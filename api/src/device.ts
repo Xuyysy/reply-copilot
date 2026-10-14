@@ -6,7 +6,7 @@ import { response } from "./http";
 
 const CODE_EXPIRY_MS = 10 * 60_000;
 export async function requestDeviceCode(request: Request, env: Env): Promise<Response> {
-  if (!extensionOriginAllowed(request)) throw new ApiFailure(403, "ORIGIN_DENIED", "请求来源无效。");
+  if (!extensionOriginAllowed(request, env)) throw new ApiFailure(403, "ORIGIN_DENIED", "请求来源无效。");
   const body = await jsonBody(request, 1024);
   const deviceId = typeof body.deviceId === "string" && /^[0-9a-f-]{36}$/i.test(body.deviceId) ? body.deviceId : "";
   if (!deviceId) throw new ApiFailure(400, "INVALID_DEVICE", "设备标识无效。");
@@ -41,7 +41,7 @@ async function ensureLicenseDevice(env: Env, session: Pick<Session,"user_id"|"de
 }
 export { ensureLicenseDevice };
 export async function exchangeDevice(request: Request, env: Env): Promise<Response> {
-  if (!extensionOriginAllowed(request)) throw new ApiFailure(403, "ORIGIN_DENIED", "请求来源无效。");
+  if (!extensionOriginAllowed(request, env)) throw new ApiFailure(403, "ORIGIN_DENIED", "请求来源无效。");
   const body = await jsonBody(request, 1024);
   const deviceToken = typeof body.deviceToken === "string" && /^[a-f0-9]{64}$/i.test(body.deviceToken) ? body.deviceToken : "";
   if (!deviceToken) throw new ApiFailure(400, "INVALID_DEVICE_TOKEN", "绑定请求无效。");
