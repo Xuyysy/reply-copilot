@@ -14,7 +14,7 @@ Base URL（本地）：`http://127.0.0.1:8787`。生产只允许 HTTPS。网页�
 | `POST /v1/extension/device-code` | 插件 | `{deviceId}`，返回 10 分钟绑定码和一次性设备令牌 |
 | `POST /v1/extension/approve` | 网页 Cookie + CSRF | `{deviceCode}`，用户明确确认绑定 |
 | `POST /v1/extension/exchange` | 插件 | `{deviceToken}`，批准后仅兑换一次 Bearer |
-| `POST /v1/ai/generate` | 插件 Bearer | `{requestId,post:{text,url},voiceProfile,recentHistory,replyStyle,outputSchemaVersion}`，返回 `{requestId,raw,quota}` |
+| `POST /v1/ai/generate` | 插件 Bearer | `{requestId,post:{text,url},voiceProfile,recentHistory,styleStats,replyStyle,outputSchemaVersion}`，返回 `{requestId,raw,quota}` |
 | `GET /v1/license/devices` | Cookie 或 Bearer | 已激活设备数量与 ID |
 | `POST /v1/feedback` | 网页 Cookie + CSRF | `{message}`，每日限 5 次 |
 

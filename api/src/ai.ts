@@ -14,8 +14,9 @@ function normalizeInput(body: Record<string, unknown>) {
   if (!requestId || !text || text.length > 12_000 || (url && !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(url))) throw new ApiFailure(400, "INVALID_REQUEST", "帖子或请求标识无效。");
   const profile = body.voiceProfile && typeof body.voiceProfile === "object" && !Array.isArray(body.voiceProfile) ? body.voiceProfile : undefined;
   const history = Array.isArray(body.recentHistory) ? body.recentHistory.slice(0, 20) : [];
+  const styleStats = body.styleStats && typeof body.styleStats === "object" && !Array.isArray(body.styleStats) ? body.styleStats : undefined;
   const replyStyle = ["natural-friendly", "short", "balanced"].includes(String(body.replyStyle)) ? String(body.replyStyle) : "natural-friendly";
-  return { requestId, post: { text, url }, profile, history, replyStyle };
+  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle };
 }
 async function provider(env: Env, system: string, user: string): Promise<string> {
   if (env.AI_MOCK === "1") {
@@ -46,7 +47,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   if (reservation.kind === "replay") return response({ requestId: input.requestId, raw: reservation.raw, quota: reservation.quota }, 200, env, request);
   let raw: string;
   try {
-    const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, replyStyle: input.replyStyle } as any);
+    const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
     raw = await provider(env, prompts.system, prompts.user);
     // The extension remains the sole parser of the shared structured response.
     const parsed = JSON.parse(raw);

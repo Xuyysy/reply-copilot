@@ -12,7 +12,7 @@ export class ReplyEngine {
     const selectedStats = styleStats || await this.historyService.getStats();
     const prompts = buildPrompts({ postContext: { text: sourceText, url: request.sourceUrl }, voiceProfile: voiceProfile || (this.persona ? undefined : DEFAULT_VOICE_PROFILE), persona: this.persona, recentHistory: selectedHistory, styleStats: selectedStats, replyStyle });
     const generate = this.aiClient.generateReplies || this.aiClient.generateReplyAnalysis;
-    const raw = await generate.call(this.aiClient, { ...prompts, signal, requestId, sourceText, sourceUrl: request.sourceUrl, voiceProfile: voiceProfile || DEFAULT_VOICE_PROFILE, recentHistory: selectedHistory, replyStyle });
+    const raw = await generate.call(this.aiClient, { ...prompts, signal, requestId, sourceText, sourceUrl: request.sourceUrl, voiceProfile: voiceProfile || DEFAULT_VOICE_PROFILE, recentHistory: selectedHistory, styleStats: selectedStats, replyStyle });
     return parseAIOutput(raw);
   }
   async generate(request, options = {}) { return this.generateReplies({ postContext: request, requestId: request?.requestId || "" }, options); }
