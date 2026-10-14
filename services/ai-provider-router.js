@@ -23,7 +23,7 @@ export class AIProviderRouter {
     if (state.status === "trial_exhausted") throw new Error("今日免费次数已用完，请明天再试。");
     if (state.status === "trial_expired") throw new Error("免费体验已结束，请等待官网购买入口开放。");
     if (state.status === "auth_unavailable") throw new Error("授权服务暂时不可用，请稍后重试。");
-    throw new Error("请先登录；官网登录入口尚未开放。");
+    throw new Error("请先在设置中心连接官网账户。");
   }
   generateReplyAnalysis(input) { return this.generateReplies(input); }
 }

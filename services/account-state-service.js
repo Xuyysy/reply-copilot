@@ -18,7 +18,7 @@ export class AccountStateService {
     this.cachedAt = Date.now();
   }
   async loadState() {
-    if (this.config.channel === "development") {
+    if (this.config.channel === "development" && (!this.config.hostedApiUrl || !await this.client.token())) {
       const status = await readDevMock(this.storage);
       return createAccountState({ status, user: null, quota: null, trial: null, license: null }, "development_mock");
     }

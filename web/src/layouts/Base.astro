@@ -1,0 +1,59 @@
+---
+import "../styles/global.css";
+const { title = "Reply Copilot", description = "AI replies that sound like you." } = Astro.props;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light" />
+    <title>{title} · Reply Copilot</title>
+  </head>
+  <body class="site-shell">
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="/" aria-label="Reply Copilot home"><span class="brand-mark">R</span>Reply Copilot</a>
+        <nav class="nav" aria-label="Main navigation">
+          <a href="/"><span data-zh="首页">Home</span></a>
+          <a href="/pricing"><span data-zh="价格">Pricing</span></a>
+          <a href="/guide"><span data-zh="使用指南">Guide</span></a>
+          <a href="/faq">FAQ</a>
+        </nav>
+        <div class="header-actions">
+          <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
+          <a class="button secondary" href="/account"><span data-zh="我的账户">My account</span></a>
+        </div>
+      </div>
+    </header>
+    <main><slot /></main>
+    <footer class="footer">
+      <div class="container footer-inner">
+        <span>© {new Date().getFullYear()} Reply Copilot · <span data-zh="AI 回复草稿，由你决定是否发送">AI drafts. You decide what to send.</span></span>
+        <div class="footer-links">
+          <a href="/privacy"><span data-zh="隐私">Privacy</span></a>
+          <a href="/terms"><span data-zh="条款">Terms</span></a>
+          <a href="/refunds"><span data-zh="退款">Refunds</span></a>
+          <a href="/feedback"><span data-zh="反馈">Feedback</span></a>
+        </div>
+      </div>
+    </footer>
+    <script>
+      const preference = localStorage.getItem("replyCopilotLanguage") === "zh" ? "zh" : "en";
+      function setLanguage(lang: "en" | "zh") {
+        document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        document.querySelectorAll<HTMLElement>("[data-zh]").forEach((element) => {
+          if (!element.dataset.en) element.dataset.en = element.textContent || "";
+          element.textContent = lang === "zh" ? element.dataset.zh || "" : element.dataset.en;
+        });
+        const button = document.getElementById("language-toggle");
+        if (button) button.textContent = lang === "zh" ? "English" : "中文";
+        localStorage.setItem("replyCopilotLanguage", lang);
+        window.dispatchEvent(new CustomEvent("reply-copilot-language", { detail: lang }));
+      }
+      setLanguage(preference);
+      document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
+    </script>
+  </body>
+</html>

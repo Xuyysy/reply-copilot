@@ -22,9 +22,9 @@ async function refreshAccount(force = false) {
   const account = await accountStates.getState({ force });
   $("account-status").textContent = accountStatusLabel(account);
   const detail = {
-    guest: "注册后可体验 7 天，每天最多 30 次 AI 生成。官网登录尚未开放。",
-    trial_active: "免费体验中；实际体验时间与额度须由服务端确认。",
-    trial_exhausted: "今日免费次数已用完。未来将于北京时间 00:00 重置。",
+    guest: "注册后可体验 7 天，每天最多 30 次 AI 生成。",
+    trial_active: "免费体验中；由云端提供 AI，无需自己的 API Key。",
+    trial_exhausted: "今日免费次数已用完，将于北京时间 00:00 重置。",
     trial_expired: "免费体验已结束。计划提供一次买断：早鸟 $10，计划原价 $15；使用自己的 API Key。",
     lifetime_active: "终身版使用你自己的 DeepSeek API Key；插件不限制每日生成次数。模型费用由你的 DeepSeek 账户承担。",
     auth_unavailable: "授权服务暂时不可用。你的本地设置和历史不会被清除。",
@@ -37,12 +37,14 @@ async function refreshAccount(force = false) {
   $("account-detail").textContent = [detail[account.status], ...serverDetails].join("\n");
   $("account-quota").textContent = account.source === "server" && account.quota ? `今日剩余 ${account.quota.dailyRemaining} / ${account.quota.dailyLimit} 次 · 下次重置 ${account.quota.resetAt ? new Date(account.quota.resetAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }) + "（北京时间）" : "等待服务端确认"}` : "";
   const canUseOwnKey = account.status === "developer_mode" || account.status === "lifetime_active" && account.source === "server";
-  $("ai-mode-description").textContent = canUseOwnKey ? "当前 AI 服务：自带 API Key。" : account.status.startsWith("trial_") ? "未来免费体验将使用官方云端额度，无需填写 API Key；目前服务尚未开放。" : "请在账户与授权页面查看当前 AI 服务状态。";
+  $("ai-mode-description").textContent = canUseOwnKey ? "当前 AI 服务：自带 API Key。" : account.status.startsWith("trial_") ? "当前 AI 服务：官网免费体验额度，无需填写自己的 API Key。" : "请在账户与授权页面查看当前 AI 服务状态。";
   $("settings-form").hidden = !canUseOwnKey;
-  $("account-login").hidden = account.status !== "guest";
+  const hasToken = Boolean(await accountClient.token());
+  $("account-login").hidden = hasToken && account.source === "server";
+  $("account-logout").hidden = !hasToken;
   $("account-purchase").hidden = !["trial_active", "trial_exhausted", "trial_expired"].includes(account.status);
   $("account-manage").hidden = account.status !== "lifetime_active";
-  if (RUNTIME_CONFIG.channel === "development") $("dev-mock-state").value = account.status;
+  if (RUNTIME_CONFIG.channel === "development") { $("dev-mock-box").hidden = hasToken; if (!hasToken) $("dev-mock-state").value = account.status; }
 }
 function showMessage(text, error = false) { message.textContent = text; message.className = `notice ${error ? "error" : "success"}`; }
 function announceSettingsChanged() { void chrome.runtime.sendMessage({ type: "REPLY_COPILOT_SETTINGS_UPDATED" }).catch(() => {}); }
@@ -80,7 +82,26 @@ if (RUNTIME_CONFIG.channel === "development") {
     showMessage("开发测试状态已切换；这不是实际授权或额度。");
   });
 }
-for (const [id, method] of [["account-login", "openLoginPage"], ["account-purchase", "openPurchasePage"], ["account-manage", "openAccountPage"]]) {
+let accountPollTimer = null;
+async function pollAccountBinding() {
+  try {
+    if (await accountClient.pollDeviceAuthorization()) {
+      clearInterval(accountPollTimer); accountPollTimer = null;
+      accountStates.invalidate(); await refreshAccount(true);
+      showMessage("官网账户已连接；账户与额度已同步。"); announceSettingsChanged();
+    }
+  } catch (error) { clearInterval(accountPollTimer); accountPollTimer = null; showMessage(error.message || "账户绑定失败。", true); }
+}
+function startAccountPolling() { if (accountPollTimer) clearInterval(accountPollTimer); accountPollTimer = setInterval(() => void pollAccountBinding(), 3000); void pollAccountBinding(); }
+$("account-login").addEventListener("click", async () => {
+  try { const code = await accountClient.beginDeviceAuthorization(); showMessage(`已打开官网。请登录并确认绑定，绑定码：${code}`); startAccountPolling(); }
+  catch (error) { showMessage(error.message || "无法发起账户绑定。", true); }
+});
+$("account-logout").addEventListener("click", async () => {
+  try { await accountClient.logout(); accountStates.invalidate(); await refreshAccount(true); showMessage("已退出插件账户，本地风格、历史和个人 Key 均已保留。"); announceSettingsChanged(); }
+  catch (error) { accountStates.invalidate(); await refreshAccount(true); showMessage(`本地凭据已清除；远端注销未确认：${error.message}`, true); }
+});
+for (const [id, method] of [["account-purchase", "openPurchasePage"], ["account-manage", "openAccountPage"]]) {
   $(id).addEventListener("click", async () => { try { await accountClient[method](); } catch (error) { showMessage(error.message, true); } });
 }
 $("account-refresh").addEventListener("click", async () => { accountStates.invalidate(); await refreshAccount(true); showMessage("账户状态已重新检查。"); });
@@ -104,5 +125,6 @@ $("clear-history").addEventListener("click", async () => { if (!confirm("确定�
 $("clear-usage").addEventListener("click", async () => { if (!confirm("确定清除本地使用统计和反馈？此操作无法撤销。")) return; await usage.clear(); await refreshUsage(); showMessage("本地使用数据已清除。"); announceSettingsChanged(); });
 $("reset-preferences").addEventListener("click", async () => { if (!confirm("确定重置个人风格、回复偏好和插件行为？API Key 和历史记录不会被删除。")) return; renderProfile(await profiles.reset()); await storage.setBehaviorPreferences({ autoGenerateOnReply: true, showFloatingWindow: true, rememberFloatingPosition: true, floatingPosition: null, defaultReplyMode: "natural" }); await storage.setReplyStyle("natural-friendly"); await refreshSettings(); showMessage("个人偏好已重置；API Key 和历史记录已保留。"); announceSettingsChanged(); });
 
-chrome.storage.onChanged.addListener((changes, area) => { if (area !== "local") return; if (["voiceProfile", "behaviorPreferences", "replyStyleProfile", "deepseekApiKey", "replyHistory", "localUsageEvents"].some((key) => key in changes)) void refreshSettings(); });
+chrome.storage.onChanged.addListener((changes, area) => { if (area !== "local") return; if ("replyCopilotAccountToken" in changes) { accountStates.invalidate(); void refreshAccount(true); } if (["voiceProfile", "behaviorPreferences", "replyStyleProfile", "deepseekApiKey", "replyHistory", "localUsageEvents"].some((key) => key in changes)) void refreshSettings(); });
 void Promise.all([refreshSettings(), refreshHostAccess()]).catch(() => showMessage("读取本地设置失败，请重新打开设置页。", true));
+void accountClient.hasPendingDeviceAuthorization().then((pending) => { if (pending) startAccountPolling(); });

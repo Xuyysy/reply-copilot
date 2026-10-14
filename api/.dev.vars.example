@@ -1,0 +1,4 @@
+AUTH_HASH_SECRET=replace-with-long-random-local-development-value
+ENVIRONMENT=development
+AI_MOCK=1
+# DEEPSEEK_API_KEY is needed only for explicit real-provider development.

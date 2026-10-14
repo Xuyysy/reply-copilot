@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "reply-copilot-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": false,
+  "triggers": { "crons": ["0 3 * * *"] },
+  "vars": {
+    "ENVIRONMENT": "production",
+    "WEB_ORIGIN": "http://127.0.0.1:4321",
+    "API_ORIGIN": "http://127.0.0.1:8787",
+    "EXTENSION_ORIGIN": "",
+    "SITE_DAILY_CAP": "300"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "reply-copilot-local",
+    "database_id": "00000000-0000-0000-0000-000000000001",
+    "migrations_dir": "migrations"
+  }]
+}

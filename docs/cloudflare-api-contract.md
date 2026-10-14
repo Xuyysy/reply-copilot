@@ -1,37 +1,23 @@
-# Reply Copilot v0.2 客户端与未来 Cloudflare 服务契约
+# Reply Copilot v0.3 本地 API 契约
 
-此文档只定义接口。本版本没有部署的官网、Worker、D1、支付或真实授权。正式构建的 `websiteUrl` 和 `hostedApiUrl` 为空；接入时需配置 HTTPS 域名并加入精确的 Chrome host permission。开发版模拟状态不是服务端授权。
+Base URL（本地）：`http://127.0.0.1:8787`。生产只允许 HTTPS。网页用 `Secure; HttpOnly; SameSite=Lax` Cookie；插件用绑定后领取的独立 Bearer 令牌。网页修改状态的请求需同源 `Origin`、`X-CSRF-Token` 和 `X-Reply-Copilot-Action`。错误统一为 `{code,message,requestId,retryAfterSeconds?}`。
 
-## 通用规则
+| 接口 | 认证 | 说明 |
+|---|---|---|
+| `POST /v1/auth/request-code` | 官网 Origin | `{email}`，限流，开发模式只在终端输出验证码 |
+| `POST /v1/auth/verify-code` | 官网 Origin | `{email,code}`，首次成功创建 7 天试用，设置网页 Cookie |
+| `POST /v1/auth/logout` | 网页 Cookie + CSRF，或插件 Bearer | 撤销当前会话 |
+| `GET /v1/auth/csrf` | 网页 Cookie | 取得当前会话的 CSRF 令牌 |
+| `GET /v1/me` | Cookie 或 Bearer | `{user:{userId,email}}` |
+| `GET /v1/entitlements` | Cookie 或 Bearer | `status` 为 `trial_active`、`trial_exhausted`、`trial_expired` 或 `lifetime_active`；同时返回 `trial`、`license` |
+| `GET /v1/usage` | Cookie 或 Bearer | `{quota:{dailyLimit,dailyUsed,dailyRemaining,resetAt}}`；终身版为 `null` |
+| `POST /v1/extension/device-code` | 插件 | `{deviceId}`，返回 10 分钟绑定码和一次性设备令牌 |
+| `POST /v1/extension/approve` | 网页 Cookie + CSRF | `{deviceCode}`，用户明确确认绑定 |
+| `POST /v1/extension/exchange` | 插件 | `{deviceToken}`，批准后仅兑换一次 Bearer |
+| `POST /v1/ai/generate` | 插件 Bearer | `{requestId,post:{text,url},voiceProfile,recentHistory,replyStyle,outputSchemaVersion}`，返回 `{requestId,raw,quota}` |
+| `GET /v1/license/devices` | Cookie 或 Bearer | 已激活设备数量与 ID |
+| `POST /v1/feedback` | 网页 Cookie + CSRF | `{message}`，每日限 5 次 |
 
-- Base URL：将来由 `config/runtime.js` 的 `hostedApiUrl` 指定，必须为 HTTPS。
-- 认证：`Authorization: Bearer <extension session token>`。令牌由未来官网与扩展的受信回调流程取得，只存可信扩展存储。网页不能用普通 `postMessage` 改授权状态。
-- 响应：JSON；错误 `{ "code": "AUTH_REQUIRED", "message": "...", "requestId": "..." }`。不得在错误里回显令牌或 DeepSeek Key。
-- 客户端请求超时：30 秒。`POST /v1/ai/generate` 的 `requestId` 为 UUID，也是幂等键；相同用户和 requestId 必须只扣一次额度、返回同一次结果。重新生成必须用新 requestId。
-- `lastVerifiedAt` 是客户端成功收到服务端状态后的时间，只用于显示与短时缓存；不能替代服务端校验。
-- 服务端按北京时间计算 7 天试用和每天最多 30 次额度，北京时间 00:00 重置。一次生成三种风格算一次；切换已生成候选不扣次数。额度扣减必须在服务端原子执行。
-- 终身版只在服务端返回有效许可证时开放 BYOK；用户自己的 DeepSeek Key 不发送到本服务。
+`requestId` 必须是 UUID。同一账户和请求 ID 的内容不能变。成功结果在 10 分钟内可重放而不扣第二次额度。上游已调用但失败或状态不确定时保留消耗记录，防止无限免费重试。新的“换一个”必须用新 ID。服务端复用根目录 `prompts/prompt-builder.js`，仍由插件的 `parseAIOutput` 解析同一结构化 JSON。
 
-## GET /v1/me
-
-请求：Bearer 令牌，无请求体。响应：`{ "user": { "userId": "...", "email": "..." } }`。未登录返回 `AUTH_REQUIRED` (401)。
-
-## GET /v1/entitlements
-
-请求：Bearer 令牌。响应示例：`{ "status": "trial_active", "entitlement": { "entitlementStatus": "active" }, "trial": { "startedAt": "ISO-8601", "expiresAt": "ISO-8601" }, "license": null }`。状态为 `trial_active | trial_exhausted | trial_expired | lifetime_active`。终身授权时 `license` 包含 `licenseType`, `licenseStatus`, `maxDevices`, `activatedDevices`。客户端不得根据本地字段伪造状态。
-
-## GET /v1/usage
-
-请求：Bearer 令牌。响应：`{ "quota": { "dailyLimit": 30, "dailyUsed": 12, "dailyRemaining": 18, "resetAt": "ISO-8601" } }`。所有字段来自服务端；终身版可返回 `quota: null`。
-
-## POST /v1/ai/generate
-
-请求：Bearer 令牌，JSON：`{ "requestId": "UUID", "prompts": { "system": "...", "user": "..." }, "outputSchemaVersion": 1 }`。请求头也可加 `Idempotency-Key: <requestId>`。仅有效试用用户可调用。响应：`{ "requestId": "UUID", "raw": "{...ReplyEngine 所需的结构化 JSON...}", "quota": { "dailyLimit": 30, "dailyUsed": 13, "dailyRemaining": 17, "resetAt": "ISO-8601" } }`。`raw` 与现有 `DeepSeekClient.generateReplies` 输出一致，仍由唯一的 `ReplyEngine` 解析。服务端必须控制额度、并发和上游 Key；不能信任客户端计数。响应中不应返回开发者 Key。
-
-## GET /v1/license/devices
-
-请求：Bearer 令牌。响应：`{ "licenseStatus": "active", "maxDevices": 2, "devices": [{ "deviceId": "...", "activatedAt": "ISO-8601" }] }`。本版本只定义读取契约，不实现解绑。
-
-## 错误码
-
-`AUTH_REQUIRED` (401)、`TRIAL_EXPIRED` (403)、`QUOTA_EXCEEDED` (429)、`LICENSE_INVALID` (403)、`LICENSE_REVOKED` (403)、`AI_PROVIDER_UNAVAILABLE` (503)、`SERVER_UNAVAILABLE` (503)、`NETWORK_ERROR`（客户端网络故障）。授权服务不可用时客户端显示 `auth_unavailable`，保留本地设置，不视为许可证撤销。服务端可返回 `retryAfterSeconds`。
+生产 Worker 只信 D1 的试用、额度与许可证状态；不会接受前端 `isPaid` 字段。开发者 DeepSeek Key 只在 Worker Secret，用户自己的 Key 仅供终身版在扩展可信上下文使用。
