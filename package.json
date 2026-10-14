@@ -1,0 +1,11 @@
+{
+  "name": "reply-copilot",
+  "version": "0.2.0-beta",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build:dev": "node scripts/build.js development",
+    "build:production": "node scripts/build.js production"
+  }
+}
