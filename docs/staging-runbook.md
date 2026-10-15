@@ -55,6 +55,8 @@ Secret 通过 Cloudflare Dashboard 对**选定 Worker 环境**设置，或经批
 
 ## 真实浏览器端到端验收
 
+本机可先运行 `cd api && npm run test:browser:local`：它构建现有网站，启动临时本地 D1 和隔离的 Chrome 资料，验证浏览器 CORS、HttpOnly Cookie、200 次余额、设备码批准、密码重置后会话失效与重新登录。默认寻找 macOS Chrome；其他系统可通过 `CHROME_BINARY` 指定 Chrome 可执行文件。该测试使用本地模拟验证码，不能代替以下云端验收。
+
 1. Chrome 打开 staging 官网，使用自己的测试邮箱完成 Turnstile、收到 Resend 验证码并注册。`/account` 应显示免费 200、付费 0。关闭标签再打开，登录 Cookie 仍可用；登出后受保护请求应为 401。
 2. 新开隐身窗口或另一浏览器会话验证登录、错误密码和重置密码；重置成功后旧密码不能登录。检查 Chrome Network：网站请求携带 Cookie，跨域预检通过，Cookie 不暴露在 JS。
 3. 安装**staging 构建**的现有插件，核对 ID 和 `EXTENSION_ORIGIN`。发起设备码、在官网批准、在插件完成绑定。官网与插件显示同一余额；拒绝的 Origin 不能绑定。
@@ -66,6 +68,6 @@ Secret 通过 Cloudflare Dashboard 对**选定 Worker 环境**设置，或经批
 ## 目前仍需云端确认
 
 - 未取得真实 Cloudflare D1 ID、域名和插件 ID，配置检查会故意失败；未执行远端迁移与部署。
-- Resend、Turnstile、Cookie、Chrome 插件绑定及真实 DeepSeek 的**云端/真实浏览器**验证尚未进行。
+- 本机 Chrome 已验证 Cookie、CORS、注册/登录、密码重置和浏览器端设备码批准。Resend、Turnstile、HTTPS 域名、实际安装插件后的绑定及真实 DeepSeek 的**云端**验证尚未进行。
 - 管理员 MFA 已实现 TOTP、加密存储、单次验证码防重放和短时会话；生产入口仍被 `ADMIN_PORTAL_ENABLED=0` 锁定。正式开放前还需审查密钥备份/恢复、审计、域名与浏览器安全。
 - 支付仍未开放。订单保持 `pending`，只有本地模拟结算接口可发放测试额度；没有支付宝或 USDT 真实支付。
