@@ -7,5 +7,21 @@ const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_
 <Base title="注册与登录" titleEn="Sign in or register">
   <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="账户">Account</div><h1 data-zh="欢迎使用 Reply Copilot">Welcome to Reply Copilot</h1><p class="lead" style="margin:auto" data-zh="验证邮箱后赠送 200 次永久有效的 AI 生成额度。">Verify your email for 200 AI generations that do not expire.</p></div>
   <section class="container app-shell"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} /></section>
+  <div id="auth-load-error" class="container notice" role="alert" hidden style="max-width:540px;margin:-80px auto 80px">
+    <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>
+    <button id="auth-reload" class="button secondary" type="button" style="margin-left:12px"><span data-zh="刷新页面">Reload page</span></button>
+  </div>
   {sitekey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
+  <script>
+    const island = document.querySelector<HTMLElement>('astro-island[component-url*="AuthPanel"]');
+    const message = document.getElementById("auth-load-error");
+    if (island && message) {
+      const timer = window.setTimeout(() => { if (island.hasAttribute("ssr")) message.hidden = false; }, 8000);
+      const observer = new MutationObserver(() => {
+        if (!island.hasAttribute("ssr")) { window.clearTimeout(timer); message.hidden = true; observer.disconnect(); }
+      });
+      observer.observe(island, { attributes: true, attributeFilter: ["ssr"] });
+    }
+    document.getElementById("auth-reload")?.addEventListener("click", () => location.reload());
+  </script>
 </Base>

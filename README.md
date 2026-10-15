@@ -34,6 +34,8 @@ npm run dev
 
 官网继续使用 Astro 路由和静态营销页面。注册登录、账户中心和管理后台使用按页加载的 React 组件与 shadcn/ui；语言默认为简体中文，可在顶部切换英文，选择保存在当前浏览器。管理后台的口令和短时 MFA 令牌只保存在当前页面内存中。充值订单仍为待付款状态，页面不会触发付款或发放额度。
 
+修改前端依赖后，如果本地登录页的标签点击无反应，先在 `web` 目录运行 `npx astro dev stop`，再运行 `npm run dev -- --force --background`，让 Vite 重新生成依赖缓存。运行 `npm run test:browser:dev` 会用独立的 Chrome 测试配置访问当前的 `http://127.0.0.1:4321/login`，实际点击登录、注册、找回密码标签，并在刷新后再次验证；不会修改本地账户数据。
+
 在仓库根目录运行 `npm run build:dev`，然后在 Chrome 扩展程序页面加载 `dist/development`。扩展设置中心点击“连接官网账户”，在官网确认设备绑定。若 X 标签页在扩展重新加载前已打开，也刷新该标签页。
 
 旧版本本地 Voice Profile、写作样本、历史与 Key 不清除。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
