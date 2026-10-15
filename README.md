@@ -30,7 +30,9 @@ npm install
 npm run dev
 ```
 
-访问 `http://127.0.0.1:4321`。本地验证码只显示在 Wrangler 终端；`AI_MOCK=1` 返回固定模拟候选，不调用真实 DeepSeek。官网本地使用 Cloudflare Turnstile 官方测试 sitekey；Worker 测试 secret 在 `.dev.vars.example`。正式环境必须更换真实密钥。
+访问 `http://127.0.0.1:4321`。Astro 开发服务器的注册页自动使用本地模拟人机验证；只在 `ENVIRONMENT=development`、本地网站 Origin 和测试 Secret 同时满足时，Worker 才接受该测试令牌。若需在 VS Code 查看本地验证码，可在 `api` 目录运行 `npm run dev:log`，然后打开同目录的 `local-worker.log`，查找 `[LOCAL EMAIL ONLY] 邮箱: 六位验证码`；不会发送真实邮件。日志已加入 `.gitignore`，不要将其手动提交或分享。`AI_MODE=mock` 和 `AI_MOCK=1` 返回固定模拟候选，不调用真实 DeepSeek。正式构建仍需要真实 Turnstile sitekey 和 Secret。
+
+官网继续使用 Astro 路由和静态营销页面。注册登录、账户中心和管理后台使用按页加载的 React 组件与 shadcn/ui；语言默认为简体中文，可在顶部切换英文，选择保存在当前浏览器。管理后台的口令和短时 MFA 令牌只保存在当前页面内存中。充值订单仍为待付款状态，页面不会触发付款或发放额度。
 
 在仓库根目录运行 `npm run build:dev`，然后在 Chrome 扩展程序页面加载 `dist/development`。扩展设置中心点击“连接官网账户”，在官网确认设备绑定。若 X 标签页在扩展重新加载前已打开，也刷新该标签页。
 

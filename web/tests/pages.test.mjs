@@ -30,7 +30,16 @@ test("language switch and responsive layout are present", () => {
   assert.match(css, /\.grid-span-2 \{ grid-column: auto; \}/);
 });
 test("account page requests protected data from the API", () => {
-  const source = readFileSync(path.join(root, "src/pages/account.astro"), "utf8");
+  const source = readFileSync(path.join(root, "src/components/account/AccountDashboard.tsx"), "utf8");
   for (const endpoint of ["/v1/me", "/v1/usage", "/v1/activity", "/v1/extension/approve"]) assert.ok(source.includes(endpoint));
-  assert.match(source, /error\.status===401/);
+  assert.match(source, /error\.status === 401/);
+});
+test("interactive pages hydrate as isolated React islands", () => {
+  for (const [pageName, component] of [["login", "AuthPanel"], ["account", "AccountDashboard"], ["admin", "AdminDashboard"]]) {
+    assert.match(readFileSync(path.join(root, `src/pages/${pageName}.astro`), "utf8"), new RegExp(`<${component} client:load`));
+  }
+  const admin = readFileSync(path.join(root, "src/components/admin/AdminDashboard.tsx"), "utf8");
+  assert.match(admin, /\/v1\/admin\/mfa\/elevate/);
+  assert.match(admin, /AlertDialog/);
+  assert.doesNotMatch(admin, /localStorage|window\.confirm|window\.alert/);
 });

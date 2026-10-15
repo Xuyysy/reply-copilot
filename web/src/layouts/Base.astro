@@ -1,29 +1,29 @@
 ---
 import "../styles/global.css";
-const { title = "Reply Copilot", description = "AI replies that sound like you." } = Astro.props;
+const { title = "Reply Copilot", titleEn = title, description = "让每条 X 回复更像你自己。" } = Astro.props;
 ---
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-title-zh={title} data-title-en={titleEn}>
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light" />
     <title>{title} · Reply Copilot</title>
+    <script is:inline>try{document.documentElement.lang=localStorage.getItem("replyCopilotLanguage")==="en"?"en":"zh-CN"}catch{}</script>
   </head>
   <body class="site-shell">
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="/" aria-label="Reply Copilot home"><span class="brand-mark">R</span>Reply Copilot</a>
         <nav class="nav" aria-label="Main navigation">
-          <a href="/"><span data-zh="首页">Home</span></a>
-          <a href="/pricing"><span data-zh="价格">Pricing</span></a>
           <a href="/guide"><span data-zh="使用指南">Guide</span></a>
+          <a href="/pricing"><span data-zh="价格">Pricing</span></a>
           <a href="/faq">FAQ</a>
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
-          <a class="button secondary" href="/account"><span data-zh="我的账户">My account</span></a>
+          <a class="button secondary" id="account-entry" href="/login"><span data-zh="登录 / 注册">Sign in / Register</span></a>
         </div>
       </div>
     </header>
@@ -40,9 +40,10 @@ const { title = "Reply Copilot", description = "AI replies that sound like you."
       </div>
     </footer>
     <script>
-      const preference = (() => { try { return localStorage.getItem("replyCopilotLanguage") === "en" ? "en" : "zh"; } catch { return "zh"; } })();
+      const preference = document.documentElement.lang === "en" ? "en" : "zh";
       function setLanguage(lang: "en" | "zh") {
         document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+        document.title = `${lang === "zh" ? document.documentElement.dataset.titleZh : document.documentElement.dataset.titleEn} · Reply Copilot`;
         document.querySelectorAll<HTMLElement>("[data-zh]").forEach((element) => {
           if (!element.dataset.en) element.dataset.en = element.textContent || "";
           element.textContent = lang === "zh" ? element.dataset.zh || "" : element.dataset.en;
@@ -54,6 +55,7 @@ const { title = "Reply Copilot", description = "AI replies that sound like you."
       }
       setLanguage(preference);
       document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
+      import("../lib/api").then(({api})=>api("/v1/me").then(()=>{const entry=document.getElementById("account-entry") as HTMLAnchorElement|null;if(entry){entry.href="/account";const label=entry.querySelector("span");if(label){label.dataset.zh="我的账户";label.dataset.en="My account";label.textContent=document.documentElement.lang==="en"?"My account":"我的账户";}}}).catch(()=>{}));
     </script>
   </body>
 </html>

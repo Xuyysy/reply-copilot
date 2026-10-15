@@ -20,7 +20,9 @@ async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false,ad
 async function waitFor(predicate,maxMs=20000){const until=Date.now()+maxMs;while(Date.now()<until){const value=await predicate();if(value)return value;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Timed out. ${logs.slice(-1000)}`);}
 async function register(email,username){
   const body={email,username,password:"strong-test-password-123",turnstileToken:"local-test-token"};
-  assert.equal((await call("/v1/auth/register",{method:"POST",body})).status,200);
+  const registration=await call("/v1/auth/register",{method:"POST",body});
+  assert.equal(registration.status,200);
+  assert.equal(registration.data.codeLogged,true);
   const code=await waitFor(()=>logs.match(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`))?.[1]);
   assert.equal((await call("/v1/auth/verify-registration",{method:"POST",body:{email,code:"000000"}})).status,400);
   const verified=await call("/v1/auth/verify-registration",{method:"POST",body:{email,code}});
@@ -42,9 +44,10 @@ try{
   const cookie=await register(email,username);
   const duplicate=await call("/v1/auth/register",{method:"POST",body:{email,username,password:"strong-test-password-123",turnstileToken:"local-test-token"}});
   assert.equal(duplicate.status,200);
+  assert.equal(duplicate.data.codeLogged,false);
   const user=(await call("/v1/me",{cookie})).data.user;assert.equal(user.username,username);assert.equal(user.emailVerified,true);
   const quota=()=>call("/v1/usage",{cookie});assert.deepEqual((await quota()).data.quota,{freeRemaining:200,paidRemaining:0,totalRemaining:200});
-  assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"wrong"}})).status,401);
+  for(let attempt=0;attempt<6;attempt++) assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"wrong"}})).status,401);
   const login=await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"strong-test-password-123"}});assert.equal(login.status,200);
   const csrf=(await call("/v1/auth/csrf",{cookie})).data.csrfToken;
   const device=await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}});assert.equal(device.status,200);

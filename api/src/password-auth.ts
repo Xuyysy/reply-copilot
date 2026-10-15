@@ -69,10 +69,14 @@ const freshCode = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1
 async function rate(request: Request,env: Env,purpose:string,email:string,now:number) {
   const ip = await hmac(env,`ip:${request.headers.get("CF-Connecting-IP") || "local"}`);
   const address = await hmac(env,`email:${email}`);
-  if (!await takeRate(env,`${purpose}-ip:${ip}`,12,3600_000,now) || !await takeRate(env,`${purpose}-email:${address}`,5,3600_000,now)) throw new ApiFailure(429,"RATE_LIMITED","请求过于频繁，请稍后再试。",60);
+  const localLogin = purpose === "login" && env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN);
+  const ipLimit = localLogin ? 60 : 12;
+  const emailLimit = localLogin ? 30 : 5;
+  if (!await takeRate(env,`${purpose}-ip:${ip}`,ipLimit,3600_000,now) || !await takeRate(env,`${purpose}-email:${address}`,emailLimit,3600_000,now)) throw new ApiFailure(429,"RATE_LIMITED","请求过于频繁，请稍后再试。",60);
 }
 export async function register(request: Request,env: Env): Promise<Response> {
   requireWebOrigin(request,env);
+  const localFeedback = env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN);
   const body = await jsonBody(request,4096);
   const username = usernameFrom(body.username); const email = emailFrom(body.email); const password = passwordFrom(body.password);
   const blocked = (env.DISPOSABLE_EMAIL_DOMAINS || "").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean);
@@ -82,7 +86,7 @@ export async function register(request: Request,env: Env): Promise<Response> {
   if (enabled?.value !== "1") throw new ApiFailure(503,"REGISTRATION_CLOSED","注册暂未开放。");
   await verifyTurnstile(request,env,body.turnstileToken);
   const taken = await env.DB.prepare("SELECT id FROM users WHERE email=? OR username=? LIMIT 1").bind(email,username).first();
-  if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。"},200,env,request);
+  if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:false}:{})},200,env,request);
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
   const passwordHash = await hashPassword(env,password);
   let inserted;
@@ -94,7 +98,7 @@ export async function register(request: Request,env: Env): Promise<Response> {
     try { await sendCode(env,email,code,"register"); }
     catch (error) { await env.DB.prepare("DELETE FROM pending_registrations WHERE email=? AND code_hash=?").bind(email,codeHash).run().catch(()=>{}); throw error; }
   }
-  return response({ok:true,message:"如果信息可用于注册，验证码已发送。"},200,env,request);
+  return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:Boolean(inserted.meta.changes)}:{})},200,env,request);
 }
 export async function verifyRegistration(request: Request,env: Env): Promise<Response> {
   requireWebOrigin(request,env); const body = await jsonBody(request,1024);

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
+    "dev:log": "umask 077; wrangler dev --local --ip 127.0.0.1 --port 8787 2>&1 | tee -a local-worker.log",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "license:local": "node scripts/license-local.mjs",
     "test:local": "node tests/local-e2e.mjs",
