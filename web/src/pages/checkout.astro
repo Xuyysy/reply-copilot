@@ -1,0 +1,14 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="结算预览">
+  <div class="container page-hero"><div class="eyebrow" data-zh="订单预览">Order preview</div><h1 data-zh="查看充值订单。">Review your top-up order.</h1><p class="lead" data-zh="支付渠道尚未开放。当前页面不会扣款，也不会发放额度。">Payment channels are not open. This page cannot charge you or grant credits.</p></div>
+  <section class="container" style="padding-bottom:100px"><div class="content-card" style="max-width:680px"><h2 id="package-name">正在读取套餐…</h2><p id="package-credits"></p><p id="package-price"></p><p>支付渠道：尚未开放</p><p>渠道手续费：待真实支付服务商报价</p><p>最终应付金额：待支付渠道确认</p><p id="order-status" class="notice">尚未创建订单。</p><div class="button-row"><button id="create-order" class="button" disabled>创建待付款订单</button><a class="button secondary" href="/pricing">返回套餐</a></div><p class="fineprint">创建订单只记录当前套餐价格快照。支付未开放时，订单不会自动变为已支付。</p></div></section>
+  <script>
+    import {api,ApiError} from "../lib/api";
+    const pkgId=new URL(location.href).searchParams.get("package")||"";
+    const status=document.getElementById("order-status")!;
+    const button=document.getElementById("create-order") as HTMLButtonElement;
+    async function load(){try{const data=await api<{packages:Array<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string}>;paymentAvailable:boolean}>("/v1/packages");const pkg=data.packages.find(item=>item.id===pkgId);if(!pkg){status.textContent="套餐不存在或已下架。";return;}document.getElementById("package-name")!.textContent=pkg.name_zh;document.getElementById("package-credits")!.textContent=`AI 生成次数：${pkg.credits.toLocaleString()} 次`;document.getElementById("package-price")!.textContent=`套餐金额：${new Intl.NumberFormat("en-US",{style:"currency",currency:pkg.currency}).format((pkg.promo_price_cents??pkg.price_cents)/100)}`;button.disabled=false;button.onclick=async()=>{button.disabled=true;try{const order=await api<{order:{id:string;amountCents:number;currency:string;status:string};paymentAvailable:boolean}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:pkg.id})});status.textContent=`订单 ${order.order.id} 已创建，状态：待付款。支付尚未开放，未扣款也未增加额度。`; }catch(error){status.textContent=error instanceof ApiError&&error.status===401?"请先登录后创建订单。":error instanceof Error?error.message:"订单创建失败。";button.disabled=false;}};}catch{status.textContent="暂时无法读取套餐，请稍后重试。";}}load();
+  </script>
+</Base>

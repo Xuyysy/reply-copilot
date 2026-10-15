@@ -8,7 +8,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const page = (name) => readFileSync(path.join(root, "dist", name === "index" ? "index.html" : `${name}/index.html`), "utf8");
 
 test("all required pages build as static HTML", () => {
-  for (const name of ["index", "pricing", "faq", "guide", "privacy", "terms", "refunds", "login", "account", "admin", "feedback"]) {
+  for (const name of ["index", "pricing", "checkout", "faq", "guide", "privacy", "terms", "refunds", "login", "account", "admin", "feedback"]) {
     assert.ok(existsSync(path.join(root, "dist", name === "index" ? "index.html" : `${name}/index.html`)), name);
   }
 });
