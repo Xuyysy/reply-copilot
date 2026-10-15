@@ -6,7 +6,7 @@ export class ApiError extends Error {
 
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let csrfHeader: Record<string,string> = {};
-  if (options.method?.toUpperCase() === "POST" && !["/v1/auth/request-code", "/v1/auth/verify-code"].includes(path)) {
+  if (options.method?.toUpperCase() === "POST" && !["/v1/auth/register", "/v1/auth/verify-registration", "/v1/auth/login", "/v1/auth/request-password-reset", "/v1/auth/reset-password"].includes(path)) {
     const csrfResponse = await fetch(`${API_BASE}/v1/auth/csrf`, { credentials: "include" });
     if (csrfResponse.ok) csrfHeader = { "X-CSRF-Token": (await csrfResponse.json()).csrfToken, "X-Reply-Copilot-Action": "1" };
   }

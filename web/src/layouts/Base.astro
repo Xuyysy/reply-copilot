@@ -3,7 +3,7 @@ import "../styles/global.css";
 const { title = "Reply Copilot", description = "AI replies that sound like you." } = Astro.props;
 ---
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -40,7 +40,7 @@ const { title = "Reply Copilot", description = "AI replies that sound like you."
       </div>
     </footer>
     <script>
-      const preference = localStorage.getItem("replyCopilotLanguage") === "zh" ? "zh" : "en";
+      const preference = (() => { try { return localStorage.getItem("replyCopilotLanguage") === "en" ? "en" : "zh"; } catch { return "zh"; } })();
       function setLanguage(lang: "en" | "zh") {
         document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
         document.querySelectorAll<HTMLElement>("[data-zh]").forEach((element) => {
@@ -49,7 +49,7 @@ const { title = "Reply Copilot", description = "AI replies that sound like you."
         });
         const button = document.getElementById("language-toggle");
         if (button) button.textContent = lang === "zh" ? "English" : "中文";
-        localStorage.setItem("replyCopilotLanguage", lang);
+        try { localStorage.setItem("replyCopilotLanguage", lang); } catch {}
         window.dispatchEvent(new CustomEvent("reply-copilot-language", { detail: lang }));
       }
       setLanguage(preference);

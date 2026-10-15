@@ -1,44 +1,35 @@
 ---
 import Base from "../layouts/Base.astro";
+const sitekey=import.meta.env.PUBLIC_TURNSTILE_SITE_KEY || (import.meta.env.DEV ? "1x00000000000000000000AA" : "");
 ---
-<Base title="Sign in">
-  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="邮箱登录">Email sign-in</div><h1 data-zh="欢迎回来。">Welcome back.</h1><p class="lead" style="margin:auto" data-zh="输入邮箱获取短时验证码。新用户验证成功后会开始 7 天免费体验。">Get a short-lived email code. New accounts begin a seven-day trial after verification.</p></div>
+<Base title="注册与登录">
+  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="账户">Account</div><h1 data-zh="欢迎使用 Reply Copilot">Welcome to Reply Copilot</h1><p class="lead" style="margin:auto" data-zh="验证邮箱后赠送 200 次永久有效的 AI 生成额度。">Verify your email for 200 AI generations that do not expire.</p></div>
   <div class="form-card">
-    <form id="request-form"><label class="field"><span data-zh="邮箱地址">Email address</span><input id="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com" /></label><button class="button" type="submit" style="width:100%" data-zh="发送验证码">Send code</button></form>
-    <form id="verify-form" hidden><p class="fineprint" id="email-hint"></p><label class="field"><span data-zh="6 位验证码">6-digit code</span><input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required /></label><button class="button" type="submit" style="width:100%" data-zh="验证并登录">Verify and sign in</button><button id="back-to-email" class="language-button" type="button" data-zh="使用其他邮箱">Use another email</button></form>
+    <div class="button-row"><button class="button secondary" type="button" data-view="login" data-zh="登录">Sign in</button><button class="button secondary" type="button" data-view="register" data-zh="注册">Register</button><button class="button secondary" type="button" data-view="reset" data-zh="忘记密码">Reset password</button></div>
+    <form id="login-form" style="margin-top:22px"><label class="field"><span data-zh="用户名或邮箱">Username or email</span><input name="identity" autocomplete="username" required /></label><label class="field"><span data-zh="密码">Password</span><input name="password" type="password" autocomplete="current-password" required /></label><button class="button" type="submit" data-zh="登录">Sign in</button></form>
+    <form id="register-form" hidden style="margin-top:22px"><label class="field"><span data-zh="用户名">Username</span><input name="username" autocomplete="username" minlength="3" maxlength="24" required /></label><label class="field"><span data-zh="邮箱">Email</span><input name="email" type="email" autocomplete="email" required /></label><label class="field"><span data-zh="密码，至少 12 位">Password, at least 12 characters</span><input name="password" type="password" autocomplete="new-password" minlength="12" required /></label>{sitekey ? <div class="cf-turnstile" data-sitekey={sitekey}></div> : <p class="notice" data-zh="注册暂不可用：尚未配置人机验证。">Registration is unavailable until Turnstile is configured.</p>}<button class="button" type="submit" disabled={!sitekey} data-zh="发送注册验证码">Send verification code</button></form>
+    <form id="verify-form" hidden style="margin-top:22px"><p id="verify-email" class="fineprint"></p><label class="field"><span data-zh="6 位验证码">6-digit code</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required /></label><button class="button" type="submit" data-zh="验证并领取 200 次">Verify and get 200 credits</button></form>
+    <form id="reset-request-form" hidden style="margin-top:22px"><label class="field"><span data-zh="账户邮箱">Account email</span><input name="email" type="email" autocomplete="email" required /></label><button class="button" type="submit" data-zh="发送重置验证码">Send reset code</button></form>
+    <form id="reset-finish-form" hidden style="margin-top:22px"><label class="field"><span data-zh="6 位验证码">6-digit code</span><input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required /></label><label class="field"><span data-zh="新密码，至少 12 位">New password, at least 12 characters</span><input name="password" type="password" autocomplete="new-password" minlength="12" required /></label><button class="button" type="submit" data-zh="重置密码">Reset password</button></form>
     <p id="auth-status" class="status" role="status" hidden></p>
-    <p class="fineprint" style="margin-top:20px" data-zh="本地开发时，验证码仅显示在 Wrangler 终端；正式邮件发送服务尚待配置。">In local development, the code appears only in the Wrangler terminal. Production email delivery is not configured yet.</p>
   </div>
+  {sitekey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>}
   <script>
-    import { api, ApiError } from "../lib/api";
-    const requestForm = document.querySelector<HTMLFormElement>("#request-form")!;
-    const verifyForm = document.querySelector<HTMLFormElement>("#verify-form")!;
-    const status = document.querySelector<HTMLElement>("#auth-status")!;
-    let email = "";
-    const note = (value: string, error = false) => { status.textContent = value; status.hidden = false; status.classList.toggle("error", error); };
-    requestForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      email = (document.querySelector<HTMLInputElement>("#email")?.value || "").trim();
-      const button = requestForm.querySelector<HTMLButtonElement>("button")!; button.disabled = true;
-      try {
-        await api("/v1/auth/request-code", { method: "POST", body: JSON.stringify({ email }) });
-        requestForm.hidden = true; verifyForm.hidden = false;
-        document.querySelector<HTMLElement>("#email-hint")!.textContent = email;
-        note(document.documentElement.lang === "zh-CN" ? "如果邮箱可用，验证码已发送。" : "If the email can receive codes, one has been sent.");
-      } catch (error) { note(error instanceof ApiError ? error.message : "Network connection failed.", true); }
-      finally { button.disabled = false; }
-    });
-    verifyForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const code = document.querySelector<HTMLInputElement>("#code")!.value;
-      const button = verifyForm.querySelector<HTMLButtonElement>("button")!; button.disabled = true;
-      try {
-        await api("/v1/auth/verify-code", { method: "POST", body: JSON.stringify({ email, code }) });
-        const deviceCode = new URL(location.href).searchParams.get("device_code");
-        window.location.href = deviceCode && /^[A-F0-9]{8}$/.test(deviceCode) ? `/account?device_code=${deviceCode}` : "/account";
-      } catch (error) { note(error instanceof ApiError ? error.message : "Network connection failed.", true); }
-      finally { button.disabled = false; }
-    });
-    document.querySelector("#back-to-email")?.addEventListener("click", () => { verifyForm.hidden = true; requestForm.hidden = false; status.hidden = true; });
+    import {api,ApiError} from "../lib/api";
+    const ids=["login-form","register-form","verify-form","reset-request-form","reset-finish-form"];
+    const status=document.querySelector<HTMLElement>("#auth-status")!;
+    const form=(id:string)=>document.getElementById(id) as HTMLFormElement;
+    const show=(id:string)=>{for(const name of ids)form(name).hidden=name!==id;status.hidden=true;};
+    const note=(value:string,error=false)=>{status.textContent=value;status.hidden=false;status.classList.toggle("error",error);};
+    const values=(id:string)=>Object.fromEntries(new FormData(form(id))) as Record<string,string>;
+    const redirect=()=>{const code=new URL(location.href).searchParams.get("device_code");location.href=code&&/^[A-F0-9]{8}$/.test(code)?`/account?device_code=${code}`:"/account";};
+    let registerEmail="",resetEmail="";
+    document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach(button=>button.addEventListener("click",()=>show(button.dataset.view==="register"?"register-form":button.dataset.view==="reset"?"reset-request-form":"login-form")));
+    async function submit(event:Event,id:string,path:string,body:object,onSuccess:()=>void){event.preventDefault();const button=form(id).querySelector<HTMLButtonElement>("button[type=submit]")!;button.disabled=true;try{await api(path,{method:"POST",body:JSON.stringify(body)});onSuccess();}catch(error){note(error instanceof ApiError?error.message:"网络连接失败，请稍后重试。",true);}finally{button.disabled=false;}}
+    form("login-form").addEventListener("submit",event=>submit(event,"login-form","/v1/auth/login",values("login-form"),redirect));
+    form("register-form").addEventListener("submit",event=>{const body=values("register-form");registerEmail=body.email;submit(event,"register-form","/v1/auth/register",{...body,turnstileToken:document.querySelector<HTMLInputElement>("[name=cf-turnstile-response]")?.value||""},()=>{show("verify-form");document.getElementById("verify-email")!.textContent=registerEmail;note("验证码已发送，请查看邮箱。");});});
+    form("verify-form").addEventListener("submit",event=>submit(event,"verify-form","/v1/auth/verify-registration",{email:registerEmail,...values("verify-form")},redirect));
+    form("reset-request-form").addEventListener("submit",event=>{resetEmail=values("reset-request-form").email;submit(event,"reset-request-form","/v1/auth/request-password-reset",{email:resetEmail},()=>{show("reset-finish-form");note("如果邮箱已有账户，验证码已发送。");});});
+    form("reset-finish-form").addEventListener("submit",event=>submit(event,"reset-finish-form","/v1/auth/reset-password",{email:resetEmail,...values("reset-finish-form")},()=>{show("login-form");note("密码已重置，请重新登录。");}));
   </script>
 </Base>

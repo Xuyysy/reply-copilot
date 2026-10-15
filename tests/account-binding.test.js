@@ -33,16 +33,16 @@ test("device binding opens only the website code, never a bearer token URL", asy
   assert.equal(storage.data[ACCOUNT_TOKEN_KEY], undefined);
 });
 
-test("server lifetime license routes to existing BYOK client without a trial quota", async () => {
+test("production credit account routes to hosted AI without reading a personal key", async () => {
   let byokCalls = 0, hostedCalls = 0;
   const provider = new AIProviderRouter({
     config,
-    accountStates: { getState: async () => createAccountState({ status: "lifetime_active" }, "server") },
+    accountStates: { getState: async () => createAccountState({ status: "credits_available",quota:{freeRemaining:200,paidRemaining:0,totalRemaining:200} }, "server") },
     storage: { getApiKey: async () => "sk-user-owned" },
     byokFactory: (key) => ({ generateReplies: async () => { byokCalls++; assert.equal(key, "sk-user-owned"); return "reply"; } }),
-    hostedFactory: () => ({ generateReplies: async () => { hostedCalls++; return "wrong"; } }),
+    hostedFactory: () => ({ generateReplies: async () => { hostedCalls++; return "reply"; } }),
   });
   assert.equal(await provider.generateReplies({}), "reply");
-  assert.equal(byokCalls, 1);
-  assert.equal(hostedCalls, 0);
+  assert.equal(byokCalls, 0);
+  assert.equal(hostedCalls, 1);
 });

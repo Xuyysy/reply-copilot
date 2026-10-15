@@ -13,8 +13,8 @@ export class AccountStateService {
   }
   invalidate() { this.cached = null; this.cachedAt = 0; }
   updateServerQuota(quota) {
-    if (this.cached?.source !== "server" || !Number.isInteger(quota?.dailyRemaining)) return;
-    this.cached = createAccountState({ ...this.cached, status: quota.dailyRemaining <= 0 && this.cached.status === "trial_active" ? "trial_exhausted" : this.cached.status, quota }, "server");
+    if (this.cached?.source !== "server" || !Number.isInteger(quota?.totalRemaining)) return;
+    this.cached = createAccountState({ ...this.cached, status: quota.totalRemaining <= 0 ? "credits_exhausted" : "credits_available", quota }, "server");
     this.cachedAt = Date.now();
   }
   async loadState() {
@@ -25,7 +25,7 @@ export class AccountStateService {
     if (!this.config.hostedApiUrl || !await this.client.token()) return EMPTY_ACCOUNT_STATE;
     try {
       const [account, entitlement, usage] = await Promise.all([this.client.fetchCurrentUser(), this.client.fetchEntitlement(), this.client.fetchUsage()]);
-      return createAccountState({ status: entitlement.status === "trial_active" && usage.quota?.dailyRemaining <= 0 ? "trial_exhausted" : entitlement.status, user: account.user, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, license: entitlement.license }, "server");
+      return createAccountState({ status: entitlement.status, user: account.user, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, license: entitlement.license }, "server");
     } catch (error) { return error?.code === "AUTH_REQUIRED" ? EMPTY_ACCOUNT_STATE : createAccountState({ status: "auth_unavailable" }, "server"); }
   }
 }

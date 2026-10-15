@@ -17,16 +17,19 @@ const $ = (id) => document.getElementById(id);
 const input = $("api-key"), state = $("key-state"), message = $("message"), hostAccess = $("host-access"), testButton = $("test");
 let configuredKey = "", profile = null;
 const DEEPSEEK_ORIGIN = "https://api.deepseek.com/*";
-const titles = { voice: "我的风格", replies: "回复偏好", account: "账户与授权", ai: "AI 配置", behavior: "插件行为", data: "历史与数据", about: "关于插件" };
+const titles = { voice: "我的风格", replies: "回复偏好", account: "账户与额度", ai: "AI 配置", behavior: "插件行为", data: "历史与数据", about: "关于插件" };
 async function refreshAccount(force = false) {
   const account = await accountStates.getState({ force });
   $("account-status").textContent = accountStatusLabel(account);
   const detail = {
-    guest: "注册后可体验 7 天，每天最多 30 次 AI 生成。",
-    trial_active: "免费体验中；由云端提供 AI，无需自己的 API Key。",
-    trial_exhausted: "今日免费次数已用完，将于北京时间 00:00 重置。",
-    trial_expired: "免费体验已结束。计划提供一次买断：早鸟 $10，计划原价 $15；使用自己的 API Key。",
-    lifetime_active: "终身版使用你自己的 DeepSeek API Key；插件不限制每日生成次数。模型费用由你的 DeepSeek 账户承担。",
+    guest: "注册并验证邮箱，即获 200 次永久有效的 AI 生成额度。",
+    credits_available: "云端 AI 已连接；一次生成包含三种风格，只扣 1 次。",
+    credits_exhausted: "生成次数已用完。可前往官网查看充值套餐，支付目前尚未开放。",
+    frozen: "账户已暂停，请联系支持。",
+    trial_active: "旧开发模拟状态；正式账户使用云端余额。",
+    trial_exhausted: "旧开发模拟状态；正式账户不按天重置。",
+    trial_expired: "旧开发模拟状态；正式账户按余额使用。",
+    lifetime_active: "旧开发模拟状态；正式账户统一由云端 AI 提供。",
     auth_unavailable: "授权服务暂时不可用。你的本地设置和历史不会被清除。",
     developer_mode: "本地开发测试模式：继续使用你自己的 DeepSeek API Key。"
   };
@@ -35,15 +38,15 @@ async function refreshAccount(force = false) {
   if (account.source === "server" && account.trial?.expiresAt) serverDetails.push(`体验截止：${new Date(account.trial.expiresAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}（北京时间）`);
   if (account.source === "server" && account.license) serverDetails.push(`许可证：${({ active: "有效", revoked: "已撤销", expired: "已过期" })[account.license.licenseStatus] || "待确认"} · 已激活设备 ${account.license.activatedDevices ?? "—"} / ${account.license.maxDevices ?? "—"}`);
   $("account-detail").textContent = [detail[account.status], ...serverDetails].join("\n");
-  $("account-quota").textContent = account.source === "server" && account.quota ? `今日剩余 ${account.quota.dailyRemaining} / ${account.quota.dailyLimit} 次 · 下次重置 ${account.quota.resetAt ? new Date(account.quota.resetAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" }) + "（北京时间）" : "等待服务端确认"}` : "";
-  const canUseOwnKey = account.status === "developer_mode" || account.status === "lifetime_active" && account.source === "server";
-  $("ai-mode-description").textContent = canUseOwnKey ? "当前 AI 服务：自带 API Key。" : account.status.startsWith("trial_") ? "当前 AI 服务：官网免费体验额度，无需填写自己的 API Key。" : "请在账户与授权页面查看当前 AI 服务状态。";
+  $("account-quota").textContent = account.source === "server" && account.quota ? `免费剩余 ${account.quota.freeRemaining} 次 · 付费剩余 ${account.quota.paidRemaining} 次 · 共 ${account.quota.totalRemaining} 次` : "";
+  const canUseOwnKey = account.status === "developer_mode" && RUNTIME_CONFIG.channel === "development";
+  $("ai-mode-description").textContent = canUseOwnKey ? "本地开发测试：自带 API Key。" : "正式使用由官网云端 AI 提供，无需填写自己的 API Key。";
   $("settings-form").hidden = !canUseOwnKey;
   const hasToken = Boolean(await accountClient.token());
   $("account-login").hidden = hasToken && account.source === "server";
   $("account-logout").hidden = !hasToken;
-  $("account-purchase").hidden = !["trial_active", "trial_exhausted", "trial_expired"].includes(account.status);
-  $("account-manage").hidden = account.status !== "lifetime_active";
+  $("account-purchase").hidden = !hasToken;
+  $("account-manage").hidden = !hasToken;
   if (RUNTIME_CONFIG.channel === "development") { $("dev-mock-box").hidden = hasToken; if (!hasToken) $("dev-mock-state").value = account.status; }
 }
 function showMessage(text, error = false) { message.textContent = text; message.className = `notice ${error ? "error" : "success"}`; }
