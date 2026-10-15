@@ -1,24 +1,37 @@
-# Cloudflare 上线准备（尚未部署）
+# Cloudflare 与外部服务配置（尚未部署）
 
-本文件是将本地内测版转为线上版的检查清单，不是自动部署脚本。当前 `api/wrangler.jsonc` 的 D1 UUID 是本地占位值，`WEB_ORIGIN` / `API_ORIGIN` 指向本机，生产邮箱凭据未配置。直接部署无法提供正常的公开注册服务。
+当前 `api/wrangler.jsonc` 仍使用本机 Origin 与 D1 占位 UUID。只执行过本地迁移；没有检查到或改动任何正式 D1。部署、DNS、Secret 和真实付款需要运营者另行确认。
 
-## 需要先完成
+## 迁移顺序与备份
 
-1. 在 Cloudflare 账户创建正式 D1，替换 `api/wrangler.jsonc` 中的 `database_id`；考虑另建预发布库。
-2. 选定官网与 API 的 HTTPS 地址，建议同一主域下的 `www` 与 `api` 子域，使 `SameSite=Lax` Cookie 可按设计工作。把 `WEB_ORIGIN`、`API_ORIGIN` 改为精确源；设置正式 `EXTENSION_ORIGIN` 为实际 Chrome 扩展 ID。审查 CORS 与 Cookie 配置。
-3. 当前预留 Resend 邮件适配器。经批准后配置 `MAIL_API_KEY` Worker Secret 与已验证域名的 `MAIL_FROM`，并核查发信额度和成本。缺少配置时返回 `MAIL_NOT_CONFIGURED`，生产环境不会打印验证码。
-4. 在 Worker Secret 中配置 `AUTH_HASH_SECRET`、`DEEPSEEK_API_KEY` 和邮件服务的 `MAIL_API_KEY`。不能提交到 Git、Pages 构建变量、浏览器代码或普通 Wrangler `vars`。`AI_MOCK` 仅可保留在本地 `.dev.vars`；线上 `ENVIRONMENT` 必须为 `production`。
-5. 将 `SITE_DAILY_CAP` 设为符合真实预算的上限。检查 DeepSeek 账户余额与成本告警。
-6. Pages 项目根目录设为 `web`，构建命令 `npm run build`，输出目录 `dist`，并设置 `PUBLIC_API_BASE_URL` 为正式 API HTTPS 源。正式官网法律页面、运营主体、联系方式与退款条款需经营者审核。
-7. 用 `REPLY_COPILOT_WEBSITE_URL` 和 `REPLY_COPILOT_API_URL` 构建生产插件，确认生成包里没有 localhost 权限和开发模拟入口。检查 `debugger` 权限及 X 平台要求，再决定上架方式。
-8. 在预发布环境先测试真实邮件、设备绑定、Cookie、CSRF、配额重置和调用成本；再考虑正式域名和发布。
+1. 对既有 D1 先做备份或导出，记录数据库 ID 与当前迁移版本；在独立预发布 D1 先验证。
+2. `0002_credits.sql` 只增加用户名、密码、状态、角色及额度、流水、套餐、订单、管理、成本表，并为现有**开发测试账户**补发 200 次。`0003_adjustment_guard.sql` 增加人工调整的并发标记。旧表不删。
+3. 本地运行 `cd api && npm run migrate:local`。Wrangler 迁移以文件名记录版本，重复运行只应用未执行的迁移。生产执行 `--remote` 前必须先核对真实 D1 备份、目标 ID 和迁移记录，并获得部署确认。
+4. 回滚方式是恢复备份到隔离库并切回旧 Worker；这些迁移是加法修改，**不提供盲目删除新表的回滚脚本**，以免误删新订单或流水。
 
-Cloudflare 官方文档说明 D1 迁移可用 Wrangler 执行，Astro 静态站点可在 Pages 使用 `npm run build` / `dist`。Wrangler 的 `secret put` 可能立即创建并部署 Worker 新版本；实际运行任何远端命令前应先审查配置和获得部署授权。
+## Resend
 
-- D1 命令：https://developers.cloudflare.com/workers/wrangler/commands/d1/
-- Astro Pages：https://developers.cloudflare.com/pages/framework-guides/deploy-an-astro-site/
-- Worker Secrets：https://developers.cloudflare.com/workers/configuration/secrets/
+1. 在 Resend 创建账户、验证发送域名，按其后台给出的 DNS 记录配置并等待验证；检查发送额度与适用费用，不需要购买付费套餐。
+2. 用已验证域名的发件地址配置 `MAIL_FROM`；将 Resend API Key 作为 Worker Secret `MAIL_API_KEY` 配置。不要写入 Git、Pages 公开变量或普通 `vars`。
+3. 注册与找回密码邮件均有中文 HTML 和纯文本版本。每个邮箱至少间隔 60 秒，同邮箱与来源有小时限流；验证码 10 分钟有效、最多尝试 5 次、使用一次。生产邮件发送失败返回明确错误，且清除未发送的待验证记录。
 
-## 下一阶段支付
+## Turnstile
 
-先选定合法的收款主体、地区和支付渠道，再设计订单表、支付请求、服务端回调验签、幂等发证、退款及撤销流程。只有支付服务端确认到账后才能写入 `licenses`。本阶段 `license:local` 命令仅操作本地数据库，不是购买入口。
+1. 在 Cloudflare Turnstile 创建官网 Widget，绑定正式官网域名。
+2. 将公开 sitekey 配置为网站构建变量 `PUBLIC_TURNSTILE_SITE_KEY`；将私密 secret 配置为 Worker Secret `TURNSTILE_SECRET_KEY`。Worker 调用 Siteverify 并核对生产 hostname。
+3. 本地开发使用 Cloudflare 官方测试 sitekey `1x00000000000000000000AA` 和测试 secret `1x0000000000000000000000000000000AA`。生产 Worker 拒绝测试 secret；缺少真实密钥时注册关闭。
+
+## Worker 与 Pages
+
+- 将真实 D1 database ID、官网/API HTTPS Origin、`EXTENSION_ORIGIN` 精确写入对应环境配置。官网/API 建议在同一主域下以便 Cookie 安全属性按设计工作。
+- Worker Secrets：`AUTH_HASH_SECRET`、`PASSWORD_PEPPER`、`TURNSTILE_SECRET_KEY`、`MAIL_API_KEY`、`MAIL_FROM`、`DEEPSEEK_API_KEY`、`ADMIN_ACCESS_SECRET`。这些均不可进入扩展、网页 DOM、Git 或日志。
+- 配置 `SITE_DAILY_CAP`、DeepSeek 每百万输入/输出 Token 的当前美元费率 `DEEPSEEK_INPUT_USD_PER_MILLION`、`DEEPSEEK_OUTPUT_USD_PER_MILLION`，并在后台确认全站成本上限。成本费率会变动，必须按服务商当前报价核对。站点请求上限提供独立熔断；当前成本估算不是账单结算依据。
+- Pages 项目使用现有 `web` 目录，构建 `npm run build`，输出 `dist`，设置 `PUBLIC_API_BASE_URL` 为正式 HTTPS API Origin。首次访问默认简体中文。
+- 生产插件使用真实官网、API URL 与扩展 ID 构建；复核 `debugger` 权限与 X 规则，手测手动发送和复制备用路径。生产构建不提供本地模拟授权或 BYOK 绕过额度。
+- 管理员必须经受控流程赋予 D1 `role='admin'`，并配置管理员安全口令。当前实现**尚无 MFA**，不得在这一步之前对外开放 `/admin`。
+
+## 支付状态
+
+当前只有服务端套餐、订单快照、支付事件去重与**仅本地**模拟到账。没有支付宝、USDT、真实手续费报价、服务商签名验证或生产回调。生产页面显示支付未开放，订单始终保持未付款，不发放额度。选定合规支付渠道后，需要单独完成验签、到账金额/币种确认、手续费规则、退款及争议处理，再考虑启用。
+
+参考：[Cloudflare Turnstile 验证](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)、[Turnstile 测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)、[Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)、[Resend API](https://resend.com/docs/api-reference/emails/send-email)。

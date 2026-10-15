@@ -1,10 +1,28 @@
-# Reply Copilot v0.3.0-beta
+# Reply Copilot：额度商业化开发版
 
-Reply Copilot 是独立的 Chrome MV3 扩展、Astro 官网和 Cloudflare Worker/D1 后端。当前交付为**本地可运行内测版**；没有正式部署、真实支付或生产邮件服务。Auto Poster 在另一个仓库，本仓库不包含它。
+独立 Chrome MV3 扩展、Astro 官网、Cloudflare Worker 和 D1。当前仅完成本地与测试环境开发，**没有部署生产版本，也没有启用真实支付或付费 DeepSeek 调用**。Auto Poster 在另一个仓库，未参与本次修改。
+
+## 当前规则
+
+- 注册填写用户名、邮箱和密码，完成 Turnstile 与邮箱验证码后，一次性获得 200 次免费 AI 生成额度。免费和付费额度均不主动过期。
+- 一次请求返回自然、幽默、观点三个候选，只扣 1 次；切换、复制、填入都不扣。已确认失败且没有可用结果会返还预留额度；结果不确定的请求保留供人工核查。
+- 正式账户统一通过 Worker 调用 DeepSeek；开发者自己的 Key 只在**本地开发模式**使用。原生 X 输入机制 `chrome.debugger` + `Input.insertText` 未改，插件不会点击发送。
+- 套餐由 D1 管理，初始为 400 次 $1.99、1,000 次 $3.99、2,000 次 $6.99。支付接口尚未接入。创建待付款订单不会扣款或增加额度。本地管理员可以使用受保护的模拟到账接口做测试。
 
 ## 本地启动
 
-需要 Node.js 22+。分别打开两个终端：
+要求 Node.js 22+。首次启动：
+
+```bash
+cd api
+npm install
+cp .dev.vars.example .dev.vars
+# 把 AUTH_HASH_SECRET、PASSWORD_PEPPER、ADMIN_ACCESS_SECRET 换成本地随机长值
+npm run migrate:local
+npm run dev
+```
+
+另开终端：
 
 ```bash
 cd web
@@ -12,32 +30,24 @@ npm install
 npm run dev
 ```
 
-```bash
-cd api
-npm install
-cp .dev.vars.example .dev.vars
-# 将 AUTH_HASH_SECRET 改为至少 24 字符的随机值；保持 AI_MOCK=1
-npm run migrate:local
-npm run dev
-```
+访问 `http://127.0.0.1:4321`。本地验证码只显示在 Wrangler 终端；`AI_MOCK=1` 返回固定模拟候选，不调用真实 DeepSeek。官网本地使用 Cloudflare Turnstile 官方测试 sitekey；Worker 测试 secret 在 `.dev.vars.example`。正式环境必须更换真实密钥。
 
-访问 `http://127.0.0.1:4321`。本地验证码只打印在 Wrangler 终端中，绝不返回到网页接口。测试模式的 AI 返回固定示例，不会调用付费 DeepSeek。
+在仓库根目录运行 `npm run build:dev`，然后在 Chrome 扩展程序页面加载 `dist/development`。扩展设置中心点击“连接官网账户”，在官网确认设备绑定。若 X 标签页在扩展重新加载前已打开，也刷新该标签页。
 
-在仓库根目录执行 `npm run build:dev`，再到 Chrome 的 `chrome://extensions` 加载 `dist/development`。扩展设置中心点“连接官网账户”：官网确认绑定后，扩展会领取独立令牌。旧 Key、Voice Profile、历史记录保留。X 页面如已打开，重载扩展后也需刷新 X 标签页。
+旧版本本地 Voice Profile、写作样本、历史与 Key 不清除。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
 
-用户可以继续通过本地开发模式使用自己的 Key。真实试用账户则由 Worker 托管 AI；本地 `AI_MOCK=1` 用于不付费的联调。终身许可证才走原有 BYOK `DeepSeekClient`。原有 `chrome.debugger` + `Input.insertText`、复制备用入口、手动发送步骤均未更改。
+## 管理后台
 
-## 本地许可证模拟
-
-先用邮箱在本地官网登录，然后执行：
+`/admin` 需要账户在 D1 中被**明确**设置为 `admin`，且 Worker 设置独立的 `ADMIN_ACCESS_SECRET`。本地初始化时，先正常注册并验证一个账户，再仅在本地 D1 中执行：
 
 ```bash
 cd api
-npm run license:local -- grant your-test@example.test
-npm run license:local -- revoke your-test@example.test
+npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHERE email='your-test@example.test'"
 ```
 
-脚本强制使用 Wrangler `--local`，没有远端或公开激活接口。授权或撤销后刷新官网与插件账户状态。终身版每个许可证最多激活 2 台插件设备，使用用户自己的 DeepSeek Key；模拟授权不代表付款。
+后台安全口令只保存在当前页面内存中。正式上线前仍需真正的管理员 MFA、安全审查和受控初始化流程。管理操作在 `admin_audit_logs` 留痕。
+
+本地模拟到账仅用于开发：管理员在本地 Worker 向 `POST /v1/dev/orders/{id}/settle` 提交 `eventId`、`amountCents`、`currency: "USD"`，必须带有效网页会话、CSRF 与 `X-Admin-Access`。接口校验订单快照金额、币种和状态；生产环境返回 404。不能将此接口当作真实支付回调。
 
 ## 验证
 
@@ -45,21 +55,12 @@ npm run license:local -- revoke your-test@example.test
 npm test
 npm run build:dev
 npm run build:production
-cd web && npm run build
+cd web && npm test
 cd ../api && npm run typecheck && npm run test:local
 ```
 
-`api/test:local` 创建独立临时 D1，启动本地 Worker，模拟邮箱和 DeepSeek，检查登录、CSRF、设备绑定、30 次额度、幂等与并发，结束后删除临时库。它不会向真实 DeepSeek 发请求。Chrome 上的 X 原生回复输入还需人工实测；Chrome 调试提示可能出现。
+`api/test:local` 创建临时 D1 和本地 Worker，使用模拟邮件、Turnstile 与 AI，验证注册、密码登录与重置、一次性赠送、设备绑定、扣减、失败返还、并发、待付款订单、金额验单、模拟到账、防重复发放和后台权限。不会请求真实付费模型或支付渠道。Chrome 上的 X 原生回复输入仍需人工实测。
 
-## 服务端规则
+## 生产前
 
-- 首次邮箱验证成功时创建 7×24 小时试用；时间来自 Worker，UTC 入库。
-- 每天北京时间 00:00 重置 30 次额度。一次生成三种风格计 1 次，切换现有候选不计次。
-- D1 `batch()` 中用唯一请求键、条件插入和条件更新原子预留用户额度与全站预算。同一请求重试只返回原结果或明确错误，不再次调用模型。
-- 预留后上游失败或结果不确定仍计 1 次，避免重复调用导致无限成本；接口会说明失败。原结果仅保留 10 分钟用于幂等重放。
-- 用户同一时刻最多有 1 个进行中的托管请求；全站每天默认上限 300 次。生产部署前需按真实成本重新配置。
-- 每日清理过期验证码、会话、设备码、限流桶；短时回复正文到期清除，AI 请求元数据保留 30 天，额度统计保留 90 天。
-
-## 生产准备
-
-详见 [Cloudflare 部署准备](docs/cloudflare-deployment.md) 和 [API 契约](docs/cloudflare-api-contract.md)。生产仍需配置 Cloudflare 账户、D1、官网和 API 的 HTTPS 同站域名、真实邮件适配、Worker Secret、正式扩展 ID，并经安全与隐私审核。**目前不要发布生产构建**：若未配置 Resend 邮件凭据，生产登录会明确返回 `MAIL_NOT_CONFIGURED`。支付尚未接入，$10 为计划早鸟价，计划原价 $15，买断不包含终身免费 AI 调用。
+请先看 [部署与服务配置](docs/cloudflare-deployment.md)、[API 契约](docs/cloudflare-api-contract.md)、[隐私说明](PRIVACY.md)。生产 D1 仍是占位 ID；需要由运营者设置 Resend 验证域名、Turnstile、Worker Secrets、HTTPS 域名、真实扩展 ID、成本费率和预算。真实支付、退款、手续费报价、管理员 MFA、法律文本审核与生产联调均未完成。未经确认，不要部署。
