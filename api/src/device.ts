@@ -50,7 +50,6 @@ export async function exchangeDevice(request: Request, env: Env): Promise<Respon
   if (!authorization || authorization.expires_at <= nowMs()) throw new ApiFailure(400, "DEVICE_CODE_EXPIRED", "绑定码已过期。");
   if (authorization.status === "pending") return response({ status: "pending" }, 200, env, request);
   if (authorization.status !== "approved" || !authorization.user_id) throw new ApiFailure(400, "DEVICE_CODE_USED", "绑定码已使用。");
-  await ensureLicenseDevice(env, { user_id: authorization.user_id, device_id: authorization.device_id });
   const now = nowMs();
   const nonce = uuid();
   const token = randomToken();

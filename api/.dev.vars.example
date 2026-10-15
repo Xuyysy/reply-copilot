@@ -1,4 +1,7 @@
 AUTH_HASH_SECRET=replace-with-long-random-local-development-value
 ENVIRONMENT=development
 AI_MOCK=1
+PASSWORD_PEPPER=replace-with-another-long-random-local-development-value
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+ADMIN_ACCESS_SECRET=replace-with-a-long-random-admin-secret-for-local-testing
 # DEEPSEEK_API_KEY is needed only for explicit real-provider development.

@@ -10,6 +10,12 @@ export interface Env {
   AI_MOCK?: string;
   MAIL_API_KEY?: string;
   MAIL_FROM?: string;
+  TURNSTILE_SECRET_KEY?: string;
+  PASSWORD_PEPPER?: string;
+  DISPOSABLE_EMAIL_DOMAINS?: string;
+  DEEPSEEK_INPUT_USD_PER_MILLION?: string;
+  DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
+  ADMIN_ACCESS_SECRET?: string;
 }
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };

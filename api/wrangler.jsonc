@@ -10,7 +10,8 @@
     "WEB_ORIGIN": "http://127.0.0.1:4321",
     "API_ORIGIN": "http://127.0.0.1:8787",
     "EXTENSION_ORIGIN": "",
-    "SITE_DAILY_CAP": "300"
+    "SITE_DAILY_CAP": "300",
+    "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
   },
   "d1_databases": [{
     "binding": "DB",
