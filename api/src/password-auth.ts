@@ -51,15 +51,15 @@ async function verifyTurnstile(request: Request, env: Env, token: unknown): Prom
   if (typeof token !== "string" || token.length < 1 || token.length > 2048) throw new ApiFailure(400,"TURNSTILE_REQUIRED","请先完成人机验证。");
   if (!env.TURNSTILE_SECRET_KEY) throw new ApiFailure(503,"TURNSTILE_NOT_CONFIGURED","人机验证尚未配置。");
   if (env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN) && env.TURNSTILE_SECRET_KEY === "1x0000000000000000000000000000000AA" && token === "local-test-token") return;
-  if (env.ENVIRONMENT === "production" && /^\dx0{20,}/.test(env.TURNSTILE_SECRET_KEY)) throw new ApiFailure(503,"TURNSTILE_NOT_CONFIGURED","生产环境不能使用测试密钥。");
+  if (env.ENVIRONMENT !== "development" && /^\dx0{20,}/.test(env.TURNSTILE_SECRET_KEY)) throw new ApiFailure(503,"TURNSTILE_NOT_CONFIGURED","预发布和生产环境不能使用测试密钥。");
   const form = new URLSearchParams({secret:env.TURNSTILE_SECRET_KEY,response:token,idempotency_key:uuid()});
   const ip = request.headers.get("CF-Connecting-IP"); if (ip) form.set("remoteip",ip);
-  let result: {success?:boolean;hostname?:string};
+  let result: {success?:boolean;hostname?:string;action?:string};
   try {
     const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",body:form,signal:AbortSignal.timeout(10_000)});
     result = await verify.json();
   } catch { throw new ApiFailure(503,"TURNSTILE_UNAVAILABLE","人机验证暂时不可用，请稍后重试。"); }
-  if (!result.success || (env.ENVIRONMENT === "production" && result.hostname !== new URL(env.WEB_ORIGIN).hostname)) throw new ApiFailure(400,"TURNSTILE_INVALID","人机验证失败，请重新尝试。");
+  if (!result.success || (env.ENVIRONMENT !== "development" && (result.hostname !== new URL(env.WEB_ORIGIN).hostname || result.action !== "register"))) throw new ApiFailure(400,"TURNSTILE_INVALID","人机验证失败，请重新尝试。");
 }
 async function newSession(env: Env, userId: string): Promise<{token:string; statement:D1PreparedStatement}> {
   const token = randomToken(); const now = nowMs();

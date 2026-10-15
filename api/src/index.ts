@@ -9,6 +9,7 @@ import { approveDevice, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
+import { startEnrollment, confirmEnrollment, elevateAdmin } from "./admin-mfa";
 
 async function feedback(request: Request, env: Env): Promise<Response> {
   const { session, token } = await sessionFor(request, env);
@@ -25,9 +26,12 @@ async function feedback(request: Request, env: Env): Promise<Response> {
 export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); },
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method === "OPTIONS") return options(request, env);
     const path = new URL(request.url).pathname;
     try {
+      const host=new URL(request.url).hostname;
+      if(env.ENVIRONMENT==="development" && host!=="127.0.0.1" && host!=="localhost") throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","开发环境只能在本机运行。");
+      if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
+      if (request.method === "OPTIONS") return options(request, env);
       if (request.method === "GET" && path === "/health") return response({ ok: true, service: "reply-copilot-api" }, 200, env, request);
       if (request.method === "POST" && path === "/v1/auth/register") return await register(request,env);
       if (request.method === "POST" && path === "/v1/auth/verify-registration") return await verifyRegistration(request,env);
@@ -48,6 +52,9 @@ export default {
       if (request.method === "POST" && path === "/v1/extension/exchange") return await exchangeDevice(request, env);
       if (request.method === "POST" && path === "/v1/ai/generate") return await generate(request, env);
       if (request.method === "POST" && path === "/v1/feedback") return await feedback(request, env);
+      if (request.method === "POST" && path === "/v1/admin/mfa/start") return await startEnrollment(request,env);
+      if (request.method === "POST" && path === "/v1/admin/mfa/confirm") return await confirmEnrollment(request,env);
+      if (request.method === "POST" && path === "/v1/admin/mfa/elevate") return await elevateAdmin(request,env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await adminUsers(request,env);
       if (request.method === "GET" && path === "/v1/admin/packages") return await adminPackages(request,env);

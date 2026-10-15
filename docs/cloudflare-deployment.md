@@ -1,6 +1,6 @@
 # Cloudflare 与外部服务配置（尚未部署）
 
-当前 `api/wrangler.jsonc` 仍使用本机 Origin 与 D1 占位 UUID。只执行过本地迁移；没有检查到或改动任何正式 D1。部署、DNS、Secret 和真实付款需要运营者另行确认。
+当前 `api/wrangler.jsonc` 已有独立 staging / production 模板，远端 D1 ID、Origin 和插件 ID 仍是占位值。只执行过本地迁移；没有检查或改动任何正式 D1。完整的当前步骤与验收清单见 [预发布联调手册](staging-runbook.md)。部署、DNS、Secret 和真实 AI 调用需要运营者另行确认。
 
 ## 迁移顺序与备份
 
@@ -24,11 +24,11 @@
 ## Worker 与 Pages
 
 - 将真实 D1 database ID、官网/API HTTPS Origin、`EXTENSION_ORIGIN` 精确写入对应环境配置。官网/API 建议在同一主域下以便 Cookie 安全属性按设计工作。
-- Worker Secrets：`AUTH_HASH_SECRET`、`PASSWORD_PEPPER`、`TURNSTILE_SECRET_KEY`、`MAIL_API_KEY`、`MAIL_FROM`、`DEEPSEEK_API_KEY`、`ADMIN_ACCESS_SECRET`。这些均不可进入扩展、网页 DOM、Git 或日志。
+- Worker Secrets：`AUTH_HASH_SECRET`、`PASSWORD_PEPPER`、`TURNSTILE_SECRET_KEY`、`MAIL_API_KEY`、`MAIL_FROM`、`ADMIN_ACCESS_SECRET`、`ADMIN_MFA_ENCRYPTION_KEY`。`DEEPSEEK_API_KEY` 仅在明确批准真实 AI 联调或生产调用后设置。这些均不可进入扩展、Git 或日志；管理员初次绑定验证器时，一次性密钥会在受保护的管理员页面显示以便录入。
 - 配置 `SITE_DAILY_CAP`、DeepSeek 每百万输入/输出 Token 的当前美元费率 `DEEPSEEK_INPUT_USD_PER_MILLION`、`DEEPSEEK_OUTPUT_USD_PER_MILLION`，并在后台确认全站成本上限。成本费率会变动，必须按服务商当前报价核对。站点请求上限提供独立熔断；当前成本估算不是账单结算依据。
 - Pages 项目使用现有 `web` 目录，构建 `npm run build`，输出 `dist`，设置 `PUBLIC_API_BASE_URL` 为正式 HTTPS API Origin。首次访问默认简体中文。
 - 生产插件使用真实官网、API URL 与扩展 ID 构建；复核 `debugger` 权限与 X 规则，手测手动发送和复制备用路径。生产构建不提供本地模拟授权或 BYOK 绕过额度。
-- 管理员必须经受控流程赋予 D1 `role='admin'`，并配置管理员安全口令。当前实现**尚无 MFA**，不得在这一步之前对外开放 `/admin`。
+- 管理员必须经受控流程赋予 D1 `role='admin'`，并配置管理员安全口令及 TOTP MFA 加密 Key。生产 `ADMIN_PORTAL_ENABLED=0` 保持关闭；完成独立安全验收后才可开放。
 
 ## 支付状态
 

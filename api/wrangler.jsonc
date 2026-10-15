@@ -6,7 +6,7 @@
   "workers_dev": false,
   "triggers": { "crons": ["0 3 * * *"] },
   "vars": {
-    "ENVIRONMENT": "production",
+    "ENVIRONMENT": "development",
     "WEB_ORIGIN": "http://127.0.0.1:4321",
     "API_ORIGIN": "http://127.0.0.1:8787",
     "EXTENSION_ORIGIN": "",
@@ -18,5 +18,37 @@
     "database_name": "reply-copilot-local",
     "database_id": "00000000-0000-0000-0000-000000000001",
     "migrations_dir": "migrations"
-  }]
+  }],
+  "env": {
+    "staging": {
+      "name": "reply-copilot-api-staging",
+      "workers_dev": false,
+      "vars": {
+        "ENVIRONMENT": "staging",
+        "AI_MODE": "mock",
+        "ADMIN_PORTAL_ENABLED": "0",
+        "WEB_ORIGIN": "https://staging.example.invalid",
+        "API_ORIGIN": "https://api-staging.example.invalid",
+        "EXTENSION_ORIGIN": "chrome-extension://replace-with-staging-extension-id",
+        "SITE_DAILY_CAP": "10",
+        "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
+      },
+      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "00000000-0000-0000-0000-000000000002", "migrations_dir": "migrations" }]
+    },
+    "production": {
+      "name": "reply-copilot-api-production",
+      "workers_dev": false,
+      "vars": {
+        "ENVIRONMENT": "production",
+        "AI_MODE": "production",
+        "ADMIN_PORTAL_ENABLED": "0",
+        "WEB_ORIGIN": "https://www.example.invalid",
+        "API_ORIGIN": "https://api.example.invalid",
+        "EXTENSION_ORIGIN": "chrome-extension://replace-with-production-extension-id",
+        "SITE_DAILY_CAP": "300",
+        "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
+      },
+      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-production", "database_id": "00000000-0000-0000-0000-000000000003", "migrations_dir": "migrations" }]
+    }
+  }
 }

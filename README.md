@@ -45,9 +45,9 @@ cd api
 npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHERE email='your-test@example.test'"
 ```
 
-后台安全口令只保存在当前页面内存中。正式上线前仍需真正的管理员 MFA、安全审查和受控初始化流程。管理操作在 `admin_audit_logs` 留痕。
+后台安全口令与 15 分钟 MFA 会话只保存在当前页面内存中。管理员 TOTP 已实现；生产入口仍由 `ADMIN_PORTAL_ENABLED=0` 锁定，正式开放前仍需安全审查和受控初始化。管理操作在 `admin_audit_logs` 留痕。
 
-本地模拟到账仅用于开发：管理员在本地 Worker 向 `POST /v1/dev/orders/{id}/settle` 提交 `eventId`、`amountCents`、`currency: "USD"`，必须带有效网页会话、CSRF 与 `X-Admin-Access`。接口校验订单快照金额、币种和状态；生产环境返回 404。不能将此接口当作真实支付回调。
+本地模拟到账仅用于开发：管理员在本地 Worker 向 `POST /v1/dev/orders/{id}/settle` 提交 `eventId`、`amountCents`、`currency: "USD"`，必须带有效网页会话、CSRF、`X-Admin-Access` 与完成 TOTP 后取得的 `X-Admin-Session`。接口校验订单快照金额、币种和状态；生产环境返回 404。不能将此接口当作真实支付回调。
 
 ## 验证
 
@@ -63,4 +63,4 @@ cd ../api && npm run typecheck && npm run test:local
 
 ## 生产前
 
-请先看 [部署与服务配置](docs/cloudflare-deployment.md)、[API 契约](docs/cloudflare-api-contract.md)、[隐私说明](PRIVACY.md)。生产 D1 仍是占位 ID；需要由运营者设置 Resend 验证域名、Turnstile、Worker Secrets、HTTPS 域名、真实扩展 ID、成本费率和预算。真实支付、退款、手续费报价、管理员 MFA、法律文本审核与生产联调均未完成。未经确认，不要部署。
+请先看 [预发布联调手册](docs/staging-runbook.md)、[部署与服务配置](docs/cloudflare-deployment.md)、[API 契约](docs/cloudflare-api-contract.md)、[隐私说明](PRIVACY.md)。远端 D1 仍是占位 ID；需要由运营者设置 Resend 验证域名、Turnstile、Worker Secrets、HTTPS 域名、真实扩展 ID、成本费率和预算。真实支付、退款、手续费报价、管理员安全验收、法律文本审核与生产联调均未完成。未经确认，不要部署。

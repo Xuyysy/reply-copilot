@@ -4,6 +4,7 @@ import {mkdtempSync,rmSync} from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import {fileURLToPath} from "node:url";
+import {createHmac} from "node:crypto";
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const wrangler=path.join(root,"node_modules",".bin","wrangler");
@@ -12,8 +13,8 @@ const base="http://127.0.0.1:8792",origin="http://127.0.0.1:4321";
 const env={...process.env,WRANGLER_SEND_METRICS:"false",WRANGLER_LOG_PATH:path.join(persist,"wrangler.log")};
 const sql=(statement)=>execFileSync(wrangler,["d1","execute","DB","--local","--persist-to",persist,"--command",statement],{cwd:root,env,stdio:"pipe"});
 let server,logs="";
-async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false,admin}={}){
-  const result=await fetch(`${base}${url}`,{method,headers:{...(body?{"Content-Type":"application/json"}:{}),...(method==="POST"&&!extension?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(bearer?{Authorization:`Bearer ${bearer}`}:{ }),...(csrf?{"X-CSRF-Token":csrf,"X-Reply-Copilot-Action":"1"}:{}),...(admin?{"X-Admin-Access":admin}:{})},...(body?{body:JSON.stringify(body)}:{})});
+async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false,admin,adminSession}={}){
+  const result=await fetch(`${base}${url}`,{method,headers:{...(body?{"Content-Type":"application/json"}:{}),...(method==="POST"&&!extension?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(bearer?{Authorization:`Bearer ${bearer}`}:{ }),...(csrf?{"X-CSRF-Token":csrf,"X-Reply-Copilot-Action":"1"}:{}),...(admin?{"X-Admin-Access":admin}:{}),...(adminSession?{"X-Admin-Session":adminSession}:{})},...(body?{body:JSON.stringify(body)}:{})});
   return {status:result.status,headers:result.headers,data:await result.json()};
 }
 async function waitFor(predicate,maxMs=20000){const until=Date.now()+maxMs;while(Date.now()<until){const value=await predicate();if(value)return value;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Timed out. ${logs.slice(-1000)}`);}
@@ -27,12 +28,15 @@ async function register(email,username){
   assert.equal((await call("/v1/auth/verify-registration",{method:"POST",body:{email,code}})).status,400);
   return verified.headers.get("set-cookie")?.split(";")[0];
 }
+function totp(secret,offset=0){const alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";let bits=0,value=0;const raw=[];for(const char of secret){value=(value<<5)|alphabet.indexOf(char);bits+=5;if(bits>=8){raw.push((value>>>(bits-=8))&255);}}const counter=Buffer.alloc(8);counter.writeBigUInt64BE(BigInt(Math.floor(Date.now()/30000)+offset));const hash=createHmac("sha1",Buffer.from(raw)).update(counter).digest();const start=hash[19]&15;return String((hash.readUInt32BE(start)&0x7fffffff)%1000000).padStart(6,"0");}
 try{
   execFileSync(wrangler,["d1","migrations","apply","DB","--local","--persist-to",persist],{cwd:root,env,stdio:"pipe"});
   server=spawn(wrangler,["dev","--local","--ip","127.0.0.1","--port","8792","--persist-to",persist,
-    "--var","ENVIRONMENT:development","--var","AI_MOCK:1","--var","PASSWORD_PEPPER:local-test-pepper-that-is-long-enough-123","--var","AUTH_HASH_SECRET:local-test-hash-secret-that-is-long-enough-123","--var","TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA","--var","ADMIN_ACCESS_SECRET:local-test-admin-secret-that-is-long-enough-123"],{cwd:root,env,stdio:["ignore","pipe","pipe"]});
+    "--var","ENVIRONMENT:development","--var","AI_MOCK:1","--var","AI_MOCK_COST_MICRO_USD:1000","--var","AI_MOCK_DELAY_MS:150","--var","PASSWORD_PEPPER:local-test-pepper-that-is-long-enough-123","--var","AUTH_HASH_SECRET:local-test-hash-secret-that-is-long-enough-123","--var","TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA","--var","ADMIN_ACCESS_SECRET:local-test-admin-secret-that-is-long-enough-123","--var","ADMIN_MFA_ENCRYPTION_KEY:local-test-mfa-encryption-key-that-is-long-enough-123"],{cwd:root,env,stdio:["ignore","pipe","pipe"]});
   server.stdout.on("data",data=>{logs+=data.toString();});server.stderr.on("data",data=>{logs+=data.toString();});
   await waitFor(async()=>{try{return (await call("/health")).status===200;}catch{return false;}});
+  const preflight=await fetch(`${base}/v1/admin/dashboard`,{method:"OPTIONS",headers:{Origin:origin,"Access-Control-Request-Method":"GET","Access-Control-Request-Headers":"x-admin-access,x-admin-session"}});
+  assert.equal(preflight.status,204);assert.match(preflight.headers.get("access-control-allow-headers")||"",/X-Admin-Session/);
   const email=`credits-${crypto.randomUUID()}@example.test`,username=`tester_${crypto.randomUUID().slice(0,8)}`;
   assert.equal((await call("/v1/auth/register",{method:"POST",body:{email,username,password:"strong-test-password-123",turnstileToken:""}})).status,400);
   const cookie=await register(email,username);
@@ -54,19 +58,27 @@ try{
   assert.equal((await call("/v1/admin/dashboard",{cookie,admin:"local-test-admin-secret-that-is-long-enough-123"})).status,403);
   sql(`UPDATE users SET role='admin' WHERE id='${user.userId}'`);
   const admin="local-test-admin-secret-that-is-long-enough-123";
-  const dashboard=await call("/v1/admin/dashboard",{cookie,admin});assert.equal(dashboard.status,200);assert.ok(dashboard.data.users>=1);
+  assert.equal((await call("/v1/admin/dashboard",{cookie,admin})).status,403);
+  const enrollment=await call("/v1/admin/mfa/start",{method:"POST",cookie,csrf,admin,body:{}});assert.equal(enrollment.status,200,JSON.stringify(enrollment.data));
+  const confirm=await call("/v1/admin/mfa/confirm",{method:"POST",cookie,csrf,admin,body:{code:totp(enrollment.data.secret)}});assert.equal(confirm.status,200,JSON.stringify(confirm.data));
+  assert.equal((await call("/v1/admin/mfa/elevate",{method:"POST",cookie,csrf,admin,body:{code:totp(enrollment.data.secret)}})).status,403);
+  let freshCode=totp(enrollment.data.secret,1);const currentSecond=Date.now()%30000;if(currentSecond>26000)freshCode=totp(enrollment.data.secret,1);
+  const elevated=await call("/v1/admin/mfa/elevate",{method:"POST",cookie,csrf,admin,body:{code:freshCode}});assert.equal(elevated.status,200,JSON.stringify(elevated.data));
+  const adminSession=elevated.data.accessToken;
+  const dashboard=await call("/v1/admin/dashboard",{cookie,admin,adminSession});assert.equal(dashboard.status,200);assert.ok(dashboard.data.users>=1);
   const frozenEmail=`frozen-${crypto.randomUUID()}@example.test`,frozenCookie=await register(frozenEmail,`frozen_${crypto.randomUUID().slice(0,8)}`);
   const frozenUser=(await call("/v1/me",{cookie:frozenCookie})).data.user;
-  const frozenSet=await call(`/v1/admin/users/${frozenUser.userId}/status`,{method:"POST",cookie,csrf,admin,body:{status:"frozen"}});assert.equal(frozenSet.status,200);
+  assert.equal((await call("/v1/admin/dashboard",{cookie:frozenCookie,admin,adminSession})).status,403);
+  const frozenSet=await call(`/v1/admin/users/${frozenUser.userId}/status`,{method:"POST",cookie,csrf,admin,adminSession,body:{status:"frozen"}});assert.equal(frozenSet.status,200);
   const frozenDevice=await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}});
   const frozenCsrf=(await call("/v1/auth/csrf",{cookie:frozenCookie})).data.csrfToken;
   assert.equal((await call("/v1/extension/approve",{method:"POST",cookie:frozenCookie,csrf:frozenCsrf,body:{deviceCode:frozenDevice.data.deviceCode}})).status,200);
   const frozenBearer=(await call("/v1/extension/exchange",{method:"POST",extension:true,body:{deviceToken:frozenDevice.data.deviceToken}})).data.accessToken;
   const frozenGeneration=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:frozenBearer,body:{requestId:crypto.randomUUID(),post:{text:"hello",url:"https://x.com/example/status/123"}}});assert.equal(frozenGeneration.status,403);
-  const adjustment=await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf,admin,body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}});assert.equal(adjustment.status,200,JSON.stringify(adjustment.data));assert.equal((await quota()).data.quota.freeRemaining,204);
-  const mismatch=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,body:{eventId:"event-local-123456",amountCents:200,currency:"USD"}});assert.equal(mismatch.status,409);assert.equal((await quota()).data.quota.paidRemaining,0);
-  const paid=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,body:{eventId:"event-local-123456",amountCents:199,currency:"USD"}});assert.equal(paid.status,200,JSON.stringify(paid.data));assert.equal((await quota()).data.quota.paidRemaining,400);
-  const replayPaid=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,body:{eventId:"event-local-123456",amountCents:199,currency:"USD"}});assert.equal(replayPaid.status,200);assert.equal((await quota()).data.quota.paidRemaining,400);
+  const adjustment=await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf,admin,adminSession,body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}});assert.equal(adjustment.status,200,JSON.stringify(adjustment.data));assert.equal((await quota()).data.quota.freeRemaining,204);
+  const mismatch=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,adminSession,body:{eventId:"event-local-123456",amountCents:200,currency:"USD"}});assert.equal(mismatch.status,409);assert.equal((await quota()).data.quota.paidRemaining,0);
+  const paid=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,adminSession,body:{eventId:"event-local-123456",amountCents:199,currency:"USD"}});assert.equal(paid.status,200,JSON.stringify(paid.data));assert.equal((await quota()).data.quota.paidRemaining,400);
+  const replayPaid=await call(`/v1/dev/orders/${order.data.order.id}/settle`,{method:"POST",cookie,csrf,admin,adminSession,body:{eventId:"event-local-123456",amountCents:199,currency:"USD"}});assert.equal(replayPaid.status,200);assert.equal((await quota()).data.quota.paidRemaining,400);
   const beforeConcurrent=(await quota()).data.quota.totalRemaining;
   const concurrent=await Promise.all(Array.from({length:8},()=>generate(crypto.randomUUID())));
   const successful=concurrent.filter(item=>item.status===200).length;
@@ -81,6 +93,19 @@ try{
   const resetCode=await waitFor(()=>[...logs.matchAll(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`,"g"))].at(-1)?.[1]);
   const changed=await call("/v1/auth/reset-password",{method:"POST",body:{email,code:resetCode,password:"another-test-password-456"}});
   assert.equal(changed.status,200,JSON.stringify(changed.data));
+  assert.equal((await call("/v1/me",{cookie})).status,401);
+  assert.equal((await call("/v1/usage",{bearer})).status,401);
   assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:email,password:"another-test-password-456"}})).status,200);
-  console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFirst:199,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,frozenBlocked:true,resetWorks:true}));
+  // Two independent accounts race for the last reserved AI budget slot.
+  sql("UPDATE ai_budget_days SET settled_micro_usd=999000,reserved_micro_usd=0");
+  async function newBearer(){const accountCookie=await register(`budget-${crypto.randomUUID()}@example.test`,`budget_${crypto.randomUUID().slice(0,8)}`);const token=(await call("/v1/auth/csrf",{cookie:accountCookie})).data.csrfToken;const device=(await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}})).data;assert.equal((await call("/v1/extension/approve",{method:"POST",cookie:accountCookie,csrf:token,body:{deviceCode:device.deviceCode}})).status,200);return (await call("/v1/extension/exchange",{method:"POST",extension:true,body:{deviceToken:device.deviceToken}})).data.accessToken;}
+  const [bearerA,bearerB]=await Promise.all([newBearer(),newBearer()]);
+  let firstFinished=false;
+  const firstBudget=call("/v1/ai/generate",{method:"POST",extension:true,bearer:bearerA,body:{requestId:crypto.randomUUID(),post:{text:"REPLY_COPILOT_SLOW_TEST Concurrent budget check",url:"https://x.com/example/status/123"}}}).then(value=>{firstFinished=true;return value;});
+  await waitFor(()=>sql("SELECT reserved_micro_usd FROM ai_budget_days").toString().includes("1000"),3000);
+  const secondBudget=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:bearerB,body:{requestId:crypto.randomUUID(),post:{text:"Concurrent budget check",url:"https://x.com/example/status/123"}}});
+  assert.equal(secondBudget.status,503);assert.equal(secondBudget.data.code,"AI_BUDGET_EXHAUSTED");assert.equal(firstFinished,false);
+  assert.equal((await firstBudget).status,200);
+  const budgetRows=sql("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days").toString();assert.match(budgetRows,/1000000/);
+  console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFirst:199,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,mfaEnforced:true,frozenBlocked:true,resetWorks:true,inflightBudgetBlocked:true}));
 }finally{server?.kill("SIGTERM");rmSync(persist,{recursive:true,force:true});}

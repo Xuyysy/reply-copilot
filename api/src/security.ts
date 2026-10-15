@@ -38,6 +38,6 @@ export function sessionCookie(token: string, maxAge: number): string { return `r
 export function clearSessionCookie(): string { return "rc_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0"; }
 export function extensionOriginAllowed(request: Request, env: Env): boolean {
   const origin = request.headers.get("Origin");
-  if (env.ENVIRONMENT === "production") return Boolean(env.EXTENSION_ORIGIN) && origin === env.EXTENSION_ORIGIN;
+  if (env.ENVIRONMENT === "production" || env.ENVIRONMENT === "staging") return Boolean(env.EXTENSION_ORIGIN) && origin === env.EXTENSION_ORIGIN;
   return !origin || /^chrome-extension:\/\/[a-p]{32}$/.test(origin);
 }
