@@ -14,7 +14,7 @@ function readVoice() { profile = { ...profile, tone: $("tone").value, language: 
 async function finish() { if (step === 1) readVoice(); await profiles.save(profile); await chrome.storage.local.set({ [ONBOARDING_COMPLETE_KEY]: true }); $("status").textContent = "设置已保存，现在可以使用 Reply Copilot。"; if (step !== 2) { step = 2; show(); } }
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button"); if (!button) return;
-  if (button.id === "open-login") { try { await accountClient.openLoginPage(); } catch (error) { $("welcome-status").textContent = error.message; } return; }
+  if (button.id === "open-login") { try { const code = await accountClient.beginDeviceAuthorization(); $("welcome-status").textContent = `已打开官网，绑定码：${code}。确认后返回插件设置中心查看状态。`; } catch (error) { $("welcome-status").textContent = error.message; } return; }
   if (button.id === "dev-setup") { step = 1; show(); return; }
   if (button.hasAttribute("data-next")) { if (step === 0) { step = 1; show(); return; } readVoice(); await profiles.save(profile); step = 2; show(); }
   if (button.hasAttribute("data-back")) { if (step === 1) step = 0; else if (step === 2) step = 1; show(); }

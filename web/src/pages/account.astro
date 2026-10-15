@@ -1,0 +1,46 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="My account">
+  <div class="container page-hero"><div class="eyebrow" data-zh="账户中心">Account</div><h1 data-zh="你的使用情况。">Your account, clearly.</h1><p class="lead" data-zh="状态与额度直接来自服务端。">Status and usage come directly from the service.</p></div>
+  <section class="container" style="padding-bottom:110px"><div id="loading" class="status" data-zh="正在读取账户…">Loading your account…</div><div id="signed-out" hidden><p data-zh="请先使用邮箱登录。">Please sign in with your email.</p><a id="sign-in-link" class="button" href="/login" data-zh="登录或注册">Sign in or register</a></div><div id="account-content" hidden><p><strong id="account-email"></strong></p><div class="stat-grid"><div class="stat"><span data-zh="账户状态">Account status</span><strong id="trial-status">—</strong></div><div class="stat"><span data-zh="今日剩余">Remaining today</span><strong id="quota-status">—</strong></div><div class="stat"><span data-zh="下次重置">Next reset</span><strong id="reset-status" style="font-size:18px">—</strong></div></div><div class="content-card" style="margin-top:20px"><h3 data-zh="试用与许可证">Trial and license</h3><p id="trial-expires"></p><p id="license-status"></p><p id="device-status"></p></div><div class="content-card" style="margin-top:16px"><h3 data-zh="连接插件">Connect the extension</h3><p data-zh="在插件设置中心点击登录，打开本网站并确认绑定。内测版目前通过本地构建安装，尚无 Chrome 商店页面。">Choose Sign in from the extension settings, then confirm the connection here. The beta is installed from a local build; there is no Chrome Web Store listing yet.</p><div id="device-approval" hidden><p id="device-description"></p><button class="button" id="approve-device" data-zh="确认绑定插件">Approve extension connection</button><p class="status" id="device-result" hidden></p></div></div><button id="logout" class="button secondary" style="margin-top:20px" data-zh="退出登录">Sign out</button></div></section>
+  <script>
+    import { api, ApiError } from "../lib/api";
+    const show = (id: string, visible: boolean) => { document.getElementById(id)!.hidden = !visible; };
+    const text = (id: string, value: string) => { document.getElementById(id)!.textContent = value; };
+    const zh = () => document.documentElement.lang === "zh-CN";
+    const format = (value?: string) => value ? new Intl.DateTimeFormat(zh() ? "zh-CN" : "en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "—";
+    async function load() {
+      try {
+        const [me, entitlements, usage, devices] = await Promise.all([
+          api<{user:{email:string}}>("/v1/me"), api<{status:string;trial?:{expiresAt:string};license?:{licenseStatus:string}}>("/v1/entitlements"), api<{quota?:{dailyRemaining:number;dailyLimit:number;resetAt:string}}>("/v1/usage"), api<{devices:any[];maxDevices:number}>("/v1/license/devices"),
+        ]);
+        show("loading", false); show("account-content", true);
+        text("account-email", me.user.email);
+        const labels: Record<string,string> = zh() ? {trial_active:"免费体验中",trial_exhausted:"今日额度已用完",trial_expired:"体验已结束",lifetime_active:"终身授权"} : {trial_active:"Trial active",trial_exhausted:"Daily limit reached",trial_expired:"Trial ended",lifetime_active:"Lifetime license"};
+        text("trial-status", labels[entitlements.status] || entitlements.status);
+        text("quota-status", usage.quota ? `${usage.quota.dailyRemaining} / ${usage.quota.dailyLimit}` : "—");
+        text("reset-status", format(usage.quota?.resetAt));
+        text("trial-expires", `${zh() ? "体验到期：" : "Trial ends: "}${format(entitlements.trial?.expiresAt)}`);
+        text("license-status", `${zh() ? "许可证：" : "License: "}${entitlements.license?.licenseStatus || (zh() ? "未激活" : "Not active")}`);
+        text("device-status", `${zh() ? "已绑定设备：" : "Connected devices: "}${devices.devices.length} / ${devices.maxDevices}`);
+        const deviceCode = new URL(location.href).searchParams.get("device_code");
+        if (deviceCode && /^[A-Z0-9]{8}$/.test(deviceCode)) {
+          show("device-approval", true);
+          text("device-description", zh() ? `插件请求绑定此账户，验证码：${deviceCode}` : `An extension is requesting access to this account. Code: ${deviceCode}`);
+          document.getElementById("approve-device")!.onclick = async () => {
+            try { await api("/v1/extension/approve", {method:"POST",headers:{"X-Reply-Copilot-Action":"approve"},body:JSON.stringify({deviceCode})}); text("device-result", zh() ? "绑定已确认，请返回插件。" : "Approved. Return to the extension."); show("device-result", true); }
+            catch (error) { text("device-result", error instanceof ApiError ? error.message : "Connection failed."); show("device-result", true); }
+          };
+        }
+      } catch (error) {
+        show("loading", false);
+        if (error instanceof ApiError && error.status === 401) { show("signed-out", true); const code = new URL(location.href).searchParams.get("device_code"); if (code && /^[A-F0-9]{8}$/.test(code)) document.querySelector<HTMLAnchorElement>("#sign-in-link")!.href = `/login?device_code=${code}`; }
+        else { show("loading", true); text("loading", error instanceof Error ? error.message : "Service unavailable."); }
+      }
+    }
+    document.getElementById("logout")?.addEventListener("click", async () => { try { await api("/v1/auth/logout",{method:"POST",headers:{"X-Reply-Copilot-Action":"logout"},body:"{}"}); location.href="/login"; } catch(error) { alert(error instanceof Error ? error.message : "Sign-out failed."); } });
+    load();
+    window.addEventListener("reply-copilot-language", () => { if (!document.getElementById("account-content")!.hidden) void load(); });
+  </script>
+</Base>

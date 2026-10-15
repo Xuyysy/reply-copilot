@@ -1,20 +1,21 @@
-# Reply Copilot — Local Beta Privacy Statement Draft
+# Reply Copilot v0.3.0-beta 隐私说明草案
 
-**Version:** 0.2.0-beta
-**Status:** Draft for local beta; not reviewed or approved by the Chrome Web Store.
+**状态：仅供本地内测，正式发布前须由运营者审核。** 当前没有正式部署或商店审核结论。
 
-Reply Copilot processes information you choose to use for drafting a reply. To generate suggestions, the extension sends the selected X post text, its status URL, the Voice Profile you configure, writing samples you choose to provide, and up to 20 previously selected reply drafts (to avoid repeating the same ideas) to the AI provider configured by you (currently DeepSeek at `api.deepseek.com`). Review the provider's privacy terms before use.
+## 回复数据
 
-Your DeepSeek API key is stored in Chrome extension local storage on this browser profile and sent in authenticated requests to DeepSeek. It is not stored on a Reply Copilot server, and it is not available to the X page content script. Browser-local storage is not server-side secret protection; people or software with access to your browser profile may be able to access it.
+用户选择生成回复时，插件会处理该 X 帖子的文字与 URL、Voice Profile、写作样本、回复偏好，以及最多 20 条最近选择的回复，以生成建议。免费试用模式将这些内容发给 Reply Copilot Worker，再由 Worker 发给 DeepSeek。服务端不长期保存完整原帖；成功生成的原始结果只暂存 10 分钟供同一请求重试，定时清理。AI 请求元数据保留 30 天用于额度、幂等与滥用核查。终身版和本地开发 BYOK 模式由扩展直接向 DeepSeek 发送请求，用户自行承担该服务的费用与数据处理条款。
 
-Reply Copilot does not collect X passwords or cookies, browsing history, unrelated timeline content, direct messages, or account credentials. It does not include analytics, advertising, or hidden telemetry. Voice Profile, writing samples, selected reply history, feedback, and usage indicators remain in local extension storage. New history entries avoid retaining the full source post. Copying or filling a draft is not treated as publication; publication is not verified.
+## 账户与授权
 
-Automatic draft insertion uses Chrome's `debugger` permission. The extension briefly attaches to the current X tab, sends one `Input.insertText` command for the selected suggestion, and detaches. Chrome may display a debugging notice. The implementation does not use this permission to read network traffic, inspect other tabs, or send a reply.
+官网邮箱验证码登录会保存邮箱、验证时间、试用起止时间、会话、每日额度与许可证记录到 D1。验证码以哈希形式保存、短时有效并限制尝试次数。本地开发时验证码仅显示在 Wrangler 终端；正式邮件服务配置后，验证码将由邮件提供商发送。插件绑定产生随机设备 ID、一次性绑定码和单独的扩展会话令牌，令牌不会放入 X 页面 DOM 或链接查询参数。会话令牌以哈希形式入库。
 
-You can change or clear the API key, edit or reset your Voice Profile, remove individual writing samples, and clear local history and usage data in Settings. Removing the extension also removes its local storage according to Chrome's extension behavior.
+用户提交官网反馈时，反馈文字会写入 D1。请勿输入 API Key、密码或其他秘密。扩展本地保存个人设置、用户自己的 DeepSeek Key、选中的回复历史及使用统计。开发者托管 DeepSeek Key 只在 Worker Secret，不进入官网或插件。
 
-This document is a privacy disclosure draft for local testing. Before distribution, the publisher must verify actual data flows, retention, provider terms, legal obligations, contact information, and Chrome Web Store disclosure requirements. No store review or approval is claimed.
+## 保存期限与控制
 
-## 0.2.0-beta 客户端说明
+过期验证码、会话和绑定码由每日任务清理；成功生成的回复正文到期清除，AI 请求元数据保留 30 天，每日额度记录保留 90 天。许可证和邮箱账户记录在账户存续期间保留；正式上线前需补充账户删除与数据导出流程。用户可在插件设置中清除本地 Key、样本、历史与统计。清除本地数据不会删除服务端试用或许可证记录。
 
-本版本增加未来账户与云端 AI 接口，但官网和后端尚未配置或上线。当前开发构建继续使用用户自己的 DeepSeek Key；开发模拟状态不代表真实账户、许可证或试用额度。生产骨架当前不执行真实登录、付款或云端生成。未来启用 Hosted AI 前，需要更新此说明，明确官网/服务端收集和处理的数据以及用户权利。
+插件不会读取 X 密码、Cookie、私信、无关的时间线内容或浏览历史；不会自动发送评论。原生填入使用 Chrome `debugger` 权限短暂向当前 X 标签页发送一次 `Input.insertText`，Chrome 可能显示调试提示。复制或填入不被记为实际发送。
+
+本草案需在上线前核实实际数据流、邮件和 AI 提供商条款、联系信息、用户权利、经营所在地适用法律和 Chrome 商店披露要求。
