@@ -8,6 +8,7 @@ import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
 import { NativeInputService } from "../services/native-input-service.js";
+import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
 
 const MENU_ID = "generate-reply-copilot";
 const storage = new StorageService();
@@ -15,13 +16,26 @@ const history = new HistoryService();
 const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
+const accountClient = new AccountClient();
 const aiProvider = new AIProviderRouter({ accountStates, storage });
 const activeRequests = new Map();
 const generatedInputs = new Map();
 const nativeInput = new NativeInputService(chrome.debugger);
 let settingsOpenPromise = null;
+let bindingPromise = null;
+let lastBindingPoll = 0;
+let pendingClaim = Promise.resolve();
+let behaviorWrite = Promise.resolve();
 const X_PAGE = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)(?:\/|$)/;
 const EXTENSION_PAGE = new RegExp(`^chrome-extension://${chrome.runtime.id}/`);
+async function broadcastSettingsChanged() {
+  const tabs = await chrome.tabs.query({ url: ["https://x.com/*", "https://twitter.com/*"] });
+  await Promise.allSettled(tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => chrome.tabs.sendMessage(tab.id, { type: "REPLY_COPILOT_SETTINGS_CHANGED" })));
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
+  if (area === "local" && changes.replyCopilotAccountToken) { accountStates.invalidate(); void broadcastSettingsChanged(); }
+});
 
 chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
@@ -67,6 +81,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void storage.getBehaviorPreferences().then((preferences) => sendResponse({ ok: true, preferences }), () => sendResponse({ ok: false }));
     return true;
   }
+  if (message?.type === "REPLY_COPILOT_SET_AUTO_GENERATE") {
+    if (!fromXPage || sender.frameId !== 0 || typeof message.enabled !== "boolean") { sendResponse({ ok: false }); return false; }
+    behaviorWrite = behaviorWrite.catch(() => null).then(() => storage.setBehaviorPreferences({ autoGenerateOnReply: message.enabled }));
+    void behaviorWrite.then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message?.type === "REPLY_COPILOT_ACCOUNT_STATE") {
+    if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) { sendResponse({ ok: false }); return false; }
+    void (async () => {
+      const pending = await accountClient.hasPendingDeviceAuthorization();
+      if (pending && Date.now() - lastBindingPoll > 2500) {
+        lastBindingPoll = Date.now();
+        try { if (await accountClient.pollDeviceAuthorization()) accountStates.invalidate(); } catch (error) { if (!/已过期/.test(error?.message || "")) throw error; }
+      }
+      const state = await accountStates.getState({ force: pending });
+      sendResponse({ ok: true, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
+    })().catch(() => sendResponse({ ok: false, status: "auth_unavailable" }));
+    return true;
+  }
+  if (message?.type === "REPLY_COPILOT_BEGIN_BINDING") {
+    if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage || !["register", "login"].includes(message.mode)) { sendResponse({ ok: false }); return false; }
+    if (!bindingPromise) bindingPromise = (async () => {
+      if (await accountClient.token()) {
+        const state = await accountStates.getState({ force: true });
+        if (state.status === "auth_expired") { await chrome.storage.local.remove(ACCOUNT_TOKEN_KEY); accountStates.invalidate(); }
+      }
+      return accountClient.beginDeviceAuthorization({ mode: message.mode });
+    })().finally(() => { bindingPromise = null; });
+    void bindingPromise.then((deviceCode) => sendResponse({ ok: true, deviceCode }), (error) => sendResponse({ ok: false, error: error?.message || "无法发起绑定。" }));
+    return true;
+  }
+  if (message?.type === "REPLY_COPILOT_OPEN_PRICING") {
+    if (!fromXPage || sender.frameId !== 0) { sendResponse({ ok: false }); return false; }
+    void accountClient.openPurchasePage().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    return true;
+  }
+  if (message?.type === "REPLY_COPILOT_CLAIM_PENDING") {
+    if (!fromExtensionPage || !sender.url?.endsWith("/sidepanel/sidepanel.html")) { sendResponse({ ok: false }); return false; }
+    pendingClaim = pendingClaim.catch(() => null).then(async () => {
+      const request = await storage.getPendingRequest();
+      await chrome.storage.session.remove("pendingReplyRequest");
+      const createdAt = Date.parse(request?.createdAt || "");
+      if (!request || !Number.isFinite(createdAt) || Date.now() - createdAt > 30_000 || Date.now() < createdAt - 5000) return null;
+      return request;
+    });
+    void pendingClaim.then((request) => sendResponse({ ok: true, request }), () => sendResponse({ ok: false }));
+    return true;
+  }
   if (message?.type === "REPLY_COPILOT_SET_FLOATING_POSITION") {
     if (!fromXPage || !Number.isFinite(message.left) || !Number.isFinite(message.top)) { sendResponse({ ok: false }); return false; }
     void storage.getBehaviorPreferences().then(async (preferences) => {
@@ -77,7 +139,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   if (message?.type === "REPLY_COPILOT_SETTINGS_UPDATED") {
     if (!fromExtensionPage) { sendResponse({ ok: false }); return false; }
-    void chrome.runtime.sendMessage({ type: "REPLY_COPILOT_SETTINGS_CHANGED" }).catch(() => {});
+    void broadcastSettingsChanged();
     sendResponse({ ok: true }); return false;
   }
   if (message?.type === "REPLY_COPILOT_INPUT_PREPARE") {

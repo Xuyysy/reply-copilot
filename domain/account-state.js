@@ -1,4 +1,4 @@
-export const ACCOUNT_STATUSES = Object.freeze(["guest", "credits_available", "credits_exhausted", "frozen", "trial_active", "trial_exhausted", "trial_expired", "lifetime_active", "auth_unavailable", "developer_mode"]);
+export const ACCOUNT_STATUSES = Object.freeze(["guest", "auth_expired", "credits_available", "credits_exhausted", "frozen", "trial_active", "trial_exhausted", "trial_expired", "lifetime_active", "auth_unavailable", "developer_mode"]);
 export const EMPTY_ACCOUNT_STATE = Object.freeze({ status: "guest", user: null, entitlement: null, trial: null, quota: null, license: null, lastVerifiedAt: null, source: "none" });
 
 export function createAccountState(value, source = "server") {
@@ -28,6 +28,7 @@ export function accountStatusLabel(state) {
     case "lifetime_active": return state.source === "server" ? "终身版" : "开发测试：模拟终身授权";
     case "developer_mode": return "本地开发测试 · 自带 API Key";
     case "auth_unavailable": return "授权状态暂时无法确认";
+    case "auth_expired": return "登录已过期，请重新连接";
     default: return "尚未登录";
   }
 }

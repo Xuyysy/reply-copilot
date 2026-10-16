@@ -26,6 +26,6 @@ export class AccountStateService {
     try {
       const [account, entitlement, usage] = await Promise.all([this.client.fetchCurrentUser(), this.client.fetchEntitlement(), this.client.fetchUsage()]);
       return createAccountState({ status: entitlement.status, user: account.user, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, license: entitlement.license }, "server");
-    } catch (error) { return error?.code === "AUTH_REQUIRED" ? EMPTY_ACCOUNT_STATE : createAccountState({ status: "auth_unavailable" }, "server"); }
+    } catch (error) { return error?.code === "AUTH_REQUIRED" ? createAccountState({ status: "auth_expired" }, "server") : createAccountState({ status: "auth_unavailable" }, "server"); }
   }
 }

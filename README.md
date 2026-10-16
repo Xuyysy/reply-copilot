@@ -38,6 +38,10 @@ npm run dev
 
 在仓库根目录运行 `npm run build:dev`，然后在 Chrome 扩展程序页面加载 `dist/development`。扩展设置中心点击“连接官网账户”，在官网确认设备绑定。若 X 标签页在扩展重新加载前已打开，也刷新该标签页。
 
+当前新用户可从定价页直接进入 `/login?mode=register`，插件的新手页和 X 悬浮窗也提供“免费注册并连接”和“已有账号登录”两个入口。官网批准设备码后，插件还要完成令牌交换才显示已连接；重复打开新手页会读取现有连接。悬浮窗的“自动生成建议”开关与 Side Panel、完整设置中心共用 `behaviorPreferences.autoGenerateOnReply`。关闭时仍可手动生成，插件始终不会自动发送 X 回复。Side Panel 默认显示账户、余额、本地统计和快捷偏好；从 X 明确发起的新请求才进入回复工作模式。
+
+修改插件后重新运行 `npm run build:dev`，到 `chrome://extensions` 点击 Reply Copilot 卡片的刷新按钮，再刷新已打开的 X 标签页。新图标的 SVG 源文件位于 `icons/reply-copilot.svg`，16/32/48/128 像素 PNG 一并打包。网页开发服务器通常会热更新前端文件；如果登录页交互停止响应，按上面的 Vite 重启步骤处理。
+
 旧版本本地 Voice Profile、写作样本、历史与 Key 不清除。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
 
 ## 管理后台
@@ -59,8 +63,9 @@ npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHER
 npm test
 npm run build:dev
 npm run build:production
+npm run test:browser:extension
 cd web && npm test
-cd ../api && npm run typecheck && npm run test:local
+cd ../api && npm run typecheck && npm run test:local && npm run test:browser:local
 ```
 
 `api/test:local` 创建临时 D1 和本地 Worker，使用模拟邮件、Turnstile 与 AI，验证注册、密码登录与重置、一次性赠送、设备绑定、扣减、失败返还、并发、待付款订单、金额验单、模拟到账、防重复发放和后台权限。不会请求真实付费模型或支付渠道。Chrome 上的 X 原生回复输入仍需人工实测。

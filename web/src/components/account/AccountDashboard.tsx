@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
@@ -21,10 +21,12 @@ export default function AccountDashboard() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [approved, setApproved] = useState(false);
+  const lastRefresh = useRef(0);
   const code = typeof location !== "undefined" ? new URL(location.href).searchParams.get("device_code") : null;
   const validCode = code && /^[A-F0-9]{8}$/.test(code) ? code : null;
 
   const load = useCallback(async () => {
+    lastRefresh.current = Date.now();
     setState("loading"); setMessage(""); setData(null);
     try {
       const [account, usage, activity] = await Promise.all([api<Account>("/v1/me"), api<Usage>("/v1/usage"), api<Activity>("/v1/activity")]);
@@ -33,7 +35,7 @@ export default function AccountDashboard() {
   }, [language]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
-    const refreshWhenVisible = () => { if (document.visibilityState === "visible") void load(); };
+    const refreshWhenVisible = () => { if (document.visibilityState === "visible" && Date.now() - lastRefresh.current > 15000) void load(); };
     document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => document.removeEventListener("visibilitychange", refreshWhenVisible);
   }, [load]);
@@ -41,7 +43,7 @@ export default function AccountDashboard() {
   async function approve() {
     if (!validCode || busy) return;
     setBusy(true); setMessage("");
-    try { await api("/v1/extension/approve", { method: "POST", body: JSON.stringify({ deviceCode: validCode }) }); setApproved(true); setMessage(t("绑定成功，请返回插件继续操作。", "Connected. Return to the extension to continue.")); }
+    try { await api("/v1/extension/approve", { method: "POST", body: JSON.stringify({ deviceCode: validCode }) }); setApproved(true); setMessage(t("官网已批准，请返回插件等待连接完成。", "Approved. Return to the extension and wait for the connection to finish.")); }
     catch (error) { setMessage(readableError(error, language)); }
     finally { setBusy(false); }
   }
@@ -50,9 +52,10 @@ export default function AccountDashboard() {
     try { await api("/v1/auth/logout", { method: "POST", body: "{}" }); location.href = "/login"; }
     catch (error) { setMessage(readableError(error, language)); setState("signed-out"); setBusy(false); }
   }
-  const signInHref = validCode ? `/login?device_code=${validCode}` : "/login";
+  const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
+  const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
-  if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{t("登录后即可查看余额、额度流水和插件绑定。", "Sign in to see your credits, activity and extension connection.")}</p><Button asChild><a href={signInHref}>{t("登录或注册", "Sign in or register")}<ArrowRight /></a></Button></CardContent></Card>;
+  if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{t("登录后即可查看余额、额度流水和插件绑定。", "Sign in to see your credits, activity and extension connection.")}</p><div className="flex gap-3"><Button asChild><a href={signInHref}>{t("登录", "Sign in")}</a></Button><Button variant="outline" asChild><a href={registerHref}>{t("免费注册", "Register for free")}<ArrowRight /></a></Button></div></CardContent></Card>;
   if (state === "error" || !data) return <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-5">{message || t("账户暂时无法读取。", "Account unavailable.")}<Button variant="outline" onClick={() => void load()}>{t("重试", "Retry")}</Button></AlertDescription></Alert>;
   const { account, usage, activity } = data;
   const date = (value: number) => new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US");

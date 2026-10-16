@@ -60,6 +60,8 @@ button { cursor: pointer; }
 .header-inner { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 20px; }
 .brand { display: inline-flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 760; letter-spacing: -.04em; white-space: nowrap; }
 .brand-mark { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 11px; color: white; background: #141b28; font-weight: 850; letter-spacing: -.08em; }
+.brand img.brand-mark { display: block; object-fit: cover; }
+[hidden] { display: none !important; }
 .nav { display: flex; align-items: center; gap: 24px; font-size: 14px; font-weight: 600; color: #5d6470; }
 .nav a:hover, .footer a:hover { color: #0e68d5; }
 .header-actions { display: flex; align-items: center; gap: 10px; }

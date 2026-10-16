@@ -9,13 +9,14 @@ const { title = "Reply Copilot", titleEn = title, description = "让每条 X 回
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{title} · Reply Copilot</title>
     <script is:inline>try{document.documentElement.lang=localStorage.getItem("replyCopilotLanguage")==="en"?"en":"zh-CN"}catch{}</script>
   </head>
   <body class="site-shell">
     <header class="site-header">
       <div class="container header-inner">
-        <a class="brand" href="/" aria-label="Reply Copilot home"><span class="brand-mark">R</span>Reply Copilot</a>
+        <a class="brand" href="/" aria-label="Reply Copilot home"><img class="brand-mark" src="/favicon.svg" alt="" />Reply Copilot</a>
         <nav class="nav" aria-label="Main navigation">
           <a href="/guide"><span data-zh="使用指南">Guide</span></a>
           <a href="/pricing"><span data-zh="价格">Pricing</span></a>
@@ -23,7 +24,7 @@ const { title = "Reply Copilot", titleEn = title, description = "让每条 X 回
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
-          <a class="button secondary" id="account-entry" href="/login"><span data-zh="登录 / 注册">Sign in / Register</span></a>
+          <a class="button secondary" id="account-entry" href="/account" hidden><span data-zh="我的账户">My account</span></a><button class="button secondary" id="account-retry" type="button" hidden><span data-zh="重试账户状态">Retry account</span></button>
         </div>
       </div>
     </header>
@@ -55,7 +56,35 @@ const { title = "Reply Copilot", titleEn = title, description = "让每条 X 回
       }
       setLanguage(preference);
       document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
-      import("../lib/api").then(({api})=>api("/v1/me").then(()=>{const entry=document.getElementById("account-entry") as HTMLAnchorElement|null;if(entry){entry.href="/account";const label=entry.querySelector("span");if(label){label.dataset.zh="我的账户";label.dataset.en="My account";label.textContent=document.documentElement.lang==="en"?"My account":"我的账户";}}}).catch(()=>{}));
+      let accountState: "loading"|"guest"|"ready"|"empty"|"error"="loading";
+      let lastAccountCheck=0;
+      function updateAccountLinks(){
+        const en=document.documentElement.lang==="en";
+        const entry=document.getElementById("account-entry") as HTMLAnchorElement;
+        const retry=document.getElementById("account-retry")!;
+        entry.hidden=accountState==="loading"||accountState==="error";
+        retry.hidden=accountState!=="error";
+        entry.href=accountState==="guest"?"/login?mode=register":"/account";
+        const label=entry.querySelector("span")!;
+        label.textContent=accountState==="guest"?(en?"Register / Sign in":"注册 / 登录"):(en?"My account":"我的账户");
+        document.querySelectorAll<HTMLAnchorElement>("[data-account-cta]").forEach((link)=>{
+          link.hidden=accountState==="loading"||accountState==="error";
+          link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
+          const text=link.querySelector("span")||link;
+          text.textContent=accountState==="guest"?(en?"Get 200 free generations":"免费领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
+        });
+        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email for 200 free generations.":"验证邮箱后赠送 200 次 AI 生成。");});
+      }
+      async function loadAccountLinks(){
+        lastAccountCheck=Date.now(); accountState="loading";updateAccountLinks();
+        try{const {api,ApiError}=await import("../lib/api");await api("/v1/me");const result=await api<{quota:{totalRemaining:number}}>("/v1/usage");accountState=result.quota.totalRemaining<=0?"empty":"ready";}
+        catch(error){const {ApiError}=await import("../lib/api");accountState=error instanceof ApiError&&error.status===401?"guest":"error";}
+        updateAccountLinks();
+      }
+      document.getElementById("account-retry")?.addEventListener("click",()=>void loadAccountLinks());
+      window.addEventListener("reply-copilot-language",updateAccountLinks);
+      document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&Date.now()-lastAccountCheck>15000)void loadAccountLinks();});
+      void loadAccountLinks();
     </script>
   </body>
 </html>

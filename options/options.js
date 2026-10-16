@@ -31,6 +31,7 @@ async function refreshAccount(force = false) {
     trial_expired: "旧开发模拟状态；正式账户按余额使用。",
     lifetime_active: "旧开发模拟状态；正式账户统一由云端 AI 提供。",
     auth_unavailable: "授权服务暂时不可用。你的本地设置和历史不会被清除。",
+    auth_expired: "登录已过期，请退出插件账户后重新连接。",
     developer_mode: "本地开发测试模式：继续使用你自己的 DeepSeek API Key。"
   };
   const serverDetails = [];
@@ -88,7 +89,8 @@ if (RUNTIME_CONFIG.channel === "development") {
 let accountPollTimer = null;
 async function pollAccountBinding() {
   try {
-    if (await accountClient.pollDeviceAuthorization()) {
+    const result = await chrome.runtime.sendMessage({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
+    if (result?.ok && !result.pending && ["credits_available", "credits_exhausted", "frozen"].includes(result.status)) {
       clearInterval(accountPollTimer); accountPollTimer = null;
       accountStates.invalidate(); await refreshAccount(true);
       showMessage("官网账户已连接；账户与额度已同步。"); announceSettingsChanged();
@@ -97,7 +99,7 @@ async function pollAccountBinding() {
 }
 function startAccountPolling() { if (accountPollTimer) clearInterval(accountPollTimer); accountPollTimer = setInterval(() => void pollAccountBinding(), 3000); void pollAccountBinding(); }
 $("account-login").addEventListener("click", async () => {
-  try { const code = await accountClient.beginDeviceAuthorization(); showMessage(`已打开官网。请登录并确认绑定，绑定码：${code}`); startAccountPolling(); }
+  try { const result = await chrome.runtime.sendMessage({ type: "REPLY_COPILOT_BEGIN_BINDING", mode: "login" }); if (!result?.ok) throw new Error(result?.error || "无法发起账户绑定。"); showMessage(`已打开官网。请登录并确认绑定，绑定码：${result.deviceCode}`); startAccountPolling(); }
   catch (error) { showMessage(error.message || "无法发起账户绑定。", true); }
 });
 $("account-logout").addEventListener("click", async () => {

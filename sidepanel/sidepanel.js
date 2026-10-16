@@ -1,21 +1,57 @@
 import { AIProviderRouter } from "../services/ai-provider-router.js";
 import { HistoryService } from "../services/history-service.js";
 import { ReplyEngine } from "../services/reply-engine.js";
-import { StorageService, PENDING_REQUEST_KEY } from "../services/storage-service.js";
+import { StorageService, PENDING_REQUEST_KEY, BEHAVIOR_PREFERENCES_KEY } from "../services/storage-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
+import { AccountClient } from "../services/account-client.js";
 
 const storage = new StorageService();
 const history = new HistoryService();
 const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const aiProvider = new AIProviderRouter({ storage });
+const accountClient = new AccountClient();
 const $ = (id) => document.getElementById(id);
 const cards = $("reply-cards");
 const styles = [["natural", "自然"], ["light_humor", "幽默"], ["thoughtful", "观点"]];
 let currentRequest = null;
 let currentResult = null;
 let busy = false;
+let queuedRequest = null;
+const processed = new Set();
+let accountPoll = null;
+
+async function refreshDashboard() {
+  const [account, summary, behavior, profile] = await Promise.all([
+    chrome.runtime.sendMessage({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).catch(() => null),
+    usage.getSummary(), storage.getBehaviorPreferences(), profiles.get(),
+  ]);
+  $("stat-week").textContent = String(summary.last7DaysGenerations);
+  $("stat-all").textContent = String(summary.totalGenerations);
+  $("stat-copy").textContent = String(summary.copies);
+  $("quick-style").value = behavior.defaultReplyMode;
+  $("quick-auto").checked = behavior.autoGenerateOnReply;
+  $("quick-language").value = profile.language;
+  $("quick-length").value = profile.replyLength;
+  $("quick-humor").value = profile.humorLevel;
+  const status = account?.ok ? account.status : "auth_unavailable";
+  $("quota-row").classList.toggle("hidden", !account?.quota || account.source !== "server");
+  $("account-buttons").classList.toggle("hidden", !["guest", "developer_mode", "auth_expired", "auth_unavailable"].includes(status) && !account?.pending);
+  $("connect-register").classList.toggle("hidden", !["guest", "developer_mode"].includes(status) || account?.pending);
+  $("connect-login").classList.toggle("hidden", !["guest", "developer_mode", "auth_expired"].includes(status) || account?.pending);
+  $("check-binding").classList.toggle("hidden", !account?.pending && status !== "auth_unavailable");
+  $("account-name").textContent = account?.pending ? "正在等待官网确认" : status === "guest" ? "尚未连接账户" : status === "developer_mode" ? "本地开发测试模式" : status === "auth_expired" ? "登录已过期" : status === "auth_unavailable" ? "暂时无法确认账户" : account?.user?.username || account?.user?.email || "已连接账户";
+  $("account-summary").textContent = account?.pending ? "请在官网完成授权，返回后点击查看绑定状态。" : status === "guest" ? "注册并验证邮箱，免费领取 200 次。" : status === "developer_mode" ? "模拟状态不代表真实账户或余额；请连接官网账户。" : status === "auth_expired" ? "请重新连接官网账户。" : status === "auth_unavailable" ? "网络暂不可用，请重试；原账户凭据仍保留。" : status === "credits_exhausted" ? "生成次数已用完，支付暂未开放。" : "余额来自官网服务。";
+  if (account?.quota && account.source === "server") { $("quota-total").textContent = String(account.quota.totalRemaining); $("quota-free").textContent = String(account.quota.freeRemaining); $("quota-paid").textContent = String(account.quota.paidRemaining); }
+  if (account?.pending && !accountPoll) accountPoll = setInterval(() => void refreshDashboard(), 3500);
+  if (!account?.pending && accountPoll) { clearInterval(accountPoll); accountPoll = null; }
+}
+async function claimPending() {
+  const response = await chrome.runtime.sendMessage({ type: "REPLY_COPILOT_CLAIM_PENDING" }).catch(() => null);
+  if (response?.ok && response.request) { if (busy) queuedRequest = response.request; else void generate(response.request); }
+}
+function showDashboard() { document.body.classList.add("dashboard-mode"); $("dashboard").classList.remove("hidden"); $("back-dashboard").classList.add("hidden"); $("status").classList.add("hidden"); $("result").classList.add("hidden"); $("regenerate").disabled = true; void refreshDashboard(); }
 
 function formatReplyForClipboard(reply) {
   return reply
@@ -33,6 +69,8 @@ function setBusy(value) {
   document.querySelectorAll(".copy-button").forEach((button) => { button.disabled = value; });
 }
 function showError(message, settings = false) {
+  document.body.classList.remove("dashboard-mode");
+  $("dashboard").classList.add("hidden"); $("back-dashboard").classList.remove("hidden");
   $("status").textContent = /[\u3400-\u9fff]/.test(message) ? message : /API key is not configured/i.test(message) ? "尚未配置 DeepSeek API Key，请先前往设置。" : /Chrome has blocked|access to api\.deepseek\.com/i.test(message) ? "Chrome 未允许插件访问 DeepSeek，请检查扩展的网站访问权限。" : /timed out|timeout|AbortError/i.test(message) ? "DeepSeek 请求超时，请稍后重试。" : /Could not reach|network request failed|fetch/i.test(message) ? "无法连接 DeepSeek，请检查网络、VPN 或扩展的网站访问权限。" : /unauthorized|invalid.*key/i.test(message) ? "DeepSeek API Key 无效或未获授权，请检查后重试。" : /rate limit/i.test(message) ? "DeepSeek 请求次数已达限制，请稍后重试。" : /invalid.*response|invalid JSON|structured response/i.test(message) ? "AI 返回内容无法识别，请重新生成。" : "回复生成失败，请重试或检查 AI 配置。";
   $("status").className = "status error";
   $("status").classList.remove("hidden");
@@ -47,6 +85,7 @@ function showIdle() {
   $("result").classList.add("hidden");
   $("open-settings").classList.add("hidden");
   currentRequest = null; currentResult = null; setBusy(false);
+  showDashboard();
 }
 function renderResult(result, preferredStyle = result.defaultStyle || result.default_style || "natural") {
   currentResult = result;
@@ -72,11 +111,15 @@ function renderResult(result, preferredStyle = result.defaultStyle || result.def
   $("quote-section").classList.toggle("hidden", result.recommendation !== "quote");
   $("quote-text").textContent = result.quote_candidate || "";
   $("status").classList.add("hidden"); $("open-settings").classList.add("hidden"); $("result").classList.remove("hidden"); setBusy(false);
+  void refreshDashboard();
 }
 async function generate(request) {
+  if (busy || processed.has(request.requestId)) return;
+  processed.add(request.requestId);
   currentRequest = request; currentResult = null;
+  document.body.classList.remove("dashboard-mode");
+  $("dashboard").classList.add("hidden"); $("back-dashboard").classList.remove("hidden");
   if (request.error) { showError(request.error); return; }
-  if (busy) { /* a newly arrived request supersedes the in-flight request */ }
   const requestId = request.requestId;
   $("status").textContent = "正在按你的风格生成回复…"; $("status").className = "status loading"; $("status").classList.remove("hidden"); $("result").classList.add("hidden"); $("open-settings").classList.add("hidden"); setBusy(true);
   try {
@@ -88,11 +131,23 @@ async function generate(request) {
     if (currentRequest?.requestId === requestId) renderResult(result, preferences.defaultReplyMode);
   } catch (error) {
     if (currentRequest?.requestId === requestId) { await usage.track("api_failure", { requestId }).catch(() => {}); showError(error.message || "Something went wrong. Try again.", error.needsSettings || error.message?.includes("API key is not configured")); }
+  } finally {
+    if (queuedRequest) { const next = queuedRequest; queuedRequest = null; void generate(next); }
   }
 }
 
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button"); if (!button) return;
+  if (button.id === "back-dashboard") { showDashboard(); return; }
+  if (button.id === "account-refresh" || button.id === "check-binding") { void refreshDashboard(); return; }
+  if (button.id === "connect-register" || button.id === "connect-login") {
+    button.disabled = true;
+    const response = await chrome.runtime.sendMessage({ type: "REPLY_COPILOT_BEGIN_BINDING", mode: button.id === "connect-register" ? "register" : "login" }).catch(() => null);
+    $("account-summary").textContent = response?.ok ? "已打开官网，请完成登录与授权。" : response?.error || "打开官网失败，请重试。";
+    button.disabled = false; void refreshDashboard(); return;
+  }
+  const destinations = { "nav-website": "/", "nav-account": "/account", "nav-pricing": "/pricing", "nav-guide": "/guide" };
+  if (destinations[button.id]) { try { await accountClient.openWebsite(destinations[button.id]); } catch { $("account-summary").textContent = "官网地址暂不可用。"; } return; }
   if (["settings", "footer-settings", "open-settings"].includes(button.id)) { chrome.runtime.openOptionsPage(); return; }
   if (button.id === "regenerate" && currentRequest && !busy) { generate({ ...currentRequest, requestId: crypto.randomUUID() }); return; }
   if (button.classList.contains("copy-button") && currentResult && currentRequest && !busy) {
@@ -114,6 +169,15 @@ document.addEventListener("click", async (event) => {
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "session" && changes[PENDING_REQUEST_KEY]?.newValue) void generate(changes[PENDING_REQUEST_KEY].newValue);
+  if (area === "session" && changes[PENDING_REQUEST_KEY]?.newValue) void claimPending();
+  if (area === "local" && [BEHAVIOR_PREFERENCES_KEY, "voiceProfile", "replyCopilotAccountToken", "localUsageEvents"].some((key) => key in changes)) void refreshDashboard();
 });
-void storage.getPendingRequest().then((request) => request ? generate(request) : showIdle()).catch(() => showError("无法读取待处理内容，请关闭后重新打开侧栏。"));
+for (const id of ["quick-style", "quick-language", "quick-length", "quick-humor", "quick-auto"]) $(id).addEventListener("change", async () => {
+  try {
+    if (id === "quick-style") await storage.setBehaviorPreferences({ defaultReplyMode: $(id).value });
+    else if (id === "quick-auto") await storage.setBehaviorPreferences({ autoGenerateOnReply: $(id).checked });
+    else await profiles.save({ ...await profiles.get(), language: $("quick-language").value, replyLength: $("quick-length").value, humorLevel: $("quick-humor").value });
+    $("quick-save-status").textContent = "已保存并同步到设置中心。";
+  } catch { $("quick-save-status").textContent = "保存失败，请重试。"; }
+});
+showIdle(); void claimPending();

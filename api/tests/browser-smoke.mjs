@@ -42,7 +42,13 @@ try{
   socket.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id&&pending.has(message.id)){const item=pending.get(message.id);pending.delete(message.id);clearTimeout(item.timer);message.error?item.reject(new Error(message.error.message)):item.resolve(message);}});
   await cdp('Runtime.enable');
   await cdp('Page.enable');
+  await cdp('Network.enable');
   await until(()=>evaluate('document.body.innerText.includes("200")'));
+  await until(()=>evaluate('Boolean(document.querySelector("[data-account-cta]") && !document.querySelector("[data-account-cta]").hidden)'));
+  assert.equal(await evaluate('document.querySelector("[data-account-cta]").getAttribute("href")'),'/login?mode=register');
+  await cdp('Page.navigate',{url:`${webBase}/login/?mode=register`});
+  await until(()=>evaluate('Boolean(document.querySelector("astro-island") && !document.querySelector("astro-island").hasAttribute("ssr"))'));
+  assert.equal(await evaluate('Boolean(document.querySelector("input[autocomplete=new-password]") && document.querySelector("input[type=email]"))'),true);
   if(process.env.RC_SCREENSHOT_PATH){const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});writeFileSync(process.env.RC_SCREENSHOT_PATH,Buffer.from(shot.result.data,'base64'));}
   const email=`browser-${crypto.randomUUID()}@example.test`,username=`browser_${crypto.randomUUID().slice(0,8)}`;
   const register=await browserCall('/v1/auth/register',{method:'POST',body:JSON.stringify({email,username,password:'browser-test-password-123',turnstileToken:'local-test-token'})});assert.equal(register.status,200,JSON.stringify(register));
@@ -55,6 +61,11 @@ try{
   const device=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(device.status,200);
   const approve=await browserCall('/v1/extension/approve',{method:'POST',headers:{'X-CSRF-Token':csrf.body.csrfToken,'X-Reply-Copilot-Action':'1'},body:JSON.stringify({deviceCode:device.body.deviceCode})});assert.equal(approve.status,200,JSON.stringify(approve));
   const exchange=await nodeCall('/v1/extension/exchange',{deviceToken:device.body.deviceToken});assert.equal(exchange.status,200);assert.ok(exchange.body.accessToken);
+  const generationId=crypto.randomUUID();
+  const generate=()=>fetch(`${apiBase}/v1/ai/generate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${exchange.body.accessToken}`},body:JSON.stringify({requestId:generationId,post:{text:'A small step today.',url:'https://x.com/example/status/123'},replyStyle:'natural-friendly'})}).then(async response=>({status:response.status,body:await response.json()}));
+  const firstGeneration=await generate();assert.equal(firstGeneration.status,200,JSON.stringify(firstGeneration));
+  const duplicateGeneration=await generate();assert.equal(duplicateGeneration.status,200,JSON.stringify(duplicateGeneration));
+  assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,199);
   const resetRequest=await browserCall('/v1/auth/request-password-reset',{method:'POST',body:JSON.stringify({email})});assert.equal(resetRequest.status,200);
   const resetCode=await until(()=>{const matches=[...logs.matchAll(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`,'g'))];return matches.length>=2?matches.at(-1)?.[1]:null;});
   const reset=await browserCall('/v1/auth/reset-password',{method:'POST',body:JSON.stringify({email,code:resetCode,password:'browser-new-password-456'})});assert.equal(reset.status,200,JSON.stringify(reset));
@@ -62,7 +73,7 @@ try{
   const login=await browserCall('/v1/auth/login',{method:'POST',body:JSON.stringify({identity:email,password:'browser-new-password-456'})});assert.equal(login.status,200,JSON.stringify(login));
   assert.equal((await browserCall('/v1/me')).status,200);
   await cdp('Page.navigate',{url:`${webBase}/account/`});
-  await until(()=>evaluate('document.body.innerText.includes("200")'));
+  await until(()=>evaluate('document.body.innerText.includes("199")'));
   assert.equal(await evaluate('document.body.innerText.includes("免费额度")'),true);
   await cdp('Page.navigate',{url:`${webBase}/login/`});
   await until(()=>evaluate('Boolean(document.querySelector("astro-island") && !document.querySelector("astro-island").hasAttribute("ssr"))'));
@@ -81,9 +92,24 @@ try{
   await evaluate('document.querySelector("input[autocomplete=current-password]").focus()');
   await cdp('Input.insertText',{text:'browser-new-password-456'});
   await evaluate('document.querySelector("form button[type=submit]").click()');
-  await until(()=>evaluate('location.pathname.startsWith("/account") && document.body.innerText.includes("200")'));
+  await until(()=>evaluate('location.pathname.startsWith("/account") && document.body.innerText.includes("199")'));
   await cdp('Page.navigate',{url:`${webBase}/pricing/`});
-  await until(()=>evaluate('document.body.innerText.includes("$1.99")'));
+  await until(()=>evaluate('document.body.innerText.includes("$1.99") && document.body.innerText.includes("Free credits claimed")'));
+  assert.equal(await evaluate('document.querySelector("#free-action").getAttribute("href")'),'/account');
+  assert.equal(await evaluate('document.querySelector("#free-detail").innerText.includes("199")'),true);
+  if(process.env.RC_PRICING_SCREENSHOT_PATH){const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});writeFileSync(process.env.RC_PRICING_SCREENSHOT_PATH,Buffer.from(shot.result.data,'base64'));}
+  if(process.env.RC_PRICING_SCREENSHOT_ZH_PATH){await evaluate('document.getElementById("language-toggle").click()');await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "免费额度已领取"'));const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});writeFileSync(process.env.RC_PRICING_SCREENSHOT_ZH_PATH,Buffer.from(shot.result.data,'base64'));await evaluate('document.getElementById("language-toggle").click()');await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Free credits claimed"'));}
+  await cdp('Network.setBlockedURLs',{urls:[`${apiBase}/v1/me`]});
+  await cdp('Page.reload',{ignoreCache:true});
+  await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Account status unavailable"'));
+  assert.equal(await evaluate('document.querySelector("#free-action").hidden && !document.querySelector("#free-retry").hidden'),true);
+  await cdp('Network.setBlockedURLs',{urls:[]});
+  await evaluate('document.querySelector("#free-retry").click()');
+  await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Free credits claimed"'));
+  execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',`UPDATE credit_accounts SET free_balance=0,paid_balance=0 WHERE user_id=(SELECT id FROM users WHERE email='${email}')`],{cwd:api,env,stdio:'pipe'});
+  await cdp('Page.reload',{ignoreCache:true});
+  await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Generations used up"'));
+  assert.equal(await evaluate('document.querySelector("#free-action").getAttribute("href")'),'/pricing#packages');
   await cdp('Page.navigate',{url:`${webBase}/admin/`});
   await until(()=>evaluate('Boolean(document.querySelector("astro-island") && !document.querySelector("astro-island").hasAttribute("ssr"))'));
   assert.equal(await evaluate('document.body.innerText.includes("Admin secret")'),true);
@@ -101,5 +127,5 @@ try{
   await evaluate('[...document.querySelectorAll("button")].find(button=>button.innerText.includes("Verify and load")).click()');
   await until(()=>evaluate('document.body.innerText.includes("Operations overview")'));
   assert.equal(await evaluate('document.body.innerText.includes("Users")'),true);
-  console.log(JSON.stringify({ok:true,realChrome:true,registration:true,httpOnlyCookie:true,balance:200,deviceApproval:true,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,adminGate:true,adminMfaUi:true}));
+  console.log(JSON.stringify({ok:true,realChrome:true,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminMfaUi:true}));
 }finally{try{socket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}

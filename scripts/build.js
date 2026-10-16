@@ -8,7 +8,7 @@ if (!["development", "production"].includes(channel)) throw new Error("Use devel
 const output = path.join(root, "dist", channel);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
-for (const name of ["background", "config", "content", "domain", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
+for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
 if (channel === "production") {
   const websiteUrl = process.env.REPLY_COPILOT_WEBSITE_URL || "";
   const hostedApiUrl = process.env.REPLY_COPILOT_API_URL || "";

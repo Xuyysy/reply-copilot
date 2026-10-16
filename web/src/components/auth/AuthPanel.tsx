@@ -16,7 +16,7 @@ declare global { interface Window { turnstile?: Turnstile } }
 export default function AuthPanel({ localVerification, sitekey }: { localVerification: boolean; sitekey: string }) {
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
-  const [view, setView] = useState<View>("login");
+  const [view, setView] = useState<View>(() => typeof location !== "undefined" && new URL(location.href).searchParams.get("mode") === "register" ? "register" : "login");
   const [notice, setNotice] = useState<{ text: string; error?: boolean } | null>(null);
   const [pending, setPending] = useState(false);
   const [identity, setIdentity] = useState("");
@@ -43,6 +43,10 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
     return () => { window.clearInterval(timer); if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current); widgetId.current = null; setTurnstileReady(false); };
   }, [view, localVerification, sitekey]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    const deviceCode = new URL(location.href).searchParams.get("device_code");
+    if (deviceCode && /^[A-F0-9]{8}$/.test(deviceCode)) void api("/v1/me").then(() => redirect(), () => {});
+  }, []);
 
   function switchView(next: View) { setView(next); setNotice(null); setCode(""); }
   function redirect() {
