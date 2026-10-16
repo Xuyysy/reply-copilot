@@ -4,7 +4,7 @@ import {requireCsrf,sessionFor} from "./auth";
 import {jsonBody,nowMs,uuid} from "./security";
 import {response} from "./http";
 import {balance} from "./quota";
-import {requireAdminSession} from "./admin-mfa";
+import {requireAdminSession} from "./admin-auth";
 
 async function webAction(request:Request,env:Env):Promise<Session>{
   const {session,token}=await sessionFor(request,env);

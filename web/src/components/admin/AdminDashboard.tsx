@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage, type Language } from "../../lib/language";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -30,15 +30,11 @@ const settingText = (value: string, language: Language) => ({ signup_grant: phra
 export default function AdminDashboard() {
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
-  const [secret, setSecret] = useState("");
-  const [code, setCode] = useState("");
-  const [token, setToken] = useState("");
-  const [expiresAt, setExpiresAt] = useState(0);
+  const [access, setAccess] = useState<"loading" | "ready" | "login" | "forbidden" | "error">("loading");
   const [data, setData] = useState<Dashboard | null>(null);
   const [notice, setNotice] = useState("");
   const [error, setError] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [enrollment, setEnrollment] = useState("");
   const [search, setSearch] = useState("");
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [editing, setEditing] = useState<Package | null>(null);
@@ -46,41 +42,28 @@ export default function AdminDashboard() {
   const [adjustKind, setAdjustKind] = useState("free");
   const [adjustDelta, setAdjustDelta] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
-  useEffect(() => {
-    if (!expiresAt || !token) return;
-    const timer = window.setTimeout(() => { setToken(""); setExpiresAt(0); setData(null); setNotice(phrase(language, "管理员会话已过期，请重新验证。", "Admin session expired. Verify again.")); }, Math.max(0, expiresAt - Date.now()));
-    return () => window.clearTimeout(timer);
-  }, [expiresAt, token, language]);
   const say = (text: string, failed = false) => { setNotice(text); setError(failed); };
-  const headers = (session = token) => ({ "X-Admin-Access": secret, "X-Admin-Session": session });
-  const read = <T,>(path: string, session = token) => api<T>(path, { headers: headers(session) });
-  const write = <T,>(path: string, body: object) => api<T>(path, { method: "POST", headers: headers(), body: JSON.stringify(body) });
-  const challenge = <T,>(path: string, body: object) => api<T>(path, { method: "POST", headers: { "X-Admin-Access": secret }, body: JSON.stringify(body) });
+  const read = <T,>(path: string) => api<T>(path);
+  const write = <T,>(path: string, body: object) => api<T>(path, { method: "POST", body: JSON.stringify(body) });
 
-  const load = useCallback(async (existingToken = token, existingExpiry = expiresAt) => {
-    if (!secret.trim()) { say(t("请输入管理员安全口令。", "Enter your admin secret."), true); return; }
-    setBusy(true); setData(null); say("");
+  const load = useCallback(async () => {
+    setBusy(true); setAccess("loading"); setData(null); setNotice("");
     try {
-      let session = existingToken;
-      if (!session || Date.now() >= existingExpiry) {
-        const elevated = await challenge<{ accessToken: string; expiresAt: number }>("/v1/admin/mfa/elevate", { code: code.trim() });
-        session = elevated.accessToken; setToken(session); setExpiresAt(elevated.expiresAt); setCode("");
-      }
-      const [metrics, users, packages, orders, settings, ledger] = await Promise.all([
-        read<Metrics>("/v1/admin/dashboard", session), read<{ users: User[] }>("/v1/admin/users", session), read<{ packages: Package[] }>("/v1/admin/packages", session), read<{ orders: Order[] }>("/v1/admin/orders", session), read<{ settings: Setting[] }>("/v1/admin/settings", session), read<{ ledger: Ledger[] }>("/v1/admin/ledger", session),
+      const metrics = await read<Metrics>("/v1/admin/dashboard");
+      const [users, packages, orders, settings, ledger] = await Promise.all([
+        read<{ users: User[] }>("/v1/admin/users"), read<{ packages: Package[] }>("/v1/admin/packages"), read<{ orders: Order[] }>("/v1/admin/orders"), read<{ settings: Setting[] }>("/v1/admin/settings"), read<{ ledger: Ledger[] }>("/v1/admin/ledger"),
       ]);
       setData({ metrics, users: users.users, packages: packages.packages, orders: orders.orders, settings: settings.settings, ledger: ledger.ledger });
-      say(t("后台数据已更新。", "Dashboard updated."));
+      setAccess("ready");
     } catch (cause) {
-      if (cause instanceof ApiError && [401, 403].includes(cause.status)) { setToken(""); setExpiresAt(0); }
+      setAccess(cause instanceof ApiError ? cause.status === 401 ? "login" : cause.status === 403 || cause.status === 404 ? "forbidden" : "error" : "error");
       say(readableError(cause, language), true);
     } finally { setBusy(false); }
-  }, [token, expiresAt, secret, code, language]);
-  const run = async (action: () => Promise<void>) => { setBusy(true); say(""); try { await action(); } catch (cause) { say(readableError(cause, language), true); } finally { setBusy(false); } };
-  async function refresh() { await load(token, expiresAt); }
+  }, [language]);
+  useEffect(() => { void load(); }, [load]);
+  const run = async (action: () => Promise<void>) => { setBusy(true); say(""); try { await action(); } catch (cause) { if (cause instanceof ApiError && [401, 403, 404].includes(cause.status)) { setData(null); setAccess(cause.status === 401 ? "login" : "forbidden"); } say(readableError(cause, language), true); } finally { setBusy(false); } };
+  async function refresh() { await load(); }
   async function searchUsers(event: FormEvent) { event.preventDefault(); await run(async () => { const response = await read<{ users: User[] }>(`/v1/admin/users?q=${encodeURIComponent(search)}`); setData(previous => previous && { ...previous, users: response.users }); }); }
-  async function beginMfa() { await run(async () => { const result = await challenge<{ secret: string }>("/v1/admin/mfa/start", {}); setEnrollment(result.secret); say(t("请把密钥加入验证器，并在 10 分钟内确认绑定。不要截图或分享。", "Add this key to your authenticator and confirm within 10 minutes. Do not share it.")); }); }
-  async function confirmMfa() { await run(async () => { await challenge("/v1/admin/mfa/confirm", { code: code.trim() }); setEnrollment(""); setCode(""); say(t("二次验证已启用。请等待下一组验证码后加载后台。", "MFA enabled. Wait for the next code, then load the dashboard.")); }); }
   function freeze(user: User) {
     const next = user.status === "frozen" ? "active" : "frozen";
     setConfirm({ title: next === "frozen" ? t("冻结账户", "Freeze account") : t("解冻账户", "Unfreeze account"), description: `${user.email} · ${next === "frozen" ? t("此用户将无法继续使用账户。", "This user will lose account access.") : t("此用户将重新获得账户访问权限。", "This user will regain account access.")}`, action: async () => { await write(`/v1/admin/users/${user.id}/status`, { status: next }); await refresh(); } });
@@ -94,7 +77,8 @@ export default function AdminDashboard() {
   function saveSetting(setting: Setting, value: string) { setConfirm({ title: t("确认修改系统设置", "Confirm setting change"), description: `${setting.key}: ${setting.value} → ${value}`, action: async () => { await write(`/v1/admin/settings/${setting.key}`, { value }); await refresh(); } }); }
 
   return <div className="space-y-6">
-    <Card className="max-w-3xl"><CardHeader><CardTitle>{t("管理员验证", "Admin verification")}</CardTitle></CardHeader><CardContent className="space-y-4"><div className="grid grid-cols-2 gap-4"><Field label={t("安全口令", "Admin secret")}><Input type="password" autoComplete="off" value={secret} onChange={event => { setSecret(event.target.value); setToken(""); setData(null); }} placeholder={t("仅用于当前页面", "Only used on this page")} /></Field><Field label={t("验证器动态验证码", "Authenticator code")}><Input inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={event => setCode(event.target.value)} placeholder={t("6 位数字", "6 digits")} /></Field></div><div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void load()}>{busy && <Loader2 className="animate-spin" />}{t("验证并加载后台", "Verify and load")}</Button><Button variant="outline" disabled={busy} onClick={() => void beginMfa()}>{t("首次设置二次验证", "Set up MFA")}</Button><Button variant="outline" disabled={busy} onClick={() => void confirmMfa()}>{t("确认绑定验证器", "Confirm authenticator")}</Button></div>{enrollment && <Alert role="status"><AlertDescription className="break-all">{t("验证器密钥（仅此页显示）：", "Authenticator key (shown only here): ")}<strong>{enrollment}</strong></AlertDescription></Alert>}{notice && <Alert variant={error ? "destructive" : "default"} role="status"><AlertDescription>{notice}</AlertDescription></Alert>}</CardContent></Card>
+    {access !== "ready" && <Card className="max-w-3xl"><CardHeader><CardTitle>{access === "loading" ? t("正在加载管理后台", "Loading admin dashboard") : access === "login" ? t("请先登录", "Please sign in") : access === "forbidden" ? t("无法访问管理后台", "Admin access denied") : t("管理后台暂时不可用", "Admin dashboard unavailable")}</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">{access === "login" ? t("请使用已开通管理员权限的官网账户登录。", "Sign in with your admin account.") : access === "forbidden" ? t("当前账户没有管理员权限，或管理入口尚未开放。", "This account is not an administrator, or the admin portal is closed.") : notice || t("正在检查登录状态和权限。", "Checking your session and permissions.")}</p>{notice && access !== "loading" && <Alert variant={error ? "destructive" : "default"} role="status"><AlertDescription>{notice}</AlertDescription></Alert>}{access === "login" && <Button asChild><a href="/login?mode=login">{t("前往登录", "Go to sign in")}</a></Button>}{access === "error" && <Button variant="outline" disabled={busy} onClick={() => void load()}>{t("重试", "Retry")}</Button>}</CardContent></Card>}
+    {access === "ready" && notice && <Alert variant={error ? "destructive" : "default"} role="status"><AlertDescription>{notice}</AlertDescription></Alert>}
     {data && <Tabs defaultValue="overview" className="space-y-6"><TabsList className="h-auto flex-wrap justify-start">{[["overview", t("概览", "Overview")], ["users", t("用户", "Users")], ["ledger", t("额度流水", "Credit ledger")], ["orders", t("订单", "Orders")], ["packages", t("套餐", "Packages")], ["cost", t("AI 成本", "AI cost")], ["settings", t("设置", "Settings")]].map(([value, label]) => <TabsTrigger key={value} value={value}>{label}</TabsTrigger>)}</TabsList>
       <TabsContent value="overview"><div className="flex items-center justify-between mb-4"><h2 className="text-2xl font-semibold">{t("运营概览", "Operations overview")}</h2><Button variant="outline" disabled={busy} onClick={() => void refresh()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div><div className="grid grid-cols-4 gap-4">{[["users", t("用户总数", "Users")], ["verifiedUsers", t("已验证用户", "Verified")], ["todayUsers", t("今日新增", "New today")], ["todayGenerations", t("今日生成", "Generations today")], ["monthGenerations", t("本月生成", "Generations this month")], ["totalFreeGranted", t("免费额度发放", "Free credits granted")], ["abnormalRequests", t("异常请求", "Abnormal requests")], ["monthRevenueCents", t("本月收入", "Revenue this month")]].map(([key, label]) => <Metric key={key} label={label} value={key === "monthRevenueCents" ? dollars(Number(data.metrics[key] || 0)) : String(data.metrics[key] ?? "—")} />)}</div></TabsContent>
       <TabsContent value="users" className="space-y-5"><Card><CardHeader><CardTitle>{t("用户管理", "Users")}</CardTitle></CardHeader><CardContent><form className="mb-5 flex gap-2" onSubmit={event => void searchUsers(event)}><Input aria-label={t("搜索用户名或邮箱", "Search username or email")} placeholder={t("搜索用户名或邮箱", "Search username or email")} value={search} onChange={event => setSearch(event.target.value)} /><Button variant="outline" disabled={busy}><Search size={15} />{t("搜索", "Search")}</Button></form><div className="data-table-wrap"><Table><TableHeader><TableRow>{[t("用户", "User"), t("状态", "Status"), t("免费", "Free"), t("付费", "Paid"), t("已生成", "Generated"), t("操作", "Action")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.users.map(user => <TableRow key={user.id}><TableCell><strong>{user.username || t("旧账户", "Legacy user")}</strong><div className="text-xs text-muted-foreground">{user.email}</div><div className="text-xs text-muted-foreground">ID {user.id}</div></TableCell><TableCell><Badge variant={user.status === "active" ? "secondary" : "destructive"}>{statusText(user.status, language)}</Badge></TableCell><TableCell>{user.free_balance}</TableCell><TableCell>{user.paid_balance}</TableCell><TableCell>{user.generations}</TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={() => freeze(user)}>{user.status === "frozen" ? t("解冻", "Unfreeze") : t("冻结", "Freeze")}</Button></TableCell></TableRow>)}</TableBody></Table></div>{!data.users.length && <Empty text={t("没有匹配账户。", "No matching users.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("额度调整", "Adjust credits")}</CardTitle></CardHeader><CardContent><form className="grid grid-cols-4 gap-4" onSubmit={adjust}><Field label={t("用户 ID", "User ID")}><Input required value={adjustUser} onChange={event => setAdjustUser(event.target.value)} /></Field><Field label={t("额度类型", "Credit type")}><select className="h-9 rounded-md border border-input bg-white px-3 text-sm" value={adjustKind} onChange={event => setAdjustKind(event.target.value)}><option value="free">{t("免费", "Free")}</option><option value="paid">{t("付费", "Paid")}</option></select></Field><Field label={t("调整次数，可填负数", "Amount, negative allowed")}><Input type="number" required min={-10000} max={10000} value={adjustDelta} onChange={event => setAdjustDelta(event.target.value)} /></Field><Field label={t("原因，至少 8 字", "Reason, at least 8 characters")}><Input required minLength={8} maxLength={500} value={adjustReason} onChange={event => setAdjustReason(event.target.value)} /></Field><Button className="col-span-4 w-fit" disabled={busy}>{t("预览并确认调整", "Review adjustment")}</Button></form></CardContent></Card></TabsContent>

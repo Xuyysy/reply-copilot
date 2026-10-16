@@ -21,7 +21,7 @@
 3. 选定实际 HTTPS 域名后，替换 staging 的 `WEB_ORIGIN`、`API_ORIGIN`；安装 staging 构建版插件并复制实际插件 ID 填入 `EXTENSION_ORIGIN`。运行 `cd api && npm run check:staging`。核对两个 Origin 属于同一站点。
 4. 获得**远端迁移**授权后，先运行 `npx wrangler d1 migrations list DB --env staging --remote` 复核目标数据库和待执行文件；再运行 `npx wrangler d1 migrations apply DB --env staging --remote`。应按 `0001`、`0002`、`0003`、`0004` 顺序。`0004` 为进行中的 AI 调用增设预算预留、管理员 MFA 表，并回填已有成本。只对 staging 执行。生产迁移需要另行审批。[D1 迁移文档](https://developers.cloudflare.com/d1/reference/migrations/)
 5. 配置 staging 专用 Secret、Resend 和 Turnstile（如下），核对费用及发件额度。获得**添加真实 Secret**和**部署公开服务**授权后，再部署 staging Worker 与现有网站的 staging 构建/分支；不要使用生产 Secret。上线前再次确认 `AI_MODE=mock`、`ADMIN_PORTAL_ENABLED=0`，网站 `PUBLIC_API_BASE_URL` 指向 staging API。
-6. 完成基础注册/绑定验收后，若需测试管理后台，先在 staging D1 **受控**地给已验证的测试账户赋 `role='admin'`，配置独立管理员 Secret，在测试窗口将 staging `ADMIN_PORTAL_ENABLED` 改为 `1` 并部署。首次登录 `/admin` 设置验证器 TOTP，随后用动态验证码取得 15 分钟管理员会话。普通用户及未通过 MFA 的管理员请求均应为 403。生产 `ADMIN_PORTAL_ENABLED` 保持 `0`，待独立安全验收。
+6. 完成基础注册/绑定验收后，若需测试管理后台，先在 staging D1 **受控**地给已验证的测试账户赋 `role='admin'`，在测试窗口将 staging `ADMIN_PORTAL_ENABLED` 改为 `1` 并部署。使用现有官网登录后直接访问 `/admin`；普通用户的管理员 API 请求应为 403。生产 `ADMIN_PORTAL_ENABLED` 保持 `0`，待独立安全验收和明确授权。
 7. 真实 DeepSeek 只能在**再次明确授权**后开启：将 staging `AI_MODE` 从 `mock` 改为 `real-test`、设置 `REAL_DEEPSEEK_TEST_ENABLED=1`、`REAL_DEEPSEEK_TEST_USER_EMAIL=<指定测试邮箱>`、`REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD<=100000`，保持 `SITE_DAILY_CAP<=10`，并将 D1 `daily_cost_limit_micro_usd` 设为不高于该值。另提供 staging 专用 `DEEPSEEK_API_KEY` 及核实后的峰值费率。先发一条请求，检查费用后再继续。关停时撤回开关和 Key，恢复 `AI_MODE=mock`。
 
 上面的 `wrangler deploy --env staging`、Pages 发布、远端数据库及 Secret 命令现在都**没有执行**。任何 CI 自动部署也须先关闭或确认不会触发公开发布。
@@ -34,7 +34,6 @@
 | Worker Secret | `AUTH_HASH_SECRET`, `PASSWORD_PEPPER` | staging 独立随机值，不能复用生产 |
 | Worker Secret | `MAIL_API_KEY`, `MAIL_FROM` | staging 专用 Resend Key 和已验证域名的发件地址 |
 | Worker Secret | `TURNSTILE_SECRET_KEY` | staging Widget Secret；不得使用测试 Secret |
-| Worker Secret | `ADMIN_ACCESS_SECRET`, `ADMIN_MFA_ENCRYPTION_KEY` | 各自独立随机值，至少 32 字符；加密 Key 丢失会使已绑定的 TOTP 无法解密 |
 | Worker Secret（仅获授权的真实 AI 联调） | `DEEPSEEK_API_KEY` | staging 专用 Key；默认不设置 |
 | Worker vars（仅获授权的真实 AI 联调） | `REAL_DEEPSEEK_TEST_ENABLED`, `REAL_DEEPSEEK_TEST_USER_EMAIL`, `REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD`, `DEEPSEEK_INPUT_USD_PER_MILLION`, `DEEPSEEK_OUTPUT_USD_PER_MILLION` | 双重显式开关、单一邮箱、最高 0.10 美元/日；费率按 DeepSeek 当前**峰值**价格核对 |
 | 网站构建变量 | `PUBLIC_API_BASE_URL`, `PUBLIC_TURNSTILE_SITE_KEY` | staging API HTTPS Origin、staging 公开 sitekey；正式构建缺 API 地址时不会回退到本机 |
@@ -62,12 +61,12 @@ Secret 通过 Cloudflare Dashboard 对**选定 Worker 环境**设置，或经批
 3. 安装**staging 构建**的现有插件，核对 ID 和 `EXTENSION_ORIGIN`。发起设备码、在官网批准、在插件完成绑定。官网与插件显示同一余额；拒绝的 Origin 不能绑定。
 4. 在 X 回复框生成一次，200→199，三种风格直接切换不再扣费；同一 `requestId` 重试返回缓存结果而不二次扣费。确认旧 `chrome.debugger + Input.insertText` 自动填入路径和手动发送仍正常。生成失败按规则返还次数；状态不确定的请求应保留待核查预留，不自动触发第二次付费调用。
 5. 两个测试账户并发生成，检查 `credit_accounts` 无负数、`credit_ledger` 每次成功仅一条扣费；在低预算下并发请求应只接受预算允许的数量。管理员概览应同时显示已结算成本和进行中预留成本。
-6. 普通用户、无 MFA 的管理员、错误或重放的动态验证码、过期管理员会话均不能访问管理数据。管理员可查看真实请求、成本、额度流水、未付款订单；创建结算订单后额度**不变**。
+6. 普通用户、冻结账户、未验证邮箱、过期或撤销的网页登录会话均不能访问管理数据。管理员使用已有账号密码登录后可查看真实请求、成本、额度流水、未付款订单；创建结算订单后额度**不变**。管理员修改操作仍要求 CSRF，危险操作要二次确认。
 7. 插件不自动点击 X 的发送按钮；Auto Poster 项目保持独立。完成后关闭真实 AI 测试开关，保存测试结果和脱敏截图。
 
 ## 目前仍需云端确认
 
 - 未取得真实 Cloudflare D1 ID、域名和插件 ID，配置检查会故意失败；未执行远端迁移与部署。
 - 本机 Chrome 已验证 Cookie、CORS、注册/登录、密码重置和浏览器端设备码批准。Resend、Turnstile、HTTPS 域名、实际安装插件后的绑定及真实 DeepSeek 的**云端**验证尚未进行。
-- 管理员 MFA 已实现 TOTP、加密存储、单次验证码防重放和短时会话；生产入口仍被 `ADMIN_PORTAL_ENABLED=0` 锁定。正式开放前还需审查密钥备份/恢复、审计、域名与浏览器安全。
+- 管理员统一使用官网账号密码和 Cookie；原有 MFA 表保留以兼容旧数据库，但不再用于鉴权。生产入口仍被 `ADMIN_PORTAL_ENABLED=0` 锁定。正式开放前还需审查账号恢复、审计、域名与浏览器安全。
 - 支付仍未开放。订单保持 `pending`，只有本地模拟结算接口可发放测试额度；没有支付宝或 USDT 真实支付。

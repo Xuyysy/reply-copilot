@@ -22,5 +22,5 @@ export function failure(error: unknown, env: Env, request: Request): Response {
 export function options(request: Request, env: Env): Response {
   const origin = request.headers.get("Origin");
   if (origin !== env.WEB_ORIGIN && origin !== env.EXTENSION_ORIGIN && !(env.ENVIRONMENT === "development" && /^chrome-extension:\/\/[a-p]{32}$/.test(origin || ""))) return new Response(null, { status: 403 });
-  return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": origin || "", "Access-Control-Allow-Credentials": "true", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Idempotency-Key, X-CSRF-Token, X-Reply-Copilot-Action, X-Admin-Access, X-Admin-Session", "Access-Control-Max-Age": "600", "Vary": "Origin" } });
+  return new Response(null, { status: 204, headers: { "Access-Control-Allow-Origin": origin || "", "Access-Control-Allow-Credentials": "true", "Access-Control-Allow-Methods": "GET, POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type, Authorization, Idempotency-Key, X-CSRF-Token, X-Reply-Copilot-Action", "Access-Control-Max-Age": "600", "Vary": "Origin" } });
 }

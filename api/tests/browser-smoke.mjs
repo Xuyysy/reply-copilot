@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
 import {existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
-import {createHmac} from 'node:crypto';
 import {createServer} from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,8 +14,6 @@ const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Content
 const webPort=20000+Math.floor(Math.random()*5000),apiPort=30000+Math.floor(Math.random()*5000),debuggerPort=40000+Math.floor(Math.random()*5000);
 const webBase=`http://127.0.0.1:${webPort}`,apiBase=`http://127.0.0.1:${apiPort}`;
 const randomSecret=()=>crypto.randomUUID()+crypto.randomUUID();
-const adminSecret='local-browser-test-admin-secret-123456';
-function totp(secret,offset=0){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits=0,value=0;const raw=[];for(const char of secret){value=(value<<5)|alphabet.indexOf(char);bits+=5;if(bits>=8)raw.push((value>>>(bits-=8))&255);}const counter=Buffer.alloc(8);counter.writeBigUInt64BE(BigInt(Math.floor(Date.now()/30000)+offset));const hash=createHmac('sha1',Buffer.from(raw)).update(counter).digest();return String((hash.readUInt32BE(hash[19]&15)&0x7fffffff)%1000000).padStart(6,'0');}
 const env={...process.env,WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:path.join(temp,'wrangler.log')};
 const processes=[];let logs='';let socket,webServer;let nextId=0;const pending=new Map();
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -30,7 +27,7 @@ try{
   assert.ok(existsSync(chrome),`Chrome not found: ${chrome}. Set CHROME_BINARY to its executable path.`);
   execFileSync(wrangler,['d1','migrations','apply','DB','--local','--persist-to',temp],{cwd:api,env,stdio:'pipe'});
   execFileSync('npm',['run','build'],{cwd:web,env:{...env,PUBLIC_API_BASE_URL:apiBase},stdio:'pipe'});
-  launch(wrangler,['dev','--local','--ip','127.0.0.1','--port',String(apiPort),'--persist-to',temp,'--var','ENVIRONMENT:development','--var','AI_MOCK:1','--var',`WEB_ORIGIN:${webBase}`,'--var',`API_ORIGIN:${apiBase}`,'--var',`PASSWORD_PEPPER:${randomSecret()}`,'--var',`AUTH_HASH_SECRET:${randomSecret()}`,'--var','TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA','--var',`ADMIN_ACCESS_SECRET:${adminSecret}`,'--var',`ADMIN_MFA_ENCRYPTION_KEY:${randomSecret()}`],api);
+  launch(wrangler,['dev','--local','--ip','127.0.0.1','--port',String(apiPort),'--persist-to',temp,'--var','ENVIRONMENT:development','--var','AI_MOCK:1','--var',`WEB_ORIGIN:${webBase}`,'--var',`API_ORIGIN:${apiBase}`,'--var',`PASSWORD_PEPPER:${randomSecret()}`,'--var',`AUTH_HASH_SECRET:${randomSecret()}`,'--var','TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA'],api);
   webServer=createServer((request,response)=>{try{const pathname=decodeURIComponent(new URL(request.url,webBase).pathname);const relative=pathname.endsWith('/')?`${pathname}index.html`:path.extname(pathname)?pathname:`${pathname}/index.html`;const filename=path.resolve(web,'dist',`.${relative}`);if(!filename.startsWith(path.resolve(web,'dist')+path.sep))throw new Error('Invalid path');const type=filename.endsWith('.js')?'text/javascript':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':'text/html';response.setHeader('Content-Type',type);response.end(readFileSync(filename));}catch{response.statusCode=404;response.end('Not found');}});
   await new Promise((resolve,reject)=>webServer.listen(webPort,'127.0.0.1',error=>error?reject(error):resolve()));
   await until(async()=>{const response=await fetch(`${apiBase}/health`);return response.ok;});
@@ -112,20 +109,12 @@ try{
   assert.equal(await evaluate('document.querySelector("#free-action").getAttribute("href")'),'/pricing#packages');
   await cdp('Page.navigate',{url:`${webBase}/admin/`});
   await until(()=>evaluate('Boolean(document.querySelector("astro-island") && !document.querySelector("astro-island").hasAttribute("ssr"))'));
-  assert.equal(await evaluate('document.body.innerText.includes("Admin secret")'),true);
-  assert.equal(await evaluate('Boolean(document.querySelector("[role=tablist]"))'),false);
+  await until(()=>evaluate('document.body.innerText.includes("Admin access denied")'));
+  assert.equal((await browserCall('/v1/admin/dashboard')).status,403);
+  assert.equal(await evaluate('Boolean(document.querySelector("input[type=password], input[inputmode=numeric]"))'),false);
   execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',`UPDATE users SET role='admin' WHERE email='${email}'`],{cwd:api,env,stdio:'pipe'});
-  const adminCsrf=(await browserCall('/v1/auth/csrf')).body.csrfToken;
-  const adminHeaders={'X-CSRF-Token':adminCsrf,'X-Reply-Copilot-Action':'1','X-Admin-Access':adminSecret};
-  const enrollment=await browserCall('/v1/admin/mfa/start',{method:'POST',headers:adminHeaders,body:'{}'});assert.equal(enrollment.status,200,JSON.stringify(enrollment));
-  const confirm=await browserCall('/v1/admin/mfa/confirm',{method:'POST',headers:adminHeaders,body:JSON.stringify({code:totp(enrollment.body.secret)})});assert.equal(confirm.status,200,JSON.stringify(confirm));
-  await evaluate('document.querySelector("input[type=password]").focus()');
-  await cdp('Input.insertText',{text:adminSecret});
-  await evaluate('document.querySelector("input[inputmode=numeric]").focus()');
-  await cdp('Input.insertText',{text:totp(enrollment.body.secret,1)});
-  await evaluate('document.querySelector("button").focus()');
-  await evaluate('[...document.querySelectorAll("button")].find(button=>button.innerText.includes("Verify and load")).click()');
+  await cdp('Page.reload',{ignoreCache:true});
   await until(()=>evaluate('document.body.innerText.includes("Operations overview")'));
   assert.equal(await evaluate('document.body.innerText.includes("Users")'),true);
-  console.log(JSON.stringify({ok:true,realChrome:true,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminMfaUi:true}));
+  console.log(JSON.stringify({ok:true,realChrome:true,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminCookieUi:true}));
 }finally{try{socket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}

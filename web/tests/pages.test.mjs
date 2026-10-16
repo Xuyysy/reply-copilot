@@ -39,7 +39,8 @@ test("interactive pages hydrate as isolated React islands", () => {
     assert.match(readFileSync(path.join(root, `src/pages/${pageName}.astro`), "utf8"), new RegExp(`<${component} client:load`));
   }
   const admin = readFileSync(path.join(root, "src/components/admin/AdminDashboard.tsx"), "utf8");
-  assert.match(admin, /\/v1\/admin\/mfa\/elevate/);
+  assert.match(admin, /\/v1\/admin\/dashboard/);
+  assert.doesNotMatch(admin, /\/v1\/admin\/mfa\/|X-Admin-Access|X-Admin-Session|inputMode="numeric"/);
   assert.match(admin, /AlertDialog/);
   assert.doesNotMatch(admin, /localStorage|window\.confirm|window\.alert/);
 });

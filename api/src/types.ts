@@ -21,8 +21,6 @@ export interface Env {
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
-  ADMIN_ACCESS_SECRET?: string;
-  ADMIN_MFA_ENCRYPTION_KEY?: string;
   ADMIN_PORTAL_ENABLED?: string;
 }
 

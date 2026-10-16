@@ -17,7 +17,7 @@
 cd api
 npm install
 cp .dev.vars.example .dev.vars
-# 把 AUTH_HASH_SECRET、PASSWORD_PEPPER、ADMIN_ACCESS_SECRET 换成本地随机长值
+# 把 AUTH_HASH_SECRET、PASSWORD_PEPPER 换成本地随机长值
 npm run migrate:local
 npm run dev
 ```
@@ -32,7 +32,7 @@ npm run dev
 
 访问 `http://127.0.0.1:4321`。Astro 开发服务器的注册页自动使用本地模拟人机验证；只在 `ENVIRONMENT=development`、本地网站 Origin 和测试 Secret 同时满足时，Worker 才接受该测试令牌。若需在 VS Code 查看本地验证码，可在 `api` 目录运行 `npm run dev:log`，然后打开同目录的 `local-worker.log`，查找 `[LOCAL EMAIL ONLY] 邮箱: 六位验证码`；不会发送真实邮件。日志已加入 `.gitignore`，不要将其手动提交或分享。`AI_MODE=mock` 和 `AI_MOCK=1` 返回固定模拟候选，不调用真实 DeepSeek。正式构建仍需要真实 Turnstile sitekey 和 Secret。
 
-官网继续使用 Astro 路由和静态营销页面。注册登录、账户中心和管理后台使用按页加载的 React 组件与 shadcn/ui；语言默认为简体中文，可在顶部切换英文，选择保存在当前浏览器。管理后台的口令和短时 MFA 令牌只保存在当前页面内存中。充值订单仍为待付款状态，页面不会触发付款或发放额度。
+官网继续使用 Astro 路由和静态营销页面。注册登录、账户中心和管理后台使用按页加载的 React 组件与 shadcn/ui；语言默认为简体中文，可在顶部切换英文，选择保存在当前浏览器。管理后台复用官网账户会话，Worker 对每个管理员 API 请求重新查询角色、账户状态与邮箱验证状态。充值订单仍为待付款状态，页面不会触发付款或发放额度。
 
 修改前端依赖后，如果本地登录页的标签点击无反应，先在 `web` 目录运行 `npx astro dev stop`，再运行 `npm run dev -- --force --background`，让 Vite 重新生成依赖缓存。运行 `npm run test:browser:dev` 会用独立的 Chrome 测试配置访问当前的 `http://127.0.0.1:4321/login`，实际点击登录、注册、找回密码标签，并在刷新后再次验证；不会修改本地账户数据。
 
@@ -46,16 +46,16 @@ npm run dev
 
 ## 管理后台
 
-`/admin` 需要账户在 D1 中被**明确**设置为 `admin`，且 Worker 设置独立的 `ADMIN_ACCESS_SECRET`。本地初始化时，先正常注册并验证一个账户，再仅在本地 D1 中执行：
+`/admin` 复用官网账号密码登录。先正常注册并验证一个账户；本地初始化时，由有权访问本地 D1 的开发者执行：
 
 ```bash
 cd api
 npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHERE email='your-test@example.test'"
 ```
 
-后台安全口令与 15 分钟 MFA 会话只保存在当前页面内存中。管理员 TOTP 已实现；生产入口仍由 `ADMIN_PORTAL_ENABLED=0` 锁定，正式开放前仍需安全审查和受控初始化。管理操作在 `admin_audit_logs` 留痕。
+然后在官网登录该账户，打开 `/admin` 即可。普通注册接口不能指定管理员角色；生产环境提权只允许有权访问生产 D1 的运维人员在获得明确授权后操作。管理员 API 要求有效的网页 Cookie、当前数据库中的 `admin` 角色、正常状态和已验证邮箱；修改操作另需 CSRF。普通账户访问这些 API 返回 403。网站使用 Astro 静态输出，因此 `/admin` 的公开 HTML 外壳本身会返回 200，但不会包含管理数据；真正的权限拒绝由 Worker API 返回 403。若未来要求页面请求本身也返回 HTTP 403，需要在网站托管层增加鉴权代理。生产管理员 API 仍由 `ADMIN_PORTAL_ENABLED=0` 默认关闭，正式开放前需安全审查和明确授权。原有 MFA 数据表保留，已不再参与鉴权。管理操作在 `admin_audit_logs` 留痕。
 
-本地模拟到账仅用于开发：管理员在本地 Worker 向 `POST /v1/dev/orders/{id}/settle` 提交 `eventId`、`amountCents`、`currency: "USD"`，必须带有效网页会话、CSRF、`X-Admin-Access` 与完成 TOTP 后取得的 `X-Admin-Session`。接口校验订单快照金额、币种和状态；生产环境返回 404。不能将此接口当作真实支付回调。
+本地模拟到账仅用于开发：管理员在本地 Worker 向 `POST /v1/dev/orders/{id}/settle` 提交 `eventId`、`amountCents`、`currency: "USD"`，必须带有效网页会话和 CSRF。接口校验订单快照金额、币种和状态；生产环境返回 404。不能将此接口当作真实支付回调。
 
 ## 验证
 
