@@ -5,7 +5,7 @@ import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {packages,createOrder,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger,settleMockOrder} from "./commercial";
-import { approveDevice, exchangeDevice, requestDeviceCode } from "./device";
+import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
@@ -47,6 +47,7 @@ export default {
       if (request.method === "POST" && path === "/v1/orders") return await createOrder(request,env);
       if (request.method === "GET" && path === "/v1/license/devices") return await licenseDevices(request, env);
       if (request.method === "POST" && path === "/v1/extension/device-code") return await requestDeviceCode(request, env);
+      if (request.method === "GET" && path === "/v1/extension/device-code/status") return await deviceCodeStatus(request, env);
       if (request.method === "POST" && path === "/v1/extension/approve") return await approveDevice(request, env);
       if (request.method === "POST" && path === "/v1/extension/exchange") return await exchangeDevice(request, env);
       if (request.method === "POST" && path === "/v1/ai/generate") return await generate(request, env);

@@ -50,8 +50,22 @@ try{
   for(let attempt=0;attempt<31;attempt++){const result=await call("/v1/auth/login",{method:"POST",body:{identity:"rate-limit@example.test",password:"wrong"}});assert.equal(result.status,attempt===30?429:401);}
   const csrf=(await call("/v1/auth/csrf",{cookie})).data.csrfToken;
   const device=await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}});assert.equal(device.status,200);
+  const statusUrl=`/v1/extension/device-code/status?device_code=${device.data.deviceCode}`;
+  assert.equal((await call(statusUrl)).status,401);
+  assert.equal((await call(statusUrl,{cookie})).data.status,"pending");
+  assert.equal((await call("/v1/extension/device-code/status?device_code=FFFFFFFF",{cookie})).data.status,"invalid");
   assert.equal((await call("/v1/extension/approve",{method:"POST",cookie,csrf,body:{deviceCode:device.data.deviceCode}})).status,200);
+  assert.equal((await call(statusUrl,{cookie})).data.status,"approved");
+  assert.equal((await call("/v1/extension/approve",{method:"POST",cookie,csrf,body:{deviceCode:device.data.deviceCode}})).status,400);
   const bearer=(await call("/v1/extension/exchange",{method:"POST",extension:true,body:{deviceToken:device.data.deviceToken}})).data.accessToken;
+  assert.equal((await call(statusUrl,{cookie})).data.status,"used");
+  assert.equal((await call("/v1/extension/exchange",{method:"POST",extension:true,body:{deviceToken:device.data.deviceToken}})).status,400);
+  const expiringDevice=await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}});
+  assert.equal(expiringDevice.status,200);
+  sql("UPDATE extension_authorizations SET expires_at=0 WHERE status='pending'");
+  assert.equal((await call(`/v1/extension/device-code/status?device_code=${expiringDevice.data.deviceCode}`,{cookie})).data.status,"expired");
+  const expiredApproval=await call("/v1/extension/approve",{method:"POST",cookie,csrf,body:{deviceCode:expiringDevice.data.deviceCode}});
+  assert.equal(expiredApproval.status,400);assert.equal(expiredApproval.data.code,"DEVICE_CODE_EXPIRED");
   const generate=(requestId,text="Small steps add up.")=>call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:{requestId,post:{text,url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"}});
   const id=crypto.randomUUID();assert.equal((await generate(id)).status,200);assert.equal((await generate(id)).status,200);assert.equal((await quota()).data.quota.totalRemaining,199);
   assert.equal((await generate(id,"Different text")).status,409);

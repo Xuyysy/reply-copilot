@@ -24,10 +24,10 @@ test("device binding opens only the website code, never a bearer token URL", asy
   } });
   assert.equal(await client.beginDeviceAuthorization(), "AB12CD34");
   assert.match(storage.data[ACCOUNT_DEVICE_ID_KEY], /^[0-9a-f-]{36}$/);
-  assert.deepEqual(opened, ["http://127.0.0.1:4321/login?mode=login&device_code=AB12CD34"]);
+  assert.deepEqual(opened, ["http://127.0.0.1:4321/account?device_code=AB12CD34"]);
   assert.equal(await client.beginDeviceAuthorization({ mode: "register" }), "AB12CD34");
   assert.equal(codes, 1);
-  assert.equal(opened[1], "http://127.0.0.1:4321/login?mode=register&device_code=AB12CD34");
+  assert.equal(opened[1], "http://127.0.0.1:4321/account?device_code=AB12CD34");
   assert.doesNotMatch(opened[0], /a{64}|b{64}/);
   assert.equal(await client.pollDeviceAuthorization(), false);
   assert.equal(await client.pollDeviceAuthorization(), true);

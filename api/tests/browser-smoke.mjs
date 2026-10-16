@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
-import {existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {cpSync,existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {createServer} from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -13,26 +13,34 @@ const wrangler=path.join(api,'node_modules/.bin/wrangler');
 const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const webPort=20000+Math.floor(Math.random()*5000),apiPort=30000+Math.floor(Math.random()*5000),debuggerPort=40000+Math.floor(Math.random()*5000);
 const webBase=`http://127.0.0.1:${webPort}`,apiBase=`http://127.0.0.1:${apiPort}`;
+const webDev=process.env.RC_WEB_DEV==='1';
 const randomSecret=()=>crypto.randomUUID()+crypto.randomUUID();
-const env={...process.env,WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:path.join(temp,'wrangler.log')};
-const processes=[];let logs='';let socket,webServer;let nextId=0;const pending=new Map();
+const env={...process.env,PUBLIC_API_BASE_URL:apiBase,WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:path.join(temp,'wrangler.log')};
+const processes=[];let logs='';let socket,browserSocket,webServer;let nextId=0;const pending=new Map(),browserPending=new Map();
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-async function until(fn,ms=20000){const end=Date.now()+ms;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch{}await wait(100);}throw new Error(`Timed out. ${logs.slice(-800)}`);}
+async function until(fn,ms=20000){const end=Date.now()+ms;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch{}await wait(100);}throw new Error(`Timed out. ${logs.slice(0,2400)} ${logs.slice(-800)}`);}
 function launch(command,args,cwd){const child=spawn(command,args,{cwd,env,stdio:['ignore','pipe','pipe']});processes.push(child);for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{logs+=chunk.toString();});return child;}
 function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++nextId;const timer=setTimeout(()=>{if(pending.delete(id))reject(new Error(`CDP timeout: ${method}`));},10000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));});}
 async function evaluate(expression){const reply=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(reply.result?.exceptionDetails)throw new Error(JSON.stringify(reply.result.exceptionDetails));return reply.result?.result?.value;}
 async function browserCall(url,options={}){return evaluate(`(async()=>{const response=await fetch(${JSON.stringify(`${apiBase}${url}`)},${JSON.stringify({credentials:'include',...options,headers:{...(options.body?{'Content-Type':'application/json'}:{}),...(options.headers||{})}})});return {status:response.status,body:await response.json()}})()`);}
+function extensionCdp(method,params={},sessionId){return new Promise((resolve,reject)=>{const id=++nextId;const timer=setTimeout(()=>{browserPending.delete(id);reject(new Error(`Extension CDP timeout: ${method}`));},10000);browserPending.set(id,{resolve,reject,timer});browserSocket.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})}));});}
+async function extensionEvaluate(sessionId,expression){const reply=await extensionCdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},sessionId);if(reply.result?.exceptionDetails)throw new Error(JSON.stringify(reply.result.exceptionDetails));return reply.result?.result?.value;}
+async function extensionPage(url){const target=await extensionCdp('Target.createTarget',{url});const attached=await extensionCdp('Target.attachToTarget',{targetId:target.result.targetId,flatten:true});const session=attached.result.sessionId;await extensionCdp('Runtime.enable',{},session);await until(()=>extensionEvaluate(session,'document.readyState === "complete"'));return session;}
 async function nodeCall(url,body){const response=await fetch(`${apiBase}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return {status:response.status,body:await response.json()};}
+async function typeInto(selector,value){await evaluate(`document.querySelector(${JSON.stringify(selector)}).focus()`);await cdp('Input.insertText',{text:value});}
 try{
   assert.ok(existsSync(chrome),`Chrome not found: ${chrome}. Set CHROME_BINARY to its executable path.`);
   execFileSync(wrangler,['d1','migrations','apply','DB','--local','--persist-to',temp],{cwd:api,env,stdio:'pipe'});
-  execFileSync('npm',['run','build'],{cwd:web,env:{...env,PUBLIC_API_BASE_URL:apiBase},stdio:'pipe'});
+  if(!webDev)execFileSync('npm',['run','build'],{cwd:web,env:{...env,PUBLIC_API_BASE_URL:apiBase},stdio:'pipe'});
   launch(wrangler,['dev','--local','--ip','127.0.0.1','--port',String(apiPort),'--persist-to',temp,'--var','ENVIRONMENT:development','--var','AI_MOCK:1','--var',`WEB_ORIGIN:${webBase}`,'--var',`API_ORIGIN:${apiBase}`,'--var',`PASSWORD_PEPPER:${randomSecret()}`,'--var',`AUTH_HASH_SECRET:${randomSecret()}`,'--var','TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA'],api);
-  webServer=createServer((request,response)=>{try{const pathname=decodeURIComponent(new URL(request.url,webBase).pathname);const relative=pathname.endsWith('/')?`${pathname}index.html`:path.extname(pathname)?pathname:`${pathname}/index.html`;const filename=path.resolve(web,'dist',`.${relative}`);if(!filename.startsWith(path.resolve(web,'dist')+path.sep))throw new Error('Invalid path');const type=filename.endsWith('.js')?'text/javascript':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':'text/html';response.setHeader('Content-Type',type);response.end(readFileSync(filename));}catch{response.statusCode=404;response.end('Not found');}});
-  await new Promise((resolve,reject)=>webServer.listen(webPort,'127.0.0.1',error=>error?reject(error):resolve()));
+  if(webDev)launch(path.join(web,'node_modules/.bin/astro'),['dev','--ignore-lock','--host','127.0.0.1','--port',String(webPort)],web);
+  else {
+    webServer=createServer((request,response)=>{try{const pathname=decodeURIComponent(new URL(request.url,webBase).pathname);const relative=pathname.endsWith('/')?`${pathname}index.html`:path.extname(pathname)?pathname:`${pathname}/index.html`;const filename=path.resolve(web,'dist',`.${relative}`);if(!filename.startsWith(path.resolve(web,'dist')+path.sep))throw new Error('Invalid path');const type=filename.endsWith('.js')?'text/javascript':filename.endsWith('.css')?'text/css':filename.endsWith('.svg')?'image/svg+xml':'text/html';response.setHeader('Content-Type',type);response.end(readFileSync(filename));}catch{response.statusCode=404;response.end('Not found');}});
+    await new Promise((resolve,reject)=>webServer.listen(webPort,'127.0.0.1',error=>error?reject(error):resolve()));
+  }
   await until(async()=>{const response=await fetch(`${apiBase}/health`);return response.ok;});
-  await until(async()=>{const response=await fetch(webBase);return response.ok;});
-  launch(chrome,['--headless=new','--no-first-run','--no-default-browser-check','--window-size=1440,1000',`--user-data-dir=${path.join(temp,'chrome')}`,`--remote-debugging-port=${debuggerPort}`,webBase],temp);
+  await until(async()=>{const response=await fetch(webBase);return response.ok;},webDev?60_000:20_000);
+  launch(chrome,['--headless=new','--no-first-run','--no-default-browser-check','--enable-unsafe-extension-debugging','--window-size=1440,1000',`--user-data-dir=${path.join(temp,'chrome')}`,`--remote-debugging-port=${debuggerPort}`,webBase],temp);
   const target=await until(async()=>{const tabs=await (await fetch(`http://127.0.0.1:${debuggerPort}/json/list`)).json();return tabs.find(tab=>tab.type==='page'&&tab.url.startsWith(webBase));},20000);
   socket=new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',reject,{once:true});});
@@ -56,8 +64,41 @@ try{
   const usage=await browserCall('/v1/usage');assert.equal(usage.body.quota.totalRemaining,200);
   const csrf=await browserCall('/v1/auth/csrf');assert.equal(csrf.status,200);
   const device=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(device.status,200);
-  const approve=await browserCall('/v1/extension/approve',{method:'POST',headers:{'X-CSRF-Token':csrf.body.csrfToken,'X-Reply-Copilot-Action':'1'},body:JSON.stringify({deviceCode:device.body.deviceCode})});assert.equal(approve.status,200,JSON.stringify(approve));
+  const deviceUrl=`${webBase}/account/?device_code=${device.body.deviceCode}`;
+  await cdp('Page.navigate',{url:deviceUrl});
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("连接 x-Reply-Helper")'));
+  assert.equal(await evaluate(`document.querySelector('[role=dialog]').innerText.includes(${JSON.stringify(email)})`),true);
+  assert.equal(await evaluate(`document.querySelector('[role=dialog]').innerText.includes(${JSON.stringify(device.body.deviceCode)})`),true);
+  await cdp('Emulation.setDeviceMetricsOverride',{width:375,height:667,deviceScaleFactor:1,mobile:true});
+  assert.equal(await evaluate('(()=>{const r=document.querySelector("[role=dialog]").getBoundingClientRect();return r.width<=innerWidth&&r.height<=innerHeight})()'),true);
+  await cdp('Emulation.clearDeviceMetricsOverride');
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${device.body.deviceCode}`)).body.status,'pending');
+  await cdp('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await cdp('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await until(()=>evaluate('!document.querySelector("[role=dialog]") && !location.search.includes("device_code")'));
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${device.body.deviceCode}`)).body.status,'pending');
+  await cdp('Page.navigate',{url:deviceUrl});
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("连接 x-Reply-Helper")'));
+  await evaluate('[...document.querySelectorAll("[role=dialog] button")].find(button=>button.innerText==="取消").click()');
+  await until(()=>evaluate('!document.querySelector("[role=dialog]") && !location.search.includes("device_code")'));
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${device.body.deviceCode}`)).body.status,'pending');
+  await cdp('Page.navigate',{url:deviceUrl});
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("确认连接插件")'));
+  await evaluate('[...document.querySelectorAll("[role=dialog] button")].find(button=>button.innerText==="确认连接插件").click()');
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("官网授权已批准")'));
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${device.body.deviceCode}`)).body.status,'approved');
   const exchange=await nodeCall('/v1/extension/exchange',{deviceToken:device.body.deviceToken});assert.equal(exchange.status,200);assert.ok(exchange.body.accessToken);
+  await cdp('Page.reload',{ignoreCache:true});
+  await until(()=>evaluate('document.body.innerText.includes("设备码已使用")'));
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
+  const expiredDevice=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(expiredDevice.status,200);
+  execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',"UPDATE extension_authorizations SET expires_at=0 WHERE status='pending'"],{cwd:api,env,stdio:'pipe'});
+  await cdp('Page.navigate',{url:`${webBase}/account/?device_code=${expiredDevice.body.deviceCode}`});
+  await until(()=>evaluate('document.body.innerText.includes("设备码已过期")'));
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
+  await cdp('Page.navigate',{url:`${webBase}/account/?device_code=bad`});
+  await until(()=>evaluate('document.body.innerText.includes("设备码格式无效")'));
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
   const generationId=crypto.randomUUID();
   const generate=()=>fetch(`${apiBase}/v1/ai/generate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${exchange.body.accessToken}`},body:JSON.stringify({requestId:generationId,post:{text:'A small step today.',url:'https://x.com/example/status/123'},replyStyle:'natural-friendly'})}).then(async response=>({status:response.status,body:await response.json()}));
   const firstGeneration=await generate();assert.equal(firstGeneration.status,200,JSON.stringify(firstGeneration));
@@ -67,7 +108,24 @@ try{
   const resetCode=await until(()=>{const matches=[...logs.matchAll(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`,'g'))];return matches.length>=2?matches.at(-1)?.[1]:null;});
   const reset=await browserCall('/v1/auth/reset-password',{method:'POST',body:JSON.stringify({email,code:resetCode,password:'browser-new-password-456'})});assert.equal(reset.status,200,JSON.stringify(reset));
   assert.equal((await browserCall('/v1/me')).status,401);
+  const loginDevice=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(loginDevice.status,200);
+  await cdp('Page.navigate',{url:`${webBase}/account/?device_code=${loginDevice.body.deviceCode}`});
+  await until(()=>evaluate('Boolean(document.querySelector("a[href*=device_code]"))'));
+  assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
+  await evaluate('document.querySelector("a[href*=device_code]").click()');
+  await until(()=>evaluate('location.pathname.startsWith("/login") && Boolean(document.querySelector("input[autocomplete=current-password]")) && !document.querySelector("astro-island")?.hasAttribute("ssr")'));
+  assert.equal(await evaluate(`location.search.includes(${JSON.stringify(loginDevice.body.deviceCode)})`),true);
+  await typeInto('input[autocomplete=username]',email);
+  await typeInto('input[autocomplete=current-password]','browser-new-password-456');
+  await evaluate('document.querySelector("form button[type=submit]").click()');
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("确认连接插件")'));
+  assert.equal(await evaluate(`location.search.includes(${JSON.stringify(loginDevice.body.deviceCode)})`),true);
+  await evaluate('[...document.querySelectorAll("[role=dialog] button")].find(button=>button.innerText==="切换账户").click()');
+  await until(()=>evaluate('location.pathname.startsWith("/login") && location.search.includes("device_code")'));
+  assert.equal((await browserCall('/v1/me')).status,401);
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${loginDevice.body.deviceCode}`)).status,401);
   const login=await browserCall('/v1/auth/login',{method:'POST',body:JSON.stringify({identity:email,password:'browser-new-password-456'})});assert.equal(login.status,200,JSON.stringify(login));
+  assert.equal((await browserCall(`/v1/extension/device-code/status?device_code=${loginDevice.body.deviceCode}`)).body.status,'pending');
   assert.equal((await browserCall('/v1/me')).status,200);
   await cdp('Page.navigate',{url:`${webBase}/account/`});
   await until(()=>evaluate('document.body.innerText.includes("199")'));
@@ -116,5 +174,57 @@ try{
   await cdp('Page.reload',{ignoreCache:true});
   await until(()=>evaluate('document.body.innerText.includes("Operations overview")'));
   assert.equal(await evaluate('document.body.innerText.includes("Users")'),true);
-  console.log(JSON.stringify({ok:true,realChrome:true,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminCookieUi:true}));
-}finally{try{socket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}
+  if(webDev){
+  const logoutCsrf=await browserCall('/v1/auth/csrf');
+  assert.equal((await browserCall('/v1/auth/logout',{method:'POST',headers:{'X-CSRF-Token':logoutCsrf.body.csrfToken,'X-Reply-Copilot-Action':'1'},body:'{}'})).status,200);
+  const registerDevice=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(registerDevice.status,200);
+  await cdp('Page.navigate',{url:`${webBase}/account/?device_code=${registerDevice.body.deviceCode}`});
+  await until(()=>evaluate('document.body.innerText.includes("Please sign in") && Boolean(document.querySelector("a[href*=device_code][href*=register]"))'));
+  await evaluate('document.querySelector("a[href*=device_code][href*=register]").click()');
+  await until(()=>evaluate('location.pathname.startsWith("/login") && Boolean(document.querySelector("input[autocomplete=new-password]")) && !document.querySelector("astro-island")?.hasAttribute("ssr")'));
+  assert.equal(await evaluate(`location.search.includes(${JSON.stringify(registerDevice.body.deviceCode)})`),true,'registration navigation must preserve the device code');
+  const newEmail=`register-${crypto.randomUUID()}@example.test`,newUsername=`new_${crypto.randomUUID().slice(0,8)}`;
+  await typeInto('input[autocomplete=username]',newUsername);
+  await typeInto('input[autocomplete=email]',newEmail);
+  await typeInto('input[autocomplete=new-password]','browser-registration-123');
+  await evaluate('document.querySelector("form button[type=submit]").click()');
+  await until(()=>evaluate('Boolean(document.querySelector("input[autocomplete=one-time-code]"))'));
+  const newCode=await until(()=>logs.match(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${newEmail}: (\\d{6})`))?.[1]);
+  await typeInto('input[autocomplete=one-time-code]',newCode);
+  await evaluate('document.querySelector("form button[type=submit]").click()');
+  try { await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("Approve extension connection")')); }
+  catch (error) { throw new Error(`${error.message} Registration page: ${JSON.stringify(await evaluate('({url:location.href,text:document.body.innerText.slice(-1200),inputs:[...document.querySelectorAll("input")].map(input=>({name:input.name,value:input.value}))})'))}`); }
+  assert.equal(await evaluate(`document.querySelector('[role=dialog]').innerText.includes(${JSON.stringify(newEmail)})`),true);
+  assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,200);
+  await evaluate('[...document.querySelectorAll("[role=dialog] button")].find(button=>button.innerText==="Approve extension connection").click()');
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("Website approval complete")'));
+  const newExchange=await nodeCall('/v1/extension/exchange',{deviceToken:registerDevice.body.deviceToken});assert.equal(newExchange.status,200);
+  assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,200);
+  execFileSync('node',['scripts/build.js','development'],{cwd:repo,env,stdio:'pipe'});
+  const extensionPath=path.join(temp,'extension');cpSync(path.join(repo,'dist/development'),extensionPath,{recursive:true});
+  writeFileSync(path.join(extensionPath,'config/runtime.js'),`export const RUNTIME_CONFIG = Object.freeze({channel:"development",websiteUrl:${JSON.stringify(webBase)},hostedApiUrl:${JSON.stringify(apiBase)},requestTimeoutMs:30000});\n`);
+  const extensionManifest=JSON.parse(readFileSync(path.join(extensionPath,'manifest.json'),'utf8'));
+  extensionManifest.host_permissions.push(`${apiBase}/*`);
+  writeFileSync(path.join(extensionPath,'manifest.json'),JSON.stringify(extensionManifest));
+  const version=await (await fetch(`http://127.0.0.1:${debuggerPort}/json/version`)).json();
+  browserSocket=new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise((resolve,reject)=>{browserSocket.addEventListener('open',resolve,{once:true});browserSocket.addEventListener('error',reject,{once:true});});
+  browserSocket.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id&&browserPending.has(message.id)){const task=browserPending.get(message.id);browserPending.delete(message.id);clearTimeout(task.timer);message.error?task.reject(new Error(message.error.message)):task.resolve(message);}});
+  const installed=await extensionCdp('Extensions.loadUnpacked',{path:extensionPath});const extensionId=installed.result.id;
+  const onboarding=await extensionPage(`chrome-extension://${extensionId}/onboarding/onboarding.html`);
+  const begin=await extensionEvaluate(onboarding,'chrome.runtime.sendMessage({type:"REPLY_COPILOT_BEGIN_BINDING",mode:"login"})');
+  assert.equal(begin.ok,true,JSON.stringify(begin));
+  await cdp('Page.navigate',{url:`${webBase}/account/?device_code=${begin.deviceCode}`});
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("Approve extension connection")'));
+  await evaluate('[...document.querySelectorAll("[role=dialog] button")].find(button=>button.innerText==="Approve extension connection").click()');
+  await until(()=>evaluate('document.querySelector("[role=dialog]")?.innerText.includes("Website approval complete")'));
+  const bound=await until(async()=>{const result=await extensionEvaluate(onboarding,'chrome.runtime.sendMessage({type:"REPLY_COPILOT_ACCOUNT_STATE"})');return result?.ok&&result.source==='server'&&result.status==='credits_available'?result:null;});
+  assert.equal(bound.quota.totalRemaining,200);
+  await until(()=>extensionEvaluate(onboarding,'document.querySelector("#welcome-status")?.textContent.includes("账户已成功连接")'));
+  const options=await extensionPage(`chrome-extension://${extensionId}/options/options.html`);
+  await until(()=>extensionEvaluate(options,'document.querySelector("#account-quota")?.textContent.includes("共 200 次")'));
+  const sidepanel=await extensionPage(`chrome-extension://${extensionId}/sidepanel/sidepanel.html`);
+  await until(()=>extensionEvaluate(sidepanel,'document.querySelector("#quota-total")?.textContent === "200"'));
+  }
+  console.log(JSON.stringify({ok:true,realChrome:true,webDev,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,automaticDialog:true,cancelDoesNotApprove:true,loginReturnsToDialog:true,registrationReturnsToDialog:webDev,registrationGrantOnce:webDev,extensionTokenExchange:webDev,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminCookieUi:true}));
+}finally{try{socket?.close();browserSocket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}

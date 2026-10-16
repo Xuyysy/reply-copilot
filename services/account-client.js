@@ -44,7 +44,7 @@ export class AccountClient {
     if (await this.token()) throw new Error("账户已连接。如需切换账号，请先在设置中心退出当前账户。");
     const pending = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
     if (pending?.deviceToken && pending?.deviceCode && Date.parse(pending.expiresAt || "") > Date.now()) {
-      await this.openWebsite(`/login?mode=${mode === "register" ? "register" : "login"}&device_code=${pending.deviceCode}`);
+      await this.openWebsite(`/account?device_code=${pending.deviceCode}`);
       return pending.deviceCode;
     }
     const saved = await this.storage.get(ACCOUNT_DEVICE_ID_KEY);
@@ -53,7 +53,7 @@ export class AccountClient {
     const data = await this.request("/v1/extension/device-code", { method: "POST", authenticate: false, body: { deviceId } });
     if (!/^[A-F0-9]{8}$/.test(data?.deviceCode || "") || !/^[a-f0-9]{64}$/.test(data?.deviceToken || "")) throw new Error("绑定请求返回内容无效。");
     await this.storage.set({ [ACCOUNT_PENDING_DEVICE_KEY]: { deviceToken: data.deviceToken, deviceCode: data.deviceCode, expiresAt: data.expiresAt } });
-    await this.openWebsite(`/login?mode=${mode === "register" ? "register" : "login"}&device_code=${data.deviceCode}`);
+    await this.openWebsite(`/account?device_code=${data.deviceCode}`);
     return data.deviceCode;
   }
   async pollDeviceAuthorization() {

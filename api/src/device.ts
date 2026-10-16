@@ -27,9 +27,30 @@ export async function approveDevice(request: Request, env: Env): Promise<Respons
   const body = await jsonBody(request, 1024);
   const code = typeof body.deviceCode === "string" && /^[A-F0-9]{8}$/.test(body.deviceCode) ? body.deviceCode : "";
   if (!code) throw new ApiFailure(400, "INVALID_CODE", "绑定码无效。");
-  const result = await env.DB.prepare("UPDATE extension_authorizations SET status='approved',user_id=? WHERE code_hash=? AND status='pending' AND expires_at>? RETURNING id").bind(session.user_id, await hmac(env, `device-code:${code}`), nowMs()).all();
-  if (!result.results.length) throw new ApiFailure(400, "INVALID_CODE", "绑定码无效或已过期。");
+  const codeHash = await hmac(env, `device-code:${code}`);
+  const result = await env.DB.prepare("UPDATE extension_authorizations SET status='approved',user_id=? WHERE code_hash=? AND status='pending' AND expires_at>? RETURNING id").bind(session.user_id, codeHash, nowMs()).all();
+  if (!result.results.length) {
+    const existing = await env.DB.prepare("SELECT status,expires_at FROM extension_authorizations WHERE code_hash=?").bind(codeHash).first<{status:string;expires_at:number}>();
+    if (existing && existing.expires_at <= nowMs()) throw new ApiFailure(400, "DEVICE_CODE_EXPIRED", "绑定码已过期，请返回插件重新发起绑定。");
+    if (existing) throw new ApiFailure(400, "DEVICE_CODE_USED", "绑定码已使用，请返回插件检查连接状态或重新发起绑定。");
+    throw new ApiFailure(400, "INVALID_CODE", "绑定码无效，请返回插件重新发起绑定。");
+  }
   return response({ ok: true }, 200, env, request);
+}
+export async function deviceCodeStatus(request: Request, env: Env): Promise<Response> {
+  const { session } = await sessionFor(request, env);
+  if (session.kind !== "web") throw new ApiFailure(403, "FORBIDDEN", "请在官网登录后查看绑定状态。");
+  const code = new URL(request.url).searchParams.get("device_code") || "";
+  if (!/^[A-F0-9]{8}$/.test(code)) throw new ApiFailure(400, "INVALID_CODE", "绑定码无效。");
+  const authorization = await env.DB.prepare("SELECT status,user_id,expires_at FROM extension_authorizations WHERE code_hash=?").bind(await hmac(env, `device-code:${code}`)).first<{status:string;user_id:string|null;expires_at:number}>();
+  let status = "invalid";
+  if (authorization) {
+    if (authorization.expires_at <= nowMs()) status = "expired";
+    else if (authorization.status === "pending") status = "pending";
+    else if (authorization.status === "approved" && authorization.user_id === session.user_id) status = "approved";
+    else status = "used";
+  }
+  return response({ status }, 200, env, request);
 }
 async function ensureLicenseDevice(env: Env, session: Pick<Session,"user_id"|"device_id">): Promise<void> {
   if (!session.device_id) return;
