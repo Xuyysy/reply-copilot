@@ -31,7 +31,7 @@ export async function licenseDevices(request: Request, env: Env): Promise<Respon
 export async function activity(request: Request,env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
   const [ledger,orders]=await Promise.all([
-    env.DB.prepare("SELECT kind,free_delta,paid_delta,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 50").bind(session.user_id).all(),
+    env.DB.prepare("SELECT kind,free_delta,paid_delta,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT 20").bind(session.user_id).all(),
     env.DB.prepare("SELECT id,package_name,credits,amount_cents,currency,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 50").bind(session.user_id).all(),
   ]);
   return response({ledger:ledger.results,orders:orders.results},200,env,request);
