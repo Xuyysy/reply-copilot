@@ -27,13 +27,13 @@
         "ENVIRONMENT": "staging",
         "AI_MODE": "mock",
         "ADMIN_PORTAL_ENABLED": "0",
-        "WEB_ORIGIN": "https://staging.example.invalid",
-        "API_ORIGIN": "https://api-staging.example.invalid",
+        "WEB_ORIGIN": "https://staging.x-reply-helper.top",
+        "API_ORIGIN": "https://api-staging.x-reply-helper.top",
         "EXTENSION_ORIGIN": "chrome-extension://replace-with-staging-extension-id",
         "SITE_DAILY_CAP": "10",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
-      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "00000000-0000-0000-0000-000000000002", "migrations_dir": "migrations" }]
+      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "cd44bb44-b525-42c4-b286-2cc84dae7fdb", "migrations_dir": "migrations" }]
     },
     "production": {
       "name": "reply-copilot-api-production",
