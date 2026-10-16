@@ -1,4 +1,4 @@
-# Reply Copilot 预发布联调手册
+# x-Reply-Helper 预发布联调手册
 
 本手册只针对现有仓库和草稿 PR #2。**当前没有创建或修改任何远端 Cloudflare 资源、执行远端迁移、部署网站或 API、写入真实 Secret、调用真实 DeepSeek。** 下列远端步骤须经仓库所有者明确确认后执行。不要合并 PR #2；它以 `codex/v0.3-platform` 为基线，先处理上游 PR #1 的合并关系。
 

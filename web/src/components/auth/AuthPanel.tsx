@@ -73,7 +73,7 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
   }
 
   return <Card className="mx-auto w-full max-w-[540px] border-border shadow-[0_24px_72px_rgb(24_49_75_/_0.08)]">
-    <CardHeader><CardTitle>{view === "verify" ? t("验证邮箱", "Verify email") : view.startsWith("reset") ? t("找回密码", "Reset password") : t("欢迎使用 Reply Copilot", "Welcome to Reply Copilot")}</CardTitle></CardHeader>
+    <CardHeader><CardTitle>{view === "verify" ? t("验证邮箱", "Verify email") : view.startsWith("reset") ? t("找回密码", "Reset password") : t("欢迎使用 x-Reply-Helper", "Welcome to x-Reply-Helper")}</CardTitle></CardHeader>
     <CardContent className="space-y-5">
       <Tabs value={view === "verify" ? "register" : view.startsWith("reset") ? "reset" : view} onValueChange={value => switchView(value === "reset" ? "reset-request" : value as View)}><TabsList className="grid w-full grid-cols-3"><TabsTrigger value="login">{t("登录", "Sign in")}</TabsTrigger><TabsTrigger value="register">{t("注册", "Register")}</TabsTrigger><TabsTrigger value="reset">{t("忘记密码", "Reset")}</TabsTrigger></TabsList></Tabs>
       {view === "login" && <form className="space-y-4" onSubmit={event => void request(event, "/v1/auth/login", { identity, password }, redirect)}><Field label={t("用户名或邮箱", "Username or email")}><Input autoFocus autoComplete="username" value={identity} onChange={event => setIdentity(event.target.value)} required /></Field><Field label={t("密码", "Password")}><PasswordInput language={language} value={password} setValue={setPassword} shown={showPassword} setShown={setShowPassword} autoComplete="current-password" /></Field><Submit pending={pending} label={t("登录", "Sign in")} /></form>}

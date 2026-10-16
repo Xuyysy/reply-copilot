@@ -1,7 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
-  <title id="title">Reply Copilot</title>
-  <rect width="128" height="128" rx="28" fill="#142238"/>
-  <path d="M28 38c0-7 6-13 13-13h46c8 0 14 6 14 13v42c0 8-6 14-14 14H56l-21 13V94c-4-2-7-7-7-12V38Z" fill="#f8fbff"/>
-  <path d="M48 77V44h20c11 0 18 6 18 16 0 8-4 13-11 15l10 12H73L62 74h-3v13H48V77Zm11-13h10c4 0 6-2 6-5s-2-5-6-5H59v10Z" fill="#142238"/>
-  <path d="m97 19 2.5 7.5L107 29l-7.5 2.5L97 39l-2.5-7.5L87 29l7.5-2.5L97 19Z" fill="#60c9f7"/>
+  <title id="title">x-Reply-Helper</title>
+  <rect width="128" height="128" rx="28" fill="#162239"/>
+  <rect x="28" y="28" width="72" height="66" rx="17" fill="#f8fbff"/>
+  <path d="M38 87v18l21-15" fill="#f8fbff"/>
+  <path d="m51 48 26 26m0-26L51 74" fill="none" stroke="#162239" stroke-width="10" stroke-linecap="round"/>
+  <circle cx="99" cy="30" r="7" fill="#60c9f7"/>
 </svg>

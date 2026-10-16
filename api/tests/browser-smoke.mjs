@@ -75,7 +75,7 @@ try{
   await cdp('Page.navigate',{url:`${webBase}/login/`});
   await until(()=>evaluate('Boolean(document.querySelector("astro-island") && !document.querySelector("astro-island").hasAttribute("ssr"))'));
   await evaluate('document.getElementById("language-toggle").click()');
-  await until(()=>evaluate('document.documentElement.lang === "en" && document.body.innerText.includes("Welcome to Reply Copilot")'));
+  await until(()=>evaluate('document.documentElement.lang === "en" && document.body.innerText.includes("Welcome to x-Reply-Helper")'));
   const tabRect=await evaluate('(()=>{const r=document.querySelectorAll("[role=tab]")[1].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
   await cdp('Input.dispatchMouseEvent',{type:'mousePressed',x:tabRect.x,y:tabRect.y,button:'left',clickCount:1});
   await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',x:tabRect.x,y:tabRect.y,button:'left',clickCount:1});

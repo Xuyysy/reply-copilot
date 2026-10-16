@@ -1,4 +1,4 @@
-# Reply Copilot API 契约（开发版）
+# x-Reply-Helper API 契约（开发版）
 
 网页使用 HttpOnly、Secure、SameSite=Lax Cookie；插件使用独立 Bearer 令牌。网页写请求除认证入口外均需 CSRF 标记，且 Worker 校验 `WEB_ORIGIN`。普通用户不能调用管理接口。错误响应为 `{code,message,requestId}`。
 

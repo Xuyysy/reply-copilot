@@ -5,6 +5,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {AccountStateService} from '../services/account-state-service.js';
 import {StorageService} from '../services/storage-service.js';
+import {ACCOUNT_TOKEN_KEY,ACCOUNT_DEVICE_ID_KEY,ACCOUNT_PENDING_DEVICE_KEY} from '../services/account-client.js';
 
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 test('expired tokens and network outages produce distinct account states',async()=>{
@@ -25,6 +26,11 @@ test('auto generation toggle uses existing behavior preferences and survives rea
 });
 test('brand icon assets match manifest sizes',()=>{
   const manifest=JSON.parse(readFileSync(path.join(root,'manifest.json'),'utf8'));
+  assert.equal(manifest.name,'x-Reply-Helper');
+  assert.equal(manifest.short_name,'x-Reply-Helper');
+  assert.equal(manifest.action.default_title,'x-Reply-Helper');
+  assert.match(manifest.description,/x-Reply-Helper/);
+  assert.match(readFileSync(path.join(root,'icons/x-reply-helper.svg'),'utf8'),/<title id="title">x-Reply-Helper<\/title>/);
   for(const size of [16,32,48,128]){
     const location=manifest.icons[String(size)];
     assert.equal(location,manifest.action.default_icon[String(size)]);
@@ -33,4 +39,9 @@ test('brand icon assets match manifest sizes',()=>{
     assert.equal(file.readUInt32BE(16),size);
     assert.equal(file.readUInt32BE(20),size);
   }
+});
+test('brand rename keeps existing account storage keys',()=>{
+  assert.equal(ACCOUNT_TOKEN_KEY,'replyCopilotAccountToken');
+  assert.equal(ACCOUNT_DEVICE_ID_KEY,'replyCopilotDeviceId');
+  assert.equal(ACCOUNT_PENDING_DEVICE_KEY,'replyCopilotPendingDevice');
 });

@@ -12,6 +12,15 @@ test("all required pages build as static HTML", () => {
     assert.ok(existsSync(path.join(root, "dist", name === "index" ? "index.html" : `${name}/index.html`)), name);
   }
 });
+test("public pages use the exact x-Reply-Helper brand", () => {
+  for (const name of ["index", "pricing", "checkout", "faq", "guide", "privacy", "terms", "refunds", "login", "account", "admin", "feedback"]) {
+    const html = readFileSync(path.join(root, "dist", name === "index" ? "index.html" : `${name}/index.html`), "utf8");
+    assert.match(html, /<meta property="og:site_name" content="x-Reply-Helper"/);
+    assert.match(html, /<title>[^<]*x-Reply-Helper<\/title>/);
+    assert.match(html, /aria-label="x-Reply-Helper home"/);
+    assert.doesNotMatch(html, /Reply Copilot|REPLY COPILOT/);
+  }
+});
 test("pricing is accurate and does not expose a fake checkout", () => {
   const html = page("pricing");
   assert.match(html, /注册赠送 200 次/);

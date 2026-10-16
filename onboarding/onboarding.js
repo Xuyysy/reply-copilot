@@ -19,7 +19,7 @@ setInterval(() => void refreshConnection(), 3500);
 chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.replyCopilotAccountToken) void refreshConnection(); });
 function show() { sections.forEach((section, index) => section.classList.toggle("hidden", index !== step)); indicators.forEach((dot, index) => dot.classList.toggle("active", index <= step)); }
 function readVoice() { profile = { ...profile, tone: $("tone").value, language: $("language").value, replyLength: $("length").value, humorLevel: $("humor").value }; }
-async function finish() { if (step === 1) readVoice(); await profiles.save(profile); await chrome.storage.local.set({ [ONBOARDING_COMPLETE_KEY]: true }); $("status").textContent = "设置已保存，现在可以使用 Reply Copilot。"; if (step !== 2) { step = 2; show(); } }
+async function finish() { if (step === 1) readVoice(); await profiles.save(profile); await chrome.storage.local.set({ [ONBOARDING_COMPLETE_KEY]: true }); $("status").textContent = "设置已保存，现在可以使用 x-Reply-Helper。"; if (step !== 2) { step = 2; show(); } }
 document.addEventListener("click", async (event) => {
   const button = event.target.closest("button"); if (!button) return;
   if (["open-login", "open-register"].includes(button.id)) { if (bindingBusy) return; bindingBusy = true; try { const result = await chrome.runtime.sendMessage({ type: "REPLY_COPILOT_BEGIN_BINDING", mode: button.id === "open-register" ? "register" : "login" }); $("welcome-status").textContent = result?.ok ? "已打开官网，请登录并确认绑定。" : result?.error || "无法发起绑定。"; await refreshConnection(); } catch { $("welcome-status").textContent = "暂时无法发起绑定，请重试。"; } finally { bindingBusy = false; } return; }

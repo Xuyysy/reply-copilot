@@ -1,6 +1,10 @@
-# Reply Copilot：额度商业化开发版
+# x-Reply-Helper
 
 独立 Chrome MV3 扩展、Astro 官网、Cloudflare Worker 和 D1。当前仅完成本地与测试环境开发，**没有部署生产版本，也没有启用真实支付或付费 DeepSeek 调用**。Auto Poster 在另一个仓库，未参与本次修改。
+
+## 品牌重命名与兼容性
+
+插件及官网面向用户的名称统一为 `x-Reply-Helper`。本次只修改展示名称和图标，保持原仓库地址、npm 包名、Worker/D1 资源名、`REPLY_COPILOT_*` 构建变量、`replyCopilot*` 浏览器存储键、`reply-copilot-language` 页面事件、`X-Reply-Copilot-Action` 请求头和内容脚本的 `ZaneReplyCopilotContent` 命名空间不变。这些属于已使用的技术协议或部署标识；更改会影响现有账户绑定、偏好、历史或资源配置。邮件仍使用已配置的 `MAIL_FROM` 发件地址，不更改验证域名。
 
 ## 当前规则
 
@@ -40,7 +44,7 @@ npm run dev
 
 当前新用户可从定价页直接进入 `/login?mode=register`，插件的新手页和 X 悬浮窗也提供“免费注册并连接”和“已有账号登录”两个入口。官网批准设备码后，插件还要完成令牌交换才显示已连接；重复打开新手页会读取现有连接。悬浮窗的“自动生成建议”开关与 Side Panel、完整设置中心共用 `behaviorPreferences.autoGenerateOnReply`。关闭时仍可手动生成，插件始终不会自动发送 X 回复。Side Panel 默认显示账户、余额、本地统计和快捷偏好；从 X 明确发起的新请求才进入回复工作模式。
 
-修改插件后重新运行 `npm run build:dev`，到 `chrome://extensions` 点击 Reply Copilot 卡片的刷新按钮，再刷新已打开的 X 标签页。新图标的 SVG 源文件位于 `icons/reply-copilot.svg`，16/32/48/128 像素 PNG 一并打包。网页开发服务器通常会热更新前端文件；如果登录页交互停止响应，按上面的 Vite 重启步骤处理。
+修改插件后重新运行 `npm run build:dev`，到 `chrome://extensions` 点击 x-Reply-Helper 卡片的刷新按钮，再刷新已打开的 X 标签页。新图标的 SVG 源文件位于 `icons/x-reply-helper.svg`，16/32/48/128 像素 PNG 一并打包。网页开发服务器通常会热更新前端文件；如果登录页交互停止响应，按上面的 Vite 重启步骤处理。
 
 旧版本本地 Voice Profile、写作样本、历史与 Key 不清除。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
 

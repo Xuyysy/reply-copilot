@@ -63,6 +63,9 @@ try {
   try { await call("Extensions.triggerAction", { id, targetId: actionTarget.result.targetId }); toolbarAction = true; } catch (error) { toolbarActionError = error.message; }
   const panel = await attach(`chrome-extension://${id}/sidepanel/sidepanel.html`);
   await call("Target.activateTarget", { targetId: panel.targetId });
+  assert.equal(await evalIn(panel.session, "chrome.runtime.getManifest().name"), "x-Reply-Helper");
+  assert.equal(await evalIn(panel.session, "chrome.runtime.getManifest().action.default_title"), "x-Reply-Helper");
+  assert.equal(await evalIn(panel.session, "document.querySelector('header h1').textContent"), "x-Reply-Helper");
   await until(() => evalIn(panel.session, "Boolean(document.querySelector('#dashboard') && !document.querySelector('#dashboard').classList.contains('hidden') && document.querySelector('#account-name').textContent !== '正在读取账户…')"));
   assert.equal(await evalIn(panel.session, "document.querySelector('#quick-auto').checked"), true);
   await click(panel.session, "#quick-auto");
@@ -72,6 +75,11 @@ try {
   await until(() => evalIn(panel.session, "document.readyState === 'complete' && document.querySelector('#quick-auto')?.checked === false"));
   const options = await attach(`chrome-extension://${id}/options/options.html`);
   await until(() => evalIn(options.session, "Boolean(document.querySelector('#auto-generate'))"));
+  assert.equal(await evalIn(options.session, "document.title"), "x-Reply-Helper 设置中心");
+  assert.equal(await evalIn(options.session, "document.querySelector('.brand strong').textContent"), "x-Reply-Helper");
+  const onboarding = await attach(`chrome-extension://${id}/onboarding/onboarding.html`);
+  assert.equal(await evalIn(onboarding.session, "document.title"), "欢迎使用 x-Reply-Helper");
+  assert.equal(await evalIn(onboarding.session, "document.querySelector('.brand').textContent.trim()"), "x-Reply-Helper · 客户端测试版");
   assert.equal(await evalIn(options.session, "document.querySelector('#auto-generate').checked"), false);
   await evalIn(options.session, "chrome.storage.local.set({behaviorPreferences:{autoGenerateOnReply:true,showFloatingWindow:true,rememberFloatingPosition:true,floatingPosition:null,defaultReplyMode:'natural'}})");
   await until(() => evalIn(panel.session, "document.querySelector('#quick-auto').checked === true"));
@@ -98,6 +106,8 @@ try {
   const overlayFixture = await attach(`chrome-extension://${id}/privacy.html`);
   await call("Target.activateTarget", { targetId: overlayFixture.targetId });
   await evalIn(overlayFixture.session, `import(chrome.runtime.getURL('content/inline-assistant.js')).then(()=>{window.fixtureActions=[];window.fixtureOverlay=ZaneReplyCopilotContent.inlineAssistant.mount(document.body,(action,data)=>fixtureActions.push({action,data}),{preferences:{autoGenerateOnReply:false}});fixtureOverlay.showAccount('guest',null,false);return true})`);
+  assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('.top strong').textContent"), "x-Reply-Helper");
+  assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('.panel').getAttribute('aria-label')"), "x-Reply-Helper 回复助手");
   assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('[data-action=register]').classList.contains('hidden')"), false);
   const before = await evalIn(overlayFixture.session, "(()=>{const r=fixtureOverlay.host.getBoundingClientRect();return {x:r.x,y:r.y}})()");
   const point = await evalIn(overlayFixture.session, "(()=>{const r=fixtureOverlay.host.shadowRoot.querySelector('#auto-generate-toggle').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");

@@ -25,7 +25,7 @@ export async function sendCode(env: Env, email: string, code: string, purpose: "
     const sent = await fetch("https://api.resend.com/emails", {
       method: "POST", signal: controller.signal,
       headers: { Authorization: `Bearer ${env.MAIL_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: purpose === "reset" ? "Reply Copilot 重置密码验证码" : "Reply Copilot 注册验证码", text: `您的 Reply Copilot ${purpose === "reset" ? "重置密码" : "注册"}验证码：${code}。10 分钟内有效。如果不是您本人操作，请忽略此邮件。`, html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto"><h2>Reply Copilot</h2><p>您的${purpose === "reset" ? "重置密码" : "注册"}验证码：</p><p style="font-size:32px;letter-spacing:8px;font-weight:700">${code}</p><p>10 分钟内有效。如果不是您本人操作，请忽略此邮件。</p></div>` }),
+      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: purpose === "reset" ? "x-Reply-Helper 重置密码验证码" : "x-Reply-Helper 注册验证码", text: `您的 x-Reply-Helper ${purpose === "reset" ? "重置密码" : "注册"}验证码：${code}。10 分钟内有效。如果不是您本人操作，请忽略此邮件。`, html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto"><h2>x-Reply-Helper</h2><p>您的${purpose === "reset" ? "重置密码" : "注册"}验证码：</p><p style="font-size:32px;letter-spacing:8px;font-weight:700">${code}</p><p>10 分钟内有效。如果不是您本人操作，请忽略此邮件。</p></div>` }),
     });
     if (!sent.ok) throw new Error("Mail provider rejected request");
   } catch { throw new ApiFailure(503, "MAIL_UNAVAILABLE", "邮件暂时无法发送，请稍后再试。"); }
