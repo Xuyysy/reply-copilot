@@ -10,7 +10,7 @@ const storage = new StorageService();
 const history = new HistoryService();
 const profiles = new VoiceProfileService();
 const usage = new UsageService();
-const aiProvider = new AIProviderRouter({ storage });
+const aiProvider = new AIProviderRouter();
 const accountClient = new AccountClient();
 const $ = (id) => document.getElementById(id);
 const cards = $("reply-cards");
@@ -37,12 +37,12 @@ async function refreshDashboard() {
   $("quick-humor").value = profile.humorLevel;
   const status = account?.ok ? account.status : "auth_unavailable";
   $("quota-row").classList.toggle("hidden", !account?.quota || account.source !== "server");
-  $("account-buttons").classList.toggle("hidden", !["guest", "developer_mode", "auth_expired", "auth_unavailable"].includes(status) && !account?.pending);
-  $("connect-register").classList.toggle("hidden", !["guest", "developer_mode"].includes(status) || account?.pending);
-  $("connect-login").classList.toggle("hidden", !["guest", "developer_mode", "auth_expired"].includes(status) || account?.pending);
+  $("account-buttons").classList.toggle("hidden", !["guest", "auth_expired", "auth_unavailable"].includes(status) && !account?.pending);
+  $("connect-register").classList.toggle("hidden", !["guest"].includes(status) || account?.pending);
+  $("connect-login").classList.toggle("hidden", !["guest", "auth_expired"].includes(status) || account?.pending);
   $("check-binding").classList.toggle("hidden", !account?.pending && status !== "auth_unavailable");
-  $("account-name").textContent = account?.pending ? "正在等待官网确认" : status === "guest" ? "尚未连接账户" : status === "developer_mode" ? "本地开发测试模式" : status === "auth_expired" ? "登录已过期" : status === "auth_unavailable" ? "暂时无法确认账户" : account?.user?.username || account?.user?.email || "已连接账户";
-  $("account-summary").textContent = account?.pending ? "请在官网完成授权，返回后点击查看绑定状态。" : status === "guest" ? "注册并验证邮箱，免费领取 200 次。" : status === "developer_mode" ? "模拟状态不代表真实账户或余额；请连接官网账户。" : status === "auth_expired" ? "请重新连接官网账户。" : status === "auth_unavailable" ? "网络暂不可用，请重试；原账户凭据仍保留。" : status === "credits_exhausted" ? "生成次数已用完，支付暂未开放。" : "余额来自官网服务。";
+  $("account-name").textContent = account?.pending ? "正在等待官网确认" : status === "guest" ? "尚未连接账户" : status === "auth_expired" ? "登录已过期" : status === "auth_unavailable" ? "暂时无法确认账户" : status === "frozen" ? "账户已冻结" : account?.user?.username || account?.user?.email || "已连接账户";
+  $("account-summary").textContent = account?.pending ? "请在官网完成授权，返回后点击查看绑定状态。" : status === "guest" ? "注册并验证邮箱，免费领取 200 次。" : status === "auth_expired" ? "请重新连接官网账户。" : status === "auth_unavailable" ? "网络暂不可用，请重试；原账户凭据仍保留。" : status === "frozen" ? "AI 生成已停用。请到官网账户中心查看账户状态。" : status === "credits_exhausted" ? "生成次数已用完，支付暂未开放。" : "余额来自官网服务。";
   if (account?.quota && account.source === "server") { $("quota-total").textContent = String(account.quota.totalRemaining); $("quota-free").textContent = String(account.quota.freeRemaining); $("quota-paid").textContent = String(account.quota.paidRemaining); }
   if (account?.pending && !accountPoll) accountPoll = setInterval(() => void refreshDashboard(), 3500);
   if (!account?.pending && accountPoll) { clearInterval(accountPoll); accountPoll = null; }
@@ -71,7 +71,7 @@ function setBusy(value) {
 function showError(message, settings = false) {
   document.body.classList.remove("dashboard-mode");
   $("dashboard").classList.add("hidden"); $("back-dashboard").classList.remove("hidden");
-  $("status").textContent = /[\u3400-\u9fff]/.test(message) ? message : /API key is not configured/i.test(message) ? "尚未配置 DeepSeek API Key，请先前往设置。" : /Chrome has blocked|access to api\.deepseek\.com/i.test(message) ? "Chrome 未允许插件访问 DeepSeek，请检查扩展的网站访问权限。" : /timed out|timeout|AbortError/i.test(message) ? "DeepSeek 请求超时，请稍后重试。" : /Could not reach|network request failed|fetch/i.test(message) ? "无法连接 DeepSeek，请检查网络、VPN 或扩展的网站访问权限。" : /unauthorized|invalid.*key/i.test(message) ? "DeepSeek API Key 无效或未获授权，请检查后重试。" : /rate limit/i.test(message) ? "DeepSeek 请求次数已达限制，请稍后重试。" : /invalid.*response|invalid JSON|structured response/i.test(message) ? "AI 返回内容无法识别，请重新生成。" : "回复生成失败，请重试或检查 AI 配置。";
+  $("status").textContent = /[\u3400-\u9fff]/.test(message) ? message : /timed out|timeout|AbortError/i.test(message) ? "云端 AI 请求超时，请稍后重试。" : /Could not reach|network request failed|fetch/i.test(message) ? "无法连接云端服务，请检查网络后重试。" : /unauthorized/i.test(message) ? "账户授权已过期，请重新连接官网账户。" : /rate limit/i.test(message) ? "请求次数已达限制，请稍后重试。" : /invalid.*response|invalid JSON|structured response/i.test(message) ? "AI 返回内容无法识别，请重新生成。" : "回复生成失败，请重试。";
   $("status").className = "status error";
   $("status").classList.remove("hidden");
   $("result").classList.add("hidden");

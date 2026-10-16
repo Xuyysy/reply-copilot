@@ -4,7 +4,7 @@ import { AccountClient, ACCOUNT_DEVICE_ID_KEY, ACCOUNT_PENDING_DEVICE_KEY, ACCOU
 import { AIProviderRouter } from "../services/ai-provider-router.js";
 import { createAccountState } from "../domain/account-state.js";
 
-const config = { channel: "development", websiteUrl: "http://127.0.0.1:4321", hostedApiUrl: "http://127.0.0.1:8787" };
+const config = { channel: "development", websiteUrl: "http://127.0.0.1:4321", hostedApiUrl: "http://127.0.0.1:8787", allowedHttpHosts: ["127.0.0.1"] };
 function localStorage() {
   const data = {};
   return { data, async get(key) { return { [key]: data[key] }; }, async set(patch) { Object.assign(data, patch); }, async remove(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) delete data[key]; } };
@@ -39,15 +39,12 @@ test("device binding opens only the website code, never a bearer token URL", asy
 });
 
 test("production credit account routes to hosted AI without reading a personal key", async () => {
-  let byokCalls = 0, hostedCalls = 0;
+  let hostedCalls = 0;
   const provider = new AIProviderRouter({
     config,
     accountStates: { getState: async () => createAccountState({ status: "credits_available",quota:{freeRemaining:200,paidRemaining:0,totalRemaining:200} }, "server") },
-    storage: { getApiKey: async () => "sk-user-owned" },
-    byokFactory: (key) => ({ generateReplies: async () => { byokCalls++; assert.equal(key, "sk-user-owned"); return "reply"; } }),
     hostedFactory: () => ({ generateReplies: async () => { hostedCalls++; return "reply"; } }),
   });
   assert.equal(await provider.generateReplies({}), "reply");
-  assert.equal(byokCalls, 0);
   assert.equal(hostedCalls, 1);
 });

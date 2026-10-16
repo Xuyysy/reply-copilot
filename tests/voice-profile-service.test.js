@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { VoiceProfileService, VOICE_PROFILE_KEY } from "../services/voice-profile-service.js";
 import { DEFAULT_VOICE_PROFILE, createZaneVoiceProfile, validateVoiceProfile } from "../domain/voice-profile.js";
+import { StorageService, API_KEY_KEY } from "../services/storage-service.js";
 import { memoryStorage } from "./helpers.js";
 
 test("default Voice Profile is valid and generic", () => {
@@ -23,6 +24,15 @@ test("legacy migration is idempotent and preserves legacy user data", async () =
   const again = await service.migrateLegacy({ apiKeyExists: true });
   assert.equal(first.profile.name, "Zane"); assert.equal(again.migrated, false);
   assert.equal(again.profile.name, "Zane");
+});
+
+test("key-only legacy profile is migrated before retired key removal", async () => {
+  const store = memoryStorage(); store.data[API_KEY_KEY] = "old-personal-secret";
+  const old = await store.get(API_KEY_KEY);
+  await new VoiceProfileService(store).migrateLegacy({ apiKeyExists: Boolean(old[API_KEY_KEY]) });
+  await new StorageService({ local: store }).migrateSchema();
+  assert.equal((await new VoiceProfileService(store).get()).name, "Zane");
+  assert.equal(API_KEY_KEY in store.data, false);
 });
 
 test("invalid profile values are rejected and stored corrupt profile falls back", async () => {

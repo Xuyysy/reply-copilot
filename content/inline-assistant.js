@@ -35,14 +35,15 @@
     function showReady(autoGenerate = true) { setStatus(autoGenerate ? "点击下方按钮生成回复建议。" : "自动生成已关闭。需要时可手动生成建议。"); root.querySelector('[data-action="generate"]').classList.remove("hidden"); }
     function setAutoGenerate(enabled) { root.querySelector('#auto-generate-toggle').checked = Boolean(enabled); }
     function showAccount(status, quota, pending) {
-      const group = root.querySelector('.account-actions'); group.classList.toggle('hidden', !['guest','auth_expired','auth_unavailable','credits_exhausted','developer_mode'].includes(status) && !pending);
+      const group = root.querySelector('.account-actions'); group.classList.toggle('hidden', !['guest','auth_expired','auth_unavailable','credits_exhausted'].includes(status) && !pending);
       for (const action of ['register','login','pricing','check-account']) root.querySelector(`[data-action="${action}"]`).classList.add('hidden');
+      if (status !== 'credits_available') root.querySelector('[data-action="generate"]').classList.add('hidden');
+      accountBadge.textContent = status === 'credits_available' && quota?.totalRemaining != null ? `剩余 ${quota.totalRemaining} 次` : '';
       if (pending) { setStatus('正在等待官网确认，请在官网完成绑定。'); root.querySelector('[data-action="check-account"]').classList.remove('hidden'); }
       else if (status === 'guest' || status === 'auth_expired') { setStatus(status === 'guest' ? '免费领取 200 次 AI 回复。注册并验证邮箱后，即可使用自然、幽默、观点三种建议。' : '登录已过期，请重新连接账户。'); root.querySelector('[data-action="register"]').classList.toggle('hidden', status !== 'guest'); root.querySelector('[data-action="login"]').classList.remove('hidden'); }
       else if (status === 'credits_exhausted') { setStatus('生成次数已用完。'); root.querySelector('[data-action="pricing"]').classList.remove('hidden'); }
+      else if (status === 'frozen') setStatus('账户已冻结，无法生成回复。请到官网账户中心查看状态。');
       else if (status === 'auth_unavailable') { setStatus('暂时无法连接账户服务，请重试。'); root.querySelector('[data-action="check-account"]').classList.remove('hidden'); }
-      else if (status === 'developer_mode') { setStatus('本地开发测试模式。正式使用请注册并连接官网账户。'); root.querySelector('[data-action="register"]').classList.remove('hidden'); root.querySelector('[data-action="login"]').classList.remove('hidden'); }
-      else if (quota?.totalRemaining != null) accountBadge.textContent = `剩余 ${quota.totalRemaining} 次`;
       if (group.classList.contains('hidden')) return;
       root.querySelector('[data-action="generate"]').classList.add('hidden');
     }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {spawn,execFileSync} from 'node:child_process';
-import {cpSync,existsSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {cpSync,existsSync,mkdtempSync,readFileSync,readdirSync,rmSync,writeFileSync} from 'node:fs';
+import {DatabaseSync} from 'node:sqlite';
 import {createServer} from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +17,7 @@ const webBase=`http://127.0.0.1:${webPort}`,apiBase=`http://127.0.0.1:${apiPort}
 const webDev=process.env.RC_WEB_DEV==='1';
 const randomSecret=()=>crypto.randomUUID()+crypto.randomUUID();
 const env={...process.env,PUBLIC_API_BASE_URL:apiBase,WRANGLER_SEND_METRICS:'false',WRANGLER_LOG_PATH:path.join(temp,'wrangler.log')};
-const processes=[];let logs='';let socket,browserSocket,webServer;let nextId=0;const pending=new Map(),browserPending=new Map();
+const processes=[];let logs='';let db;const sql=statement=>db.exec(statement);let socket,browserSocket,webServer;let nextId=0;const pending=new Map(),browserPending=new Map();
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(fn,ms=20000){const end=Date.now()+ms;while(Date.now()<end){try{const value=await fn();if(value)return value;}catch{}await wait(100);}throw new Error(`Timed out. ${logs.slice(0,2400)} ${logs.slice(-800)}`);}
 function launch(command,args,cwd){const child=spawn(command,args,{cwd,env,stdio:['ignore','pipe','pipe']});processes.push(child);for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>{logs+=chunk.toString();});return child;}
@@ -31,6 +32,10 @@ async function typeInto(selector,value){await evaluate(`document.querySelector($
 try{
   assert.ok(existsSync(chrome),`Chrome not found: ${chrome}. Set CHROME_BINARY to its executable path.`);
   execFileSync(wrangler,['d1','migrations','apply','DB','--local','--persist-to',temp],{cwd:api,env,stdio:'pipe'});
+  const d1Dir=path.join(temp,'v3','d1','miniflare-D1DatabaseObject');
+  const d1File=readdirSync(d1Dir).find(name=>name.endsWith('.sqlite')&&name!=='metadata.sqlite');
+  assert.ok(d1File,'temporary D1 database file must exist');
+  db=new DatabaseSync(path.join(d1Dir,d1File));
   if(!webDev)execFileSync('npm',['run','build'],{cwd:web,env:{...env,PUBLIC_API_BASE_URL:apiBase},stdio:'pipe'});
   launch(wrangler,['dev','--local','--ip','127.0.0.1','--port',String(apiPort),'--persist-to',temp,'--var','ENVIRONMENT:development','--var','AI_MOCK:1','--var',`WEB_ORIGIN:${webBase}`,'--var',`API_ORIGIN:${apiBase}`,'--var',`PASSWORD_PEPPER:${randomSecret()}`,'--var',`AUTH_HASH_SECRET:${randomSecret()}`,'--var','TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA'],api);
   if(webDev)launch(path.join(web,'node_modules/.bin/astro'),['dev','--ignore-lock','--host','127.0.0.1','--port',String(webPort)],web);
@@ -92,7 +97,7 @@ try{
   await until(()=>evaluate('document.body.innerText.includes("设备码已使用")'));
   assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
   const expiredDevice=await nodeCall('/v1/extension/device-code',{deviceId:crypto.randomUUID()});assert.equal(expiredDevice.status,200);
-  execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',"UPDATE extension_authorizations SET expires_at=0 WHERE status='pending'"],{cwd:api,env,stdio:'pipe'});
+  sql("UPDATE extension_authorizations SET expires_at=0 WHERE status='pending'");
   await cdp('Page.navigate',{url:`${webBase}/account/?device_code=${expiredDevice.body.deviceCode}`});
   await until(()=>evaluate('document.body.innerText.includes("设备码已过期")'));
   assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
@@ -161,7 +166,7 @@ try{
   await cdp('Network.setBlockedURLs',{urls:[]});
   await evaluate('document.querySelector("#free-retry").click()');
   await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Free credits claimed"'));
-  execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',`UPDATE credit_accounts SET free_balance=0,paid_balance=0 WHERE user_id=(SELECT id FROM users WHERE email='${email}')`],{cwd:api,env,stdio:'pipe'});
+  sql(`UPDATE credit_accounts SET free_balance=0,paid_balance=0 WHERE user_id=(SELECT id FROM users WHERE email='${email}')`);
   await cdp('Page.reload',{ignoreCache:true});
   await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Generations used up"'));
   assert.equal(await evaluate('document.querySelector("#free-action").getAttribute("href")'),'/pricing#packages');
@@ -170,7 +175,7 @@ try{
   await until(()=>evaluate('document.body.innerText.includes("Admin access denied")'));
   assert.equal((await browserCall('/v1/admin/dashboard')).status,403);
   assert.equal(await evaluate('Boolean(document.querySelector("input[type=password], input[inputmode=numeric]"))'),false);
-  execFileSync(wrangler,['d1','execute','DB','--local','--persist-to',temp,'--command',`UPDATE users SET role='admin' WHERE email='${email}'`],{cwd:api,env,stdio:'pipe'});
+  sql(`UPDATE users SET role='admin' WHERE email='${email}'`);
   await cdp('Page.reload',{ignoreCache:true});
   await until(()=>evaluate('document.body.innerText.includes("Operations overview")'));
   assert.equal(await evaluate('document.body.innerText.includes("Users")'),true);
@@ -202,7 +207,7 @@ try{
   assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,200);
   execFileSync('node',['scripts/build.js','development'],{cwd:repo,env,stdio:'pipe'});
   const extensionPath=path.join(temp,'extension');cpSync(path.join(repo,'dist/development'),extensionPath,{recursive:true});
-  writeFileSync(path.join(extensionPath,'config/runtime.js'),`export const RUNTIME_CONFIG = Object.freeze({channel:"development",websiteUrl:${JSON.stringify(webBase)},hostedApiUrl:${JSON.stringify(apiBase)},requestTimeoutMs:30000});\n`);
+  writeFileSync(path.join(extensionPath,'config/runtime.js'),`export const RUNTIME_CONFIG = Object.freeze({channel:"development",websiteUrl:${JSON.stringify(webBase)},hostedApiUrl:${JSON.stringify(apiBase)},allowedHttpHosts:["127.0.0.1"],requestTimeoutMs:30000});\n`);
   const extensionManifest=JSON.parse(readFileSync(path.join(extensionPath,'manifest.json'),'utf8'));
   extensionManifest.host_permissions.push(`${apiBase}/*`);
   writeFileSync(path.join(extensionPath,'manifest.json'),JSON.stringify(extensionManifest));
@@ -227,4 +232,4 @@ try{
   await until(()=>extensionEvaluate(sidepanel,'document.querySelector("#quota-total")?.textContent === "200"'));
   }
   console.log(JSON.stringify({ok:true,realChrome:true,webDev,registration:true,httpOnlyCookie:true,grant:200,oneGenerationBalance:199,duplicateRequestNoDoubleDebit:true,deviceApproval:true,automaticDialog:true,cancelDoesNotApprove:true,loginReturnsToDialog:true,registrationReturnsToDialog:webDev,registrationGrantOnce:webDev,extensionTokenExchange:webDev,passwordResetRevokesCookie:true,login:true,uiLogin:true,accountIsland:true,authIsland:true,languageSwitch:true,pricingPage:true,networkRetry:true,exhaustedPricing:true,adminGate:true,adminCookieUi:true}));
-}finally{try{socket?.close();browserSocket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}
+}finally{try{socket?.close();browserSocket?.close();}catch{}for(const child of processes)child.kill('SIGTERM');webServer?.close();db?.close();await wait(500);rmSync(temp,{recursive:true,force:true});}

@@ -12,7 +12,7 @@
 | `POST /v1/extension/device-code`、`/approve`、`/exchange` | 插件短码绑定与独立会话 |
 | `POST /v1/ai/generate` | 插件 Hosted AI；同一 `requestId` 幂等，成功消耗 1 次，确认失败返还 |
 | `GET /v1/packages` | 服务端当前上架套餐与支付开放状态 |
-| `POST /v1/orders` | 保存套餐价格快照；当前仅生成未付款订单，不发放额度 |
+| `POST /v1/orders` | 仅本地开发可保存套餐价格快照；staging/production 支付未开放时拒绝创建新订单 |
 | `GET /v1/admin/dashboard`、`/users`、`/packages`、`/orders`、`/settings`、`/ledger` | 管理数据，需管理员会话和独立安全口令 |
 | `POST /v1/admin/users/{id}/status`、`/credits` | 冻结/解冻与有原因、有确认的额度调整 |
 | `POST /v1/admin/packages/{id}`、`/settings/{key}` | 未来套餐与系统设置修改，记录审计 |
@@ -20,4 +20,4 @@
 
 余额字段为 `{freeRemaining,paidRemaining,totalRemaining}`。服务端 D1 是唯一权威；插件缓存只用于展示。套餐价格以订单创建时的服务端快照为准。`paymentAvailable:false` 表示没有真实收款通道。
 
-`trials`、`daily_usage`、`licenses` 和旧邮件验证码表为迁移保留记录，不再决定正式 AI 生成授权。生产自带 Key 路由已移除；本地开发的 BYOK 路由保留。
+`trials`、`daily_usage`、`licenses` 和旧邮件验证码表为迁移保留记录，不再决定正式 AI 生成授权。插件中的自带 Key 路由已移除；本地开发使用 Worker Mock AI。

@@ -7,7 +7,7 @@ export const ACCOUNT_PENDING_DEVICE_KEY = "replyCopilotPendingDevice";
 function allowedOrigin(raw, config) {
   try {
     const url = new URL(raw);
-    return url.protocol === "https:" || (config.channel === "development" && url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname));
+    return url.protocol === "https:" || (config.channel === "development" && url.protocol === "http:" && config.allowedHttpHosts?.includes(url.hostname));
   } catch { return false; }
 }
 

@@ -5,6 +5,7 @@ import {jsonBody,nowMs,uuid} from "./security";
 import {response} from "./http";
 import {balance} from "./quota";
 import {requireAdminSession} from "./admin-auth";
+import {DEEPSEEK_MODEL} from "./ai";
 
 async function webAction(request:Request,env:Env):Promise<Session>{
   const {session,token}=await sessionFor(request,env);
@@ -17,6 +18,7 @@ export async function packages(request:Request,env:Env):Promise<Response>{
   return response({packages:rows.results,paymentAvailable:false},200,env,request);
 }
 export async function createOrder(request:Request,env:Env):Promise<Response>{
+  if(env.ENVIRONMENT!=="development") throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付尚未开放，暂不能创建订单。");
   const session=await webAction(request,env); const body=await jsonBody(request,1024); const packageId=safeId(String(body.packageId||""));
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string}>();
   if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","套餐不存在或已下架。");
@@ -30,7 +32,7 @@ export async function admin(request:Request,env:Env,write=false):Promise<Session
 }
 export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const now=nowMs();const day=new Date(now).toISOString().slice(0,10);const month=day.slice(0,7);
-  const [users,verified,todayUsers,todayAi,monthAi,grant,paidSpent,revenue,cost,errors,dailyCost,costSetting,budget]=await Promise.all([
+  const [users,verified,todayUsers,todayAi,monthAi,grant,paidSpent,revenue,cost,errors,dailyCost,costSetting,budget,aiEnabled,todayCost]=await Promise.all([
     env.DB.prepare("SELECT count(*) n FROM users").first<{n:number}>(),
     env.DB.prepare("SELECT count(*) n FROM users WHERE email_verified_at IS NOT NULL").first<{n:number}>(),
     env.DB.prepare("SELECT count(*) n FROM users WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
@@ -44,9 +46,12 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
     env.DB.prepare("SELECT COALESCE(sum(estimated_cost_micro_usd),0) n FROM ai_usage_costs WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
     env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>(),
     env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
+    env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>(),
+    env.DB.prepare("SELECT COALESCE(sum(input_tokens),0) inputTokens,COALESCE(sum(output_tokens),0) outputTokens,COALESCE(sum(estimated_cost_micro_usd),0) costMicroUsd FROM ai_usage_costs WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first(),
   ]);
   const budgetLimitMicroUsd=Number(costSetting?.value||0),dailyCostMicroUsd=budget?.settled_micro_usd??dailyCost?.n??0,reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
-  return response({users:users?.n||0,verifiedUsers:verified?.n||0,todayUsers:todayUsers?.n||0,todayGenerations:todayAi?.n||0,monthGenerations:monthAi?.n||0,totalFreeGranted:grant?.n||0,paidCreditsSpent:paidSpent?.n||0,monthRevenueCents:revenue?.n||0,cost:cost||{inputTokens:0,outputTokens:0,costMicroUsd:0},dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,abnormalRequests:errors?.n||0},200,env,request);
+  const displayedAiMode=env.AI_MODE || (env.AI_MOCK==="1"?"mock":"unconfigured");
+  return response({users:users?.n||0,verifiedUsers:verified?.n||0,todayUsers:todayUsers?.n||0,todayGenerations:todayAi?.n||0,monthGenerations:monthAi?.n||0,totalFreeGranted:grant?.n||0,paidCreditsSpent:paidSpent?.n||0,monthRevenueCents:revenue?.n||0,cost:cost||{inputTokens:0,outputTokens:0,costMicroUsd:0},todayCost:todayCost||{inputTokens:0,outputTokens:0,costMicroUsd:0},dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,budgetUsedPercent:budgetLimitMicroUsd>0?Math.min(100,Math.round(committed/budgetLimitMicroUsd*100)):null,costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,abnormalRequests:errors?.n||0,aiService:{enabled:aiEnabled?.value==="1",mode:displayedAiMode,provider:displayedAiMode==="mock"?"Mock AI":displayedAiMode==="unconfigured"?"未配置":"DeepSeek",model:displayedAiMode==="mock"?"mock":displayedAiMode==="unconfigured"?"—":DEEPSEEK_MODEL,keyConfigured:Boolean(env.DEEPSEEK_API_KEY)}},200,env,request);
 }
 export async function adminUsers(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const search=(new URL(request.url).searchParams.get("q")||"").trim().slice(0,100);

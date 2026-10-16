@@ -32,6 +32,6 @@
 
 ## 支付状态
 
-当前只有服务端套餐、订单快照、支付事件去重与**仅本地**模拟到账。没有支付宝、USDT、真实手续费报价、服务商签名验证或生产回调。生产页面显示支付未开放，订单始终保持未付款，不发放额度。选定合规支付渠道后，需要单独完成验签、到账金额/币种确认、手续费规则、退款及争议处理，再考虑启用。
+当前只有服务端套餐、订单快照、支付事件去重与**仅本地**模拟到账。没有支付宝、USDT、真实手续费报价、服务商签名验证或生产回调。生产页面显示支付未开放，Worker 拒绝新订单创建；已有待付款订单不发放额度。选定合规支付渠道后，需要单独完成验签、到账金额/币种确认、手续费规则、退款及争议处理，再考虑启用。
 
 参考：[Cloudflare Turnstile 验证](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)、[Turnstile 测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)、[Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)、[Resend API](https://resend.com/docs/api-reference/emails/send-email)。

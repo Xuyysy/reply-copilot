@@ -79,7 +79,7 @@ try {
   assert.equal(await evalIn(options.session, "document.querySelector('.brand strong').textContent"), "x-Reply-Helper");
   const onboarding = await attach(`chrome-extension://${id}/onboarding/onboarding.html`);
   assert.equal(await evalIn(onboarding.session, "document.title"), "欢迎使用 x-Reply-Helper");
-  assert.equal(await evalIn(onboarding.session, "document.querySelector('.brand').textContent.trim()"), "x-Reply-Helper · 客户端测试版");
+  assert.equal(await evalIn(onboarding.session, "document.querySelector('.brand').textContent.trim()"), "x-Reply-Helper");
   assert.equal(await evalIn(options.session, "document.querySelector('#auto-generate').checked"), false);
   await evalIn(options.session, "chrome.storage.local.set({behaviorPreferences:{autoGenerateOnReply:true,showFloatingWindow:true,rememberFloatingPosition:true,floatingPosition:null,defaultReplyMode:'natural'}})");
   await until(() => evalIn(panel.session, "document.querySelector('#quick-auto').checked === true"));
@@ -109,6 +109,10 @@ try {
   assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('.top strong').textContent"), "x-Reply-Helper");
   assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('.panel').getAttribute('aria-label')"), "x-Reply-Helper 回复助手");
   assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('[data-action=register]').classList.contains('hidden')"), false);
+  await evalIn(overlayFixture.session, "fixtureOverlay.showAccount('frozen',{totalRemaining:10},false)");
+  assert.match(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('.status').textContent"), /账户已冻结/);
+  assert.equal(await evalIn(overlayFixture.session, "fixtureOverlay.host.shadowRoot.querySelector('[data-action=generate]').classList.contains('hidden')"), true);
+  await evalIn(overlayFixture.session, "fixtureOverlay.showAccount('guest',null,false)");
   const before = await evalIn(overlayFixture.session, "(()=>{const r=fixtureOverlay.host.getBoundingClientRect();return {x:r.x,y:r.y}})()");
   const point = await evalIn(overlayFixture.session, "(()=>{const r=fixtureOverlay.host.shadowRoot.querySelector('#auto-generate-toggle').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
   await call("Input.dispatchMouseEvent", { type: "mousePressed", x: point.x, y: point.y, button: "left", clickCount: 1 }, overlayFixture.session);

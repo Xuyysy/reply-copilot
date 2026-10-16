@@ -17,7 +17,7 @@ const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
-const aiProvider = new AIProviderRouter({ accountStates, storage });
+const aiProvider = new AIProviderRouter({ accountStates });
 const activeRequests = new Map();
 const generatedInputs = new Map();
 const nativeInput = new NativeInputService(chrome.debugger);
@@ -40,9 +40,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.runtime.onInstalled.addListener((details) => {
   void (async () => {
     await chrome.storage.local.setAccessLevel?.({ accessLevel: "TRUSTED_CONTEXTS" });
-    await storage.migrateSchema();
     const old = await chrome.storage.local.get([API_KEY_KEY, HISTORY_KEY, ONBOARDING_COMPLETE_KEY, "replyCopilotWelcomeShown"]);
     await profiles.migrateLegacy({ apiKeyExists: Boolean(old[API_KEY_KEY]), historyExists: Boolean(old[HISTORY_KEY]?.length) });
+    await storage.migrateSchema();
     // Remove the old DOM editing preference; the native input path is controlled per request.
     await storage.disableLegacyAutoFill();
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

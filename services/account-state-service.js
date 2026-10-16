@@ -1,10 +1,9 @@
 import { RUNTIME_CONFIG } from "../config/runtime.js";
 import { AccountClient } from "./account-client.js";
 import { createAccountState, EMPTY_ACCOUNT_STATE } from "../domain/account-state.js";
-import { readDevMock } from "../config/dev-state.js";
 
 export class AccountStateService {
-  constructor({ config = RUNTIME_CONFIG, client = new AccountClient({ config }), storage = globalThis.chrome?.storage?.local } = {}) { this.config = config; this.client = client; this.storage = storage; this.pending = null; this.cached = null; this.cachedAt = 0; if (config.channel === "development") globalThis.chrome?.storage?.onChanged?.addListener?.((changes, area) => { if (area === "local" && "replyCopilotDevMockState" in changes) this.invalidate(); }); }
+  constructor({ config = RUNTIME_CONFIG, client = new AccountClient({ config }) } = {}) { this.config = config; this.client = client; this.pending = null; this.cached = null; this.cachedAt = 0; }
   async getState({ force = false } = {}) {
     if (!force && this.cached && Date.now() - this.cachedAt < 30000) return this.cached;
     if (this.pending) return this.pending;
@@ -18,10 +17,6 @@ export class AccountStateService {
     this.cachedAt = Date.now();
   }
   async loadState() {
-    if (this.config.channel === "development" && (!this.config.hostedApiUrl || !await this.client.token())) {
-      const status = await readDevMock(this.storage);
-      return createAccountState({ status, user: null, quota: null, trial: null, license: null }, "development_mock");
-    }
     if (!this.config.hostedApiUrl || !await this.client.token()) return EMPTY_ACCOUNT_STATE;
     try {
       const [account, entitlement, usage] = await Promise.all([this.client.fetchCurrentUser(), this.client.fetchEntitlement(), this.client.fetchUsage()]);

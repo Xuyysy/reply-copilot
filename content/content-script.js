@@ -47,15 +47,12 @@
   }
   function localizeError(message) {
     if (/[\u3400-\u9fff]/.test(message || "")) return message;
-    if (/API key is not configured/i.test(message || "")) return "请先在设置中心保存 DeepSeek API Key。";
-    if (/Chrome has blocked|access to api\.deepseek\.com/i.test(message || "")) return "Chrome 未允许插件访问 DeepSeek，请在扩展的网站访问权限中允许 api.deepseek.com。";
-    if (/timed out|timeout|AbortError/i.test(message || "")) return "DeepSeek 请求超时，请检查网络或稍后重试。";
-    if (/Could not reach|network request failed|fetch/i.test(message || "")) return "无法连接 DeepSeek，请检查网络、VPN、代理和扩展的网站访问权限。";
-    if (/invalid or unauthorized|unauthorized/i.test(message || "")) return "DeepSeek API Key 无效或未获授权，请检查后重试。";
-    if (/rate limit/i.test(message || "")) return "DeepSeek 请求次数已达限制，请稍后重试。";
-    if (/temporarily unavailable/i.test(message || "")) return "DeepSeek 服务暂时不可用，请稍后重试。";
+    if (/timed out|timeout|AbortError/i.test(message || "")) return "云端 AI 请求超时，请稍后重试。";
+    if (/Could not reach|network request failed|fetch/i.test(message || "")) return "无法连接云端服务，请检查网络后重试。";
+    if (/unauthorized/i.test(message || "")) return "账户授权已过期，请重新连接官网账户。";
+    if (/rate limit/i.test(message || "")) return "请求次数已达限制，请稍后重试。";
     if (/invalid JSON|invalid.*response|empty response|structured response/i.test(message || "")) return "AI 返回内容暂时无法识别，请重新生成。";
-    return "回复生成失败，请重试或打开设置中心检查配置。";
+    return "回复生成失败，请稍后重试。";
   }
   function matchedComposer(post) {
     if (!hasRuntimeContext()) return { editor: null, matchedPost: false };
@@ -120,7 +117,7 @@
       if (current.preferences.showFloatingWindow) current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
       const account = await refreshAccount(current);
       if (!active || active.requestId !== requestId) return;
-      if (account?.status === "credits_available" || account?.status === "developer_mode") {
+      if (account?.status === "credits_available") {
         if (current.preferences.autoGenerateOnReply && current.preferences.showFloatingWindow) void generateActive(requestId);
         else current.assistant?.showReady(current.preferences.autoGenerateOnReply);
       }
@@ -134,7 +131,7 @@
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
     current.assistant.showAccount(current.accountStatus, response?.quota, response?.pending);
-    if ((wasPending || previousStatus === "guest" || previousStatus === "auth_expired") && !response?.pending && ['credits_available','developer_mode'].includes(current.accountStatus) && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
+    if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
     if (response?.pending && !bindingTimer) bindingTimer = setInterval(() => void refreshAccount(current), 3500);
     if (!response?.pending && bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
     return response;
@@ -147,7 +144,8 @@
     if (current.appliedText) { current.assistant.showResult(current.result.replies, current.appliedStyle || "natural"); current.assistant.showApplied(); }
     else if (current.result) current.assistant.showResult(current.result.replies, preferences.defaultReplyMode || current.result.defaultStyle || "natural");
     else if (current.generating) current.assistant.showLoading();
-    else current.assistant.showReady(preferences.autoGenerateOnReply);
+    else if (current.accountStatus === "credits_available") current.assistant.showReady(preferences.autoGenerateOnReply);
+    else void refreshAccount(current);
   }
   function showFallback(message, anchor) {
     const fallback = api.inlineAssistant.mount(anchor, handleAction, { compact: true, dismissAfterMs: 12_000 });
@@ -196,7 +194,7 @@
   async function generateActive(requestId) {
     const current = active;
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated) return;
-    if (!['credits_available','developer_mode'].includes(current.accountStatus)) { void refreshAccount(current); return; }
+    if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
     if (!current.editor?.isConnected || !current.matchedPost) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
     current.generating = true; current.assistant?.showLoading();
     try {
@@ -235,7 +233,7 @@
       if (typeof data.enabled !== "boolean") return;
       current.preferences = { ...current.preferences, autoGenerateOnReply: data.enabled };
       void safeSend({ type: "REPLY_COPILOT_SET_AUTO_GENERATE", enabled: data.enabled }).then((response) => { if (!response?.ok) { current.assistant?.setAutoGenerate(!data.enabled); current.assistant?.setStatus("保存开关失败，请重试。"); } });
-      if (!current.generating && !current.result && ['credits_available','developer_mode'].includes(current.accountStatus)) current.assistant?.showReady(data.enabled);
+      if (!current.generating && !current.result && ['credits_available'].includes(current.accountStatus)) current.assistant?.showReady(data.enabled);
       return;
     }
     if (action === "register" || action === "login") { void safeSend({ type: "REPLY_COPILOT_BEGIN_BINDING", mode: action }).then((response) => { if (response?.ok) void refreshAccount(current); else current.assistant?.setStatus(response?.error || "无法打开官网，请重试。"); }); return; }
@@ -266,7 +264,7 @@
       const needsRemount = current.preferences?.showFloatingWindow !== response.preferences.showFloatingWindow;
       current.preferences = response.preferences;
       if (needsRemount) remountAssistant(current, response.preferences);
-      else { current.assistant?.setAutoGenerate(response.preferences.autoGenerateOnReply); if (!current.generating && !current.result && ['credits_available','developer_mode'].includes(current.accountStatus)) current.assistant?.showReady(response.preferences.autoGenerateOnReply); void refreshAccount(current); }
+      else { current.assistant?.setAutoGenerate(response.preferences.autoGenerateOnReply); if (!current.generating && !current.result && ['credits_available'].includes(current.accountStatus)) current.assistant?.showReady(response.preferences.autoGenerateOnReply); void refreshAccount(current); }
     }).catch(() => {});
     return false;
   }

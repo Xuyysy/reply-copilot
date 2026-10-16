@@ -6,6 +6,8 @@ import { response } from "./http";
 import { finishGeneration, reserveGeneration } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 
+export const DEEPSEEK_MODEL = "deepseek-flash";
+
 function normalizeInput(body: Record<string, unknown>) {
   const requestId = typeof body.requestId === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(body.requestId) ? body.requestId : "";
   const post = body.post && typeof body.post === "object" && !Array.isArray(body.post) ? body.post as Record<string,unknown> : {};
@@ -49,7 +51,7 @@ async function provider(env: Env, system: string, user: string, mode:"mock"|"rea
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 25_000);
   try {
-    const upstream = await fetch("https://api.deepseek.com/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: "deepseek-flash", messages: [{role:"system",content:system},{role:"user",content:user}], response_format: {type:"json_object"}, max_tokens: 1200, thinking: {type:"disabled"} }), signal: controller.signal });
+    const upstream = await fetch("https://api.deepseek.com/chat/completions", { method: "POST", headers: { Authorization: `Bearer ${env.DEEPSEEK_API_KEY}`, "Content-Type": "application/json" }, body: JSON.stringify({ model: DEEPSEEK_MODEL, messages: [{role:"system",content:system},{role:"user",content:user}], response_format: {type:"json_object"}, max_tokens: 1200, thinking: {type:"disabled"} }), signal: controller.signal });
     if (!upstream.ok) throw new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用。");
     const data = await upstream.json() as { model?:string; usage?:{prompt_tokens?:number;completion_tokens?:number}; choices?: Array<{message?:{content?:string}}> };
     const raw = data.choices?.[0]?.message?.content;
@@ -58,7 +60,7 @@ async function provider(env: Env, system: string, user: string, mode:"mock"|"rea
     if(typeof inputTokens!=="number"||typeof outputTokens!=="number"||!Number.isSafeInteger(inputTokens)||!Number.isSafeInteger(outputTokens)||inputTokens<0||outputTokens<0) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","AI 服务未返回有效用量。");
     const inputRate=Number(env.DEEPSEEK_INPUT_USD_PER_MILLION || 0); const outputRate=Number(env.DEEPSEEK_OUTPUT_USD_PER_MILLION || 0);
     const costMicroUsd=Math.ceil(inputTokens*inputRate+outputTokens*outputRate);
-    return {raw,usage:{model:data.model || "deepseek-flash",inputTokens,outputTokens,costMicroUsd}};
+    return {raw,usage:{model:data.model || DEEPSEEK_MODEL,inputTokens,outputTokens,costMicroUsd}};
   } catch { throw new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。"); }
   finally { clearTimeout(timer); }
 }

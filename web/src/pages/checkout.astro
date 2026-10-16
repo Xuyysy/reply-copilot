@@ -1,20 +1,42 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="结算预览" titleEn="Order preview">
-  <div class="container page-hero"><div class="eyebrow" data-zh="订单预览">Order preview</div><h1 data-zh="查看充值订单。">Review your top-up order.</h1><p class="lead" data-zh="支付渠道尚未开放。当前页面不会扣款，也不会发放额度。">Payment channels are not open. This page cannot charge you or grant credits.</p></div>
-  <section class="container" style="padding-bottom:100px"><div class="content-card" style="max-width:680px"><h2 id="package-name">正在读取套餐…</h2><p id="package-credits"></p><p id="package-price"></p><p data-zh="支付渠道：尚未开放">Payment channel: unavailable</p><p data-zh="渠道手续费：待真实支付服务商报价">Processing fee: awaiting provider quote</p><p data-zh="最终应付金额：待支付渠道确认">Total payable: awaiting payment channel</p><p id="order-status" class="notice">尚未创建订单。</p><div class="button-row"><button id="create-order" class="button" disabled><span data-zh="创建待付款订单">Create pending order</span></button><a class="button secondary" href="/pricing"><span data-zh="返回套餐">Back to plans</span></a></div><p class="fineprint" data-zh="创建订单只记录当前套餐价格快照。支付未开放时，订单不会自动变为已支付。">An order records a price snapshot. It will not become paid while checkout is unavailable.</p></div></section>
+<Base title="套餐预览" titleEn="Package preview">
+  <div class="container page-hero">
+    <div class="eyebrow" data-zh="套餐预览">Package preview</div>
+    <h1 data-zh="了解充值套餐。">Review the credit package.</h1>
+    <p class="lead" data-zh="支付尚未开放。本页只展示套餐信息，不创建订单、不扣款，也不发放额度。">Payment is not available. This page only previews a package; it does not create an order, charge you, or grant credits.</p>
+  </div>
+  <section class="container" style="padding-bottom:100px">
+    <div class="content-card" style="max-width:680px">
+      <h2 id="package-name">正在读取套餐…</h2>
+      <p id="package-credits"></p>
+      <p id="package-price"></p>
+      <p id="package-status" class="notice" data-zh="支付暂未开放，请稍后再来。">Payment is not open yet. Please check back later.</p>
+      <div class="button-row"><a class="button secondary" href="/pricing" data-zh="返回套餐">Back to plans</a></div>
+    </div>
+  </section>
   <script>
-    import {api,ApiError} from "../lib/api";
-    const pkgId=new URL(location.href).searchParams.get("package")||"";
-    const status=document.getElementById("order-status")!;
-    const button=document.getElementById("create-order") as HTMLButtonElement;
-    type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string};
-    let selected:Package|null=null;
-    const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
-    let statusZh="尚未创建订单。",statusEn="No order created.";
-    function setStatus(zh:string,en:string){statusZh=zh;statusEn=en;status.textContent=label(zh,en);}
-    function render(){status.textContent=label(statusZh,statusEn);if(!selected){document.getElementById("package-name")!.textContent=label("正在读取套餐…","Loading package…");return;}document.getElementById("package-name")!.textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;document.getElementById("package-credits")!.textContent=label(`AI 生成次数：${selected.credits.toLocaleString()} 次`,`AI generations: ${selected.credits.toLocaleString()}`);document.getElementById("package-price")!.textContent=label("套餐金额：","Package price: ")+new Intl.NumberFormat("en-US",{style:"currency",currency:selected.currency}).format((selected.promo_price_cents??selected.price_cents)/100);}
-    async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");const pkg=data.packages.find(item=>item.id===pkgId);if(!pkg){setStatus("套餐不存在或已下架。","Package not found or unavailable.");return;}selected=pkg;render();button.disabled=false;button.onclick=async()=>{button.disabled=true;try{const order=await api<{order:{id:string;amountCents:number;currency:string;status:string};paymentAvailable:boolean}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:pkg.id})});setStatus(`订单 ${order.order.id} 已创建，状态：待付款。支付尚未开放，未扣款也未增加额度。`,`Order ${order.order.id} created. Payment is unavailable; no charge or credits were applied.`);}catch(error){if(error instanceof ApiError&&error.status===401)setStatus("请先登录后创建订单。","Please sign in before creating an order.");else setStatus(error instanceof Error?error.message:"订单创建失败。","Could not create the order. Please try again.");button.disabled=false;}};}catch{setStatus("暂时无法读取套餐，请稍后重试。","Unable to load packages. Please retry later.");}}render();void load();window.addEventListener("reply-copilot-language",render);
+    import { api } from "../lib/api";
+    type Package = { id: string; name_zh: string; name_en: string; credits: number; price_cents: number; promo_price_cents: number | null; currency: string };
+    const pkgId = new URL(location.href).searchParams.get("package") || "";
+    const label = (zh: string, en: string) => document.documentElement.lang === "en" ? en : zh;
+    let selected: Package | null = null;
+    function render() {
+      if (!selected) return;
+      document.getElementById("package-name")!.textContent = document.documentElement.lang === "en" ? selected.name_en : selected.name_zh;
+      document.getElementById("package-credits")!.textContent = label(`AI 生成次数：${selected.credits.toLocaleString()} 次`, `AI generations: ${selected.credits.toLocaleString()}`);
+      document.getElementById("package-price")!.textContent = label("套餐金额：", "Package price: ") + new Intl.NumberFormat("en-US", { style: "currency", currency: selected.currency }).format((selected.promo_price_cents ?? selected.price_cents) / 100);
+    }
+    async function load() {
+      try {
+        const data = await api<{ packages: Package[] }>("/v1/packages");
+        selected = data.packages.find(item => item.id === pkgId) || null;
+        if (!selected) document.getElementById("package-status")!.textContent = label("套餐不存在或已下架。", "Package not found or unavailable.");
+        render();
+      } catch { document.getElementById("package-status")!.textContent = label("暂时无法读取套餐，请稍后重试。", "Unable to load packages. Please retry later."); }
+    }
+    void load();
+    window.addEventListener("reply-copilot-language", render);
   </script>
 </Base>

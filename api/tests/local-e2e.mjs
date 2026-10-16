@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {spawn,execFileSync} from "node:child_process";
-import {mkdtempSync,rmSync} from "node:fs";
+import {mkdtempSync,rmSync,readdirSync} from "node:fs";
+import {DatabaseSync} from "node:sqlite";
 import path from "node:path";
 import os from "node:os";
 import {fileURLToPath} from "node:url";
@@ -10,7 +11,8 @@ const wrangler=path.join(root,"node_modules",".bin","wrangler");
 const persist=mkdtempSync(path.join(os.tmpdir(),"reply-copilot-credit-e2e-"));
 const base="http://127.0.0.1:8792",origin="http://127.0.0.1:4321";
 const env={...process.env,WRANGLER_SEND_METRICS:"false",WRANGLER_LOG_PATH:path.join(persist,"wrangler.log")};
-const sql=(statement)=>execFileSync(wrangler,["d1","execute","DB","--local","--persist-to",persist,"--command",statement],{cwd:root,env,stdio:"pipe"});
+let db;
+const sql=(statement)=>statement.trimStart().toUpperCase().startsWith("SELECT")?Buffer.from(JSON.stringify(db.prepare(statement).all())):(db.exec(statement),Buffer.from("ok"));
 let server,logs="";
 async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false}={}){
   const result=await fetch(`${base}${url}`,{method,headers:{...(body?{"Content-Type":"application/json"}:{}),...(method==="POST"&&!extension?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(bearer?{Authorization:`Bearer ${bearer}`}:{ }),...(csrf?{"X-CSRF-Token":csrf,"X-Reply-Copilot-Action":"1"}:{})},...(body?{body:JSON.stringify(body)}:{})});
@@ -31,9 +33,14 @@ async function register(email,username){
 }
 try{
   execFileSync(wrangler,["d1","migrations","apply","DB","--local","--persist-to",persist],{cwd:root,env,stdio:"pipe"});
+  const d1Dir=path.join(persist,"v3","d1","miniflare-D1DatabaseObject");
+  const d1File=readdirSync(d1Dir).find(name=>name.endsWith(".sqlite")&&name!=="metadata.sqlite");
+  assert.ok(d1File,"temporary D1 database file must exist");
+  db=new DatabaseSync(path.join(d1Dir,d1File));
   server=spawn(wrangler,["dev","--local","--ip","127.0.0.1","--port","8792","--persist-to",persist,
     "--var","ENVIRONMENT:development","--var","AI_MOCK:1","--var","AI_MOCK_COST_MICRO_USD:1000","--var","AI_MOCK_DELAY_MS:150","--var","PASSWORD_PEPPER:local-test-pepper-that-is-long-enough-123","--var","AUTH_HASH_SECRET:local-test-hash-secret-that-is-long-enough-123","--var","TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA"],{cwd:root,env,stdio:["ignore","pipe","pipe"]});
   server.stdout.on("data",data=>{logs+=data.toString();});server.stderr.on("data",data=>{logs+=data.toString();});
+  server.on("exit",(code,signal)=>{logs+=`\n[local worker exited: code=${code}, signal=${signal}]\n`;});
   await waitFor(async()=>{try{return (await call("/health")).status===200;}catch{return false;}});
   const preflight=await fetch(`${base}/v1/admin/dashboard`,{method:"OPTIONS",headers:{Origin:origin,"Access-Control-Request-Method":"GET","Access-Control-Request-Headers":"x-csrf-token"}});
   assert.equal(preflight.status,204);assert.match(preflight.headers.get("access-control-allow-headers")||"",/X-CSRF-Token/);
@@ -78,6 +85,11 @@ try{
   sql(`UPDATE users SET role='admin' WHERE id='${user.userId}'`);
   assert.equal((await call("/v1/admin/mfa/start",{method:"POST",cookie,csrf,body:{}})).status,404);
   const dashboard=await call("/v1/admin/dashboard",{cookie});assert.equal(dashboard.status,200);assert.ok(dashboard.data.users>=1);
+  assert.equal(dashboard.data.aiService.enabled,true);
+  assert.equal(dashboard.data.aiService.mode,"mock");
+  assert.equal(dashboard.data.aiService.keyConfigured,false);
+  assert.ok(dashboard.data.todayCost.inputTokens>=0);
+  assert.ok(dashboard.data.todayCost.outputTokens>=0);
   assert.equal((await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}})).status,403);
   assert.equal((await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf:"wrong",body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}})).status,403);
   assert.equal((await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf,body:{kind:"free",delta:5,reason:"本地测试人工补发"}})).status,400);
@@ -136,4 +148,5 @@ try{
   assert.equal((await firstBudget).status,200);
   const budgetRows=sql("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days").toString();assert.match(budgetRows,/1000000/);
   console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFirst:199,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,adminSessionCookie:true,frozenBlocked:true,resetWorks:true,inflightBudgetBlocked:true}));
-}finally{server?.kill("SIGTERM");rmSync(persist,{recursive:true,force:true});}
+}catch(error){console.error("Local Worker log tail:",logs.slice(-4000));throw error;}
+finally{server?.kill("SIGTERM");db?.close();rmSync(persist,{recursive:true,force:true});}

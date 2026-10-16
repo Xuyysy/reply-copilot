@@ -10,8 +10,8 @@
 
 - 注册填写用户名、邮箱和密码，完成 Turnstile 与邮箱验证码后，一次性获得 200 次免费 AI 生成额度。免费和付费额度均不主动过期。
 - 一次请求返回自然、幽默、观点三个候选，只扣 1 次；切换、复制、填入都不扣。已确认失败且没有可用结果会返还预留额度；结果不确定的请求保留供人工核查。
-- 正式账户统一通过 Worker 调用 DeepSeek；开发者自己的 Key 只在**本地开发模式**使用。原生 X 输入机制 `chrome.debugger` + `Input.insertText` 未改，插件不会点击发送。
-- 套餐由 D1 管理，初始为 400 次 $1.99、1,000 次 $3.99、2,000 次 $6.99。支付接口尚未接入。创建待付款订单不会扣款或增加额度。本地管理员可以使用受保护的模拟到账接口做测试。
+- 正式账户统一通过 Worker 调用 DeepSeek；本地开发通过 Worker Mock AI 验证，不再使用个人 Key。原生 X 输入机制 `chrome.debugger` + `Input.insertText` 未改，插件不会点击发送。
+- 套餐由 D1 管理，初始为 400 次 $1.99、1,000 次 $3.99、2,000 次 $6.99。支付接口尚未接入。正式环境不允许创建待付款订单；已有订单保持原状态。本地测试可创建订单，并由本地管理员使用受保护的模拟到账接口验证。
 
 ## 本地启动
 
@@ -46,7 +46,7 @@ npm run dev
 
 修改插件后重新运行 `npm run build:dev`，到 `chrome://extensions` 点击 x-Reply-Helper 卡片的刷新按钮，再刷新已打开的 X 标签页。新图标的 SVG 源文件位于 `icons/x-reply-helper.svg`，16/32/48/128 像素 PNG 一并打包。网页开发服务器通常会热更新前端文件；如果登录页交互停止响应，按上面的 Vite 重启步骤处理。
 
-旧版本本地 Voice Profile、写作样本、历史与 Key 不清除。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
+旧版本本地 Voice Profile、写作样本与历史保留；更新时先完成旧风格迁移，再移除不再使用的个人 Key。迁移保留旧 D1 的 `users`、`trials`、`daily_usage`、`licenses`、`sessions`、`ai_requests`。当前账户只有开发测试数据，迁移给旧已验证账户各补发 200 次，唯一赠送记录防止重复领取。旧账户可以用邮箱找回密码后登录。
 
 ## 管理后台
 
@@ -66,13 +66,13 @@ npx wrangler d1 execute DB --local --command "UPDATE users SET role='admin' WHER
 ```bash
 npm test
 npm run build:dev
-npm run build:production
+REPLY_COPILOT_WEBSITE_URL=https://web.example.test REPLY_COPILOT_API_URL=https://api.example.test npm run build:production
 npm run test:browser:extension
 cd web && npm test
 cd ../api && npm run typecheck && npm run test:local && npm run test:browser:local
 ```
 
-`api/test:local` 创建临时 D1 和本地 Worker，使用模拟邮件、Turnstile 与 AI，验证注册、密码登录与重置、一次性赠送、设备绑定、扣减、失败返还、并发、待付款订单、金额验单、模拟到账、防重复发放和后台权限。不会请求真实付费模型或支付渠道。Chrome 上的 X 原生回复输入仍需人工实测。
+`api/test:local` 创建临时 D1 和本地 Worker，使用模拟邮件、Turnstile 与 AI，验证注册、密码登录与重置、一次性赠送、设备绑定、扣减、失败返还、并发、待付款订单、金额验单、模拟到账、防重复发放和后台权限。不会请求真实付费模型或支付渠道。生产构建示例域名仅用于结构测试，不可部署。Chrome 上的 X 原生回复输入仍需人工实测。
 
 ## 生产前
 
