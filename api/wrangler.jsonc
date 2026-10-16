@@ -29,7 +29,7 @@
         "ADMIN_PORTAL_ENABLED": "0",
         "WEB_ORIGIN": "https://staging.x-reply-helper.top",
         "API_ORIGIN": "https://api-staging.x-reply-helper.top",
-        "EXTENSION_ORIGIN": "chrome-extension://replace-with-staging-extension-id",
+        "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",
         "SITE_DAILY_CAP": "10",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
