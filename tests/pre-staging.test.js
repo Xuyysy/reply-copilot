@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const read = (name) => readFileSync(new URL("../" + name, import.meta.url), "utf8");
@@ -25,4 +25,25 @@ test("production build rejects loopback HTTPS origin variants", () => {
       stdio: "pipe",
     }), /Production URLs/, origin);
   }
+});
+
+test("staging extension package uses the staging origins and excludes development-only code", () => {
+  execFileSync(process.execPath, ["scripts/build.js", "staging"], {
+    cwd: new URL("..", import.meta.url),
+    env: {
+      ...process.env,
+      REPLY_COPILOT_WEBSITE_URL: "https://staging.x-reply-helper.top",
+      REPLY_COPILOT_API_URL: "https://api-staging.x-reply-helper.top",
+    },
+    stdio: "pipe",
+  });
+
+  const manifest = JSON.parse(read("dist/staging/manifest.json"));
+  const runtime = read("dist/staging/config/runtime.js");
+  assert.deepEqual(manifest.host_permissions, ["https://api-staging.x-reply-helper.top/*"]);
+  assert.match(runtime, /channel: "staging"/);
+  assert.match(runtime, /https:\/\/staging\.x-reply-helper\.top/);
+  assert.match(runtime, /https:\/\/api-staging\.x-reply-helper\.top/);
+  assert.equal(existsSync(new URL("../dist/staging/dev", import.meta.url)), false);
+  assert.equal(existsSync(new URL("../dist/staging/services/deepseek-client.js", import.meta.url)), false);
 });
