@@ -1,5 +1,6 @@
 import { RUNTIME_CONFIG } from "../config/runtime.js";
 import { AccountClient } from "./account-client.js";
+import { parseAIOutput } from "../utils/output-parser.js";
 
 export class HostedAIClient {
   constructor({ config = RUNTIME_CONFIG, accountClient = new AccountClient({ config }) } = {}) { this.config = config; this.accountClient = accountClient; }
@@ -12,6 +13,11 @@ export class HostedAIClient {
     try {
       const data = await this.accountClient.request("/v1/ai/generate", { method: "POST", body: { requestId, post: { text: sourceText, url: sourceUrl }, voiceProfile, recentHistory, styleStats, replyStyle, outputSchemaVersion: 1 }, signal: controller.signal });
       if (typeof data?.raw !== "string" || !data.raw.trim()) throw new Error("云端 AI 返回内容无效。");
+      // Validate the exact payload the UI will consume before permanently
+      // charging the allocated lot. The response is not exposed until the
+      // Worker confirms the idempotent delivery acknowledgement.
+      parseAIOutput(data.raw);
+      await this.accountClient.request(`/v1/ai/requests/${requestId}/delivered`, { method: "POST", body: { requestId }, signal: controller.signal });
       this.lastQuota = data.quota || null;
       return data.raw;
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }

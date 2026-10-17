@@ -32,7 +32,18 @@ export async function activity(request: Request,env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
   const [ledger,orders]=await Promise.all([
     env.DB.prepare("SELECT kind,free_delta,paid_delta,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT 20").bind(session.user_id).all(),
-    env.DB.prepare("SELECT id,package_name,credits,amount_cents,currency,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 50").bind(session.user_id).all(),
+    env.DB.prepare(`SELECT o.id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,
+      t.base_amount_fen,t.service_fee_fen,t.amount_fen total_amount_fen,
+      CASE WHEN t.status<>'paid' OR o.credited_at IS NULL THEN 'not_paid'
+        WHEN EXISTS(SELECT 1 FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status IN ('requested','pending','unknown')) THEN 'refund_pending'
+        WHEN b.status='refunded' OR (b.remaining_credits=0 AND b.permanently_revoked_credits>0) THEN 'refunded'
+        WHEN b.id IS NULL OR b.history_confidence<>'tracked' THEN 'manual_review'
+        WHEN b.consumed_credits>0 OR b.remaining_credits<b.grant_credits THEN 'used_ineligible'
+        WHEN b.status='active' AND b.generation_reserved_credits=0 AND b.refund_reserved_credits=0 THEN 'eligible'
+        ELSE 'manual_review' END refund_eligibility
+      FROM recharge_orders o LEFT JOIN payment_transactions t ON t.order_id=o.id
+      LEFT JOIN credit_batches b ON b.source_order_id=o.id
+      WHERE o.user_id=? ORDER BY o.created_at DESC LIMIT 50`).bind(session.user_id).all(),
   ]);
   return response({ledger:ledger.results,orders:orders.results},200,env,request);
 }

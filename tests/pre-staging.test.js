@@ -5,9 +5,11 @@ import { execFileSync } from "node:child_process";
 
 const read = (name) => readFileSync(new URL("../" + name, import.meta.url), "utf8");
 
-test("unavailable payments have no public order creation control", () => {
-  assert.doesNotMatch(read("web/src/pages/checkout.astro"), /\/v1\/orders|id="create-order"/);
-  assert.match(read("api/src/commercial.ts"), /PAYMENT_UNAVAILABLE/);
+test("unavailable payments keep checkout disabled and the API rejects order creation", () => {
+  const checkout = read("web/src/pages/checkout.astro");
+  assert.match(checkout, /byId\("create-order"\)\.disabled=busy\|\|!paymentAvailable/);
+  assert.match(checkout, /if\(!selected\|\|busy\|\|order\|\|!paymentAvailable\)return/);
+  assert.match(read("api/src/payments.ts"), /PAYMENT_UNAVAILABLE/);
 });
 
 test("production package uses one configured API origin and no direct DeepSeek host", () => {

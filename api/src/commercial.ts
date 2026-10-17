@@ -51,17 +51,26 @@ export async function adminUserStatus(request:Request,env:Env,userId:string):Pro
 }
 export async function adminAdjust(request:Request,env:Env,userId:string):Promise<Response>{
   const actor=await admin(request,env,true);const body=await jsonBody(request,1024);
-  const kind=body.kind;const delta=body.delta;const reason=typeof body.reason==="string"?body.reason.trim():"";
+  const kind=body.kind;const delta=Number(body.delta);const reason=typeof body.reason==="string"?body.reason.trim():"";
   if((kind!=="free"&&kind!=="paid")||!Number.isInteger(delta)||Math.abs(Number(delta))>10000||delta===0||reason.length<8||reason.length>500||body.confirm!==true)throw new ApiFailure(400,"INVALID_ADJUSTMENT","调整需要类型、非零次数、原因和二次确认。");
   const before=await balance(env,userId);const next=kind==="free"?before.freeRemaining+Number(delta):before.paidRemaining+Number(delta);
   if(next<0)throw new ApiFailure(409,"INSUFFICIENT_CREDITS","余额不足。");
-  const now=nowMs();const reference=uuid();
-  const results=await env.DB.batch([
-    env.DB.prepare(`UPDATE credit_accounts SET ${kind==="free"?"free_balance":"paid_balance"}=${kind==="free"?"free_balance":"paid_balance"}+?,version=version+1,last_adjustment_ref=?,updated_at=? WHERE user_id=? AND ${kind==="free"?"free_balance":"paid_balance"}+?>=${kind==="paid"?"paid_reserved_for_refunds":"0"}`).bind(delta,reference,now,userId,delta),
+  const now=nowMs(),reference=uuid(),statements=[];
+  if(delta<0){
+    let remaining=-Number(delta);
+    const lots=await env.DB.prepare("SELECT id,remaining_credits,generation_reserved_credits,refund_reserved_credits FROM credit_batches WHERE user_id=? AND bucket=? AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0 ORDER BY CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,COALESCE(paid_at,granted_at),granted_at,id").bind(userId,kind).all<{id:string;remaining_credits:number;generation_reserved_credits:number;refund_reserved_credits:number}>();
+    for(const lot of lots.results){if(remaining<=0)break;const take=Math.min(remaining,lot.remaining_credits-lot.generation_reserved_credits-lot.refund_reserved_credits);if(take>0){statements.push(env.DB.prepare("UPDATE credit_batches SET remaining_credits=remaining_credits-?,permanently_revoked_credits=permanently_revoked_credits+? WHERE id=? AND remaining_credits-generation_reserved_credits-refund_reserved_credits>=?").bind(take,take,lot.id,take));remaining-=take;}}
+    if(remaining>0)throw new ApiFailure(409,"INSUFFICIENT_CREDITS","可用额度不足，无法完成调整。");
+  }
+  statements.push(env.DB.prepare(`UPDATE credit_accounts SET ${kind==="free"?"free_balance":"paid_balance"}=${kind==="free"?"free_balance":"paid_balance"}+?,version=version+1,last_adjustment_ref=?,updated_at=? WHERE user_id=? AND ${kind==="free"?"free_balance":"paid_balance"}+?>=${kind==="paid"?"paid_reserved_for_refunds+paid_generation_reserved":"free_generation_reserved"}`).bind(delta,reference,now,userId,delta));
+  if(delta>0)statements.push(env.DB.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,consumed_credits,permanently_revoked_credits,generation_reserved_credits,refund_reserved_credits,granted_at,history_confidence,status) SELECT ?,?,?, 'admin_adjustment',?,?,0,0,0,0,?,'tracked','active' WHERE EXISTS(SELECT 1 FROM credit_accounts WHERE user_id=? AND last_adjustment_ref=?)").bind(uuid(),userId,kind,delta,delta,now,userId,reference));
+  statements.push(
     env.DB.prepare(`INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,actor_user_id,reason,created_at) SELECT ?,?,'admin_adjustment',?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM credit_accounts WHERE user_id=? AND last_adjustment_ref=?)`).bind(uuid(),userId,kind==="free"?delta:0,kind==="paid"?delta:0,reference,actor.user_id,reason,now,userId,reference),
     env.DB.prepare("INSERT INTO admin_audit_logs(id,actor_user_id,action,target_id,reason,before_json,after_json,created_at) SELECT ?,?,'credit_adjustment',?,?,?,?,? WHERE EXISTS(SELECT 1 FROM credit_accounts WHERE user_id=? AND last_adjustment_ref=?)").bind(uuid(),actor.user_id,userId,reason,JSON.stringify(before),JSON.stringify({kind,delta}),now,userId,reference),
-  ]);
-  if(results[0].meta.changes!==1)throw new ApiFailure(409,"ADJUSTMENT_FAILED","额度调整未完成。");
+    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM credit_accounts a WHERE a.user_id=? AND a.free_balance=(SELECT COALESCE(sum(remaining_credits),0) FROM credit_batches WHERE user_id=? AND bucket='free') AND a.paid_balance=(SELECT COALESCE(sum(remaining_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')) THEN 1 ELSE 0 END`).bind(reference,userId,userId,userId),
+    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(reference),
+  );
+  try{const results=await env.DB.batch(statements);if(results.at(-2)?.meta.changes!==1)throw new Error("credit reconciliation failed");}catch{throw new ApiFailure(409,"ADJUSTMENT_FAILED","额度调整未完成或额度账本需要核对。");}
   return response({ok:true,quota:await balance(env,userId)},200,env,request);
 }
 export async function adminPackages(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({packages:(await env.DB.prepare("SELECT * FROM recharge_packages ORDER BY sort_order,id").all()).results},200,env,request);}

@@ -13,6 +13,7 @@ import Base from "../layouts/Base.astro";
       <p id="package-credits"></p>
       <p id="package-usd"></p>
       <p id="package-cny" class="notice" aria-live="polite"></p>
+      <p id="refund-policy" class="notice" data-zh="购买的次数包完全未使用时，可申请退还套餐本金。一旦使用该次数包中的任何次数，便不支持普通退款，也不支持部分退款。支付服务费原则上不予退还，法律法规或支付平台规则另有要求的除外。">You may request a refund of the package principal only while the package remains completely unused. Once any credit from the package has been used, ordinary and partial refunds are unavailable. The payment handling fee is generally non-refundable, except where law or payment-platform rules require otherwise.</p>
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
       <div class="button-row">
@@ -27,8 +28,8 @@ import Base from "../layouts/Base.astro";
   </section>
   <script>
     import { api, ApiError } from "../lib/api";
-    type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null };
-    type Order = { id:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; amountFen:number; currency:"CNY"; status:string; paymentMode?:"mock"; paymentUrl?:string|null; message?:string };
+    type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number };
+    type Order = { id:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; baseAmountFen:number; serviceFeeFen:number; feeRateBps:number; amountFen:number; currency:"CNY"; status:string; paymentMode?:"mock"; paymentUrl?:string|null; message?:string };
     type Quota = { freeRemaining:number; paidRemaining:number; totalRemaining:number };
     const pkgId = new URL(location.href).searchParams.get("package") || "";
     const label = (zh:string,en:string) => document.documentElement.lang === "en" ? en : zh;
@@ -45,15 +46,15 @@ import Base from "../layouts/Base.astro";
       byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
       byId("package-usd").textContent=label("美元参考价：$"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2),"USD reference price: $"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2));
-      byId("package-cny").textContent=selected.price_cny_fen?label("支付宝实际支付：¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY（固定价格，不按汇率换算）","Alipay settlement: ¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY (fixed; no exchange-rate conversion)"):label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
-      byId("create-order").textContent=label("创建支付订单","Create payment order");
-      byId("create-order").disabled=busy||!paymentAvailable||!selected.price_cny_fen||Boolean(order);
+      byId("package-cny").textContent=selected.price_cny_fen&&selected.service_fee_fen!==null&&selected.total_payment_fen!==null?label("套餐本金：¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY · 支付处理服务费：¥"+(selected.service_fee_fen/100).toFixed(2)+" CNY · 实付合计：¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY（固定人民币金额，美元仅作参考价）","Package principal: ¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY · Payment handling fee: ¥"+(selected.service_fee_fen/100).toFixed(2)+" CNY · Total due: ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY (fixed CNY price; USD is a reference)"):label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
+      byId("create-order").textContent=selected.total_payment_fen?label("创建订单 · ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY","Create order · ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY"):label("创建支付订单","Create payment order");
+          byId("create-order").disabled=busy||!paymentAvailable||!selected.price_cny_fen||Boolean(order);
     }
     function showOrder(next:Order){
       order=next;render();
       const status:Record<string,[string,string]>={pending:["订单待支付，请完成支付宝付款。","Order awaiting payment. Complete payment in the cashier."],paid:["支付成功，额度已到账。","Payment succeeded and credits are available."],failed:["支付未成功，可返回套餐重新下单。","Payment failed. Return to plans to try again."],closed:["订单已关闭。","The order is closed."],unknown:["支付结果确认中，请勿重复下单，可稍后刷新。","Payment status is being confirmed. Do not place another order; refresh later."]};
       const pair=status[next.status]??["订单处理中。","Order is processing."];setStatus(pair[0],pair[1]);
-      byId("package-cny").textContent=label("本订单应付：¥"+(next.amountFen/100).toFixed(2)+" "+next.currency,"Amount due: ¥"+(next.amountFen/100).toFixed(2)+" "+next.currency);
+      byId("package-cny").textContent=label("套餐本金：¥"+(next.baseAmountFen/100).toFixed(2)+" CNY · 支付处理服务费：¥"+(next.serviceFeeFen/100).toFixed(2)+" CNY · 本订单实付合计：¥"+(next.amountFen/100).toFixed(2)+" CNY","Package principal: ¥"+(next.baseAmountFen/100).toFixed(2)+" CNY · Payment handling fee: ¥"+(next.serviceFeeFen/100).toFixed(2)+" CNY · Total due: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
       show("cashier-link",Boolean(next.paymentUrl)&&next.status==="pending");if(next.paymentUrl)byId<HTMLAnchorElement>("cashier-link").href=next.paymentUrl;
       show("simulate-payment",next.paymentMode==="mock"&&next.status==="pending");
       show("refresh-order",next.status==="unknown"||(next.status==="pending"&&provider==="xiaodou"));
@@ -70,7 +71,7 @@ import Base from "../layouts/Base.astro";
       }catch{setStatus("暂时无法读取套餐，请稍后重试。","Unable to load packages. Please retry later.");}
     }
     byId("create-order").addEventListener("click",async()=>{
-      if(!selected||busy||order)return;busy=true;render();setStatus("正在创建订单…","Creating order…");
+          if(!selected||busy||order||!paymentAvailable)return;busy=true;render();setStatus("正在创建订单…","Creating order…");
       try{const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id})});showOrder(result.order);}
       catch(error){if(error instanceof ApiError&&error.status===401){show("login-link",true);setStatus("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else setStatus(error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry."));}
       finally{busy=false;render();if(order)showOrder(order);}

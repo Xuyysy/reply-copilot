@@ -11,7 +11,7 @@ import { Skeleton } from "../ui/skeleton";
 
 type Account = { user: { username: string | null; email: string; role: string; emailVerified: boolean } };
 type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number } };
-type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; created_at: number }> };
+type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
 
@@ -85,6 +85,14 @@ export default function AccountDashboard() {
     try { await api("/v1/auth/logout", { method: "POST", body: "{}" }); location.href = signInHref; }
     catch (error) { setMessage(readableError(error, language)); setBusy(false); }
   }
+  async function requestRefund(orderId:string){
+    const accepted=window.confirm(t("仅完全未使用的次数包可申请普通退款。退款仅退套餐本金，支付服务费原则上不退。确定申请吗？","Ordinary refunds are available only for a completely unused package. Only the package principal is refunded; the handling fee is generally non-refundable. Continue?"));
+    if(!accepted)return;
+    setBusy(true);setMessage("");
+    try{await api(`/v1/orders/${encodeURIComponent(orderId)}/refunds`,{method:"POST",body:JSON.stringify({confirm:true})});await load();}
+    catch(error){setMessage(readableError(error,language));}
+    finally{setBusy(false);}
+  }
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
@@ -111,7 +119,7 @@ export default function AccountDashboard() {
       </Card>
       <Card data-orders-card className="min-w-0 self-start">
         <CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader>
-        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => <li key={order.id} className="flex items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p></div><Badge className="shrink-0" variant="secondary">{order.status === "pending" ? t("待付款", "Pending") : order.status === "paid" ? t("已付款", "Paid") : order.status}</Badge></li>)}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
+        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{t("套餐本金", "Principal")}: ¥{((order.base_amount_fen||0)/100).toFixed(2)} · {t("服务费", "Fee")}: ¥{((order.service_fee_fen||0)/100).toFixed(2)}</p><p>{phrase(language,...(refundLabels[order.refund_eligibility||"manual_review"]||refundLabels.manual_review))}</p>{order.refund_eligibility==="eligible"&&<Button className="mt-2" size="sm" variant="outline" disabled={busy} onClick={()=>void requestRefund(order.id)}>{t("申请普通退款","Request ordinary refund")}</Button>}</div><Badge className="shrink-0" variant="secondary">{order.status === "pending" ? t("待付款", "Pending") : order.status === "paid" ? t("已付款", "Paid") : order.status}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
       </Card>
     </div>
     <Card><CardContent className="flex items-center justify-between gap-5 p-6"><div><h3 className="mb-1 text-lg font-semibold">{t("按需充值", "Top up when needed")}</h3><p className="text-sm text-muted-foreground">{t("支付尚未开放，创建待付款订单不会扣款或增加额度。", "Payment is not yet available. Pending orders do not charge or grant credits.")}</p></div><Button variant="outline" asChild><a href="/pricing">{t("查看套餐", "View plans")}<ArrowRight /></a></Button></CardContent></Card>

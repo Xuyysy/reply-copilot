@@ -1,28 +1,35 @@
 import type { Env, Session } from "./types";
 import { ApiFailure } from "./types";
 import { nowMs, shanghaiDay, uuid } from "./security";
+import { sessionFor } from "./auth";
+import { response } from "./http";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
 export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string };
-type StoredRequest = { status: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
+type StoredRequest = { status: string; generation_phase?: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
+type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
 
 export async function balance(env: Env, userId: string): Promise<Balance> {
-  const row = await env.DB.prepare("SELECT free_balance,paid_balance,paid_reserved_for_refunds FROM credit_accounts WHERE user_id=?").bind(userId).first<{free_balance:number;paid_balance:number;paid_reserved_for_refunds?:number}>();
-  const freeRemaining = row?.free_balance ?? 0;
-  const paidRemaining = Math.max(0,(row?.paid_balance ?? 0)-(row?.paid_reserved_for_refunds ?? 0));
+  const row = await env.DB.prepare(`SELECT
+    MAX(0,free_balance-free_generation_reserved) free_remaining,
+    MAX(0,paid_balance-paid_generation_reserved-paid_reserved_for_refunds) paid_remaining
+    FROM credit_accounts WHERE user_id=?`).bind(userId).first<{free_remaining:number;paid_remaining:number}>();
+  const freeRemaining = row?.free_remaining ?? 0;
+  const paidRemaining = row?.paid_remaining ?? 0;
   return { freeRemaining, paidRemaining, totalRemaining: freeRemaining + paidRemaining };
 }
 async function existing(env: Env, userId: string, requestId: string): Promise<StoredRequest | null> {
-  return env.DB.prepare("SELECT status,request_hash,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId, requestId).first<StoredRequest>();
+  return env.DB.prepare("SELECT status,generation_phase,request_hash,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId, requestId).first<StoredRequest>();
 }
 async function replay(env: Env, userId: string, requestId: string, hash: string, row: StoredRequest, now: number): Promise<Reservation> {
   if (row.request_hash !== hash) throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同内容。");
-  if (row.status === "succeeded" && row.raw_response && row.response_expires_at && row.response_expires_at > now) return { kind: "replay", raw: row.raw_response, quota: await balance(env, userId) };
-  if (row.status === "reserved") throw new ApiFailure(409, "GENERATION_IN_PROGRESS", "这条回复仍在生成，请稍后再试。", 3);
+  if ((row.status === "succeeded" || row.generation_phase === "awaiting_delivery") && row.raw_response && row.response_expires_at && row.response_expires_at > now) return { kind: "replay", raw: row.raw_response, quota: await balance(env, userId) };
+  if (row.status === "reserved") throw new ApiFailure(409, "GENERATION_IN_PROGRESS", "这条回复仍在生成或确认交付，请稍后再试。", 3);
   if (row.status === "succeeded") throw new ApiFailure(409, "IDEMPOTENCY_RESULT_EXPIRED", "原结果已过保留期，请重新生成。");
-  if (row.status === "upstream_failed") throw new ApiFailure(409, "GENERATION_FAILED", "这次生成已失败且额度已返还，请重新生成。", 1);
+  if (row.status === "upstream_failed") throw new ApiFailure(409, "GENERATION_FAILED", "这次生成已失败且额度已释放，请重新生成。", 1);
   throw new ApiFailure(503, "GENERATION_STATUS_UNKNOWN", "这次生成的结果尚未确认，请稍后重试或联系支持。");
 }
+
 export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number): Promise<Reservation> {
   const now = nowMs();
   const prior = await existing(env, session.user_id, requestId);
@@ -35,67 +42,121 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   const setting = await env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>();
   const budgetLimit = Number(setting?.value);
   if (!Number.isSafeInteger(budgetLimit) || budgetLimit < 1) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预算尚未配置。");
-  const nonce = uuid();
-  const results = await env.DB.batch([
+  const account = await env.DB.prepare("SELECT free_generation_reserved,paid_generation_reserved,paid_reserved_for_refunds FROM credit_accounts WHERE user_id=?").bind(session.user_id).first<{free_generation_reserved:number;paid_generation_reserved:number;paid_reserved_for_refunds:number}>();
+  if (!account) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+  const lot = await env.DB.prepare(`SELECT id,bucket,source_kind FROM credit_batches
+    WHERE user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
+    ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
+      CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
+      COALESCE(paid_at,granted_at),granted_at,id LIMIT 1`).bind(session.user_id).first<CreditBatch>();
+  if (!lot) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+  const nonce = uuid(), allocationId = uuid();
+  const batch = [
     env.DB.prepare("INSERT INTO site_daily_usage(quota_date,used) VALUES(?,0) ON CONFLICT(quota_date) DO NOTHING").bind(date),
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
-    env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd)
-      SELECT ?,?,?,?,'reserved',1,?,?,CASE WHEN free_balance>0 THEN 'free' ELSE 'paid' END,?,?
-      FROM credit_accounts WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds>0
-      AND (free_balance>0 OR paid_balance>paid_reserved_for_refunds)
+    env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase)
+      SELECT ?,?,?,?,'reserved',0,?,?,?, ?,?,'generating' FROM credit_accounts
+      WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved>0
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM site_daily_usage WHERE quota_date=? AND used<?)
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
       AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND status='reserved')
-      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,budgetDay,budgetReserve,session.user_id,session.user_id,date,siteCap,budgetDay,budgetReserve,budgetLimit,session.user_id),
+      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,session.user_id,session.user_id,date,siteCap,budgetDay,budgetReserve,budgetLimit,session.user_id),
+    env.DB.prepare(`INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,credits,state,created_at)
+      SELECT ?,?,?,?,1,'reserved',? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)
+      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(allocationId,session.user_id,requestId,lot.id,now,session.user_id,requestId,nonce),
+    env.DB.prepare(`UPDATE credit_batches SET generation_reserved_credits=generation_reserved_credits+1
+      WHERE id=? AND user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
+      AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE id=? AND state='reserved')`).bind(lot.id,session.user_id,allocationId),
+    env.DB.prepare(`UPDATE credit_accounts SET ${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}=${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}+1,version=version+1,updated_at=?
+      WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE id=? AND state='reserved')`).bind(now,session.user_id,allocationId),
     env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd+? WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(budgetReserve,budgetDay,budgetReserve,budgetLimit,session.user_id,requestId,nonce),
-    env.DB.prepare(`UPDATE credit_accounts SET free_balance=free_balance-CASE WHEN (SELECT credit_source FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)='free' THEN 1 ELSE 0 END,
-      paid_balance=paid_balance-CASE WHEN (SELECT credit_source FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)='paid' THEN 1 ELSE 0 END,
-      version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)`).bind(session.user_id,requestId,nonce,session.user_id,requestId,nonce,now,session.user_id,session.user_id,requestId,nonce),
-    env.DB.prepare(`INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,created_at)
-      SELECT ?,?,'generation_debit',CASE WHEN credit_source='free' THEN -1 ELSE 0 END,CASE WHEN credit_source='paid' THEN -1 ELSE 0 END,?,?
-      FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?`).bind(uuid(),session.user_id,`${session.user_id}:${requestId}`,now,session.user_id,requestId,nonce),
-    env.DB.prepare("UPDATE site_daily_usage SET used=used+1 WHERE quota_date=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(date,session.user_id,requestId,nonce),
-  ]);
-  if (results[2].meta.changes === 1 && results[3].meta.changes === 1 && results[4].meta.changes === 1 && results[5].meta.changes === 1 && results[6].meta.changes === 1) return { kind: "new", quota: await balance(env, session.user_id) };
-  const concurrent = await existing(env, session.user_id, requestId);
-  if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now);
-  const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
-  if (user?.status === "frozen") throw new ApiFailure(403, "ACCOUNT_FROZEN", "账户已暂停，请联系支持。");
-  if ((await balance(env, session.user_id)).totalRemaining < 1) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
-  const site = await env.DB.prepare("SELECT used FROM site_daily_usage WHERE quota_date=?").bind(date).first<{used:number}>();
-  if ((site?.used ?? 0) >= siteCap) throw new ApiFailure(503, "HOSTED_BUDGET_EXHAUSTED", "今日托管 AI 安全预算已用完，请稍后再试。");
-  const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
-  if ((budget?.reserved_micro_usd || 0) + (budget?.settled_micro_usd || 0) + budgetReserve > budgetLimit) throw new ApiFailure(503, "AI_BUDGET_EXHAUSTED", "AI 成本安全预算已用完，请稍后再试。");
-  throw new ApiFailure(429, "GENERATION_IN_PROGRESS", "已有一条回复正在生成，请稍后再试。", 3);
-}
-export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}): Promise<void> {
-  const now = nowMs();
-  const ref = uuid();
-  const row = await env.DB.prepare("SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved'").bind(userId,requestId).first<{budget_reserved_micro_usd:number}>();
-  if (!row) return;
-  // A missing provider usage report is charged at the reserved maximum, never zero.
-  const actual = usage && Number.isSafeInteger(usage.costMicroUsd) && usage.costMicroUsd >= 0 ? Math.max(usage.costMicroUsd,0) : row.budget_reserved_micro_usd;
-  const settled = actual;
-  if (raw) {
-    await env.DB.batch([
-      env.DB.prepare("UPDATE ai_requests SET status='succeeded',raw_response=?,completed_at=?,response_expires_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved'").bind(raw,now,now+10*60_000,ref,userId,requestId),
-      env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE budget_finalization_ref=?),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE budget_finalization_ref=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE budget_finalization_ref=?)").bind(ref,settled,ref,ref),
-      env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model || "unknown",usage?.inputTokens || 0,usage?.outputTokens || 0,settled,now,ref),
-    ]);
-    return;
+    env.DB.prepare("UPDATE site_daily_usage SET used=used+1 WHERE quota_date=? AND used<? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(date,siteCap,session.user_id,requestId,nonce),
+    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
+      SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
+        WHERE r.user_id=? AND r.request_id=? AND r.reservation_nonce=? AND r.status='reserved' AND x.state='reserved' AND b.generation_reserved_credits>0
+        AND a.${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}>0
+        AND EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=? AND d.reserved_micro_usd>=?)
+        AND EXISTS(SELECT 1 FROM site_daily_usage s WHERE s.quota_date=? AND s.used>0)) THEN 1 ELSE 0 END`).bind(nonce,session.user_id,requestId,nonce,budgetDay,budgetReserve,date),
+    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(nonce),
+  ];
+  try { await env.DB.batch(batch); } catch {
+    const concurrent = await existing(env, session.user_id, requestId);
+    if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now);
+    const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
+    if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
+    const site = await env.DB.prepare("SELECT used FROM site_daily_usage WHERE quota_date=?").bind(date).first<{used:number}>();
+    if ((site?.used ?? 0) >= siteCap) throw new ApiFailure(503,"HOSTED_BUDGET_EXHAUSTED","今日托管 AI 安全预算已用完，请稍后再试。");
+    const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
+    if ((budget?.reserved_micro_usd||0)+(budget?.settled_micro_usd||0)+budgetReserve>budgetLimit) throw new ApiFailure(503,"AI_BUDGET_EXHAUSTED","AI 成本安全预算已用完，请稍后再试。");
+    throw new ApiFailure(409,"GENERATION_RESERVATION_CONFLICT","额度状态刚刚变化，请重新生成。");
   }
-  // A confirmed unusable result is refunded exactly once. Unknown outcomes stay reserved for review.
+  return { kind: "new", quota: await balance(env, session.user_id) };
+}
+
+export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}): Promise<void> {
+  const now=nowMs(), ref=uuid();
+  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved'").bind(userId,requestId).first<{budget_reserved_micro_usd:number}>();
+  if(!row)return;
+  const actual=usage&&Number.isSafeInteger(usage.costMicroUsd)&&usage.costMicroUsd>=0?usage.costMicroUsd:row.budget_reserved_micro_usd;
+  if(raw){
+    await env.DB.batch([
+      env.DB.prepare("UPDATE ai_requests SET raw_response=?,generation_phase='awaiting_delivery',response_expires_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(raw,now+10*60_000,ref,userId,requestId),
+      env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
+      env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,userId,requestId,ref),
+    ]);return;
+  }
+  const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
+  if(!allocation)return;
   await env.DB.batch([
-    env.DB.prepare("UPDATE ai_requests SET status='upstream_failed',completed_at=?,refunded_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved'").bind(now,now,ref,userId,requestId),
-    env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE budget_finalization_ref=?),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE budget_finalization_ref=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE budget_finalization_ref=?)").bind(ref,settled,ref,ref),
-    env.DB.prepare(`UPDATE credit_accounts SET free_balance=free_balance+CASE WHEN (SELECT credit_source FROM ai_requests WHERE user_id=? AND request_id=? AND refunded_at=?)='free' THEN 1 ELSE 0 END,
-      paid_balance=paid_balance+CASE WHEN (SELECT credit_source FROM ai_requests WHERE user_id=? AND request_id=? AND refunded_at=?)='paid' THEN 1 ELSE 0 END,
-      version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND refunded_at=?)
-      AND NOT EXISTS(SELECT 1 FROM credit_ledger WHERE kind='generation_refund' AND reference_id=?)`).bind(userId,requestId,now,userId,requestId,now,now,userId,userId,requestId,now,`${userId}:${requestId}`),
-    env.DB.prepare(`INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,created_at)
-      SELECT ?,?,'generation_refund',CASE WHEN credit_source='free' THEN 1 ELSE 0 END,CASE WHEN credit_source='paid' THEN 1 ELSE 0 END,?,?
-      FROM ai_requests WHERE user_id=? AND request_id=? AND refunded_at=? ON CONFLICT(kind,reference_id) DO NOTHING`).bind(uuid(),userId,`${userId}:${requestId}`,now,userId,requestId,now),
-    env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM ai_requests WHERE budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown-estimated",usage?.inputTokens||0,usage?.outputTokens||0,settled,now,settled,ref),
+    env.DB.prepare("UPDATE ai_requests SET status='upstream_failed',generation_phase='unknown',completed_at=?,refunded_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(now,now,ref,userId,requestId),
+    env.DB.prepare("UPDATE ai_credit_allocations SET state='released',released_at=? WHERE user_id=? AND request_id=? AND state='reserved'").bind(now,userId,requestId),
+    env.DB.prepare("UPDATE credit_batches SET generation_reserved_credits=generation_reserved_credits-1 WHERE id=? AND generation_reserved_credits>0 AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?)").bind(allocation.credit_batch_id,userId,requestId,now),
+    env.DB.prepare("UPDATE credit_accounts SET free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?)").bind(allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now),
+    env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
+    env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_release',0,0,?,?,? WHERE EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"确认生成失败，释放额度预占",now,userId,requestId,now),
+    env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown-estimated",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,actual,userId,requestId,ref),
   ]);
+}
+
+export async function acknowledgeDelivery(request:Request,env:Env,requestId:string):Promise<Response>{
+  const {session}=await sessionFor(request,env);
+  if(session.kind!=="extension")throw new ApiFailure(403,"FORBIDDEN","仅绑定的插件可以确认回复已接收。");
+  const userId=session.user_id,now=nowMs(),operationId=uuid();
+  const state=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
+  if(state?.status==="succeeded"&&state.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+  const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
+  if(!allocation)throw new ApiFailure(409,"DELIVERY_NOT_AVAILABLE","这条回复无法确认或已过期，请重新生成。");
+  let batch;
+  try {
+    batch=await env.DB.batch([
+      // Claim this confirmation with a unique per-attempt token before changing
+      // any balances. A concurrent ACK cannot reuse another attempt's claim.
+      env.DB.prepare("UPDATE ai_requests SET status='succeeded',consumed=1,delivery_confirmed_at=?,delivery_confirmation_id=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='awaiting_delivery' AND raw_response IS NOT NULL AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved')").bind(now,operationId,userId,requestId,userId,requestId),
+      env.DB.prepare("UPDATE ai_credit_allocations SET state='consumed',consumed_at=? WHERE user_id=? AND request_id=? AND state='reserved' AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND status='succeeded' AND delivery_confirmation_id=?)").bind(now,userId,requestId,userId,requestId,operationId),
+      env.DB.prepare("UPDATE credit_batches SET remaining_credits=remaining_credits-1,consumed_credits=consumed_credits+1,generation_reserved_credits=generation_reserved_credits-1 WHERE id=? AND remaining_credits>0 AND generation_reserved_credits>0 AND refund_reserved_credits=0 AND status='active' AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='consumed' AND consumed_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?)").bind(allocation.credit_batch_id,userId,requestId,now,userId,requestId,operationId),
+      env.DB.prepare("UPDATE credit_accounts SET free_balance=free_balance-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END,paid_balance=paid_balance-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END,free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='consumed' AND consumed_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?) AND free_balance+paid_balance>0").bind(allocation.credit_batch_id,allocation.credit_batch_id,allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now,userId,requestId,operationId),
+      env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_debit',CASE WHEN b.bucket='free' THEN -1 ELSE 0 END,CASE WHEN b.bucket='paid' THEN -1 ELSE 0 END,?,?,? FROM credit_batches b JOIN ai_credit_allocations x ON x.credit_batch_id=b.id WHERE b.id=? AND x.user_id=? AND x.request_id=? AND x.state='consumed' AND x.consumed_at=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"回复已送达插件，扣除一次额度",now,allocation.credit_batch_id,userId,requestId,now,userId,requestId,operationId),
+      env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(
+        SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id
+        JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
+        JOIN credit_ledger l ON l.user_id=r.user_id AND l.kind='generation_debit' AND l.reference_id=?
+        WHERE r.user_id=? AND r.request_id=? AND r.status='succeeded' AND r.delivery_confirmation_id=?
+          AND x.state='consumed' AND x.consumed_at=? AND b.id=?
+          AND b.remaining_credits=b.grant_credits-b.consumed_credits-b.permanently_revoked_credits
+          AND a.free_balance=(SELECT COALESCE(sum(remaining_credits),0) FROM credit_batches WHERE user_id=? AND bucket='free')
+          AND a.paid_balance=(SELECT COALESCE(sum(remaining_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')
+          AND a.free_generation_reserved=(SELECT COALESCE(sum(generation_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='free')
+          AND a.paid_generation_reserved=(SELECT COALESCE(sum(generation_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')
+          AND a.paid_reserved_for_refunds=(SELECT COALESCE(sum(refund_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')
+      ) THEN 1 ELSE 0 END`).bind(operationId,`${userId}:${requestId}`,userId,requestId,operationId,now,allocation.credit_batch_id,userId,userId,userId,userId,userId),
+      env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(operationId),
+    ]);
+  } catch {
+    const current=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
+    if(current?.status==="succeeded"&&current.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+    throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
+  }
+  if(batch[5].meta.changes!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
+  return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId)},200,env,request);
 }

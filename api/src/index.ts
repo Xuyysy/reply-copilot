@@ -5,9 +5,10 @@ import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
-import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,requestRefund,simulateRefund} from "./payments";
+import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,requestRefund,requestUserRefund,simulateRefund} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
+import { acknowledgeDelivery } from "./quota";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
 
@@ -53,12 +54,16 @@ export default {
       if(request.method==="GET"&&orderRoute&&!orderRoute[2])return await getOrder(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="refresh")return await refreshOrder(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="attempts")return await relaunchPayment(request,env,orderRoute[1]);
+      const userRefund=path.match(/^\/v1\/orders\/([0-9a-f-]{36})\/refunds$/i);
+      if(request.method==="POST"&&userRefund)return await requestUserRefund(request,env,userRefund[1]);
       if (request.method === "GET" && path === "/v1/license/devices") return await licenseDevices(request, env);
       if (request.method === "POST" && path === "/v1/extension/device-code") return await requestDeviceCode(request, env);
       if (request.method === "GET" && path === "/v1/extension/device-code/status") return await deviceCodeStatus(request, env);
       if (request.method === "POST" && path === "/v1/extension/approve") return await approveDevice(request, env);
       if (request.method === "POST" && path === "/v1/extension/exchange") return await exchangeDevice(request, env);
       if (request.method === "POST" && path === "/v1/ai/generate") return await generate(request, env);
+      const deliveryAck=path.match(/^\/v1\/ai\/requests\/([0-9a-f-]{36})\/delivered$/i);
+      if(request.method==="POST"&&deliveryAck)return await acknowledgeDelivery(request,env,deliveryAck[1]);
       if (request.method === "POST" && path === "/v1/feedback") return await feedback(request, env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await adminUsers(request,env);

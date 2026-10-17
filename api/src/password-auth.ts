@@ -135,6 +135,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
   try { await env.DB.batch([
     env.DB.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,status,role) VALUES(?,?,?,?,?,?,'active','user')").bind(userId,email,now,now,row.username,row.password_hash),
     env.DB.prepare("INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES(?,?,0,?,?)").bind(userId,grant,now,now),
+    env.DB.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,consumed_credits,permanently_revoked_credits,granted_at,history_confidence,status) VALUES(?,?,'free','signup',?,?,0,0,?,'tracked','active')").bind(`signup:${userId}`,userId,grant,grant,now),
     env.DB.prepare("INSERT INTO credit_grants(user_id,grant_type,amount,created_at) VALUES(?,'signup',?,?)").bind(userId,grant,now),
     env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,created_at) VALUES(?,?,'signup_grant',?,0,?,?)").bind(uuid(),userId,grant,userId,now),
     session.statement,
