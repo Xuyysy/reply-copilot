@@ -26,12 +26,17 @@
       "observability": {
         "enabled": true,
         "head_sampling_rate": 1,
-        "redact_query_string": true
+        "redact_query_string": true,
+        "logs": { "invocation_logs": false }
       },
       "vars": {
         "ENVIRONMENT": "staging",
         "AI_MODE": "mock",
         "ADMIN_PORTAL_ENABLED": "0",
+        "REAL_DEEPSEEK_TEST_ENABLED": "0",
+        "REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD": "50000",
+        "DEEPSEEK_INPUT_USD_PER_MILLION": "0.30",
+        "DEEPSEEK_OUTPUT_USD_PER_MILLION": "1.32",
         "WEB_ORIGIN": "https://staging.x-reply-helper.top",
         "API_ORIGIN": "https://api-staging.x-reply-helper.top",
         "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",

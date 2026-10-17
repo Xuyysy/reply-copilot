@@ -95,8 +95,14 @@ try{
   assert.equal(expiredApproval.status,400);assert.equal(expiredApproval.data.code,"DEVICE_CODE_EXPIRED");
   const generate=(requestId,text="Small steps add up.")=>call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:{requestId,post:{text,url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"}});
   const id=crypto.randomUUID();assert.equal((await generate(id)).status,200);assert.equal((await generate(id)).status,200);assert.equal((await quota()).data.quota.totalRemaining,199);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_requests WHERE user_id='${user.userId}' AND request_id='${id}'`).toString())[0].n,1);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id='${user.userId}:${id}'`).toString())[0].n,1);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_usage_costs WHERE user_id='${user.userId}' AND request_id='${id}'`).toString())[0].n,1);
   assert.equal((await generate(id,"Different text")).status,409);
-  const failure=await generate(crypto.randomUUID(),"REPLY_COPILOT_FORCE_FAIL");assert.equal(failure.status,503);assert.equal((await quota()).data.quota.totalRemaining,199);
+  const failedId=crypto.randomUUID();const failure=await generate(failedId,"REPLY_COPILOT_FORCE_FAIL");assert.equal(failure.status,503);assert.equal((await quota()).data.quota.totalRemaining,199);
+  assert.equal(JSON.parse(sql(`SELECT status FROM ai_requests WHERE user_id='${user.userId}' AND request_id='${failedId}'`).toString())[0].status,"upstream_failed");
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_refund' AND reference_id='${user.userId}:${failedId}'`).toString())[0].n,1);
+  assert.equal(JSON.parse(sql(`SELECT estimated_cost_micro_usd n FROM ai_usage_costs WHERE user_id='${user.userId}' AND request_id='${failedId}'`).toString())[0].n,1000);
   const order=await call("/v1/orders",{method:"POST",cookie,csrf,body:{packageId:"starter"}});assert.equal(order.status,201);assert.equal(order.data.paymentAvailable,false);assert.equal((await quota()).data.quota.paidRemaining,0);
   assert.equal((await call("/v1/admin/dashboard")).status,401);
   assert.equal((await call("/v1/admin/dashboard",{cookie})).status,403);
@@ -168,8 +174,10 @@ try{
   let firstFinished=false;
   const firstBudget=call("/v1/ai/generate",{method:"POST",extension:true,bearer:bearerA,body:{requestId:crypto.randomUUID(),post:{text:"REPLY_COPILOT_SLOW_TEST Concurrent budget check",url:"https://x.com/example/status/123"}}}).then(value=>{firstFinished=true;return value;});
   await waitFor(()=>sql("SELECT reserved_micro_usd FROM ai_budget_days").toString().includes("1000"),3000);
-  const secondBudget=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:bearerB,body:{requestId:crypto.randomUUID(),post:{text:"Concurrent budget check",url:"https://x.com/example/status/123"}}});
+  const blockedBudgetRequestId=crypto.randomUUID();
+  const secondBudget=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:bearerB,body:{requestId:blockedBudgetRequestId,post:{text:"REPLY_COPILOT_FORCE_FAIL Concurrent budget check",url:"https://x.com/example/status/123"}}});
   assert.equal(secondBudget.status,503);assert.equal(secondBudget.data.code,"AI_BUDGET_EXHAUSTED");assert.equal(firstFinished,false);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_requests WHERE request_id='${blockedBudgetRequestId}'`).toString())[0].n,0);
   assert.equal((await firstBudget).status,200);
   const budgetRows=sql("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days").toString();assert.match(budgetRows,/1000000/);
   console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFirst:199,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,adminSessionCookie:true,frozenBlocked:true,resetWorks:true,inflightBudgetBlocked:true}));
