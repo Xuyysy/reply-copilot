@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { ApiFailure } from "./types";
+import { ApiFailure, type RegistrationDiagnostics } from "./types";
 
 const securityHeaders: Record<string,string> = {
   "X-Content-Type-Options": "nosniff",
@@ -14,10 +14,36 @@ export function response(value: unknown, status = 200, env?: Env, request?: Requ
   if (env && origin && (origin === env.WEB_ORIGIN || origin === env.EXTENSION_ORIGIN || (env.ENVIRONMENT === "development" && /^chrome-extension:\/\/[a-p]{32}$/.test(origin)))) { headers.set("Access-Control-Allow-Origin", origin); headers.set("Access-Control-Allow-Credentials", "true"); headers.set("Vary", "Origin"); }
   return new Response(JSON.stringify(value), { status, headers });
 }
-export function failure(error: unknown, env: Env, request: Request): Response {
+function exceptionCategory(error: unknown): string {
+  try {
+    if (error instanceof TypeError) return "TypeError";
+    if (error instanceof RangeError) return "RangeError";
+    if (error instanceof ReferenceError) return "ReferenceError";
+    if (error instanceof SyntaxError) return "SyntaxError";
+    if (error instanceof URIError) return "URIError";
+    if (error instanceof EvalError) return "EvalError";
+    if (error instanceof Error) return "Error";
+  } catch {
+    return "unknown";
+  }
+  return "unknown";
+}
+
+export function failure(error: unknown, env: Env, request: Request, diagnostics?: RegistrationDiagnostics): Response {
   const safe = error instanceof ApiFailure ? error : new ApiFailure(503, "SERVER_UNAVAILABLE", "服务暂时不可用，请稍后重试。");
   const headers: Record<string,string> = safe.retryAfterSeconds ? { "Retry-After": String(safe.retryAfterSeconds) } : {};
-  return response({ code: safe.code, message: safe.message, requestId: crypto.randomUUID(), ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}) }, safe.status, env, request, headers);
+  const requestId = diagnostics?.requestId ?? crypto.randomUUID();
+  if (diagnostics && !(error instanceof ApiFailure)) {
+    console.error(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      route: "/v1/auth/register",
+      requestId,
+      stage: diagnostics.stage,
+      category: exceptionCategory(error),
+      state: "unexpected_exception",
+    }));
+  }
+  return response({ code: safe.code, message: safe.message, requestId, ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}) }, safe.status, env, request, headers);
 }
 export function options(request: Request, env: Env): Response {
   const origin = request.headers.get("Origin");

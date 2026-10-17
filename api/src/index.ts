@@ -26,13 +26,15 @@ export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); },
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
+    const isRegistration = request.method === "POST" && path === "/v1/auth/register";
+    const registrationDiagnostics = isRegistration ? { requestId: crypto.randomUUID(), stage: "origin_validation" as const } : undefined;
     try {
       const host=new URL(request.url).hostname;
       if(env.ENVIRONMENT==="development" && host!=="127.0.0.1" && host!=="localhost") throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","开发环境只能在本机运行。");
       if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
       if (request.method === "OPTIONS") return options(request, env);
       if (request.method === "GET" && path === "/health") return response({ ok: true, service: "reply-copilot-api" }, 200, env, request);
-      if (request.method === "POST" && path === "/v1/auth/register") return await register(request,env);
+      if (isRegistration) return await register(request,env,registrationDiagnostics);
       if (request.method === "POST" && path === "/v1/auth/verify-registration") return await verifyRegistration(request,env);
       if (request.method === "POST" && path === "/v1/auth/login") return await passwordLogin(request,env);
       if (request.method === "POST" && path === "/v1/auth/request-password-reset") return await requestPasswordReset(request,env);
@@ -69,6 +71,6 @@ export default {
       const mockPayment=path.match(/^\/v1\/dev\/orders\/([0-9a-f-]{36})\/settle$/i);
       if(request.method==="POST"&&mockPayment)return await settleMockOrder(request,env,mockPayment[1]);
       throw new ApiFailure(404, "NOT_FOUND", "接口不存在。");
-    } catch (error) { return failure(error, env, request); }
+    } catch (error) { return failure(error, env, request, registrationDiagnostics); }
   },
 } satisfies ExportedHandler<Env>;

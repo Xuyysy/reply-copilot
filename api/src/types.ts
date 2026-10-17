@@ -26,6 +26,23 @@ export interface Env {
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };
 
+export type RegistrationStage =
+  | "origin_validation"
+  | "request_validation"
+  | "rate_limit"
+  | "registration_settings"
+  | "turnstile"
+  | "account_lookup"
+  | "registration_code_hash"
+  | "password_hash"
+  | "pending_registration_write"
+  | "mail_send";
+
+export interface RegistrationDiagnostics {
+  requestId: string;
+  stage: RegistrationStage;
+}
+
 export class ApiFailure extends Error {
   constructor(public status: number, public code: string, message: string, public retryAfterSeconds?: number) { super(message); }
 }

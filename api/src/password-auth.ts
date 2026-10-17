@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { ApiFailure } from "./types";
+import { ApiFailure, type RegistrationDiagnostics } from "./types";
 import { sendCode, takeRate } from "./auth";
 import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sha256, uuid } from "./security";
 import { response } from "./http";
@@ -21,6 +21,9 @@ function passwordFrom(value: unknown): string {
   const password = typeof value === "string" ? value : "";
   if (password.length < 12 || encoder.encode(password).length > 256) throw new ApiFailure(400,"INVALID_PASSWORD","密码至少 12 位，且不能超过 256 字节。");
   return password;
+}
+function isPendingUsernameConflict(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed: pending_registrations\.username/i.test(error.message);
 }
 function codeFrom(value: unknown): string {
   const code = typeof value === "string" && /^\d{6}$/.test(value) ? value : "";
@@ -74,27 +77,41 @@ async function rate(request: Request,env: Env,purpose:string,email:string,now:nu
   const emailLimit = localLogin ? 30 : 5;
   if (!await takeRate(env,`${purpose}-ip:${ip}`,ipLimit,3600_000,now) || !await takeRate(env,`${purpose}-email:${address}`,emailLimit,3600_000,now)) throw new ApiFailure(429,"RATE_LIMITED","请求过于频繁，请稍后再试。",60);
 }
-export async function register(request: Request,env: Env): Promise<Response> {
+export async function register(request: Request,env: Env,diagnostics?: RegistrationDiagnostics): Promise<Response> {
+  if (diagnostics) diagnostics.stage = "origin_validation";
   requireWebOrigin(request,env);
+  if (diagnostics) diagnostics.stage = "request_validation";
   const localFeedback = env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN);
   const body = await jsonBody(request,4096);
   const username = usernameFrom(body.username); const email = emailFrom(body.email); const password = passwordFrom(body.password);
   const blocked = (env.DISPOSABLE_EMAIL_DOMAINS || "").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean);
   if (blocked.includes(email.split("@")[1])) throw new ApiFailure(400,"EMAIL_NOT_ALLOWED","该邮箱暂不支持注册，请使用常用邮箱。");
-  const now = nowMs(); await rate(request,env,"register",email,now);
+  const now = nowMs();
+  if (diagnostics) diagnostics.stage = "rate_limit";
+  await rate(request,env,"register",email,now);
+  if (diagnostics) diagnostics.stage = "registration_settings";
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='registration_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"REGISTRATION_CLOSED","注册暂未开放。");
+  if (diagnostics) diagnostics.stage = "turnstile";
   await verifyTurnstile(request,env,body.turnstileToken);
+  if (diagnostics) diagnostics.stage = "account_lookup";
   const taken = await env.DB.prepare("SELECT id FROM users WHERE email=? OR username=? LIMIT 1").bind(email,username).first();
   if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:false}:{})},200,env,request);
+  if (diagnostics) diagnostics.stage = "registration_code_hash";
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
+  if (diagnostics) diagnostics.stage = "password_hash";
   const passwordHash = await hashPassword(env,password);
+  if (diagnostics) diagnostics.stage = "pending_registration_write";
   let inserted;
   try { inserted = await env.DB.prepare(`INSERT INTO pending_registrations(email,username,password_hash,code_hash,created_at,expires_at,sent_at,attempts) VALUES(?,?,?,?,?,?,?,0)
     ON CONFLICT(email) DO UPDATE SET username=excluded.username,password_hash=excluded.password_hash,code_hash=excluded.code_hash,created_at=excluded.created_at,expires_at=excluded.expires_at,sent_at=excluded.sent_at,attempts=0
     WHERE pending_registrations.sent_at<=?`).bind(email,username,passwordHash,codeHash,now,now+600_000,now,now-60_000).run(); }
-  catch { throw new ApiFailure(409,"USERNAME_UNAVAILABLE","用户名暂不可用，请换一个。"); }
+  catch (error) {
+    if (isPendingUsernameConflict(error)) throw new ApiFailure(409,"USERNAME_UNAVAILABLE","用户名暂不可用，请换一个。");
+    throw error;
+  }
   if (inserted.meta.changes) {
+    if (diagnostics) diagnostics.stage = "mail_send";
     try { await sendCode(env,email,code,"register"); }
     catch (error) { await env.DB.prepare("DELETE FROM pending_registrations WHERE email=? AND code_hash=?").bind(email,codeHash).run().catch(()=>{}); throw error; }
   }
