@@ -19,6 +19,13 @@ async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false}={
   return {status:result.status,headers:result.headers,data:await result.json()};
 }
 async function waitFor(predicate,maxMs=20000){const until=Date.now()+maxMs;while(Date.now()<until){const value=await predicate();if(value)return value;await new Promise(resolve=>setTimeout(resolve,100));}throw new Error(`Timed out. ${logs.slice(-1000)}`);}
+async function makePasswordHash(password,saltHex,iterations,pepper){
+  const salt=Uint8Array.from(saltHex.match(/../g),byte=>parseInt(byte,16));
+  const key=await crypto.subtle.importKey("raw",new TextEncoder().encode(`${password}\u0000${pepper}`),"PBKDF2",false,["deriveBits"]);
+  const bits=await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt,iterations},key,256);
+  const digest=Array.from(new Uint8Array(bits),byte=>byte.toString(16).padStart(2,"0")).join("");
+  return `pbkdf2-sha256:${iterations}:${saltHex}:${digest}`;
+}
 async function register(email,username){
   const body={email,username,password:"strong-test-password-123",turnstileToken:"local-test-token"};
   const registration=await call("/v1/auth/register",{method:"POST",body});
@@ -51,6 +58,19 @@ try{
   assert.equal(duplicate.status,200);
   assert.equal(duplicate.data.codeLogged,false);
   const user=(await call("/v1/me",{cookie})).data.user;assert.equal(user.username,username);assert.equal(user.emailVerified,true);assert.equal(user.role,"user");
+  const initialPasswordHash=JSON.parse(sql(`SELECT password_hash FROM users WHERE id='${user.userId}'`).toString())[0].password_hash;
+  const initialHashParts=initialPasswordHash.split(":");
+  assert.equal(initialHashParts[0],"pbkdf2-sha256");assert.equal(initialHashParts[1],"100000");
+  assert.match(initialHashParts[2],/^[0-9a-f]{32}$/);assert.match(initialHashParts[3],/^[0-9a-f]{64}$/);
+  assert.notEqual(initialHashParts[2],"00112233445566778899aabbccddeeff");
+  assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"strong-test-password-123"}})).status,200);
+  const legacySalt="00112233445566778899aabbccddeeff";
+  const legacyHash=await makePasswordHash("strong-test-password-123",legacySalt,210000,"local-test-pepper-that-is-long-enough-123");
+  const unsupportedHash=await makePasswordHash("strong-test-password-123",legacySalt,1,"local-test-pepper-that-is-long-enough-123");
+  sql(`UPDATE users SET password_hash='${unsupportedHash}' WHERE id='${user.userId}'`);
+  assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"strong-test-password-123"}})).status,401);
+  sql(`UPDATE users SET password_hash='${legacyHash}' WHERE id='${user.userId}'`);
+  assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"strong-test-password-123"}})).status,200);
   const quota=()=>call("/v1/usage",{cookie});assert.deepEqual((await quota()).data.quota,{freeRemaining:200,paidRemaining:0,totalRemaining:200});
   for(let attempt=0;attempt<6;attempt++) assert.equal((await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"wrong"}})).status,401);
   const login=await call("/v1/auth/login",{method:"POST",body:{identity:username,password:"strong-test-password-123"}});assert.equal(login.status,200);
@@ -121,6 +141,11 @@ try{
   const resetCode=await waitFor(()=>[...logs.matchAll(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`,"g"))].at(-1)?.[1]);
   const changed=await call("/v1/auth/reset-password",{method:"POST",body:{email,code:resetCode,password:"another-test-password-456"}});
   assert.equal(changed.status,200,JSON.stringify(changed.data));
+  const resetPasswordHash=JSON.parse(sql(`SELECT password_hash FROM users WHERE id='${user.userId}'`).toString())[0].password_hash;
+  const resetHashParts=resetPasswordHash.split(":");
+  assert.equal(resetHashParts[0],"pbkdf2-sha256");assert.equal(resetHashParts[1],"100000");
+  assert.match(resetHashParts[2],/^[0-9a-f]{32}$/);assert.match(resetHashParts[3],/^[0-9a-f]{64}$/);
+  assert.notEqual(resetHashParts[2],legacySalt);
   assert.equal((await call("/v1/me",{cookie})).status,401);
   assert.equal((await call("/v1/usage",{bearer})).status,401);
   const newLogin=await call("/v1/auth/login",{method:"POST",body:{identity:email,password:"another-test-password-456"}});assert.equal(newLogin.status,200);

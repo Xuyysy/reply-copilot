@@ -5,7 +5,8 @@ import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sh
 import { response } from "./http";
 
 const SESSION_MS = 30 * 86400_000;
-const ITERATIONS = 210_000;
+const ITERATIONS = 100_000;
+const SUPPORTED_ITERATIONS = new Set([ITERATIONS, 210_000]);
 const encoder = new TextEncoder();
 function emailFrom(value: unknown): string {
   const email = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -32,20 +33,21 @@ function codeFrom(value: unknown): string {
 }
 function hex(bytes: Uint8Array): string { return Array.from(bytes, b => b.toString(16).padStart(2,"0")).join(""); }
 function fromHex(value: string): Uint8Array { return Uint8Array.from(value.match(/../g) || [], value => parseInt(value,16)); }
-async function derive(env: Env, password: string, salt: Uint8Array): Promise<string> {
+async function derive(env: Env, password: string, salt: Uint8Array, iterations: number): Promise<string> {
   if (!env.PASSWORD_PEPPER || env.PASSWORD_PEPPER.length < 24) throw new ApiFailure(503,"AUTH_NOT_CONFIGURED","账户服务尚未配置。");
   const key = await crypto.subtle.importKey("raw",encoder.encode(`${password}\u0000${env.PASSWORD_PEPPER}`),"PBKDF2",false,["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations:ITERATIONS},key,256);
+  const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations},key,256);
   return hex(new Uint8Array(bits));
 }
 async function hashPassword(env: Env, password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  return `pbkdf2-sha256:${ITERATIONS}:${hex(salt)}:${await derive(env,password,salt)}`;
+  return `pbkdf2-sha256:${ITERATIONS}:${hex(salt)}:${await derive(env,password,salt,ITERATIONS)}`;
 }
 async function verifyPassword(env: Env, password: string, stored: string | null): Promise<boolean> {
   const parts = stored?.split(":") || [];
-  if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || Number(parts[1]) !== ITERATIONS || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
-  const actual = fromHex(await derive(env,password,fromHex(parts[2])));
+  const iterations = Number(parts[1]);
+  if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || !SUPPORTED_ITERATIONS.has(iterations) || String(iterations) !== parts[1] || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
+  const actual = fromHex(await derive(env,password,fromHex(parts[2]),iterations));
   const expected = fromHex(parts[3]);
   let mismatch = 0; for (let i=0;i<32;i++) mismatch |= actual[i]^expected[i];
   return mismatch === 0;
