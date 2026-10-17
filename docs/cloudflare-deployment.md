@@ -32,6 +32,6 @@
 
 ## 支付状态
 
-当前只有服务端套餐、订单快照、支付事件去重与**仅本地**模拟到账。没有支付宝、USDT、真实手续费报价、服务商签名验证或生产回调。生产页面显示支付未开放，Worker 拒绝新订单创建；已有待付款订单不发放额度。选定合规支付渠道后，需要单独完成验签、到账金额/币种确认、手续费规则、退款及争议处理，再考虑启用。
+当前已实现服务端 CNY 套餐订单、仅 loopback 可用的本地模拟支付、小豆 RSA2 请求签名/响应验签/Webhook 验签与查单补偿，以及退款状态和额度冲销账本。真实支付开关默认关闭，生产页面不能新建真实订单，Worker 不接受真实小豆回调。套餐美元参考价为 $1.49/$2.99/$4.99，对应固定人民币 990/1990/3290 分；已有历史订单快照和用户余额不被改写。真实启用前仍需商户凭证、平台 Sandbox/受控联调、金额状态核验、退款与争议流程、商户资格和税务/法律审查。
 
 参考：[Cloudflare Turnstile 验证](https://developers.cloudflare.com/turnstile/get-started/server-side-validation/)、[Turnstile 测试密钥](https://developers.cloudflare.com/turnstile/troubleshooting/testing/)、[Workers Web Crypto](https://developers.cloudflare.com/workers/runtime-apis/web-crypto/)、[Resend API](https://resend.com/docs/api-reference/emails/send-email)。

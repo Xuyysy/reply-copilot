@@ -22,6 +22,14 @@ export interface Env {
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
+  PAYMENTS_ENABLED?: string;
+  PAYMENT_PROVIDER?: string;
+  XIAODOU_BASE_URL?: string;
+  XIAODOU_APP_ID?: string;
+  XIAODOU_KEY_ID?: string;
+  XIAODOU_PRIVATE_KEY?: string;
+  XIAODOU_PLATFORM_PUBLIC_KEYS?: string;
+  XIAODOU_RETURN_URL?: string;
 }
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };

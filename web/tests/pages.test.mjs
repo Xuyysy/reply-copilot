@@ -21,12 +21,30 @@ test("public pages use the exact x-Reply-Helper brand", () => {
     assert.doesNotMatch(html, /Reply Copilot|REPLY COPILOT/);
   }
 });
-test("pricing is accurate and does not expose a fake checkout", () => {
+test("pricing renders USD reference and server-set CNY settlement values", () => {
   const html = page("pricing");
+  const source = readFileSync(path.join(root, "src/pages/pricing.astro"), "utf8");
+  const migration = readFileSync(path.resolve(root, "../api/migrations/0005_xiaodou_payments.sql"), "utf8");
+  const homepage = page("index");
   assert.match(html, /注册赠送 200 次/);
   assert.match(html, /无需订阅、买断或自备 API Key/);
   assert.match(html, /付款尚未开放/);
+  assert.match(source, /price_cny_fen/);
+  assert.match(source, /toFixed\(2\)/);
+  assert.match(migration, /price_cents=149,price_cny_fen=990/);
+  assert.match(migration, /price_cents=299,price_cny_fen=1990/);
+  assert.match(migration, /price_cents=499,price_cny_fen=3290/);
+  for (const price of ["$1.49", "$2.99", "$4.99", "¥9.90", "¥19.90", "¥32.90"]) assert.ok(homepage.includes(price), price);
   assert.doesNotMatch(html, /Seven consecutive days|Lifetime license/);
+});
+test("checkout offers an explicit payment flow and never trusts a browser-submitted amount", () => {
+  const html = page("checkout");
+  const source = readFileSync(path.join(root, "src/pages/checkout.astro"), "utf8");
+  assert.match(html, /创建支付订单|Create payment order/);
+  assert.match(html, /模拟支付完成|Simulate payment/);
+  assert.match(source, /amountFen/);
+  assert.match(source, /packageId/);
+  assert.doesNotMatch(source, /localStorage|sessionStorage/);
 });
 test("language switch and responsive layout are present", () => {
   const html = page("index");

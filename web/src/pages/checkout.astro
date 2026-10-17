@@ -1,42 +1,92 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="套餐预览" titleEn="Package preview">
+<Base title="套餐结账" titleEn="Checkout">
   <div class="container page-hero">
-    <div class="eyebrow" data-zh="套餐预览">Package preview</div>
-    <h1 data-zh="了解充值套餐。">Review the credit package.</h1>
-    <p class="lead" data-zh="支付尚未开放。本页只展示套餐信息，不创建订单、不扣款，也不发放额度。">Payment is not available. This page only previews a package; it does not create an order, charge you, or grant credits.</p>
+    <div class="eyebrow" data-zh="安全结账">Secure checkout</div>
+    <h1 data-zh="确认充值套餐。">Review your top-up.</h1>
+    <p class="lead" data-zh="套餐美元价格仅作参考；支付宝实际结算金额为固定人民币价格，以服务端订单为准。">USD prices are references. Alipay settles at the fixed CNY amount shown in the server-created order.</p>
   </div>
   <section class="container" style="padding-bottom:100px">
     <div class="content-card" style="max-width:680px">
       <h2 id="package-name">正在读取套餐…</h2>
       <p id="package-credits"></p>
-      <p id="package-price"></p>
-      <p id="package-status" class="notice" data-zh="支付暂未开放，请稍后再来。">Payment is not open yet. Please check back later.</p>
-      <div class="button-row"><a class="button secondary" href="/pricing" data-zh="返回套餐">Back to plans</a></div>
+      <p id="package-usd"></p>
+      <p id="package-cny" class="notice" aria-live="polite"></p>
+      <p id="checkout-status" role="status" aria-live="polite"></p>
+      <p id="quota-result" hidden></p>
+      <div class="button-row">
+        <button id="create-order" class="button" type="button" disabled data-zh="创建支付订单">Create payment order</button>
+        <a id="cashier-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
+        <button id="simulate-payment" class="button secondary" type="button" hidden data-zh="模拟支付完成">Simulate payment</button>
+        <button id="refresh-order" class="button secondary" type="button" hidden data-zh="刷新支付状态">Refresh payment status</button>
+        <a id="login-link" class="button secondary" href="/login?mode=login" hidden data-zh="登录后继续">Sign in to continue</a>
+        <a class="button secondary" href="/pricing" data-zh="返回套餐">Back to plans</a>
+      </div>
     </div>
   </section>
   <script>
-    import { api } from "../lib/api";
-    type Package = { id: string; name_zh: string; name_en: string; credits: number; price_cents: number; promo_price_cents: number | null; currency: string };
+    import { api, ApiError } from "../lib/api";
+    type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null };
+    type Order = { id:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; amountFen:number; currency:"CNY"; status:string; paymentMode?:"mock"; paymentUrl?:string|null; message?:string };
+    type Quota = { freeRemaining:number; paidRemaining:number; totalRemaining:number };
     const pkgId = new URL(location.href).searchParams.get("package") || "";
-    const label = (zh: string, en: string) => document.documentElement.lang === "en" ? en : zh;
-    let selected: Package | null = null;
-    function render() {
-      if (!selected) return;
-      document.getElementById("package-name")!.textContent = document.documentElement.lang === "en" ? selected.name_en : selected.name_zh;
-      document.getElementById("package-credits")!.textContent = label(`AI 生成次数：${selected.credits.toLocaleString()} 次`, `AI generations: ${selected.credits.toLocaleString()}`);
-      document.getElementById("package-price")!.textContent = label("套餐金额：", "Package price: ") + new Intl.NumberFormat("en-US", { style: "currency", currency: selected.currency }).format((selected.promo_price_cents ?? selected.price_cents) / 100);
+    const label = (zh:string,en:string) => document.documentElement.lang === "en" ? en : zh;
+    const byId = <T extends HTMLElement>(id:string) => document.getElementById(id) as T;
+    let selected:Package|null = null;
+    let paymentAvailable = false;
+    let provider:"local_mock"|"xiaodou"|null = null;
+    let order:Order|null = null;
+    let busy = false;
+    const setStatus = (zh:string,en:string) => { byId("checkout-status").textContent = label(zh,en); };
+    function show(id:string,visible:boolean){byId(id).hidden=!visible;}
+    function render(){
+      if(!selected){byId("package-name").textContent=label("套餐不存在或已下架。","Package not found or unavailable.");return;}
+      byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
+      byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
+      byId("package-usd").textContent=label("美元参考价：$"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2),"USD reference price: $"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2));
+      byId("package-cny").textContent=selected.price_cny_fen?label("支付宝实际支付：¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY（固定价格，不按汇率换算）","Alipay settlement: ¥"+(selected.price_cny_fen/100).toFixed(2)+" CNY (fixed; no exchange-rate conversion)"):label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
+      byId("create-order").textContent=label("创建支付订单","Create payment order");
+      byId("create-order").disabled=busy||!paymentAvailable||!selected.price_cny_fen||Boolean(order);
     }
-    async function load() {
-      try {
-        const data = await api<{ packages: Package[] }>("/v1/packages");
-        selected = data.packages.find(item => item.id === pkgId) || null;
-        if (!selected) document.getElementById("package-status")!.textContent = label("套餐不存在或已下架。", "Package not found or unavailable.");
+    function showOrder(next:Order){
+      order=next;render();
+      const status:Record<string,[string,string]>={pending:["订单待支付，请完成支付宝付款。","Order awaiting payment. Complete payment in the cashier."],paid:["支付成功，额度已到账。","Payment succeeded and credits are available."],failed:["支付未成功，可返回套餐重新下单。","Payment failed. Return to plans to try again."],closed:["订单已关闭。","The order is closed."],unknown:["支付结果确认中，请勿重复下单，可稍后刷新。","Payment status is being confirmed. Do not place another order; refresh later."]};
+      const pair=status[next.status]??["订单处理中。","Order is processing."];setStatus(pair[0],pair[1]);
+      byId("package-cny").textContent=label("本订单应付：¥"+(next.amountFen/100).toFixed(2)+" "+next.currency,"Amount due: ¥"+(next.amountFen/100).toFixed(2)+" "+next.currency);
+      show("cashier-link",Boolean(next.paymentUrl)&&next.status==="pending");if(next.paymentUrl)byId<HTMLAnchorElement>("cashier-link").href=next.paymentUrl;
+      show("simulate-payment",next.paymentMode==="mock"&&next.status==="pending");
+      show("refresh-order",next.status==="unknown"||(next.status==="pending"&&provider==="xiaodou"));
+      show("create-order",false);
+    }
+    async function load(){
+      try{
+        const data=await api<{packages:Package[];paymentAvailable:boolean;paymentProvider:"local_mock"|"xiaodou"|null}>("/v1/packages");
+        selected=data.packages.find(item=>item.id===pkgId)||null;paymentAvailable=data.paymentAvailable;provider=data.paymentProvider;
         render();
-      } catch { document.getElementById("package-status")!.textContent = label("暂时无法读取套餐，请稍后重试。", "Unable to load packages. Please retry later."); }
+        if(!selected){setStatus("套餐不存在或已下架。","Package not found or unavailable.");return;}
+        if(!paymentAvailable)setStatus("支付暂未开放，目前不能创建订单。","Checkout is not open yet; an order cannot be created.");
+        else if(provider==="local_mock")setStatus("本地模拟支付仅用于开发，不会扣款。","Local mock checkout is for development only; it will not charge you.");
+      }catch{setStatus("暂时无法读取套餐，请稍后重试。","Unable to load packages. Please retry later.");}
     }
-    void load();
-    window.addEventListener("reply-copilot-language", render);
+    byId("create-order").addEventListener("click",async()=>{
+      if(!selected||busy||order)return;busy=true;render();setStatus("正在创建订单…","Creating order…");
+      try{const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id})});showOrder(result.order);}
+      catch(error){if(error instanceof ApiError&&error.status===401){show("login-link",true);setStatus("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else setStatus(error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry."));}
+      finally{busy=false;render();if(order)showOrder(order);}
+    });
+    byId("simulate-payment").addEventListener("click",async()=>{
+      if(!order||busy)return;busy=true;show("simulate-payment",false);setStatus("正在模拟本地支付…","Simulating local payment…");
+      try{await api("/v1/dev/orders/"+encodeURIComponent(order.id)+"/simulate-payment",{method:"POST",body:JSON.stringify({eventId:"local-"+crypto.randomUUID()})});const result=await api<{order:Order;quota:Quota}>("/v1/orders/"+encodeURIComponent(order.id));showOrder(result.order);byId("quota-result").hidden=false;byId("quota-result").textContent=label("付费余额："+result.quota.paidRemaining+" 次 · 总余额："+result.quota.totalRemaining+" 次","Paid balance: "+result.quota.paidRemaining+" · Total: "+result.quota.totalRemaining);}
+      catch(error){setStatus(error instanceof Error?error.message:label("模拟支付失败，请重试。","Mock payment failed. Retry."));show("simulate-payment",true);}
+      finally{busy=false;}
+    });
+    byId("refresh-order").addEventListener("click",async()=>{
+      if(!order||busy)return;busy=true;setStatus("正在查询支付状态…","Checking payment status…");
+      try{if(provider==="xiaodou")await api("/v1/orders/"+encodeURIComponent(order.id)+"/refresh",{method:"POST",body:"{}"});const result=await api<{order:Order;quota:Quota}>("/v1/orders/"+encodeURIComponent(order.id));showOrder(result.order);if(result.order.status==="paid"){byId("quota-result").hidden=false;byId("quota-result").textContent=label("付费余额："+result.quota.paidRemaining+" 次 · 总余额："+result.quota.totalRemaining+" 次","Paid balance: "+result.quota.paidRemaining+" · Total: "+result.quota.totalRemaining);}}
+      catch(error){setStatus(error instanceof Error?error.message:label("查询失败，请稍后重试。","Status check failed. Retry later."));}
+      finally{busy=false;}
+    });
+    void load();window.addEventListener("reply-copilot-language",()=>{render();if(order)showOrder(order);});
   </script>
 </Base>

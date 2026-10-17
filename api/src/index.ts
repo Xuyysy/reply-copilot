@@ -4,7 +4,8 @@ import { failure, options, response } from "./http";
 import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
-import {packages,createOrder,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger,settleMockOrder} from "./commercial";
+import {adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
+import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,requestRefund,simulateRefund} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { jsonBody, nowMs, uuid } from "./security";
@@ -47,6 +48,11 @@ export default {
       if (request.method === "GET" && path === "/v1/activity") return await activity(request,env);
       if (request.method === "GET" && path === "/v1/packages") return await packages(request,env);
       if (request.method === "POST" && path === "/v1/orders") return await createOrder(request,env);
+      if (request.method === "POST" && path === "/v1/payments/xiaodou/webhook") return await xiaodouWebhook(request,env);
+      const orderRoute=path.match(/^\/v1\/orders\/([0-9a-f-]{36})(?:\/(refresh|attempts))?$/i);
+      if(request.method==="GET"&&orderRoute&&!orderRoute[2])return await getOrder(request,env,orderRoute[1]);
+      if(request.method==="POST"&&orderRoute?.[2]==="refresh")return await refreshOrder(request,env,orderRoute[1]);
+      if(request.method==="POST"&&orderRoute?.[2]==="attempts")return await relaunchPayment(request,env,orderRoute[1]);
       if (request.method === "GET" && path === "/v1/license/devices") return await licenseDevices(request, env);
       if (request.method === "POST" && path === "/v1/extension/device-code") return await requestDeviceCode(request, env);
       if (request.method === "GET" && path === "/v1/extension/device-code/status") return await deviceCodeStatus(request, env);
@@ -68,8 +74,12 @@ export default {
       if(request.method==="POST"&&packageUpdate)return await adminPackageUpdate(request,env,packageUpdate[1]);
       const settingUpdate=path.match(/^\/v1\/admin\/settings\/([a-z_]+)$/);
       if(request.method==="POST"&&settingUpdate)return await adminSettingUpdate(request,env,settingUpdate[1]);
-      const mockPayment=path.match(/^\/v1\/dev\/orders\/([0-9a-f-]{36})\/settle$/i);
-      if(request.method==="POST"&&mockPayment)return await settleMockOrder(request,env,mockPayment[1]);
+      const mockPayment=path.match(/^\/v1\/dev\/orders\/([0-9a-f-]{36})\/simulate-payment$/i);
+      if(request.method==="POST"&&mockPayment)return await simulatePayment(request,env,mockPayment[1]);
+      const adminRefund=path.match(/^\/v1\/admin\/orders\/([0-9a-f-]{36})\/refunds$/i);
+      if(request.method==="POST"&&adminRefund)return await requestRefund(request,env,adminRefund[1]);
+      const mockRefund=path.match(/^\/v1\/dev\/refunds\/([a-z0-9_-]{6,64})\/simulate$/i);
+      if(request.method==="POST"&&mockRefund)return await simulateRefund(request,env,mockRefund[1]);
       throw new ApiFailure(404, "NOT_FOUND", "接口不存在。");
     } catch (error) { return failure(error, env, request, registrationDiagnostics); }
   },

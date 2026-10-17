@@ -7,9 +7,9 @@ export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string
 type StoredRequest = { status: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
 
 export async function balance(env: Env, userId: string): Promise<Balance> {
-  const row = await env.DB.prepare("SELECT free_balance,paid_balance FROM credit_accounts WHERE user_id=?").bind(userId).first<{free_balance:number;paid_balance:number}>();
+  const row = await env.DB.prepare("SELECT free_balance,paid_balance,paid_reserved_for_refunds FROM credit_accounts WHERE user_id=?").bind(userId).first<{free_balance:number;paid_balance:number;paid_reserved_for_refunds?:number}>();
   const freeRemaining = row?.free_balance ?? 0;
-  const paidRemaining = row?.paid_balance ?? 0;
+  const paidRemaining = Math.max(0,(row?.paid_balance ?? 0)-(row?.paid_reserved_for_refunds ?? 0));
   return { freeRemaining, paidRemaining, totalRemaining: freeRemaining + paidRemaining };
 }
 async function existing(env: Env, userId: string, requestId: string): Promise<StoredRequest | null> {
@@ -41,7 +41,8 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
     env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd)
       SELECT ?,?,?,?,'reserved',1,?,?,CASE WHEN free_balance>0 THEN 'free' ELSE 'paid' END,?,?
-      FROM credit_accounts WHERE user_id=? AND free_balance+paid_balance>0
+      FROM credit_accounts WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds>0
+      AND (free_balance>0 OR paid_balance>paid_reserved_for_refunds)
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM site_daily_usage WHERE quota_date=? AND used<?)
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)

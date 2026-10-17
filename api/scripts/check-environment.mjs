@@ -21,6 +21,8 @@ else {
   for(const field of ["WEB_ORIGIN","API_ORIGIN","EXTENSION_ORIGIN"])if(env.vars?.[field]===other.vars?.[field])errors.push(`${field} must differ from the other environment`);
   if(!/^chrome-extension:\/\/[a-p]{32}$/.test(env.vars?.EXTENSION_ORIGIN||""))errors.push("EXTENSION_ORIGIN must be the exact installed Chrome extension origin");
   if(env.vars.AI_MODE!==(selected==="staging"?"mock":"production"))errors.push("AI_MODE must start in the approved safe mode");
+  if(env.vars.PAYMENTS_ENABLED!=="0")errors.push("PAYMENTS_ENABLED must stay disabled until a separate payment launch approval");
+  if(env.vars.PAYMENT_PROVIDER!=="xiaodou")errors.push("PAYMENT_PROVIDER must explicitly identify the configured provider");
   if(env.vars.ADMIN_PORTAL_ENABLED!=="0")errors.push("ADMIN_PORTAL_ENABLED must stay closed for initial deployment");
   if(selected==="staging"&&(!Number.isInteger(Number(env.vars.SITE_DAILY_CAP))||Number(env.vars.SITE_DAILY_CAP)>10))errors.push("Staging SITE_DAILY_CAP must be at most 10");
   if(env.workers_dev!==false)errors.push("workers_dev must remain disabled");

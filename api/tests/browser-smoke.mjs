@@ -201,9 +201,19 @@ try{
   await evaluate('document.querySelector("form button[type=submit]").click()');
   await until(()=>evaluate('location.pathname.startsWith("/account") && document.body.innerText.includes("199")'));
   await cdp('Page.navigate',{url:`${webBase}/pricing/`});
-  await until(()=>evaluate('document.body.innerText.includes("$1.99") && document.body.innerText.includes("Free credits claimed")'));
+  await until(()=>evaluate('document.body.innerText.includes("$1.49") && document.body.innerText.includes("Alipay ¥9.90 CNY") && document.body.innerText.includes("Free credits claimed")'));
   assert.equal(await evaluate('document.querySelector("#free-action").getAttribute("href")'),'/account');
   assert.equal(await evaluate('document.querySelector("#free-detail").innerText.includes("199")'),true);
+  await cdp('Page.navigate',{url:`${webBase}/checkout/?package=starter`});
+  await until(()=>evaluate('document.querySelector("#package-name")?.innerText === "Starter" && document.querySelector("#package-cny")?.innerText.includes("¥9.90") && !document.querySelector("#create-order").disabled'));
+  await evaluate('document.querySelector("#create-order").click()');
+  await until(()=>evaluate('!document.querySelector("#simulate-payment").hidden && document.querySelector("#checkout-status").innerText.includes("awaiting payment")'));
+  await evaluate('document.querySelector("#simulate-payment").click()');
+  await until(()=>evaluate('document.querySelector("#quota-result").innerText.includes("Paid balance: 400")'));
+  assert.equal((await browserCall('/v1/usage')).body.quota.paidRemaining,400);
+  assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,599);
+  await cdp('Page.navigate',{url:`${webBase}/pricing/`});
+  await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Free credits claimed"'));
   if(process.env.RC_PRICING_SCREENSHOT_PATH){const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});writeFileSync(process.env.RC_PRICING_SCREENSHOT_PATH,Buffer.from(shot.result.data,'base64'));}
   if(process.env.RC_PRICING_SCREENSHOT_ZH_PATH){await evaluate('document.getElementById("language-toggle").click()');await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "免费额度已领取"'));const shot=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});writeFileSync(process.env.RC_PRICING_SCREENSHOT_ZH_PATH,Buffer.from(shot.result.data,'base64'));await evaluate('document.getElementById("language-toggle").click()');await until(()=>evaluate('document.querySelector("#free-title")?.innerText === "Free credits claimed"'));}
   await cdp('Network.setBlockedURLs',{urls:[`${apiBase}/v1/me`]});

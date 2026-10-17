@@ -16,7 +16,9 @@
 | `GET /v1/admin/dashboard`、`/users`、`/packages`、`/orders`、`/settings`、`/ledger` | 管理数据，需管理员会话和独立安全口令 |
 | `POST /v1/admin/users/{id}/status`、`/credits` | 冻结/解冻与有原因、有确认的额度调整 |
 | `POST /v1/admin/packages/{id}`、`/settings/{key}` | 未来套餐与系统设置修改，记录审计 |
-| `POST /v1/dev/orders/{id}/settle` | 仅本地测试；验证金额、币种与事件去重后模拟到账 |
+| `POST /v1/dev/orders/{id}/simulate-payment` | 仅本机 loopback 开发模式；模拟付款事件并验证重复回调不会重复到账 |
+
+订单只接受服务端保存的套餐 ID；人民币金额由 D1 套餐配置决定。浏览器不得提交可信价格。正式小豆支付默认关闭，只有启用后才由服务端 RSA2 请求签名、响应验签、原始 Webhook 验签或签名查单确认支付。套餐当前美元参考价为 $1.49/$2.99/$4.99，对应固定支付宝人民币 ¥9.90/¥19.90/¥32.90；下单不做实时汇率换算。
 
 余额字段为 `{freeRemaining,paidRemaining,totalRemaining}`。服务端 D1 是唯一权威；插件缓存只用于展示。套餐价格以订单创建时的服务端快照为准。`paymentAvailable:false` 表示没有真实收款通道。
 

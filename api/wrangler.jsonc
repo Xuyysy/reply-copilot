@@ -11,6 +11,8 @@
     "API_ORIGIN": "http://127.0.0.1:8787",
     "EXTENSION_ORIGIN": "",
     "SITE_DAILY_CAP": "300",
+    "PAYMENTS_ENABLED": "0",
+    "PAYMENT_PROVIDER": "mock",
     "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
   },
   "d1_databases": [{
@@ -41,6 +43,8 @@
         "API_ORIGIN": "https://api-staging.x-reply-helper.top",
         "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",
         "SITE_DAILY_CAP": "10",
+        "PAYMENTS_ENABLED": "0",
+        "PAYMENT_PROVIDER": "xiaodou",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
       "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "cd44bb44-b525-42c4-b286-2cc84dae7fdb", "migrations_dir": "migrations" }]
@@ -56,6 +60,8 @@
         "API_ORIGIN": "https://api.example.invalid",
         "EXTENSION_ORIGIN": "chrome-extension://replace-with-production-extension-id",
         "SITE_DAILY_CAP": "300",
+        "PAYMENTS_ENABLED": "0",
+        "PAYMENT_PROVIDER": "xiaodou",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
       "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-production", "database_id": "00000000-0000-0000-0000-000000000003", "migrations_dir": "migrations" }]
