@@ -238,7 +238,13 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
 export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   if(!xiaodouWebhookIsEnabled(env))localOnlyError();
   let bytes:Uint8Array;try{bytes=await readLimitedBytes(request.body,64*1024);}catch(error){if(error instanceof PayloadTooLargeError)throw new ApiFailure(413,"PAYMENT_EVENT_TOO_LARGE","支付事件过大。");throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
-  const client=configuredXiaodouClient(env),verified=await client.verifyWebhook(request.headers,bytes);
+  const client=configuredXiaodouClient(env);
+  let verified:Awaited<ReturnType<InstanceType<typeof XiaodouClient>["verifyWebhook"]>>;
+  try { verified=await client.verifyWebhook(request.headers,bytes); }
+  catch(error) {
+    if(error instanceof XiaodouProviderError&&error.status===401)throw new ApiFailure(401,error.code,"支付通知签名无效或已过期。");
+    throw error;
+  }
   let event:Record<string,unknown>;try{event=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)) as Record<string,unknown>;}catch{throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
   if(event.eventId!==verified.eventId||event.eventType!==verified.eventType||event.appId!==env.XIAODOU_APP_ID)throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");
   const type=String(event.eventType),outTradeNo=String(event.outTradeNo??"");

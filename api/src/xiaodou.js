@@ -59,6 +59,10 @@ function readHeader(headers, name) {
   if (typeof value !== "string" || !value.length || /[\r\n]/.test(value)) throw new TypeError(`Required header is invalid: ${name}`);
   return value;
 }
+function readWebhookHeader(headers, name) {
+  try { return readHeader(headers, name); }
+  catch { throw new XiaodouProviderError("INVALID_WEBHOOK_HEADERS", 401); }
+}
 function timestampIsFresh(timestamp, now) {
   if (!/^\d{1,10}$/.test(timestamp)) return false;
   const delta = Math.abs(Math.floor(now / 1000) - Number(timestamp));
@@ -138,21 +142,28 @@ export class XiaodouClient {
   async #privateKey() { return crypto.subtle.importKey("pkcs8", pemBytes(this.privateKeyPem, "PRIVATE KEY"), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
   async #verify(keyId, signature, text) {
     const pem = this.platformPublicKeys[keyId];
-    if (!pem) throw new XiaodouProviderError("UNKNOWN_PLATFORM_KEY", 502);
+    if (!pem) throw new XiaodouProviderError("UNKNOWN_PLATFORM_KEY", 401);
     const key = await crypto.subtle.importKey("spki", pemBytes(pem, "PUBLIC KEY"), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-    try { return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, base64Bytes(signature), encoder.encode(text)); } catch { return false; }
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(signature)) return false;
+    let signatureBytes;
+    try { signatureBytes = base64Bytes(signature); } catch { return false; }
+    if (signatureBytes.byteLength !== Math.ceil(key.algorithm.modulusLength / 8)) return false;
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signatureBytes, encoder.encode(text));
   }
   async verifyWebhook(headers, rawBody) {
     const values = {
-      "X-XD-Webhook-Event-Id": readHeader(headers, "X-XD-Webhook-Event-Id"),
-      "X-XD-Webhook-Event-Type": readHeader(headers, "X-XD-Webhook-Event-Type"),
-      "X-XD-Webhook-Timestamp": readHeader(headers, "X-XD-Webhook-Timestamp"),
-      "X-XD-Webhook-Nonce": readHeader(headers, "X-XD-Webhook-Nonce"),
-      "X-XD-Webhook-Key-Id": readHeader(headers, "X-XD-Webhook-Key-Id"),
+      "X-XD-Webhook-Event-Id": readWebhookHeader(headers, "X-XD-Webhook-Event-Id"),
+      "X-XD-Webhook-Event-Type": readWebhookHeader(headers, "X-XD-Webhook-Event-Type"),
+      "X-XD-Webhook-Timestamp": readWebhookHeader(headers, "X-XD-Webhook-Timestamp"),
+      "X-XD-Webhook-Nonce": readWebhookHeader(headers, "X-XD-Webhook-Nonce"),
+      "X-XD-Webhook-Key-Id": readWebhookHeader(headers, "X-XD-Webhook-Key-Id"),
     };
     if (!timestampIsFresh(values["X-XD-Webhook-Timestamp"], this.now())) throw new XiaodouProviderError("STALE_WEBHOOK", 401);
-    const text = webhookSigningText({ ...values, rawBody });
-    if (!await this.#verify(values["X-XD-Webhook-Key-Id"], readHeader(headers, "X-XD-Webhook-Signature"), text)) throw new XiaodouProviderError("INVALID_WEBHOOK_SIGNATURE", 401);
+    let text;
+    try { text = webhookSigningText({ ...values, rawBody }); }
+    catch (error) { if (error instanceof TypeError) throw new XiaodouProviderError("INVALID_WEBHOOK_HEADERS", 401); throw error; }
+    const signature = readWebhookHeader(headers, "X-XD-Webhook-Signature");
+    if (!await this.#verify(values["X-XD-Webhook-Key-Id"], signature, text)) throw new XiaodouProviderError("INVALID_WEBHOOK_SIGNATURE", 401);
     return { eventId: values["X-XD-Webhook-Event-Id"], eventType: values["X-XD-Webhook-Event-Type"], bodySha256: await sha256(rawBody) };
   }
   async #request(method, path, { requestId, body, query = "", contentType = "" } = {}) {
