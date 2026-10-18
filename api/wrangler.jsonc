@@ -12,6 +12,7 @@
     "EXTENSION_ORIGIN": "",
     "SITE_DAILY_CAP": "300",
     "PAYMENTS_ENABLED": "0",
+    "XIAODOU_WEBHOOKS_ENABLED": "0",
     "PAYMENT_PROVIDER": "mock",
     "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
   },
@@ -44,6 +45,7 @@
         "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",
         "SITE_DAILY_CAP": "10",
         "PAYMENTS_ENABLED": "0",
+        "XIAODOU_WEBHOOKS_ENABLED": "0",
         "PAYMENT_PROVIDER": "xiaodou",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
@@ -61,6 +63,7 @@
         "EXTENSION_ORIGIN": "chrome-extension://replace-with-production-extension-id",
         "SITE_DAILY_CAP": "300",
         "PAYMENTS_ENABLED": "0",
+        "XIAODOU_WEBHOOKS_ENABLED": "0",
         "PAYMENT_PROVIDER": "xiaodou",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },

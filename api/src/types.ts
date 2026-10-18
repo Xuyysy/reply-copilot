@@ -23,6 +23,7 @@ export interface Env {
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
+  XIAODOU_WEBHOOKS_ENABLED?: string;
   PAYMENT_PROVIDER?: string;
   XIAODOU_BASE_URL?: string;
   XIAODOU_APP_ID?: string;

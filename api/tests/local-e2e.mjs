@@ -49,6 +49,7 @@ try{
   server.stdout.on("data",data=>{logs+=data.toString();});server.stderr.on("data",data=>{logs+=data.toString();});
   server.on("exit",(code,signal)=>{logs+=`\n[local worker exited: code=${code}, signal=${signal}]\n`;});
   await waitFor(async()=>{try{return (await call("/health")).status===200;}catch{return false;}});
+  const disabledWebhook=await call("/v1/payments/xiaodou/webhook",{method:"POST",body:{}});assert.equal(disabledWebhook.status,404,"the Xiaodou webhook stays closed by its independent default-off switch");
   const preflight=await fetch(`${base}/v1/admin/dashboard`,{method:"OPTIONS",headers:{Origin:origin,"Access-Control-Request-Method":"GET","Access-Control-Request-Headers":"x-csrf-token"}});
   assert.equal(preflight.status,204);assert.match(preflight.headers.get("access-control-allow-headers")||"",/X-CSRF-Token/);
   const email=`credits-${crypto.randomUUID()}@example.test`,username=`tester_${crypto.randomUUID().slice(0,8)}`;
@@ -161,6 +162,20 @@ try{
   const refundFailed=await call(`/v1/orders/${standardOrder.data.order.id}/refunds`,{method:"POST",cookie,csrf,body:{confirm:true}});assert.equal(refundFailed.status,201,JSON.stringify(refundFailed.data));assert.equal(refundFailed.data.refund.creditsToRevoke,1000);assert.equal(refundFailed.data.refund.amountFen,1990);assert.equal((await quota()).data.quota.paidRemaining,0,"refund pending must freeze its own lot");
   const blockedRefundSpend=await generate(crypto.randomUUID());assert.equal(blockedRefundSpend.status,200);assert.equal((await quota()).data.quota.paidRemaining,0);assert.equal(JSON.parse(sql(`SELECT consumed_credits FROM credit_batches WHERE source_order_id='${standardOrder.data.order.id}'`).toString())[0].consumed_credits,0,"generation during refund must not consume the frozen order lot");
   const failedRefundNo=refundFailed.data.refund.outRefundNo;
+  const originalRefundState=JSON.parse(sql(`SELECT status,amount_fen FROM payment_refunds WHERE out_refund_no='${failedRefundNo}'`).toString())[0];
+  const originalRefundReservation=JSON.parse(sql(`SELECT remaining_credits,refund_reserved_credits FROM credit_batches WHERE source_order_id='${standardOrder.data.order.id}'`).toString())[0];
+  for(const tampered of [
+    {outRefundNo:"XRH_other_refund"},
+    {outTradeNo:"XRH_other_trade"},
+    {grossAmountFen:1990},
+    {eventAmountFen:1991},
+  ]){
+    const rejected=await call(`/v1/dev/refunds/${failedRefundNo}/simulate`,{method:"POST",cookie,csrf,body:{eventId:`event-tamper-${crypto.randomUUID()}`,...tampered}});
+    assert.equal(rejected.status,409,JSON.stringify(rejected.data));assert.equal(rejected.data.code,"REFUND_MISMATCH");
+    assert.deepEqual(JSON.parse(sql(`SELECT status,amount_fen FROM payment_refunds WHERE out_refund_no='${failedRefundNo}'`).toString())[0],originalRefundState,"tampered refund events cannot resolve the refund record");
+    assert.deepEqual(JSON.parse(sql(`SELECT remaining_credits,refund_reserved_credits FROM credit_batches WHERE source_order_id='${standardOrder.data.order.id}'`).toString())[0],originalRefundReservation,"tampered refund events cannot release or revoke the reserved credits");
+    assert.equal((await quota()).data.quota.paidRemaining,0,"tampered refund events cannot restore or remove account credits");
+  }
   const refundFailureResult=await call(`/v1/dev/refunds/${failedRefundNo}/simulate`,{method:"POST",cookie,csrf,body:{eventId:"event-refund-failed",eventType:"REFUND_FAILED"}});assert.equal(refundFailureResult.status,200,JSON.stringify(refundFailureResult.data));assert.equal((await quota()).data.quota.paidRemaining,1000);
   const refundEligible=JSON.parse(sql(`SELECT consumed_credits,remaining_credits,status FROM credit_batches WHERE source_order_id='${standardOrder.data.order.id}'`).toString())[0];assert.deepEqual(refundEligible,{consumed_credits:0,remaining_credits:1000,status:"active"});
   const finalOrdinary=await call(`/v1/orders/${standardOrder.data.order.id}/refunds`,{method:"POST",cookie,csrf,body:{confirm:true}});assert.equal(finalOrdinary.status,201);assert.equal(finalOrdinary.data.refund.amountFen,1990);

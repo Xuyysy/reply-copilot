@@ -5,7 +5,7 @@ import { requireAdminSession } from "./admin-auth";
 import { jsonBody, nowMs, uuid } from "./security";
 import { response } from "./http";
 import { balance } from "./quota";
-import { PayloadTooLargeError, readLimitedBytes, XiaodouClient, XiaodouProviderError } from "./xiaodou.js";
+import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, XiaodouClient, XiaodouProviderError, xiaodouPaymentOrdersAreEnabled, xiaodouWebhookIsEnabled } from "./xiaodou.js";
 
 type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number };
 type PaymentEvent = { eventId:string;eventType:string;amountFen:number;currency:string;bodySha256?:string };
@@ -23,13 +23,17 @@ function isLocalMock(env:Env,request:Request):boolean {
   const host=new URL(request.url).hostname;
   return env.ENVIRONMENT==="development"&&env.AI_MOCK==="1"&&env.PAYMENT_PROVIDER==="mock"&&LOCAL_WEB_ORIGIN.test(env.WEB_ORIGIN)&&["127.0.0.1","localhost"].includes(host);
 }
-function realPaymentsEnabled(env:Env):boolean { return env.PAYMENTS_ENABLED==="1"&&env.PAYMENT_PROVIDER==="xiaodou"; }
-function paymentClient(env:Env):InstanceType<typeof XiaodouClient> {
-  if(!realPaymentsEnabled(env)||!env.XIAODOU_BASE_URL||!env.XIAODOU_APP_ID||!env.XIAODOU_KEY_ID||!env.XIAODOU_PRIVATE_KEY||!env.XIAODOU_PLATFORM_PUBLIC_KEYS) throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。");
+function realPaymentsEnabled(env:Env):boolean { return xiaodouPaymentOrdersAreEnabled(env); }
+function configuredXiaodouClient(env:Env):InstanceType<typeof XiaodouClient> {
+  if(!env.XIAODOU_BASE_URL||!env.XIAODOU_APP_ID||!env.XIAODOU_KEY_ID||!env.XIAODOU_PRIVATE_KEY||!env.XIAODOU_PLATFORM_PUBLIC_KEYS) throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。");
   let keys:Record<string,string>;
   try { keys=JSON.parse(env.XIAODOU_PLATFORM_PUBLIC_KEYS) as Record<string,string>; } catch { throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。"); }
   try { return new XiaodouClient({baseUrl:env.XIAODOU_BASE_URL,appId:env.XIAODOU_APP_ID,keyId:env.XIAODOU_KEY_ID,privateKeyPem:env.XIAODOU_PRIVATE_KEY,platformPublicKeys:keys}); }
   catch { throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。"); }
+}
+function paymentClient(env:Env):InstanceType<typeof XiaodouClient> {
+  if(!realPaymentsEnabled(env))throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。");
+  return configuredXiaodouClient(env);
 }
 async function webSession(request:Request,env:Env,write=false):Promise<Session> {
   const {session,token}=await sessionFor(request,env);
@@ -232,9 +236,9 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
   }catch(error){await env.DB.prepare("UPDATE payment_attempts SET state='unknown',provider_code=?,updated_at=? WHERE id=?").bind(error instanceof XiaodouProviderError?error.code:"PROVIDER_ERROR",nowMs(),attemptId).run();await env.DB.prepare("UPDATE payment_transactions SET status='unknown',updated_at=? WHERE id=? AND status<>'paid'").bind(nowMs(),transaction.id).run();throw new ApiFailure(503,"PAYMENT_STATUS_UNKNOWN","支付尝试结果不确定，请先查询订单状态。");}
 }
 export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
-  if(!realPaymentsEnabled(env)||env.PAYMENT_PROVIDER!=="xiaodou")localOnlyError();
+  if(!xiaodouWebhookIsEnabled(env))localOnlyError();
   let bytes:Uint8Array;try{bytes=await readLimitedBytes(request.body,64*1024);}catch(error){if(error instanceof PayloadTooLargeError)throw new ApiFailure(413,"PAYMENT_EVENT_TOO_LARGE","支付事件过大。");throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
-  const client=paymentClient(env),verified=await client.verifyWebhook(request.headers,bytes);
+  const client=configuredXiaodouClient(env),verified=await client.verifyWebhook(request.headers,bytes);
   let event:Record<string,unknown>;try{event=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)) as Record<string,unknown>;}catch{throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
   if(event.eventId!==verified.eventId||event.eventType!==verified.eventType||event.appId!==env.XIAODOU_APP_ID)throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");
   const type=String(event.eventType),outTradeNo=String(event.outTradeNo??"");
@@ -249,6 +253,7 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
     if(!refund)throw new ApiFailure(404,"REFUND_NOT_FOUND","退款记录不存在。");
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=?").bind(refund.transaction_id).first<PaymentTransaction>();
     if(!transaction)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+    if(!refundEventMatchesTransaction(event,refund,transaction))throw new ApiFailure(409,"REFUND_MISMATCH","退款事件与原订单或退款记录不符。");
     await applyRefundEvent(env,transaction,refund,{eventId:verified.eventId,eventType:type,amountFen:Number(event.eventAmountFen),currency:"CNY",bodySha256:verified.bodySha256});
   }
   return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
@@ -321,6 +326,8 @@ export async function simulateRefund(request:Request,env:Env,outRefundNo:string)
   if(!refund)throw new ApiFailure(404,"REFUND_NOT_FOUND","退款记录不存在。");
   const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=?").bind(refund.transaction_id).first<PaymentTransaction>();
   if(!transaction||transaction.provider!=="local_mock")localOnlyError();
-  const result=await applyRefundEvent(env,transaction,refund,{eventId,eventType:String(eventType),amountFen:Number(refund.amount_fen),currency:"CNY"});
+  const simulatedEvent={outRefundNo:body.outRefundNo??refund.out_refund_no,outTradeNo:body.outTradeNo??transaction.provider_trade_id,grossAmountFen:body.grossAmountFen??transaction.amount_fen,eventAmountFen:body.eventAmountFen??refund.amount_fen};
+  if(!refundEventMatchesTransaction(simulatedEvent,refund,transaction))throw new ApiFailure(409,"REFUND_MISMATCH","退款事件与原订单或退款记录不符。");
+  const result=await applyRefundEvent(env,transaction,refund,{eventId,eventType:String(eventType),amountFen:Number(simulatedEvent.eventAmountFen),currency:"CNY"});
   return response({ok:true,alreadyProcessed:result.duplicate,refundStatus:result.status,quota:result.quota},200,env,request);
 }

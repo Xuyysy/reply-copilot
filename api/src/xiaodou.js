@@ -11,6 +11,26 @@ export class XiaodouProviderError extends Error {
   }
 }
 
+export function xiaodouWebhookIsEnabled(env) {
+  return env?.PAYMENT_PROVIDER === "xiaodou" && env?.XIAODOU_WEBHOOKS_ENABLED === "1";
+}
+
+export function xiaodouPaymentOrdersAreEnabled(env) {
+  return env?.PAYMENT_PROVIDER === "xiaodou" && env?.PAYMENTS_ENABLED === "1";
+}
+
+export function refundEventMatchesTransaction(event, refund, transaction) {
+  return Boolean(event && refund && transaction
+    && typeof event.outRefundNo === "string"
+    && event.outRefundNo === refund.out_refund_no
+    && typeof event.outTradeNo === "string"
+    && event.outTradeNo === transaction.provider_trade_id
+    && Number.isSafeInteger(event.grossAmountFen)
+    && event.grossAmountFen === Number(transaction.amount_fen)
+    && Number.isSafeInteger(event.eventAmountFen)
+    && event.eventAmountFen === Number(refund.amount_fen));
+}
+
 function hex(bytes) { return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, "0")).join(""); }
 async function sha256(value) { return hex(await crypto.subtle.digest("SHA-256", typeof value === "string" ? encoder.encode(value) : value)); }
 function pemBytes(pem, label) {
@@ -105,7 +125,7 @@ export class XiaodouClient {
   constructor({ baseUrl, appId, keyId, privateKeyPem, platformPublicKeys, fetcher = fetch, now = () => Date.now(), nonce = randomToken }) {
     const base = new URL(baseUrl);
     if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) throw new TypeError("Xiaodou base URL must be a clean HTTPS origin");
-    if (!/^xdop_[A-Za-z0-9]{16}$/.test(appId) || !/^[\x21-\x7e]{1,128}$/.test(keyId) || !platformPublicKeys || typeof platformPublicKeys !== "object") throw new TypeError("Xiaodou credential configuration is invalid");
+    if (!/^xdop_[A-Za-z0-9]{16}$/.test(appId) || !/^mkid_[0-9a-f]{16}$/.test(keyId) || !platformPublicKeys || typeof platformPublicKeys !== "object") throw new TypeError("Xiaodou credential configuration is invalid");
     this.baseUrl = base.href.replace(/\/$/, "");
     this.appId = appId;
     this.keyId = keyId;
