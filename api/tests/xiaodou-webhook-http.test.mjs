@@ -58,8 +58,8 @@ function signedEvent(event, eventType=event.eventType) {
 
 function paymentDb() {
   const transaction={id:"tx-1",order_id:"order-1",provider:"xiaodou",amount_fen:1006,currency:"CNY",status:"pending",provider_trade_id:"XRH_trade_123",order_user_id:"user-1",order_credits:400,order_status:"awaiting_payment",credited_at:null,provider_fee_projection_status:"pending",provider_fee_projection_json:null,provider_fee_projection_issue:null};
-  const state={transaction,batchCalls:0,projectionWrites:0};
-  return {state,prepare(sql){return {bind(...args){this.args=args;return this;},async first(){if(sql.includes("WHERE t.provider='xiaodou' AND t.provider_trade_id=?"))return state.transaction;if(sql.includes("FROM provider_payment_events WHERE provider=?"))return null;if(sql.includes("WHERE t.order_id=?"))return state.transaction;if(sql.includes("MAX(0,free_balance-free_generation_reserved)"))return {free_remaining:200,paid_remaining:0};return null;},async run(){if(sql.includes("provider_fee_projection_status=?")){state.projectionWrites++;Object.assign(state.transaction,{provider_fee_projection_status:this.args[0],provider_fee_projection_json:this.args[1],provider_fee_projection_issue:this.args[2]});}return {meta:{changes:1}};}};},async batch(){state.batchCalls++;state.transaction.status="paid";state.transaction.order_status="paid";state.transaction.credited_at=Date.now();return [{meta:{changes:1}},...Array.from({length:8},()=>({meta:{changes:1}}))];}};
+  const state={transaction,batchCalls:0,projectionWrites:0,events:new Map()};
+  return {state,prepare(sql){return {bind(...args){this.args=args;return this;},async first(){if(sql.includes("WHERE t.provider='xiaodou' AND t.provider_trade_id=?"))return state.transaction;if(sql.includes("FROM provider_payment_events WHERE provider=? AND provider_event_id=?"))return state.events.get(`${this.args[0]}:${this.args[1]}`)??null;if(sql.includes("WHERE t.order_id=?"))return state.transaction;if(sql.includes("MAX(0,free_balance-free_generation_reserved)"))return {free_remaining:200,paid_remaining:0};return null;},async run(){if(sql.includes("provider_fee_projection_status=?")){state.projectionWrites++;Object.assign(state.transaction,{provider_fee_projection_status:this.args[0],provider_fee_projection_json:this.args[1],provider_fee_projection_issue:this.args[2]});}return {meta:{changes:1}};}};},async batch(statements){state.batchCalls++;const args=statements[0].args;state.events.set(`${args[1]}:${args[2]}`,{transaction_id:args[3],event_type:args[4],amount_fen:args[5],currency:args[6]});state.transaction.status="paid";state.transaction.order_status="paid";state.transaction.credited_at=Date.now();return [{meta:{changes:1}},...Array.from({length:8},()=>({meta:{changes:1}}))];}};
 }
 
 test.after(() => rmSync(temp, { recursive: true, force: true }));
@@ -147,6 +147,17 @@ test("a correctly signed paid webhook validates status and settlement projection
   assert.equal(db.state.projectionWrites,1);
   assert.equal(db.state.transaction.provider_fee_projection_status,"verified");
   assert.equal(db.state.transaction.status,"paid");
+});
+
+test("replaying the same valid paid webhook does not run a second credit batch",async()=>{
+  const db=paymentDb(),projection={ruleVersion:"2026-10",thresholdFen:0,tier:"STANDARD",merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:976,companyServiceFeeFen:30};
+  const event={eventId:"evt-repeat-paid-123",eventType:"PAYMENT_SUCCEEDED",status:"SUCCEEDED",appId:"xdop_1234567890abcdef",outTradeNo:"XRH_trade_123",currency:"CNY",grossAmountFen:1006,eventAmountFen:1006,feeProjection:projection};
+  const first=await worker.fetch(signedEvent(event),env({DB:db}));
+  const replay=await worker.fetch(signedEvent(event),env({DB:db}));
+  assert.equal(first.status,200);
+  assert.equal(replay.status,200);
+  assert.equal(db.state.batchCalls,1);
+  assert.equal(db.state.events.size,1);
 });
 
 test("a correctly signed event with a mismatched status is rejected before D1 mutation",async()=>{

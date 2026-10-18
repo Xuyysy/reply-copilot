@@ -224,13 +224,18 @@ export async function simulatePayment(request:Request,env:Env,orderId:string):Pr
 }
 export async function refreshOrder(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
-  if(transaction.provider!=="xiaodou"||!realPaymentsEnabled(env))throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
-  const result=await paymentClient(env).queryPayment(transaction.provider_trade_id!,{requestId:`xrh-q-${uuid()}`});
+  // Payment checkout is a separately gated write capability. Existing owners
+  // must still be able to reconcile a previously created Xiaodou order after
+  // checkout is turned off, using the configured read-only query operation.
+  if(transaction.provider!=="xiaodou")throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
+  const result=await configuredXiaodouClient(env).queryPayment(transaction.provider_trade_id!,{requestId:`xrh-q-${uuid()}`});
   if(result.outTradeNo!==transaction.provider_trade_id||result.currency!=="CNY"||!Number.isSafeInteger(result.amountFen)||result.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","查询结果与订单不匹配。");
   const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
   const state=mapProviderStatus(result.status);
   if(state==="paid"){
-    const applied=await applyPaymentEvent(env,transaction,{eventId:`query-${uuid()}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
+    // A stable synthetic event ID makes repeated trusted queries idempotent
+    // without changing the provider's webhook event IDs or state ordering.
+    const applied=await applyPaymentEvent(env,transaction,{eventId:`xrh-query-${transaction.id}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
     return response({ok:true,orderStatus:applied.status,providerFeeProjectionStatus:projection.status,quota:applied.quota},200,env,request);
   }
   const orderStatus=state==="closed"?"expired":state==="failed"?"failed":"awaiting_payment",now=nowMs();
