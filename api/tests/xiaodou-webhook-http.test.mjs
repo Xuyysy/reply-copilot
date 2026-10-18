@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import { buildSync } from "esbuild";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -47,6 +47,19 @@ function request(headers = {}, body = "{}") {
     headers: { "Content-Type": "application/json", ...headers },
     body,
   });
+}
+
+function signedEvent(event, eventType=event.eventType) {
+  const body=JSON.stringify(event),eventId=event.eventId,timestamp=String(Math.floor(Date.now()/1000)),nonce="abcdefghijklmnop",keyId="platform-test-key";
+  const signingText=["XD-Webhook-v1",eventId,eventType,timestamp,nonce,keyId,Buffer.from(body).toString("hex")].join("\n");
+  const signature=sign("RSA-SHA256",Buffer.from(signingText),platform.privateKey).toString("base64");
+  return request({"X-XD-Webhook-Event-Id":eventId,"X-XD-Webhook-Event-Type":eventType,"X-XD-Webhook-Timestamp":timestamp,"X-XD-Webhook-Nonce":nonce,"X-XD-Webhook-Key-Id":keyId,"X-XD-Webhook-Signature":signature},body);
+}
+
+function paymentDb() {
+  const transaction={id:"tx-1",order_id:"order-1",provider:"xiaodou",amount_fen:1006,currency:"CNY",status:"pending",provider_trade_id:"XRH_trade_123",order_user_id:"user-1",order_credits:400,order_status:"awaiting_payment",credited_at:null,provider_fee_projection_status:"pending",provider_fee_projection_json:null,provider_fee_projection_issue:null};
+  const state={transaction,batchCalls:0,projectionWrites:0};
+  return {state,prepare(sql){return {bind(...args){this.args=args;return this;},async first(){if(sql.includes("WHERE t.provider='xiaodou' AND t.provider_trade_id=?"))return state.transaction;if(sql.includes("FROM provider_payment_events WHERE provider=?"))return null;if(sql.includes("WHERE t.order_id=?"))return state.transaction;if(sql.includes("MAX(0,free_balance-free_generation_reserved)"))return {free_remaining:200,paid_remaining:0};return null;},async run(){if(sql.includes("provider_fee_projection_status=?")){state.projectionWrites++;Object.assign(state.transaction,{provider_fee_projection_status:this.args[0],provider_fee_projection_json:this.args[1],provider_fee_projection_issue:this.args[2]});}return {meta:{changes:1}};}};},async batch(){state.batchCalls++;state.transaction.status="paid";state.transaction.order_status="paid";state.transaction.credited_at=Date.now();return [{meta:{changes:1}},...Array.from({length:8},()=>({meta:{changes:1}}))];}};
 }
 
 test.after(() => rmSync(temp, { recursive: true, force: true }));
@@ -122,4 +135,37 @@ test("WebCrypto verification runtime errors remain server errors", async () => {
   } finally {
     subtlePrototype.verify = originalVerify;
   }
+});
+
+test("a correctly signed paid webhook validates status and settlement projection before one credit batch",async()=>{
+  const db=paymentDb(),projection={ruleVersion:"2026-10",thresholdFen:0,tier:"STANDARD",merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:976,companyServiceFeeFen:30};
+  const response=await worker.fetch(signedEvent({eventId:"evt-valid-123456",eventType:"PAYMENT_SUCCEEDED",status:"SUCCEEDED",appId:"xdop_1234567890abcdef",outTradeNo:"XRH_trade_123",currency:"CNY",grossAmountFen:1006,eventAmountFen:1006,feeProjection:projection}),env({DB:db}));
+  const body=await response.text();
+  assert.equal(response.status,200,body);
+  assert.equal(body,"success");
+  assert.equal(db.state.batchCalls,1);
+  assert.equal(db.state.projectionWrites,1);
+  assert.equal(db.state.transaction.provider_fee_projection_status,"verified");
+  assert.equal(db.state.transaction.status,"paid");
+});
+
+test("a correctly signed event with a mismatched status is rejected before D1 mutation",async()=>{
+  const db=paymentDb();
+  const response=await worker.fetch(signedEvent({eventId:"evt-bad-status-123",eventType:"PAYMENT_SUCCEEDED",status:"FAILED",appId:"xdop_1234567890abcdef",outTradeNo:"XRH_trade_123",currency:"CNY",grossAmountFen:1006,eventAmountFen:1006}),env({DB:db}));
+  const body=await response.json();
+  assert.equal(response.status,409);
+  assert.equal(body.code,"PAYMENT_EVENT_STATUS_MISMATCH");
+  assert.equal(db.state.batchCalls,0);
+  assert.equal(db.state.projectionWrites,0);
+  assert.equal(db.state.transaction.status,"pending");
+});
+
+test("a signed success with a broken feeProjection is visibly held for reconciliation",async()=>{
+  const db=paymentDb(),projection={ruleVersion:"2026-10",thresholdFen:0,tier:"STANDARD",merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:975,companyServiceFeeFen:30};
+  const response=await worker.fetch(signedEvent({eventId:"evt-bad-fee-123456",eventType:"PAYMENT_SUCCEEDED",status:"SUCCEEDED",appId:"xdop_1234567890abcdef",outTradeNo:"XRH_trade_123",currency:"CNY",grossAmountFen:1006,eventAmountFen:1006,feeProjection:projection}),env({DB:db}));
+  assert.equal(response.status,200,"verified paid status is still acknowledged to avoid retry storms");
+  assert.equal(db.state.transaction.provider_fee_projection_status,"review");
+  assert.equal(db.state.transaction.provider_fee_projection_issue,"invalid");
+  assert.equal(db.state.transaction.status,"paid","entitlement follows the verified paid amount, not the separate settlement projection");
+  assert.equal(db.state.batchCalls,1);
 });

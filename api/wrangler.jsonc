@@ -47,6 +47,7 @@
         "PAYMENTS_ENABLED": "0",
         "XIAODOU_WEBHOOKS_ENABLED": "1",
         "PAYMENT_PROVIDER": "xiaodou",
+        "XIAODOU_RETURN_URL": "https://staging.x-reply-helper.top/account/",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
       "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "cd44bb44-b525-42c4-b286-2cc84dae7fdb", "migrations_dir": "migrations" }]

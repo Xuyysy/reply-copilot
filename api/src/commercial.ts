@@ -85,7 +85,7 @@ export async function adminPackageUpdate(request:Request,env:Env,id:string):Prom
     env.DB.prepare("INSERT INTO admin_audit_logs(id,actor_user_id,action,target_id,reason,before_json,after_json,created_at) VALUES(?,?,'package_update',?,'管理员修改套餐',?,?,?)").bind(uuid(),actor.user_id,id,JSON.stringify(before),JSON.stringify(body),now),
   ]);return response({ok:true},200,env,request);
 }
-export async function adminOrders(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({orders:(await env.DB.prepare("SELECT o.*,u.email,t.amount_fen,t.currency payment_currency,t.provider,t.status payment_status FROM recharge_orders o JOIN users u ON u.id=o.user_id LEFT JOIN payment_transactions t ON t.order_id=o.id ORDER BY o.created_at DESC LIMIT 100").all()).results},200,env,request);}
+export async function adminOrders(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({orders:(await env.DB.prepare("SELECT o.*,u.email,t.amount_fen,t.currency payment_currency,t.provider,t.status payment_status,t.provider_fee_projection_status,t.provider_fee_projection_issue FROM recharge_orders o JOIN users u ON u.id=o.user_id LEFT JOIN payment_transactions t ON t.order_id=o.id ORDER BY o.created_at DESC LIMIT 100").all()).results},200,env,request);}
 export async function adminSettings(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({settings:(await env.DB.prepare("SELECT key,value FROM system_settings ORDER BY key").all()).results},200,env,request);}
 export async function adminSettingUpdate(request:Request,env:Env,key:string):Promise<Response>{
   const actor=await admin(request,env,true);const body=await jsonBody(request,1024);const value=String(body.value??"");

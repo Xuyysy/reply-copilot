@@ -5,9 +5,9 @@ import { requireAdminSession } from "./admin-auth";
 import { jsonBody, nowMs, uuid } from "./security";
 import { response } from "./http";
 import { balance } from "./quota";
-import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, XiaodouClient, XiaodouProviderError, xiaodouPaymentOrdersAreEnabled, xiaodouWebhookIsEnabled } from "./xiaodou.js";
+import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, reconcileFeeProjection, webhookEventMatchesStatus, XiaodouClient, XiaodouProviderError, xiaodouPaymentOrdersAreEnabled, xiaodouWebhookIsEnabled } from "./xiaodou.js";
 
-type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number };
+type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number;provider_fee_projection_status?:string;provider_fee_projection_json?:string|null;provider_fee_projection_issue?:string|null };
 type PaymentEvent = { eventId:string;eventType:string;amountFen:number;currency:string;bodySha256?:string };
 const LOCAL_WEB_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost):\d+$/;
 const CUSTOMER_FEE_RATE_BPS = 150;
@@ -53,6 +53,14 @@ function mapProviderStatus(value:unknown):"pending"|"paid"|"closed"|"failed"|"un
 }
 async function transactionForOrder(env:Env,orderId:string):Promise<PaymentTransaction|null> {
   return env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.order_id=?").bind(orderId).first<PaymentTransaction>();
+}
+async function recordProviderFeeProjection(env:Env,transaction:PaymentTransaction,incoming:unknown):Promise<ReturnType<typeof reconcileFeeProjection>>{
+  const next=reconcileFeeProjection(transaction.provider_fee_projection_status??"pending",transaction.provider_fee_projection_json??null,incoming,transaction.amount_fen);
+  await env.DB.prepare("UPDATE payment_transactions SET provider_fee_projection_status=?,provider_fee_projection_json=?,provider_fee_projection_issue=?,updated_at=? WHERE id=?").bind(next.status,next.json,next.issue,nowMs(),transaction.id).run();
+  transaction.provider_fee_projection_status=next.status;
+  transaction.provider_fee_projection_json=next.json;
+  transaction.provider_fee_projection_issue=next.issue;
+  return next;
 }
 async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,event:PaymentEvent):Promise<{duplicate:boolean;quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};status:string}> {
   if(event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
@@ -154,13 +162,23 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   const id=uuid(),now=nowMs(),amountCents=pkg.promo_price_cents??pkg.price_cents,provider=mock?"local_mock":"xiaodou",outTradeNo=`XRH_${id.replaceAll("-","")}`,transactionId=uuid(),attemptId=uuid(),requestId=`xrh-${uuid()}`;
   const created=await env.DB.batch([
     env.DB.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND status IN ('pending','awaiting_payment'))").bind(id,session.user_id,pkg.id,pkg.name_zh,pkg.credits,amountCents,provider,outTradeNo,now,session.user_id),
-    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,status,provider_trade_id,created_at,updated_at) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1','pending',?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,outTradeNo,now,now,id,session.user_id),
+    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,provider,outTradeNo,now,now,id,session.user_id),
     env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,1,?,'prepared',?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?)").bind(attemptId,transactionId,requestId,now,now,transactionId),
   ]);
   if(created[0].meta.changes!==1)throw new ApiFailure(409,"UNRESOLVED_ORDER_EXISTS","你已有一笔待支付或待确认订单，请先查看该订单状态，不要重复下单。");
   if(mock)return response({paymentAvailable:true,paymentProvider:"local_mock",order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",baseAmountFen:feeSnapshot.baseAmountFen,serviceFeeFen:feeSnapshot.serviceFeeFen,feeRateBps:feeSnapshot.feeRateBps,amountFen,currency:"CNY",status:"pending",paymentMode:"mock",message:"本地模拟订单，不会产生真实扣款。"}},201,env,request);
   try {
     const providerResult=await client!.createPayment({outTradeNo,channel:"ALIPAY_H5",amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
+    const projection=await recordProviderFeeProjection(env,(await transactionForOrder(env,id))!,providerResult.feeProjection);
+    if(projection.status!=="verified"){
+      const now=nowMs();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE payment_attempts SET state='unknown',cashier_url=NULL,provider_code='FEE_PROJECTION_REVIEW',updated_at=? WHERE id=?").bind(now,attemptId),
+        env.DB.prepare("UPDATE payment_transactions SET status='unknown',cashier_url=NULL,updated_at=? WHERE id=?").bind(now,transactionId),
+        env.DB.prepare("UPDATE recharge_orders SET status='awaiting_payment' WHERE id=? AND credited_at IS NULL").bind(id),
+      ]);
+      return response({paymentAvailable:true,paymentProvider:"xiaodou",order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:"unknown",paymentUrl:null,providerFeeProjectionStatus:"review"},message:"平台结算信息正在核对，暂不显示收银信息。请稍后刷新订单状态。"},201,env,request);
+    }
     const state=mapProviderStatus(providerResult.status),payUrl=typeof providerResult.payUrl==="string"?providerResult.payUrl:null;
     if(payUrl){const url=new URL(payUrl);if(url.protocol!=="https:"||url.username||url.password)throw new ApiFailure(502,"INVALID_PROVIDER_CASHIER","收银链接暂时无法使用。");}
     const storedState=state==="paid"?"pending":state;
@@ -184,9 +202,9 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   }
 }
 export async function getOrder(request:Request,env:Env,orderId:string):Promise<Response>{
-  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,t.provider,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.cashier_url FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
+  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,t.provider,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.cashier_url,t.provider_fee_projection_status,t.provider_fee_projection_issue FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
   if(!row)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
-  return response({order:{id:row.id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:row.provider==="xiaodou"&&row.payment_status==="pending"?row.cashier_url:null},quota:await balance(env,session.user_id)},200,env,request);
+  return response({order:{id:row.id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:row.provider==="xiaodou"&&row.payment_status==="pending"&&row.provider_fee_projection_status==="verified"?row.cashier_url:null},quota:await balance(env,session.user_id)},200,env,request);
 }
 async function paymentTransactionForOwner(env:Env,orderId:string,userId:string):Promise<PaymentTransaction>{
   const txn=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE o.id=? AND o.user_id=?").bind(orderId,userId).first<PaymentTransaction>();
@@ -208,18 +226,19 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
   if(transaction.provider!=="xiaodou"||!realPaymentsEnabled(env))throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
   const result=await paymentClient(env).queryPayment(transaction.provider_trade_id!,{requestId:`xrh-q-${uuid()}`});
-  if(result.outTradeNo!==transaction.provider_trade_id||result.currency!=="CNY"||result.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","查询结果与订单不匹配。");
+  if(result.outTradeNo!==transaction.provider_trade_id||result.currency!=="CNY"||!Number.isSafeInteger(result.amountFen)||result.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","查询结果与订单不匹配。");
+  const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
   const state=mapProviderStatus(result.status);
   if(state==="paid"){
     const applied=await applyPaymentEvent(env,transaction,{eventId:`query-${uuid()}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
-    return response({ok:true,orderStatus:applied.status,quota:applied.quota},200,env,request);
+    return response({ok:true,orderStatus:applied.status,providerFeeProjectionStatus:projection.status,quota:applied.quota},200,env,request);
   }
   const orderStatus=state==="closed"?"expired":state==="failed"?"failed":"awaiting_payment",now=nowMs();
   await env.DB.batch([
     env.DB.prepare("UPDATE payment_transactions SET status=?,updated_at=? WHERE id=? AND status NOT IN ('paid','refunded')").bind(state,now,transaction.id),
     env.DB.prepare("UPDATE recharge_orders SET status=? WHERE id=? AND credited_at IS NULL AND status IN ('pending','awaiting_payment','failed','expired') AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status=?)").bind(orderStatus,transaction.order_id,transaction.id,state),
   ]);
-  return response({ok:true,orderStatus:state,quota:await balance(env,session.user_id)},200,env,request);
+  return response({ok:true,orderStatus:state,providerFeeProjectionStatus:projection.status,quota:await balance(env,session.user_id)},200,env,request);
 }
 export async function relaunchPayment(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
@@ -228,7 +247,12 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
   await env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) VALUES(?,?,?,?,'prepared',?,?)").bind(attemptId,transaction.id,attempt,requestId,now,now).run();
   try{
     const result=await client.relaunchPayment(transaction.provider_trade_id!,{requestId});
+    const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
     const state=mapProviderStatus(result.status),payUrl=typeof result.payUrl==="string"?result.payUrl:null;
+    if(projection.status!=="verified"){
+      await env.DB.batch([env.DB.prepare("UPDATE payment_attempts SET state='unknown',cashier_url=NULL,provider_code='FEE_PROJECTION_REVIEW',updated_at=? WHERE id=?").bind(nowMs(),attemptId),env.DB.prepare("UPDATE payment_transactions SET status='unknown',cashier_url=NULL,updated_at=? WHERE id=?").bind(nowMs(),transaction.id)]);
+      return response({ok:true,orderStatus:"unknown",paymentUrl:null,providerFeeProjectionStatus:"review",message:"平台结算信息正在核对，暂不显示收银信息。"},200,env,request);
+    }
     if(payUrl){const target=new URL(payUrl);if(target.protocol!=="https:"||target.username||target.password)throw new ApiFailure(502,"INVALID_PROVIDER_CASHIER","收银链接暂时无法使用。");}
     const storedState=state==="paid"?"pending":state,now=nowMs(),orderStatus=storedState==="closed"?"expired":storedState==="failed"?"failed":"awaiting_payment";
     await env.DB.batch([env.DB.prepare("UPDATE payment_attempts SET state=?,cashier_url=?,updated_at=? WHERE id=?").bind(storedState==="pending"?"pending":storedState,payUrl,now,attemptId),env.DB.prepare("UPDATE payment_transactions SET status=?,cashier_url=?,updated_at=? WHERE id=?").bind(storedState,payUrl,now,transaction.id),env.DB.prepare("UPDATE recharge_orders SET status=? WHERE id=? AND credited_at IS NULL AND status IN ('pending','awaiting_payment','failed','expired')").bind(orderStatus,transaction.order_id)]);
@@ -247,12 +271,16 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   }
   let event:Record<string,unknown>;try{event=JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(bytes)) as Record<string,unknown>;}catch{throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
   if(event.eventId!==verified.eventId||event.eventType!==verified.eventType||event.appId!==env.XIAODOU_APP_ID)throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");
-  const type=String(event.eventType),outTradeNo=String(event.outTradeNo??"");
+  const type=String(event.eventType);
+  if(!webhookEventMatchesStatus(event))throw new ApiFailure(409,"PAYMENT_EVENT_STATUS_MISMATCH","支付事件类型、状态或金额格式不匹配。");
+  if(event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
+  const outTradeNo=String(event.outTradeNo??"");
   if(type.startsWith("PAYMENT_")){
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
     if(!transaction)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
-    const amount=Number(event.eventAmountFen),gross=Number(event.grossAmountFen);
-    if(gross!==transaction.amount_fen||(type==="PAYMENT_SUCCEEDED"&&amount!==transaction.amount_fen)||(type!=="PAYMENT_SUCCEEDED"&&amount!==0))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付事件金额不匹配。");
+    const amount=event.eventAmountFen as number,gross=event.grossAmountFen;
+    if(!Number.isSafeInteger(gross)||gross!==transaction.amount_fen||(type==="PAYMENT_SUCCEEDED"&&amount!==transaction.amount_fen)||(type!=="PAYMENT_SUCCEEDED"&&amount!==0))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付事件金额不匹配。");
+    await recordProviderFeeProjection(env,transaction,event.feeProjection);
     await applyPaymentEvent(env,transaction,{eventId:verified.eventId,eventType:type,amountFen:amount,currency:String(event.currency??"CNY"),bodySha256:verified.bodySha256});
   }else{
     const refundNo=String(event.outRefundNo??""),refund=await env.DB.prepare("SELECT r.* FROM payment_refunds r JOIN payment_transactions t ON t.id=r.transaction_id WHERE t.provider='xiaodou' AND r.out_refund_no=?").bind(refundNo).first<Record<string,unknown>>();
@@ -260,7 +288,7 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=?").bind(refund.transaction_id).first<PaymentTransaction>();
     if(!transaction)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
     if(!refundEventMatchesTransaction(event,refund,transaction))throw new ApiFailure(409,"REFUND_MISMATCH","退款事件与原订单或退款记录不符。");
-    await applyRefundEvent(env,transaction,refund,{eventId:verified.eventId,eventType:type,amountFen:Number(event.eventAmountFen),currency:"CNY",bodySha256:verified.bodySha256});
+    await applyRefundEvent(env,transaction,refund,{eventId:verified.eventId,eventType:type,amountFen:event.eventAmountFen as number,currency:"CNY",bodySha256:verified.bodySha256});
   }
   return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
 }

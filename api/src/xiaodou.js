@@ -1,6 +1,53 @@
 const encoder = new TextEncoder();
 const SIGNATURE_HEADERS = ["X-XD-Response-Sign", "X-XD-Response-Key-Id", "X-XD-Response-Timestamp", "X-XD-Response-Nonce"];
 const EVENT_TYPES = new Set(["PAYMENT_SUCCEEDED", "PAYMENT_CLOSED", "PAYMENT_FAILED", "REFUND_SUCCEEDED", "REFUND_FAILED"]);
+const WEBHOOK_STATUSES = Object.freeze({
+  PAYMENT_SUCCEEDED: "SUCCEEDED",
+  PAYMENT_CLOSED: "CLOSED",
+  PAYMENT_FAILED: "FAILED",
+  REFUND_SUCCEEDED: "SUCCEEDED",
+  REFUND_FAILED: "FAILED",
+});
+
+export function webhookEventMatchesStatus(event) {
+  if (!event || WEBHOOK_STATUSES[event.eventType] !== event.status) return false;
+  if (!Number.isSafeInteger(event.eventAmountFen) || event.eventAmountFen < 0) return false;
+  if (event.eventType === "PAYMENT_SUCCEEDED" || event.eventType === "REFUND_SUCCEEDED" || event.eventType === "REFUND_FAILED") return event.eventAmountFen > 0;
+  return event.eventAmountFen === 0;
+}
+
+// This is Xiaodou's signed settlement projection, not the customer-facing
+// package principal/service-fee snapshot. Never derive these values from rates.
+export function validateFeeProjection(value, grossAmountFen) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Number.isSafeInteger(grossAmountFen) || grossAmountFen < 1) return null;
+  const { ruleVersion, thresholdFen, tier, merchantRateBps, companyServiceFeeRateBps, merchantSettlementFen, companyServiceFeeFen } = value;
+  if (typeof ruleVersion !== "string" || !/^[A-Za-z0-9._-]{1,64}$/.test(ruleVersion)) return null;
+  if (!Number.isSafeInteger(thresholdFen) || thresholdFen < 0) return null;
+  if (typeof tier !== "string" || !/^[A-Z0-9_-]{1,32}$/.test(tier)) return null;
+  if (!Number.isSafeInteger(merchantRateBps) || merchantRateBps < 0 || merchantRateBps > 10000) return null;
+  if (!Number.isSafeInteger(companyServiceFeeRateBps) || companyServiceFeeRateBps < 0 || companyServiceFeeRateBps > 10000) return null;
+  if (!Number.isSafeInteger(merchantSettlementFen) || merchantSettlementFen < 0) return null;
+  if (!Number.isSafeInteger(companyServiceFeeFen) || companyServiceFeeFen < 0) return null;
+  if (merchantSettlementFen + companyServiceFeeFen !== grossAmountFen) return null;
+  return { ruleVersion, thresholdFen, tier, merchantRateBps, companyServiceFeeRateBps, merchantSettlementFen, companyServiceFeeFen };
+}
+
+export function reconcileFeeProjection(currentStatus, currentJson, incoming, grossAmountFen) {
+  const existing = typeof currentJson === "string" ? currentJson : null;
+  if (incoming === null || incoming === undefined) {
+    if (currentStatus === "verified" && existing) return { status: "verified", json: existing, issue: null };
+    return { status: "review", json: existing, issue: "missing" };
+  }
+  const normalized = validateFeeProjection(incoming, grossAmountFen);
+  if (!normalized) return { status: "review", json: existing, issue: "invalid" };
+  const json = JSON.stringify(normalized);
+  if (existing) {
+    let prior;
+    try { prior = JSON.stringify(JSON.parse(existing)); } catch { return { status: "review", json: existing, issue: "conflict" }; }
+    if (prior !== json) return { status: "review", json: existing, issue: "conflict" };
+  }
+  return { status: "verified", json: existing ?? json, issue: null };
+}
 
 export class XiaodouProviderError extends Error {
   constructor(code, status = 502) {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {generateKeyPairSync,createHash,sign,verify} from "node:crypto";
 import {test} from "node:test";
-import {PayloadTooLargeError,readLimitedBytes,XiaodouClient,canonicalRequest,canonicalQuery,normalizeContentType,webhookSigningText,refundEventMatchesTransaction,xiaodouPaymentOrdersAreEnabled,xiaodouWebhookIsEnabled} from "../src/xiaodou.js";
+import {PayloadTooLargeError,readLimitedBytes,XiaodouClient,canonicalRequest,canonicalQuery,normalizeContentType,webhookSigningText,refundEventMatchesTransaction,webhookEventMatchesStatus,validateFeeProjection,reconcileFeeProjection,xiaodouPaymentOrdersAreEnabled,xiaodouWebhookIsEnabled} from "../src/xiaodou.js";
 
 const merchantKeyId="mkid_0123456789abcdef";
 
@@ -29,6 +29,7 @@ test("Xiaodou client signs create requests and verifies raw signed responses",as
   const result=await client.createPayment({outTradeNo:"order-12345678",channel:"ALIPAY_H5",amountFen:199,currency:"CNY",subject:"AI reply credits",payerClientIp:"8.8.8.8",returnUrl:"https://example.test/checkout"},{requestId:"request-12345678"});
   assert.equal(result.status,"PAYING");assert.equal(result.payUrl,"https://cashier.test/pay/1");
   const headers=captured.init.headers;assert.equal(headers["X-XD-Request-Id"],"request-12345678");assert.equal(headers["Content-Type"],"application/json");
+  assert.deepEqual(JSON.parse(captured.init.body),{outTradeNo:"order-12345678",channel:"ALIPAY_H5",amountFen:199,currency:"CNY",subject:"AI reply credits",payerClientIp:"8.8.8.8",returnUrl:"https://example.test/checkout"});
   const raw=captured.init.body;const toSign=await canonicalRequest({method:"POST",path:"/api/open/v1/payments",query:"",timestamp:headers["X-XD-Timestamp"],nonce:headers["X-XD-Nonce"],appId:headers["X-XD-App-Id"],keyId:headers["X-XD-Key-Id"],requestId:headers["X-XD-Request-Id"],contentType:headers["Content-Type"],rawBody:raw});
   assert.equal(verify("RSA-SHA256",Buffer.from(toSign),merchant.publicKey,Buffer.from(headers["X-XD-Sign"],"base64")),true);
 });
@@ -109,6 +110,48 @@ test("refund envelope binds refund id, original trade id, gross order amount, an
   assert.equal(refundEventMatchesTransaction({...ordinaryPartial,outTradeNo:"XRH_other_trade"},refund,transaction),false);
   assert.equal(refundEventMatchesTransaction({...ordinaryPartial,grossAmountFen:1990},refund,transaction),false);
   assert.equal(refundEventMatchesTransaction({...ordinaryPartial,eventAmountFen:1991},refund,transaction),false);
+});
+
+test("webhook event status must match the event type and amount semantics",()=>{
+  for(const [eventType,status,eventAmountFen] of [
+    ["PAYMENT_SUCCEEDED","SUCCEEDED",1006],
+    ["PAYMENT_CLOSED","CLOSED",0],
+    ["PAYMENT_FAILED","FAILED",0],
+    ["REFUND_SUCCEEDED","SUCCEEDED",990],
+    ["REFUND_FAILED","FAILED",990],
+  ]) assert.equal(webhookEventMatchesStatus({eventType,status,eventAmountFen}),true);
+  for(const event of [
+    {eventType:"PAYMENT_SUCCEEDED",status:"CLOSED",eventAmountFen:1006},
+    {eventType:"PAYMENT_CLOSED",status:"SUCCEEDED",eventAmountFen:0},
+    {eventType:"PAYMENT_FAILED",status:"FAILED",eventAmountFen:1},
+    {eventType:"REFUND_SUCCEEDED",status:"FAILED",eventAmountFen:990},
+    {eventType:"REFUND_FAILED",status:"SUCCEEDED",eventAmountFen:990},
+    {eventType:"REFUND_SUCCEEDED",status:"SUCCEEDED",eventAmountFen:"990"},
+  ]) assert.equal(webhookEventMatchesStatus(event),false);
+});
+
+test("feeProjection validates the signed provider settlement snapshot without recomputing rates",()=>{
+  const projection={ruleVersion:"2026-10",thresholdFen:0,tier:"STANDARD",merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:976,companyServiceFeeFen:30};
+  assert.deepEqual(validateFeeProjection(projection,1006),projection);
+  for(const invalid of [
+    {...projection,merchantSettlementFen:975},
+    {...projection,companyServiceFeeRateBps:10001},
+    {...projection,merchantSettlementFen:976.5},
+    {...projection,thresholdFen:"0"},
+    {...projection,ruleVersion:""},
+    {...projection,companyServiceFeeFen:29},
+    {...projection,merchantRateBps:-1},
+  ]) assert.equal(validateFeeProjection(invalid,1006),null);
+  assert.equal(validateFeeProjection(null,1006),null);
+});
+
+test("fee projection reconciliation preserves verified snapshots and flags missing or conflicting data",()=>{
+  const projection={ruleVersion:"2026-10",thresholdFen:0,tier:"STANDARD",merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:976,companyServiceFeeFen:30};
+  assert.deepEqual(reconcileFeeProjection("pending",null,projection,1006),{status:"verified",json:JSON.stringify(projection),issue:null});
+  assert.deepEqual(reconcileFeeProjection("pending",null,null,1006),{status:"review",json:null,issue:"missing"});
+  assert.equal(reconcileFeeProjection("verified",JSON.stringify(projection),null,1006).status,"verified");
+  assert.equal(reconcileFeeProjection("verified",JSON.stringify(projection),{...projection,merchantSettlementFen:975},1006).status,"review");
+  assert.equal(reconcileFeeProjection("verified",JSON.stringify(projection),{...projection,merchantSettlementFen:975,companyServiceFeeFen:31},1006).issue,"conflict");
 });
 
 test("webhook intake can be enabled for Xiaodou while payment order creation remains disabled",()=>{
