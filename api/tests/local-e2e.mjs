@@ -94,15 +94,44 @@ try{
   const expiredApproval=await call("/v1/extension/approve",{method:"POST",cookie,csrf,body:{deviceCode:expiringDevice.data.deviceCode}});
   assert.equal(expiredApproval.status,400);assert.equal(expiredApproval.data.code,"DEVICE_CODE_EXPIRED");
   const generate=async(requestId,text="Small steps add up.")=>{const generated=await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:{requestId,post:{text,url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"}});if(generated.status===200){const ack=await call(`/v1/ai/requests/${requestId}/delivered`,{method:"POST",extension:true,bearer,body:{requestId}});assert.equal(ack.status,200,JSON.stringify(ack.data));}return generated;};
-  const id=crypto.randomUUID(),generationBody={requestId:id,post:{text:"Small steps add up.",url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"};
-  assert.equal((await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:generationBody})).status,200);assert.equal(JSON.parse(sql(`SELECT remaining_credits,generation_reserved_credits,consumed_credits FROM credit_batches WHERE user_id='${user.userId}' AND source_kind='signup'`).toString())[0].remaining_credits,200,"reservation must not permanently debit the free lot");assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id='${user.userId}:${id}'`).toString())[0].n,0);
-  assert.equal((await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:generationBody})).status,200);
-  const concurrentAcks=await Promise.all([1,2].map(()=>call(`/v1/ai/requests/${id}/delivered`,{method:"POST",extension:true,bearer,body:{requestId:id}})));assert.ok(concurrentAcks.every(item=>item.status===200),JSON.stringify(concurrentAcks.map(item=>item.data)));assert.equal((await quota()).data.quota.totalRemaining,199);
-  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_requests WHERE user_id='${user.userId}' AND request_id='${id}'`).toString())[0].n,1);
-  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id='${user.userId}:${id}'`).toString())[0].n,1);
-  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_usage_costs WHERE user_id='${user.userId}' AND request_id='${id}'`).toString())[0].n,1);
-  assert.equal((await generate(id,"Different text")).status,409);
-  const failedId=crypto.randomUUID();const failure=await generate(failedId,"REPLY_COPILOT_FORCE_FAIL");assert.equal(failure.status,503);assert.equal((await quota()).data.quota.totalRemaining,199);
+  const generationIds=[];
+  for(let attempt=0;attempt<5;attempt++){
+    const id=crypto.randomUUID();generationIds.push(id);
+    const generated=await generate(id,`Small steps add up. ${attempt}`);
+    assert.equal(generated.status,200,JSON.stringify(generated.data));
+    const parsed=JSON.parse(generated.data.raw);
+    assert.deepEqual(Object.keys(parsed.replies).sort(),["light_humor","natural","thoughtful"]);
+    assert.equal((await quota()).data.quota.totalRemaining,199-attempt,"each delivered generation debits exactly one credit");
+    assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id='${user.userId}:${id}'`).toString())[0].n,1);
+    assert.equal(JSON.parse(sql(`SELECT state FROM ai_credit_allocations WHERE user_id='${user.userId}' AND request_id='${id}'`).toString())[0].state,"consumed");
+  }
+  assert.equal(JSON.parse(sql(`SELECT remaining_credits,generation_reserved_credits,consumed_credits FROM credit_batches WHERE user_id='${user.userId}' AND source_kind='signup'`).toString())[0].remaining_credits,195);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_requests WHERE user_id='${user.userId}' AND status='succeeded' AND consumed=1`).toString())[0].n,5);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_credit_allocations WHERE user_id='${user.userId}' AND state='reserved'`).toString())[0].n,0);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE user_id='${user.userId}' AND kind='generation_debit'`).toString())[0].n,5);
+  const activity=await call("/v1/activity",{cookie});assert.equal(activity.status,200);assert.equal(activity.data.ledger[0].kind,"generation_debit");assert.ok(activity.data.ledger[0].created_at>=activity.data.ledger[1].created_at);assert.equal(activity.data.ledger.filter(row=>row.kind==="generation_debit").length,5);
+  const pendingId=crypto.randomUUID(),pendingBody={requestId:pendingId,post:{text:"A request awaiting delivery.",url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"};
+  const pendingGeneration=await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:pendingBody});assert.equal(pendingGeneration.status,200);
+  const blockedSecond=await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:{...pendingBody,requestId:crypto.randomUUID()}});assert.equal(blockedSecond.status,409);assert.equal(blockedSecond.data.code,"GENERATION_IN_PROGRESS");
+  assert.equal((await quota()).data.quota.totalRemaining,194,"the pending generation is unavailable while reserved, but is not permanently consumed until delivery confirmation");
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE user_id='${user.userId}' AND kind='generation_debit'`).toString())[0].n,5);
+  const replayPending=await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:pendingBody});assert.equal(replayPending.status,200);assert.equal(replayPending.data.raw,pendingGeneration.data.raw);
+  const recoveredAck=await call(`/v1/ai/requests/${pendingId}/delivered`,{method:"POST",extension:true,bearer,body:{requestId:pendingId}});assert.equal(recoveredAck.status,200);assert.equal(recoveredAck.data.quota.totalRemaining,194);
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE user_id='${user.userId}' AND kind='generation_debit'`).toString())[0].n,6);
+  const refreshedActivity=await call("/v1/activity",{cookie});assert.equal(refreshedActivity.data.ledger[0].kind,"generation_debit");assert.equal(refreshedActivity.data.ledger.filter(row=>row.kind==="generation_debit").length,6);
+  assert.equal((await quota()).data.quota.totalRemaining,194);
+  const abandonedId=crypto.randomUUID();assert.equal((await call("/v1/ai/generate",{method:"POST",extension:true,bearer,body:{requestId:abandonedId,post:{text:"Delivery that will expire.",url:"https://x.com/example/status/123"},replyStyle:"natural-friendly"}})).status,200);
+  sql(`UPDATE ai_requests SET response_expires_at=${Date.now()-1} WHERE user_id='${user.userId}' AND request_id='${abandonedId}'`);
+  const afterExpiryId=crypto.randomUUID(),afterExpiry=await generate(afterExpiryId,"Generate after expired delivery");assert.equal(afterExpiry.status,200,JSON.stringify(afterExpiry.data));
+  assert.equal(JSON.parse(sql(`SELECT status FROM ai_requests WHERE user_id='${user.userId}' AND request_id='${abandonedId}'`).toString())[0].status,"upstream_failed");
+  assert.equal(JSON.parse(sql(`SELECT state FROM ai_credit_allocations WHERE user_id='${user.userId}' AND request_id='${abandonedId}'`).toString())[0].state,"released");
+  assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_release' AND reference_id='${user.userId}:${abandonedId}'`).toString())[0].n,1);
+  assert.equal(JSON.parse(sql(`SELECT remaining_credits,generation_reserved_credits,consumed_credits FROM credit_batches WHERE user_id='${user.userId}' AND source_kind='signup'`).toString())[0].remaining_credits,193);
+  assert.equal((await quota()).data.quota.totalRemaining,193);
+  const postExpiryActivity=await call("/v1/activity",{cookie});assert.equal(postExpiryActivity.data.ledger.filter(row=>row.kind==="generation_debit").length,7);
+  const duplicateAck=await call(`/v1/ai/requests/${generationIds[0]}/delivered`,{method:"POST",extension:true,bearer,body:{requestId:generationIds[0]}});assert.equal(duplicateAck.status,200);assert.equal((await quota()).data.quota.totalRemaining,193);
+  assert.equal((await generate(generationIds[0],"Different text")).status,409);
+  const failedId=crypto.randomUUID();const failure=await generate(failedId,"REPLY_COPILOT_FORCE_FAIL");assert.equal(failure.status,503);assert.equal((await quota()).data.quota.totalRemaining,193);
   assert.equal(JSON.parse(sql(`SELECT status FROM ai_requests WHERE user_id='${user.userId}' AND request_id='${failedId}'`).toString())[0].status,"upstream_failed");
   assert.equal(JSON.parse(sql(`SELECT count(*) n FROM credit_ledger WHERE kind='generation_release' AND reference_id='${user.userId}:${failedId}'`).toString())[0].n,1);
   assert.equal(JSON.parse(sql(`SELECT estimated_cost_micro_usd n FROM ai_usage_costs WHERE user_id='${user.userId}' AND request_id='${failedId}'`).toString())[0].n,1000);
@@ -240,6 +269,6 @@ try{
   assert.equal(JSON.parse(sql(`SELECT count(*) n FROM ai_requests WHERE request_id='${blockedBudgetRequestId}'`).toString())[0].n,0);
   assert.equal((await firstBudget).status,200);
   const budgetRows=sql("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days").toString();assert.match(budgetRows,/1000000/);
-  console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFirst:199,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,adminSessionCookie:true,frozenBlocked:true,resetWorks:true,inflightBudgetBlocked:true}));
+  console.log(JSON.stringify({ok:true,freeGrant:200,creditAfterFiveGenerations:195,pendingDeliveryReplay:true,expiredDeliveryReleased:true,activityLedgerConsistent:true,refundConfirmed:true,idempotent:true,parallelSuccessful:successful,unpaidOrderNoCredit:true,mockPaymentCredits:400,duplicatePaymentNoDoubleGrant:true,adminAdjustmentAudited:true,adminDenied:true,adminSessionCookie:true,frozenBlocked:true,resetWorks:true,inflightBudgetBlocked:true}));
 }catch(error){console.error("Local Worker log tail:",logs.slice(-4000));throw error;}
 finally{server?.kill("SIGTERM");db?.close();rmSync(persist,{recursive:true,force:true});}

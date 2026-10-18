@@ -201,8 +201,9 @@
       const response = await safeSend({ type: "REPLY_COPILOT_GENERATE", requestId, sourceText: current.post.sourceText, sourceUrl: current.post.sourceUrl });
       if (!contextAlive) return;
       if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
-      if (!response?.ok) throw new Error(response?.error || "生成失败，请打开侧边栏重试。");
+      if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
       current.generated = true; current.generating = false; current.result = response.result;
+      current.retrySameRequestId = false;
       current.assistant?.setAccountLabel(response.accountLabel);
       const selectedStyle = current.preferences?.defaultReplyMode || response.result.defaultStyle || response.result.default_style || "natural";
       current.assistant?.showResult(response.result.replies, selectedStyle);
@@ -211,6 +212,7 @@
       else await autoFillCurrent(current, requestId, selectedStyle);
     } catch (error) {
       current.generating = false;
+      current.retrySameRequestId = error?.code === "DELIVERY_CONFIRMATION_PENDING" || error?.code === "NETWORK_ERROR";
       if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); }
     }
   }
@@ -242,9 +244,11 @@
     if (action === "position_changed") { void safeSend({ type: "REPLY_COPILOT_SET_FLOATING_POSITION", left: data.left, top: data.top }); return; }
     if (action === "generate") { void generateActive(current.requestId); return; }
     if (action === "regenerate") {
-      void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: current.requestId });
-      const requestId = crypto.randomUUID();
+      const retryPending = current.retrySameRequestId;
+      if (!retryPending) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: current.requestId });
+      const requestId = retryPending ? current.requestId : crypto.randomUUID();
       current.requestId = requestId; current.generated = false; current.generating = false;
+      current.retrySameRequestId = false;
       current.assistant?.showLoading("正在重新生成…");
       void generateActive(requestId);
       return;

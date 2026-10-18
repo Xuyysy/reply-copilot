@@ -1,7 +1,9 @@
 import type { Env } from "./types";
 import { nowMs } from "./security";
+import { releaseExpiredDeliveryReservations } from "./quota";
 
 export async function cleanup(env: Env, now = nowMs()): Promise<void> {
+  await releaseExpiredDeliveryReservations(env, now);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM email_verifications WHERE expires_at<?").bind(now - 86400_000),
     env.DB.prepare("DELETE FROM pending_registrations WHERE expires_at<?").bind(now - 86400_000),

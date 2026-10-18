@@ -9,6 +9,59 @@ export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string
 type StoredRequest = { status: string; generation_phase?: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
 type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
 
+/**
+ * A response that was generated but never acknowledged is not a delivered
+ * credit use. Once its replay window expires, release its reservation so a
+ * later request can proceed. Requests still in `generating` remain untouched
+ * because their provider outcome may be uncertain.
+ */
+export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs(), userId?: string): Promise<void> {
+  const scope = userId ? " AND r.user_id=?" : "";
+  const params = userId ? [now, userId] : [now];
+  const candidate = await env.DB.prepare(`SELECT 1 AS pending FROM ai_requests r
+    JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id
+    WHERE r.status='reserved' AND r.generation_phase='awaiting_delivery'
+      AND r.response_expires_at IS NOT NULL AND r.response_expires_at<?
+      AND x.state='reserved'${scope} LIMIT 1`).bind(...params).first<{pending:number}>();
+  if (!candidate) return;
+
+  const operationId = uuid();
+  const statements = [
+    env.DB.prepare(`UPDATE ai_requests SET status='upstream_failed',generation_phase='unknown',completed_at=?,refunded_at=?
+      WHERE status='reserved' AND generation_phase='awaiting_delivery' AND response_expires_at IS NOT NULL AND response_expires_at<?
+        ${userId ? "AND user_id=?" : ""}
+        AND EXISTS(SELECT 1 FROM ai_credit_allocations x WHERE x.user_id=ai_requests.user_id AND x.request_id=ai_requests.request_id AND x.state='reserved')`).bind(now,now,now,...(userId?[userId]:[])),
+    env.DB.prepare(`UPDATE ai_credit_allocations SET state='released',released_at=?
+      WHERE state='reserved' AND EXISTS(SELECT 1 FROM ai_requests r WHERE r.user_id=ai_credit_allocations.user_id AND r.request_id=ai_credit_allocations.request_id AND r.status='upstream_failed' AND r.generation_phase='unknown' AND r.completed_at=?)`).bind(now,now),
+    env.DB.prepare(`UPDATE credit_batches SET generation_reserved_credits=generation_reserved_credits-(SELECT COUNT(*) FROM ai_credit_allocations x WHERE x.credit_batch_id=credit_batches.id AND x.state='released' AND x.released_at=?)
+      WHERE generation_reserved_credits >= (SELECT COUNT(*) FROM ai_credit_allocations x WHERE x.credit_batch_id=credit_batches.id AND x.state='released' AND x.released_at=?)
+        AND EXISTS(SELECT 1 FROM ai_credit_allocations x WHERE x.credit_batch_id=credit_batches.id AND x.state='released' AND x.released_at=?)`).bind(now,now,now),
+    env.DB.prepare(`UPDATE credit_accounts SET
+      free_generation_reserved=free_generation_reserved-(SELECT COUNT(*) FROM ai_credit_allocations x JOIN credit_batches b ON b.id=x.credit_batch_id WHERE x.user_id=credit_accounts.user_id AND b.bucket='free' AND x.state='released' AND x.released_at=?),
+      paid_generation_reserved=paid_generation_reserved-(SELECT COUNT(*) FROM ai_credit_allocations x JOIN credit_batches b ON b.id=x.credit_batch_id WHERE x.user_id=credit_accounts.user_id AND b.bucket='paid' AND x.state='released' AND x.released_at=?),
+      version=version+1,updated_at=?
+      WHERE free_generation_reserved >= (SELECT COUNT(*) FROM ai_credit_allocations x JOIN credit_batches b ON b.id=x.credit_batch_id WHERE x.user_id=credit_accounts.user_id AND b.bucket='free' AND x.state='released' AND x.released_at=?)
+        AND paid_generation_reserved >= (SELECT COUNT(*) FROM ai_credit_allocations x JOIN credit_batches b ON b.id=x.credit_batch_id WHERE x.user_id=credit_accounts.user_id AND b.bucket='paid' AND x.state='released' AND x.released_at=?)
+        AND EXISTS(SELECT 1 FROM ai_credit_allocations x WHERE x.user_id=credit_accounts.user_id AND x.state='released' AND x.released_at=?)`).bind(now,now,now,now,now,now),
+    env.DB.prepare(`INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at)
+      SELECT lower(hex(randomblob(16))),x.user_id,'generation_release',0,0,x.user_id||':'||x.request_id,'交付确认过期，释放额度预占',?
+      FROM ai_credit_allocations x JOIN ai_requests r ON r.user_id=x.user_id AND r.request_id=x.request_id
+      WHERE x.state='released' AND x.released_at=? AND r.status='upstream_failed' AND r.completed_at=?
+      ON CONFLICT(kind,reference_id) DO NOTHING`).bind(now,now,now),
+    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
+      SELECT ?,CASE WHEN NOT EXISTS(SELECT 1 FROM credit_accounts a WHERE
+        a.free_balance<>(SELECT COALESCE(SUM(b.remaining_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='free') OR
+        a.paid_balance<>(SELECT COALESCE(SUM(b.remaining_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid') OR
+        a.free_generation_reserved<>(SELECT COALESCE(SUM(b.generation_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='free') OR
+        a.paid_generation_reserved<>(SELECT COALESCE(SUM(b.generation_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid') OR
+        a.paid_reserved_for_refunds<>(SELECT COALESCE(SUM(b.refund_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid'))
+        AND NOT EXISTS(SELECT 1 FROM ai_credit_allocations x JOIN ai_requests r ON r.user_id=x.user_id AND r.request_id=x.request_id WHERE x.state='released' AND x.released_at=? AND r.status='upstream_failed' AND r.completed_at=? AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.user_id=x.user_id AND l.kind='generation_release' AND l.reference_id=x.user_id||':'||x.request_id))
+        THEN 1 ELSE 0 END`).bind(operationId,now,now),
+    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(operationId),
+  ];
+  await env.DB.batch(statements);
+}
+
 export async function balance(env: Env, userId: string): Promise<Balance> {
   const row = await env.DB.prepare(`SELECT
     MAX(0,free_balance-free_generation_reserved) free_remaining,
@@ -32,6 +85,7 @@ async function replay(env: Env, userId: string, requestId: string, hash: string,
 
 export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number): Promise<Reservation> {
   const now = nowMs();
+  await releaseExpiredDeliveryReservations(env, now, session.user_id);
   const prior = await existing(env, session.user_id, requestId);
   if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
   const siteCap = Number(env.SITE_DAILY_CAP);
@@ -83,6 +137,8 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   try { await env.DB.batch(batch); } catch {
     const concurrent = await existing(env, session.user_id, requestId);
     if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now);
+    const inFlight = await env.DB.prepare("SELECT 1 AS pending FROM ai_requests WHERE user_id=? AND status='reserved' LIMIT 1").bind(session.user_id).first<{pending:number}>();
+    if (inFlight) throw new ApiFailure(409,"GENERATION_IN_PROGRESS","上一条回复仍在等待交付确认，请先重试该回复或稍后再生成。",3);
     const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
     if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
     const site = await env.DB.prepare("SELECT used FROM site_daily_usage WHERE quota_date=?").bind(date).first<{used:number}>();

@@ -176,7 +176,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ ok: true, result, accountLabel });
       } catch (error) {
         if (!controller.signal.aborted) void usage.track("api_failure", { requestId: message.requestId }).catch(() => {});
-        sendResponse({ ok: false, error: error?.message || "生成失败，请打开侧边栏重试。" });
+        sendResponse({ ok: false, error: error?.message || "生成失败，请打开侧边栏重试。", ...(typeof error?.code === "string" ? { code: error.code } : {}) });
       } finally { if (activeRequests.get(message.requestId) === controller) activeRequests.delete(message.requestId); }
     })();
     return true;

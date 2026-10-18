@@ -30,3 +30,20 @@ test("lost acknowledgement response can be retried with the same request id",asy
   await assert.doesNotReject(client.generateReplies(input));
   assert.equal(ackAttempts,2);
 });
+
+test("delivery confirmation failure is retryable with the same id and uses confirmed quota",async()=>{
+  const calls=[];let acknowledged=false;
+  const accountClient={request:async(path,options)=>{
+    calls.push({path,options});
+    if(path==="/v1/ai/generate")return {raw:valid,quota:{totalRemaining:199}};
+    if(!acknowledged){const error=Object.assign(new Error("confirmation unavailable"),{code:"DELIVERY_CONFIRMATION_CONFLICT",status:409});throw error;}
+    return {ok:true,quota:{totalRemaining:198}};
+  }};
+  const client=new HostedAIClient({config:{hostedApiUrl:"https://api.example.test"},accountClient});
+  await assert.rejects(client.generateReplies(input),error=>error.code==="DELIVERY_CONFIRMATION_PENDING");
+  acknowledged=true;
+  assert.equal(await client.generateReplies(input),valid);
+  assert.equal(calls.filter(call=>call.path==="/v1/ai/generate").length,2,"retry must replay the same idempotent generation");
+  assert.ok(calls.every(call=>!call.options?.body || call.options.body.requestId===input.requestId));
+  assert.equal(client.lastQuota.totalRemaining,198,"use quota returned by delivery confirmation");
+});

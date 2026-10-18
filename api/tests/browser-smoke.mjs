@@ -106,10 +106,11 @@ try{
   await until(()=>evaluate('document.body.innerText.includes("设备码格式无效")'));
   assert.equal(await evaluate('Boolean(document.querySelector("[role=dialog]"))'),false);
   const generationId=crypto.randomUUID();
-  const generate=()=>fetch(`${apiBase}/v1/ai/generate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${exchange.body.accessToken}`},body:JSON.stringify({requestId:generationId,post:{text:'A small step today.',url:'https://x.com/example/status/123'},replyStyle:'natural-friendly'})}).then(async response=>({status:response.status,body:await response.json()}));
+  const generate=async()=>{const response=await fetch(`${apiBase}/v1/ai/generate`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${exchange.body.accessToken}`},body:JSON.stringify({requestId:generationId,post:{text:'A small step today.',url:'https://x.com/example/status/123'},replyStyle:'natural-friendly'})});const body=await response.json();if(response.ok){const ack=await fetch(`${apiBase}/v1/ai/requests/${generationId}/delivered`,{method:'POST',headers:{'Content-Type':'application/json',Authorization:`Bearer ${exchange.body.accessToken}`},body:JSON.stringify({requestId:generationId})});assert.equal(ack.status,200,await ack.text());}return {status:response.status,body};};
   const firstGeneration=await generate();assert.equal(firstGeneration.status,200,JSON.stringify(firstGeneration));
   const duplicateGeneration=await generate();assert.equal(duplicateGeneration.status,200,JSON.stringify(duplicateGeneration));
   assert.equal((await browserCall('/v1/usage')).body.quota.totalRemaining,199);
+  const generatedActivity=await browserCall('/v1/activity');assert.equal(generatedActivity.status,200);assert.equal(generatedActivity.body.ledger[0].kind,'generation_debit');assert.equal(generatedActivity.body.ledger[0].free_delta,-1);
   const resetRequest=await browserCall('/v1/auth/request-password-reset',{method:'POST',body:JSON.stringify({email})});assert.equal(resetRequest.status,200);
   const resetCode=await until(()=>{const matches=[...logs.matchAll(new RegExp(`\\[LOCAL EMAIL ONLY\\] ${email}: (\\d{6})`,'g'))];return matches.length>=2?matches.at(-1)?.[1]:null;});
   const reset=await browserCall('/v1/auth/reset-password',{method:'POST',body:JSON.stringify({email,code:resetCode,password:'browser-new-password-456'})});assert.equal(reset.status,200,JSON.stringify(reset));
@@ -135,6 +136,8 @@ try{
   assert.equal((await browserCall('/v1/me')).status,200);
   await cdp('Page.navigate',{url:`${webBase}/account/`});
   await until(()=>evaluate('document.body.innerText.includes("199")'));
+  assert.equal(await evaluate('document.querySelector("[data-activity-scroll] li strong")?.textContent'),"AI 生成");
+  assert.equal(await evaluate('document.querySelector("[data-activity-scroll] li span")?.textContent'),"-1");
   assert.equal(await evaluate('document.body.innerText.includes("免费额度")'),true);
   assert.ok((await browserCall('/v1/activity')).body.ledger.length<20);
   const shortList=await evaluate('(()=>{const list=document.querySelector("[data-activity-scroll]");return {height:list.clientHeight,scrollHeight:list.scrollHeight}})()');

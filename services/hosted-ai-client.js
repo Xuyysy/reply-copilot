@@ -17,8 +17,16 @@ export class HostedAIClient {
       // charging the allocated lot. The response is not exposed until the
       // Worker confirms the idempotent delivery acknowledgement.
       parseAIOutput(data.raw);
-      await this.accountClient.request(`/v1/ai/requests/${requestId}/delivered`, { method: "POST", body: { requestId }, signal: controller.signal });
-      this.lastQuota = data.quota || null;
+      let confirmation;
+      try {
+        confirmation = await this.accountClient.request(`/v1/ai/requests/${requestId}/delivered`, { method: "POST", body: { requestId }, signal: controller.signal });
+      } catch {
+        // The generated response is safely replayable under this requestId.
+        // Never expose it or start a new paid generation until delivery has
+        // been confirmed; the caller can retry this same idempotent request.
+        throw Object.assign(new Error("回复已生成，但额度确认暂未完成。请重试确认，不会重复生成或扣次。"), { code: "DELIVERY_CONFIRMATION_PENDING" });
+      }
+      this.lastQuota = confirmation?.quota || data.quota || null;
       return data.raw;
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
   }
