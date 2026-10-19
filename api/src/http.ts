@@ -1,5 +1,5 @@
 import type { Env } from "./types";
-import { ApiFailure, type RegistrationDiagnostics } from "./types";
+import { ApiFailure, RefreshDiagnosticFailure, type RegistrationDiagnostics } from "./types";
 
 const securityHeaders: Record<string,string> = {
   "X-Content-Type-Options": "nosniff",
@@ -30,9 +30,12 @@ function exceptionCategory(error: unknown): string {
 }
 
 export function failure(error: unknown, env: Env, request: Request, diagnostics?: RegistrationDiagnostics): Response {
-  const safe = error instanceof ApiFailure ? error : new ApiFailure(503, "SERVER_UNAVAILABLE", "服务暂时不可用，请稍后重试。");
+  const stagingRefreshDiagnostic = error instanceof RefreshDiagnosticFailure && env.ENVIRONMENT === "staging" ? error : null;
+  const safe = stagingRefreshDiagnostic || (error instanceof ApiFailure && !(error instanceof RefreshDiagnosticFailure))
+    ? error as ApiFailure
+    : new ApiFailure(503, "SERVER_UNAVAILABLE", "服务暂时不可用，请稍后重试。");
   const headers: Record<string,string> = safe.retryAfterSeconds ? { "Retry-After": String(safe.retryAfterSeconds) } : {};
-  const requestId = diagnostics?.requestId ?? crypto.randomUUID();
+  const requestId = stagingRefreshDiagnostic?.requestId ?? diagnostics?.requestId ?? crypto.randomUUID();
   if (diagnostics && !(error instanceof ApiFailure)) {
     console.error(JSON.stringify({
       timestamp: new Date().toISOString(),
@@ -43,7 +46,13 @@ export function failure(error: unknown, env: Env, request: Request, diagnostics?
       state: "unexpected_exception",
     }));
   }
-  return response({ code: safe.code, message: safe.message, requestId, ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}) }, safe.status, env, request, headers);
+  return response({
+    code: safe.code,
+    message: safe.message,
+    requestId,
+    ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}),
+    ...(stagingRefreshDiagnostic ? { diagnostic: { stage: stagingRefreshDiagnostic.stage, upstreamHttpStatus: stagingRefreshDiagnostic.upstreamHttpStatus } } : {}),
+  }, safe.status, env, request, headers);
 }
 export function options(request: Request, env: Env): Response {
   const origin = request.headers.get("Origin");

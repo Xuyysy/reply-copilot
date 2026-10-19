@@ -32,7 +32,7 @@ const feeProjection = { ruleVersion: "2026-10", thresholdFen: 0, tier: "STANDARD
   companyServiceFeeRateBps: 100, merchantSettlementFen: 976, companyServiceFeeFen: 30 };
 
 function makeDb() {
-  const state = { transaction: { ...transaction }, sessionUser: "owner-user", freeBalance: 200, paidBalance: 0, events: new Map(), writes: 0, batchCalls: 0, attempts: 0 };
+  const state = { transaction: { ...transaction }, sessionUser: "owner-user", freeBalance: 200, paidBalance: 0, events: new Map(), writes: 0, batchCalls: 0, attempts: 0, failProjectionWrite: false };
   return {
     state,
     prepare(sql) {
@@ -54,6 +54,7 @@ function makeDb() {
         async run() {
           state.writes++;
           if (sql.includes("UPDATE payment_transactions SET provider_fee_projection_status=?")) {
+            if (state.failProjectionWrite) throw new Error("internal-db-failure-marker");
             Object.assign(state.transaction, { provider_fee_projection_status: this.args[0], provider_fee_projection_json: this.args[1], provider_fee_projection_issue: this.args[2] });
           }
           if (sql.includes("INSERT INTO payment_attempts")) state.attempts++;
@@ -74,9 +75,9 @@ function makeDb() {
   };
 }
 
-function env(DB) {
+function env(DB, environment = "staging") {
   return {
-    ENVIRONMENT: "staging", WEB_ORIGIN: webOrigin, API_ORIGIN: "https://api-staging.x-reply-helper.top",
+    ENVIRONMENT: environment, WEB_ORIGIN: webOrigin, API_ORIGIN: "https://api-staging.x-reply-helper.top",
     EXTENSION_ORIGIN: "chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", PAYMENT_PROVIDER: "xiaodou",
     PAYMENTS_ENABLED: "0", XIAODOU_WEBHOOKS_ENABLED: "1", XIAODOU_BASE_URL: "https://merchant.example.test",
     XIAODOU_APP_ID: "xdop_1234567890abcdef", XIAODOU_KEY_ID: "mkid_0123456789abcdef",
@@ -91,7 +92,7 @@ async function csrfToken() {
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function signedProviderResponse(request, { status = "SUCCEEDED", amountFen = 1006, outTradeNo = transaction.provider_trade_id } = {}) {
+async function signedProviderResponse(request, { status = "SUCCEEDED", amountFen = 1006, outTradeNo = transaction.provider_trade_id, invalidSignature = false } = {}) {
   const requestId = request.headers.get("X-XD-Request-Id");
   const payload = JSON.stringify({ outTradeNo, amountFen, currency: "CNY", status, feeProjection });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = "provider-nonce-1234", keyId = "platform-test-key";
@@ -100,12 +101,12 @@ async function signedProviderResponse(request, { status = "SUCCEEDED", amountFen
   const canonical = ["XD-Response-v1", "200", "application/json", requestId, timestamp, nonce, keyId, hex].join("\n");
   const signature = sign("RSA-SHA256", Buffer.from(canonical), platform.privateKey).toString("base64");
   return new Response(payload, { status: 200, headers: {
-    "Content-Type": "application/json", "X-XD-Response-Sign": signature, "X-XD-Response-Key-Id": keyId,
+    "Content-Type": "application/json", "X-XD-Response-Sign": invalidSignature ? `${signature.slice(1)}A` : signature, "X-XD-Response-Key-Id": keyId,
     "X-XD-Response-Timestamp": timestamp, "X-XD-Response-Nonce": nonce, "X-XD-Request-Id": requestId,
   } });
 }
 
-async function call(path, DB, { userId = "owner-user", method = "POST", body, query = async (request) => signedProviderResponse(request) } = {}) {
+async function call(path, DB, { userId = "owner-user", method = "POST", body, environment = "staging", envOverrides = {}, query = async (request) => signedProviderResponse(request) } = {}) {
   const csrf = await csrfToken();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (url, init) => query(new Request(url, init));
@@ -116,7 +117,7 @@ async function call(path, DB, { userId = "owner-user", method = "POST", body, qu
       }, ...(body ? { body: JSON.stringify(body) } : {}),
     });
     DB.state.sessionUser = userId;
-    const response = await worker.fetch(request, env(DB));
+    const response = await worker.fetch(request, { ...env(DB, environment), ...envOverrides });
     return { response, body: await response.json() };
   } finally { globalThis.fetch = originalFetch; }
 }
@@ -147,16 +148,98 @@ test("payments-off refresh enforces ownership and does not call provider for ano
   assert.equal(DB.state.writes, 0);
 });
 
-test("repeated trusted queries are idempotent; provider failures never mark paid", async () => {
+test("fetch failure is returned as a safe provider network diagnostic and never marks paid", async () => {
   const DB = makeDb();
-  const failed = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async () => { throw new Error("offline"); } });
+  let upstreamRequestId;
+  const failed = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => { upstreamRequestId = request.headers.get("X-XD-Request-Id"); throw new Error("offline https://merchant.example.test/private-path key=do-not-leak"); } });
   assert.equal(failed.response.status, 503);
+  assert.equal(failed.body.code, "PROVIDER_NETWORK_ERROR");
+  assert.deepEqual(failed.body.diagnostic, { stage: "provider_fetch", upstreamHttpStatus: null });
+  assert.equal(failed.body.requestId, upstreamRequestId);
+  assert.doesNotMatch(JSON.stringify(failed.body), /merchant\.example\.test|private-path|do-not-leak|offline/);
   assert.equal(DB.state.transaction.status, "unknown");
   assert.equal(DB.state.paidBalance, 0);
   assert.equal(DB.state.batchCalls, 0);
+});
 
+test("provider HTTP errors expose only status and safe category", async () => {
+  const DB = makeDb();
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async () => new Response(JSON.stringify({ code: "PRIVATE_PLATFORM_DETAIL", message: "do-not-leak" }), { status: 503 }) });
+  assert.equal(result.response.status, 502);
+  assert.equal(result.body.code, "PROVIDER_HTTP_ERROR");
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_http_response", upstreamHttpStatus: 503 });
+  assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_PLATFORM_DETAIL|do-not-leak/);
+  assert.equal(DB.state.transaction.status, "unknown");
+  assert.equal(DB.state.paidBalance, 0);
+  assert.equal(DB.state.batchCalls, 0);
+});
+
+test("provider response signature failures get a safe classification", async () => {
+  const DB = makeDb();
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => signedProviderResponse(request, { invalidSignature: true }) });
+  assert.equal(result.response.status, 502);
+  assert.equal(result.body.code, "PROVIDER_SIGNATURE_ERROR");
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200 });
+  assert.equal(DB.state.transaction.status, "unknown");
+  assert.equal(DB.state.paidBalance, 0);
+  assert.equal(DB.state.batchCalls, 0);
+});
+
+test("incomplete provider response signature is classified as a signature failure", async () => {
+  const DB = makeDb();
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => {
+    const signed = await signedProviderResponse(request);
+    const headers = new Headers(signed.headers);
+    headers.delete("X-XD-Response-Nonce");
+    return new Response(await signed.text(), { status: signed.status, headers });
+  } });
+  assert.equal(result.response.status, 502);
+  assert.equal(result.body.code, "PROVIDER_SIGNATURE_ERROR");
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200 });
+  assert.equal(DB.state.transaction.status, "unknown");
+  assert.equal(DB.state.paidBalance, 0);
+  assert.equal(DB.state.batchCalls, 0);
+});
+
+test("missing provider configuration is classified safely in Staging", async () => {
+  const DB = makeDb();
+  let providerCalls = 0;
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { envOverrides: { XIAODOU_BASE_URL: "" }, query: async () => { providerCalls++; return new Response(); } });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.code, "PROVIDER_CONFIG_ERROR");
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_config", upstreamHttpStatus: null });
+  assert.equal(providerCalls, 0);
+  assert.equal(DB.state.transaction.status, "unknown");
+  assert.equal(DB.state.writes, 0);
+});
+
+test("local reconciliation failures are classified without exposing exception detail", async () => {
+  const DB = makeDb();
+  DB.state.failProjectionWrite = true;
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB);
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.code, "ORDER_RECONCILIATION_ERROR");
+  assert.deepEqual(result.body.diagnostic, { stage: "order_reconciliation", upstreamHttpStatus: 200 });
+  assert.doesNotMatch(JSON.stringify(result.body), /internal-db-failure-marker/);
+  assert.equal(DB.state.transaction.status, "unknown");
+  assert.equal(DB.state.paidBalance, 0);
+  assert.equal(DB.state.batchCalls, 0);
+});
+
+test("production refresh errors keep generic response details", async () => {
+  const DB = makeDb();
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { environment: "production", query: async () => { throw new Error("private-provider-error"); } });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.code, "SERVER_UNAVAILABLE");
+  assert.equal(result.body.diagnostic, undefined);
+  assert.doesNotMatch(JSON.stringify(result.body), /private-provider-error|merchant\.example\.test/);
+});
+
+test("repeated trusted queries are idempotent; provider failures never mark paid", async () => {
+  const DB = makeDb();
   const first = await call(`/v1/orders/${orderId}/refresh`, DB);
   assert.equal(first.response.status, 200);
+  assert.equal(first.body.orderStatus, "paid");
   assert.equal(first.body.quota.paidRemaining, 400);
   const second = await call(`/v1/orders/${orderId}/refresh`, DB);
   assert.equal(second.response.status, 200);

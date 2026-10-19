@@ -50,11 +50,13 @@ export function reconcileFeeProjection(currentStatus, currentJson, incoming, gro
 }
 
 export class XiaodouProviderError extends Error {
-  constructor(code, status = 502) {
+  constructor(code, status = 502, stage = "provider_response", upstreamHttpStatus = null) {
     super("小豆支付暂时无法处理请求。");
     this.name = "XiaodouProviderError";
     this.code = code;
     this.status = status;
+    this.stage = stage;
+    this.upstreamHttpStatus = upstreamHttpStatus;
   }
 }
 
@@ -136,7 +138,7 @@ function validateOutId(value, field) {
 function responseKeyHeaders(response) {
   const values = SIGNATURE_HEADERS.map((name) => response.headers.get(name));
   if (values.every((value) => value === null)) return null;
-  if (values.some((value) => value === null)) throw new XiaodouProviderError("INCOMPLETE_RESPONSE_SIGNATURE", 502);
+  if (values.some((value) => value === null)) throw new XiaodouProviderError("INCOMPLETE_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status);
   return values;
 }
 async function readResponseBody(response) {
@@ -189,7 +191,7 @@ export class XiaodouClient {
   async #privateKey() { return crypto.subtle.importKey("pkcs8", pemBytes(this.privateKeyPem, "PRIVATE KEY"), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
   async #verify(keyId, signature, text) {
     const pem = this.platformPublicKeys[keyId];
-    if (!pem) throw new XiaodouProviderError("UNKNOWN_PLATFORM_KEY", 401);
+    if (!pem) throw new XiaodouProviderError("UNKNOWN_PLATFORM_KEY", 401, "provider_response_signature");
     const key = await crypto.subtle.importKey("spki", pemBytes(pem, "PUBLIC KEY"), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(signature)) return false;
     let signatureBytes;
@@ -222,34 +224,41 @@ export class XiaodouClient {
     const rawBody = body === undefined ? "" : body;
     const url = `${this.baseUrl}${path}${query ? `?${query}` : ""}`;
     const pathName = new URL(url).pathname;
-    const signatureText = await canonicalRequest({ method, path: pathName, query, timestamp, nonce, appId: this.appId, keyId: this.keyId, requestId: id, contentType, rawBody });
-    const privateKey = await this.#privateKey();
-    const signature = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, encoder.encode(signatureText)))));
+    let signature;
+    try {
+      const signatureText = await canonicalRequest({ method, path: pathName, query, timestamp, nonce, appId: this.appId, keyId: this.keyId, requestId: id, contentType, rawBody });
+      const privateKey = await this.#privateKey();
+      signature = btoa(String.fromCharCode(...new Uint8Array(await crypto.subtle.sign("RSASSA-PKCS1-v1_5", privateKey, encoder.encode(signatureText)))));
+    } catch {
+      throw new XiaodouProviderError("PROVIDER_CONFIG_ERROR", 503, "provider_request_signing");
+    }
     const headers = { "X-XD-App-Id": this.appId, "X-XD-Timestamp": timestamp, "X-XD-Nonce": nonce, "X-XD-Key-Id": this.keyId, "X-XD-Request-Id": id, "X-XD-Sign": signature };
     if (contentType) headers["Content-Type"] = contentType;
     let response;
     try { response = await this.fetcher(url, { method, headers, ...(body !== undefined ? { body } : {}) }); }
-    catch { throw new XiaodouProviderError("NETWORK_UNCERTAIN", 503); }
+    catch { throw new XiaodouProviderError("NETWORK_UNCERTAIN", 503, "provider_fetch"); }
     let result;
     try { result = await readResponseBody(response); } catch (error) { if (error instanceof XiaodouProviderError) throw error; throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE", 502); }
     const signatureHeaders = responseKeyHeaders(response);
     if (signatureHeaders) {
       const [responseSign, responseKeyId, responseTimestamp, responseNonce] = signatureHeaders;
-      if (!timestampIsFresh(responseTimestamp, this.now())) throw new XiaodouProviderError("STALE_PROVIDER_RESPONSE", 502);
+      if (!timestampIsFresh(responseTimestamp, this.now())) throw new XiaodouProviderError("STALE_PROVIDER_RESPONSE", 502, "provider_response_signature", response.status);
       const responseRequestId = response.headers.get("X-XD-Request-Id");
-      if (!responseRequestId) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISSING", 502);
-      if (responseRequestId !== id) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISMATCH", 502);
+      if (!responseRequestId) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISSING", 502, "provider_response_signature", response.status);
+      if (responseRequestId !== id) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISMATCH", 502, "provider_response_signature", response.status);
       const canonical = ["XD-Response-v1", String(response.status), normalizeContentType(response.headers.get("Content-Type")), responseRequestId, responseTimestamp, responseNonce, responseKeyId, await sha256(result.bytes)].join("\n");
-      if (!await this.#verify(responseKeyId, responseSign, canonical)) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE_SIGNATURE", 502);
-    } else if (response.ok) throw new XiaodouProviderError("UNSIGNED_PROVIDER_SUCCESS", 502);
+      let verified = false;
+      try { verified = await this.#verify(responseKeyId, responseSign, canonical); } catch { /* Do not surface crypto implementation details. */ }
+      if (!verified) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status);
+    } else if (response.ok) throw new XiaodouProviderError("UNSIGNED_PROVIDER_SUCCESS", 502, "provider_response_signature", response.status);
     if (!response.ok) {
       let code = "PROVIDER_REJECTED";
       try { const parsed = JSON.parse(result.text); if (typeof parsed.code === "string" && /^[A-Z0-9_]{1,80}$/.test(parsed.code)) code = parsed.code; } catch { /* Deliberately ignore provider response text. */ }
-      throw new XiaodouProviderError(code, response.status >= 500 ? 502 : 409);
+      throw new XiaodouProviderError(code, response.status >= 500 ? 502 : 409, "provider_http_response", response.status);
     }
     let data;
-    try { data = JSON.parse(result.text); } catch { throw new XiaodouProviderError("INVALID_PROVIDER_JSON", 502); }
-    if (!data || typeof data !== "object" || Array.isArray(data)) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE", 502);
+    try { data = JSON.parse(result.text); } catch { throw new XiaodouProviderError("INVALID_PROVIDER_JSON", 502, "provider_response", response.status); }
+    if (!data || typeof data !== "object" || Array.isArray(data)) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE", 502, "provider_response", response.status);
     return data;
   }
   async createPayment(input, options = {}) {

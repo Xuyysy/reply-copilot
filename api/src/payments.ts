@@ -1,5 +1,5 @@
 import type { Env, Session } from "./types";
-import { ApiFailure } from "./types";
+import { ApiFailure, RefreshDiagnosticFailure, type RefreshDiagnosticCode, type RefreshDiagnosticStage } from "./types";
 import { requireCsrf, sessionFor } from "./auth";
 import { requireAdminSession } from "./admin-auth";
 import { jsonBody, nowMs, uuid } from "./security";
@@ -43,6 +43,17 @@ async function webSession(request:Request,env:Env,write=false):Promise<Session> 
 }
 function cleanId(value:unknown,pattern=/^[a-z0-9_-]{6,64}$/i):string { if(typeof value!=="string"||!pattern.test(value)) throw new ApiFailure(400,"INVALID_REQUEST","请求标识无效。"); return value; }
 function localOnlyError():never { throw new ApiFailure(404,"NOT_FOUND","接口不存在。"); }
+function refreshProviderFailure(error:unknown,requestId:string):RefreshDiagnosticFailure {
+  if(error instanceof XiaodouProviderError){
+    if(error.code==="NETWORK_UNCERTAIN") return new RefreshDiagnosticFailure("PROVIDER_NETWORK_ERROR","provider_fetch",requestId,503,"连接支付平台失败，订单状态仍待确认。");
+    if(error.code==="PROVIDER_CONFIG_ERROR") return new RefreshDiagnosticFailure("PROVIDER_CONFIG_ERROR","provider_request_signing",requestId,503,"支付配置暂时无法用于查单。");
+    if(error.stage==="provider_http_response") return new RefreshDiagnosticFailure("PROVIDER_HTTP_ERROR","provider_http_response",requestId,502,"支付平台暂时无法确认订单。",error.upstreamHttpStatus??null);
+    if(error.stage==="provider_response_signature") return new RefreshDiagnosticFailure("PROVIDER_SIGNATURE_ERROR","provider_response_signature",requestId,502,"支付平台响应暂时无法验证。",error.upstreamHttpStatus??null);
+    const stage:RefreshDiagnosticStage=error.stage==="provider_request_signing"?"provider_request_signing":error.stage==="provider_fetch"?"provider_fetch":error.stage==="provider_response"?"provider_response":"unknown";
+    return new RefreshDiagnosticFailure("SERVER_UNAVAILABLE",stage,requestId,503,"查单暂时不可用，订单状态仍待确认。",error.upstreamHttpStatus??null);
+  }
+  return new RefreshDiagnosticFailure("SERVER_UNAVAILABLE","unknown",requestId,503,"查单暂时不可用，订单状态仍待确认。");
+}
 function mapProviderStatus(value:unknown):"pending"|"paid"|"closed"|"failed"|"unknown" {
   if(value==="SUCCEEDED")return "paid";
   if(value==="CLOSED")return "closed";
@@ -228,22 +239,36 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
   // must still be able to reconcile a previously created Xiaodou order after
   // checkout is turned off, using the configured read-only query operation.
   if(transaction.provider!=="xiaodou")throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
-  const result=await configuredXiaodouClient(env).queryPayment(transaction.provider_trade_id!,{requestId:`xrh-q-${uuid()}`});
-  if(result.outTradeNo!==transaction.provider_trade_id||result.currency!=="CNY"||!Number.isSafeInteger(result.amountFen)||result.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","查询结果与订单不匹配。");
-  const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
-  const state=mapProviderStatus(result.status);
-  if(state==="paid"){
-    // A stable synthetic event ID makes repeated trusted queries idempotent
-    // without changing the provider's webhook event IDs or state ordering.
-    const applied=await applyPaymentEvent(env,transaction,{eventId:`xrh-query-${transaction.id}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
-    return response({ok:true,orderStatus:applied.status,providerFeeProjectionStatus:projection.status,quota:applied.quota},200,env,request);
+  const requestId=`xrh-q-${uuid()}`;
+  let client:InstanceType<typeof XiaodouClient>;
+  try { client=configuredXiaodouClient(env); }
+  catch(error) {
+    if(error instanceof ApiFailure&&error.code==="PAYMENT_UNAVAILABLE")throw new RefreshDiagnosticFailure("PROVIDER_CONFIG_ERROR","provider_config",requestId,503,"支付配置暂时无法用于查单。");
+    throw error;
   }
-  const orderStatus=state==="closed"?"expired":state==="failed"?"failed":"awaiting_payment",now=nowMs();
-  await env.DB.batch([
-    env.DB.prepare("UPDATE payment_transactions SET status=?,updated_at=? WHERE id=? AND status NOT IN ('paid','refunded')").bind(state,now,transaction.id),
-    env.DB.prepare("UPDATE recharge_orders SET status=? WHERE id=? AND credited_at IS NULL AND status IN ('pending','awaiting_payment','failed','expired') AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status=?)").bind(orderStatus,transaction.order_id,transaction.id,state),
-  ]);
-  return response({ok:true,orderStatus:state,providerFeeProjectionStatus:projection.status,quota:await balance(env,session.user_id)},200,env,request);
+  let result:Awaited<ReturnType<typeof client.queryPayment>>;
+  try { result=await client.queryPayment(transaction.provider_trade_id!,{requestId}); }
+  catch(error) { throw refreshProviderFailure(error,requestId); }
+  try {
+    if(result.outTradeNo!==transaction.provider_trade_id||result.currency!=="CNY"||!Number.isSafeInteger(result.amountFen)||result.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","查询结果与订单不匹配。");
+    const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
+    const state=mapProviderStatus(result.status);
+    if(state==="paid"){
+      // A stable synthetic event ID makes repeated trusted queries idempotent
+      // without changing the provider's webhook event IDs or state ordering.
+      const applied=await applyPaymentEvent(env,transaction,{eventId:`xrh-query-${transaction.id}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
+      return response({ok:true,orderStatus:applied.status,providerFeeProjectionStatus:projection.status,quota:applied.quota},200,env,request);
+    }
+    const orderStatus=state==="closed"?"expired":state==="failed"?"failed":"awaiting_payment",now=nowMs();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE payment_transactions SET status=?,updated_at=? WHERE id=? AND status NOT IN ('paid','refunded')").bind(state,now,transaction.id),
+      env.DB.prepare("UPDATE recharge_orders SET status=? WHERE id=? AND credited_at IS NULL AND status IN ('pending','awaiting_payment','failed','expired') AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status=?)").bind(orderStatus,transaction.order_id,transaction.id,state),
+    ]);
+    return response({ok:true,orderStatus:state,providerFeeProjectionStatus:projection.status,quota:await balance(env,session.user_id)},200,env,request);
+  } catch(error) {
+    if(error instanceof ApiFailure)throw error;
+    throw new RefreshDiagnosticFailure("ORDER_RECONCILIATION_ERROR","order_reconciliation",requestId,503,"查单结果已收到，但本地订单状态同步失败；请稍后刷新，勿重复下单。",200);
+  }
 }
 export async function relaunchPayment(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);

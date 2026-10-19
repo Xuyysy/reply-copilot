@@ -56,3 +56,19 @@ export interface RegistrationDiagnostics {
 export class ApiFailure extends Error {
   constructor(public status: number, public code: string, message: string, public retryAfterSeconds?: number) { super(message); }
 }
+
+export type RefreshDiagnosticCode = "PROVIDER_NETWORK_ERROR" | "PROVIDER_HTTP_ERROR" | "PROVIDER_SIGNATURE_ERROR" | "PROVIDER_CONFIG_ERROR" | "ORDER_RECONCILIATION_ERROR" | "SERVER_UNAVAILABLE";
+export type RefreshDiagnosticStage = "provider_config" | "provider_request_signing" | "provider_fetch" | "provider_http_response" | "provider_response_signature" | "provider_response" | "order_reconciliation" | "unknown";
+
+export class RefreshDiagnosticFailure extends ApiFailure {
+  constructor(
+    public diagnosticCode: RefreshDiagnosticCode,
+    public stage: RefreshDiagnosticStage,
+    public requestId: string,
+    status: number,
+    message: string,
+    public upstreamHttpStatus: number | null = null,
+  ) {
+    super(status, diagnosticCode, message);
+  }
+}
