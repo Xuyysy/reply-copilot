@@ -19,7 +19,7 @@ const webOrigin = "https://staging.x-reply-helper.top";
 const secretMarker = "DO_NOT_LOG_DIAGNOSTIC_SECRET_MARKER";
 
 function makeDb({ role = "admin", status = "active", verified = Date.now(), rateAllowed = true } = {}) {
-  const state = { rateAllowed, rateCalls: 0 };
+  const state = { rateAllowed, rateCalls: 0, accountLookupCalls: 0, roleLookupCalls: 0 };
   return {
     state,
     prepare(sql) {
@@ -29,7 +29,10 @@ function makeDb({ role = "admin", status = "active", verified = Date.now(), rate
           if (sql.includes("FROM sessions JOIN users")) {
             return this.args[1] === "web" ? { id: "session-1", user_id: "user-1", email: "admin@example.test", kind: "web", device_id: null, csrf_token_hash: null, expires_at: Date.now() + 60_000 } : null;
           }
-          if (sql.includes("SELECT role,status,email_verified_at FROM users WHERE id=?")) return { role, status, email_verified_at: verified };
+          if (sql.includes("SELECT status,email_verified_at FROM users WHERE id=?")) {
+            state.accountLookupCalls++;
+            return { role, status, email_verified_at: verified };
+          }
           return null;
         },
         async all() {
@@ -95,6 +98,16 @@ test("Staging admin can run one credential-free root GET even while the admin po
   assert.equal(db.state.rateCalls, 1);
 });
 
+test("regular Staging web user with valid session and CSRF can run diagnostic without role authorization", async () => {
+  const db = makeDb({ role: "user" });
+  const result = await call(db, { fetcher: async () => new Response(null, { status: 404 }) });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.category, "http_response");
+  assert.equal(db.state.rateCalls, 1);
+  assert.equal(db.state.accountLookupCalls, 1);
+  assert.equal(db.state.roleLookupCalls, 0);
+});
+
 test("invalid Base URL shapes are rejected before fetch", async (t) => {
   for (const [label, baseUrl] of [
     ["path prefix", "https://merchant.example.test/prefix/"],
@@ -118,16 +131,16 @@ test("invalid Base URL shapes are rejected before fetch", async (t) => {
   }
 });
 
-test("missing, regular, unverified, or CSRF-invalid sessions cannot access the diagnostic", async (t) => {
+test("missing sessions, inactive or unverified accounts, and CSRF-invalid requests cannot access diagnostic", async (t) => {
   const cases = [
     ["missing session", makeDb(), { Origin: webOrigin }, 401],
-    ["regular user", makeDb({ role: "user" }), undefined, 403],
-    ["frozen admin", makeDb({ status: "frozen" }), undefined, 403],
-    ["unverified admin", makeDb({ verified: null }), undefined, 403],
+    ["frozen user", makeDb({ role: "user", status: "frozen" }), undefined, 403],
+    ["unverified user", makeDb({ role: "user", verified: null }), undefined, 403],
     ["missing CSRF", makeDb(), { Origin: webOrigin, Cookie: `rc_session=${token}`, "X-Reply-Copilot-Action": "1" }, 403],
+    ["invalid CSRF", makeDb(), { Origin: webOrigin, Cookie: `rc_session=${token}`, "X-Reply-Copilot-Action": "1", "X-CSRF-Token": "invalid" }, 403],
   ];
   for (const [label, db, headers, status] of cases) await t.test(label, async () => {
-    const result = await call(db, { headers, includeCsrf: label !== "missing CSRF" });
+    const result = await call(db, { headers, includeCsrf: !["missing CSRF", "invalid CSRF"].includes(label) });
     assert.equal(result.response.status, status);
     assert.equal(result.observedRequest, undefined);
   });

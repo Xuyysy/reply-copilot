@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { ApiFailure } from "./types";
 import { takeRate } from "./auth";
-import { requireStagingDiagnosticAdmin } from "./admin-auth";
+import { requireStagingDiagnosticSession } from "./admin-auth";
 import { hmac, nowMs, sha256, uuid } from "./security";
 import { response } from "./http";
 
@@ -90,7 +90,7 @@ export async function performXiaodouConnectivityProbe(
 }
 
 export async function xiaodouConnectivityDiagnostic(request: Request, env: Env): Promise<Response> {
-  await requireStagingDiagnosticAdmin(request, env);
+  await requireStagingDiagnosticSession(request, env);
   // A single shared opaque bucket limits the outbound probe to one per Staging hour.
   const bucket = `xiaodou-connectivity:${await hmac(env, "staging-global")}`;
   if (!await takeRate(env, bucket, 1, RATE_WINDOW_MS, nowMs())) {
