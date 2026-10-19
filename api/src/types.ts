@@ -31,6 +31,7 @@ export interface Env {
   XIAODOU_PRIVATE_KEY?: string;
   XIAODOU_PLATFORM_PUBLIC_KEYS?: string;
   XIAODOU_RETURN_URL?: string;
+  XIAODOU_NETWORK_DIAGNOSTIC_ENABLED?: string;
 }
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };

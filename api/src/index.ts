@@ -11,6 +11,7 @@ import { generate } from "./ai";
 import { acknowledgeDelivery } from "./quota";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
+import { xiaodouConnectivityDiagnostic } from "./xiaodou-connectivity-diagnostic";
 
 async function feedback(request: Request, env: Env): Promise<Response> {
   const { session, token } = await sessionFor(request, env);
@@ -50,6 +51,7 @@ export default {
       if (request.method === "GET" && path === "/v1/packages") return await packages(request,env);
       if (request.method === "POST" && path === "/v1/orders") return await createOrder(request,env);
       if (request.method === "POST" && path === "/v1/payments/xiaodou/webhook") return await xiaodouWebhook(request,env);
+      if (request.method === "POST" && path === "/v1/admin/diagnostics/xiaodou-connectivity") return await xiaodouConnectivityDiagnostic(request,env);
       const orderRoute=path.match(/^\/v1\/orders\/([0-9a-f-]{36})(?:\/(refresh|attempts))?$/i);
       if(request.method==="GET"&&orderRoute&&!orderRoute[2])return await getOrder(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="refresh")return await refreshOrder(request,env,orderRoute[1]);
