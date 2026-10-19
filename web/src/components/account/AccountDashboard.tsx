@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
+import { canRefreshPaymentOrder, refreshPaymentOrder } from "../../lib/payment-refresh.mjs";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -11,9 +12,10 @@ import { Skeleton } from "../ui/skeleton";
 
 type Account = { user: { username: string | null; email: string; role: string; emailVerified: boolean } };
 type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number } };
-type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
+type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_status?: string; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
+type OrderRefreshFeedback = { orderId: string; message: string; code?: string; requestId?: string; diagnostic?: { stage: string; upstreamHttpStatus: number | null } };
 
 export default function AccountDashboard() {
   const language = useLanguage();
@@ -22,10 +24,13 @@ export default function AccountDashboard() {
   const [state, setState] = useState<"loading" | "signed-out" | "error" | "ready">("loading");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refreshingOrderId, setRefreshingOrderId] = useState<string | null>(null);
+  const [orderRefreshFeedback, setOrderRefreshFeedback] = useState<OrderRefreshFeedback | null>(null);
   const [code, setCode] = useState(() => typeof location !== "undefined" ? new URL(location.href).searchParams.get("device_code") : null);
   const [authorization, setAuthorization] = useState<Authorization>(code ? "checking" : "none");
   const [dialogOpen, setDialogOpen] = useState(false);
   const submitting = useRef(false);
+  const refreshInFlight = useRef(new Set<string>());
   const lastRefresh = useRef(0);
   const validCode = code && /^[A-F0-9]{8}$/.test(code) ? code : null;
 
@@ -93,6 +98,35 @@ export default function AccountDashboard() {
     catch(error){setMessage(readableError(error,language));}
     finally{setBusy(false);}
   }
+  async function refreshPaymentStatus(orderId: string) {
+    if (refreshInFlight.current.has(orderId)) return;
+    setRefreshingOrderId(orderId);
+    setOrderRefreshFeedback(null);
+    try {
+      const result = await refreshPaymentOrder<{ orderStatus?: string }>(orderId, { inFlight: refreshInFlight.current, request: api, reload: load });
+      if (result === false) return;
+      const status = result.orderStatus;
+      const statusMessage = status === "paid"
+        ? t("支付平台已确认成功，账户信息已刷新。", "The provider confirmed payment and account details were refreshed.")
+        : status === "pending"
+          ? t("已查询一次，订单仍待支付。", "Status checked once; the order is still awaiting payment.")
+          : status === "closed" || status === "failed"
+            ? t("已查询一次，支付未成功。", "Status checked once; payment did not succeed.")
+            : t("已查询一次，支付结果仍待确认；请勿重复下单。", "Status checked once; payment is still unconfirmed. Do not place another order.");
+      setOrderRefreshFeedback({ orderId, message: statusMessage });
+    } catch (error) {
+      const apiError = error instanceof ApiError ? error : null;
+      setOrderRefreshFeedback({
+        orderId,
+        message: readableError(error, language),
+        ...(apiError && /^[A-Z0-9_]{1,64}$/.test(apiError.code) ? { code: apiError.code } : {}),
+        ...(apiError?.requestId ? { requestId: apiError.requestId } : {}),
+        ...(apiError?.diagnostic ? { diagnostic: apiError.diagnostic } : {}),
+      });
+    } finally {
+      setRefreshingOrderId(null);
+    }
+  }
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
@@ -119,7 +153,7 @@ export default function AccountDashboard() {
       </Card>
       <Card data-orders-card className="min-w-0 self-start">
         <CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader>
-        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{t("套餐本金", "Principal")}: ¥{((order.base_amount_fen||0)/100).toFixed(2)} · {t("服务费", "Fee")}: ¥{((order.service_fee_fen||0)/100).toFixed(2)}</p><p>{phrase(language,...(refundLabels[order.refund_eligibility||"manual_review"]||refundLabels.manual_review))}</p>{order.refund_eligibility==="eligible"&&<Button className="mt-2" size="sm" variant="outline" disabled={busy} onClick={()=>void requestRefund(order.id)}>{t("申请普通退款","Request ordinary refund")}</Button>}</div><Badge className="shrink-0" variant="secondary">{order.status === "pending" ? t("待付款", "Pending") : order.status === "paid" ? t("已付款", "Paid") : order.status}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
+        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{t("套餐本金", "Principal")}: ¥{((order.base_amount_fen||0)/100).toFixed(2)} · {t("服务费", "Fee")}: ¥{((order.service_fee_fen||0)/100).toFixed(2)}</p><p>{phrase(language,...(refundLabels[order.refund_eligibility||"manual_review"]||refundLabels.manual_review))}</p>{canRefresh&&<Button data-order-refresh size="sm" variant="outline" className="mt-2" disabled={busy||refreshingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):t("刷新支付状态","Refresh payment status")}</Button>}{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}{order.refund_eligibility==="eligible"&&<Button className="mt-2" size="sm" variant="outline" disabled={busy} onClick={()=>void requestRefund(order.id)}>{t("申请普通退款","Request ordinary refund")}</Button>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
       </Card>
     </div>
     <Card><CardContent className="flex items-center justify-between gap-5 p-6"><div><h3 className="mb-1 text-lg font-semibold">{t("按需充值", "Top up when needed")}</h3><p className="text-sm text-muted-foreground">{t("支付尚未开放，创建待付款订单不会扣款或增加额度。", "Payment is not yet available. Pending orders do not charge or grant credits.")}</p></div><Button variant="outline" asChild><a href="/pricing">{t("查看套餐", "View plans")}<ArrowRight /></a></Button></CardContent></Card>

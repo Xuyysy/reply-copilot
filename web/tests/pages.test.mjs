@@ -62,6 +62,22 @@ test("account page requests protected data from the API", () => {
   assert.match(source, /error\.status === 401/);
   assert.match(source, /<Dialog open=/);
 });
+test("account orders expose provider refresh only for unresolved Xiaodou payments", () => {
+  const source = readFileSync(path.join(root, "src/components/account/AccountDashboard.tsx"), "utf8");
+  const refresh = readFileSync(path.join(root, "src/lib/payment-refresh.mjs"), "utf8");
+  const api = readFileSync(path.join(root, "src/lib/api.ts"), "utf8");
+  assert.match(refresh, /\/v1\/orders\/\$\{encodeURIComponent\(orderId\)\}\/refresh/);
+  assert.match(source, /payment_status/);
+  assert.match(source, /canRefreshPaymentOrder\(order\)/);
+  assert.match(refresh, /order\?\.provider === "xiaodou"/);
+  assert.match(refresh, /order\.status === "awaiting_payment"/);
+  assert.match(source, /data-order-refresh/);
+  assert.match(source, /refreshingOrderId===order\.id/);
+  assert.match(source, /disabled=\{busy\|\|refreshingOrderId===order\.id\}/);
+  assert.match(source, /diagnostic\.stage/);
+  assert.match(api, /diagnostic\?:/);
+  assert.match(api, /requestId\?:/);
+});
 test("interactive pages hydrate as isolated React islands", () => {
   for (const [pageName, component] of [["login", "AuthPanel"], ["account", "AccountDashboard"], ["admin", "AdminDashboard"]]) {
     assert.match(readFileSync(path.join(root, `src/pages/${pageName}.astro`), "utf8"), new RegExp(`<${component} client:load`));

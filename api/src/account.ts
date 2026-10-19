@@ -33,6 +33,7 @@ export async function activity(request: Request,env: Env): Promise<Response> {
   const [ledger,orders]=await Promise.all([
     env.DB.prepare("SELECT kind,free_delta,paid_delta,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT 20").bind(session.user_id).all(),
     env.DB.prepare(`SELECT o.id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,
+      t.provider,t.status payment_status,
       t.base_amount_fen,t.service_fee_fen,t.amount_fen total_amount_fen,
       CASE WHEN t.status<>'paid' OR o.credited_at IS NULL THEN 'not_paid'
         WHEN EXISTS(SELECT 1 FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status IN ('requested','pending','unknown')) THEN 'refund_pending'

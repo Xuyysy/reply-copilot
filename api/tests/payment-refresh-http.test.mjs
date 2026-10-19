@@ -60,6 +60,14 @@ function makeDb() {
           if (sql.includes("INSERT INTO payment_attempts")) state.attempts++;
           return { meta: { changes: 1 } };
         },
+        async all() {
+          if (sql.includes("FROM credit_ledger")) return { results: [] };
+          if (sql.includes("FROM recharge_orders o LEFT JOIN payment_transactions")) return { results: [{
+            id: orderId, package_name: "400 次", credits: 400, status: "awaiting_payment", provider: "xiaodou", payment_status: "unknown",
+            refund_eligibility: "not_paid", created_at: Date.now(), base_amount_fen: 990, service_fee_fen: 16, total_amount_fen: 1006,
+          }] };
+          return { results: [] };
+        },
       };
     },
     async batch(statements) {
@@ -137,6 +145,15 @@ test("payments off blocks new orders and payment attempts but allows owned order
   assert.equal(relaunch.response.status, 409);
   assert.equal(DB.state.attempts, 0, "closed payment setting must not create a new attempt");
   assert.equal(DB.state.paidBalance, 400);
+});
+
+test("activity exposes provider and payment state needed for the account refresh action", async () => {
+  const DB = makeDb();
+  const result = await call("/v1/activity", DB, { method: "GET" });
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.orders[0].status, "awaiting_payment");
+  assert.equal(result.body.orders[0].provider, "xiaodou");
+  assert.equal(result.body.orders[0].payment_status, "unknown");
 });
 
 test("payments-off refresh enforces ownership and does not call provider for another user's order", async () => {
