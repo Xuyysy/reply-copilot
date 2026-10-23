@@ -48,9 +48,10 @@ export async function updateAdminPaymentControl(request:Request,env:Env):Promise
   if(!isNew&&!isLegacy)throw new ApiFailure(400,'INVALID_REQUEST','支付配置格式无效。');
   const normalized=isNew?input:{
    rsa2Enabled:input.rsa2Enabled,rsa2WechatEnabled:input.wechatEnabled,rsa2AlipayEnabled:input.alipayEnabled,
-   rsa2WechatReleased:input.wechatReleased,rsa2AlipayReleased:input.alipayReleased,
-   // A legacy client only knew the former global Alipay/WeChat flags. Treat
-   // those as RSA2 values and preserve Epay's independent channel decisions.
+   rsa2WechatReleased:input.wechatReleased,rsa2AlipayReleased:before.channels.rsa2.alipay.platformReleased,
+   // Legacy clients cannot identify which Alipay protocol was approved.
+   // Preserve both independent decisions; only explicit provider fields may
+   // change Alipay release. WeChat has only ever been supported by RSA2.
    epayEnabled:input.epayEnabled,epayAlipayEnabled:before.channels.epay.alipay.enabled,epayAlipayReleased:before.channels.epay.alipay.platformReleased,
   };
   const op=await operation(env,actor,body,'payment_provider_settings','payment_providers');

@@ -84,7 +84,7 @@ test('legacy Epay Alipay sales require only their own channel and release gates'
  } finally { f.sql.close(); }
 });
 
-test('admin can independently toggle providers and channels with audit and no environment purchase reset',async()=>{
+test('legacy admin can toggle providers with audit but cannot infer provider-specific Alipay approval',async()=>{
  const f=adminFixture();
  const before=await f.call('/v1/admin/payment-control',{method:'GET'});
  assert.equal(before.status,200);assert.equal(before.body.operatorEnabled,true);
@@ -92,7 +92,7 @@ test('admin can independently toggle providers and channels with audit and no en
  const body={...op(),settings:{rsa2Enabled:false,epayEnabled:true,alipayEnabled:true,wechatEnabled:true,alipayReleased:true,wechatReleased:false}};
  const saved=await f.call('/v1/admin/payment-control',{body});
  assert.equal(saved.status,200);assert.equal(saved.body.providers.rsa2.enabled,false);assert.equal(saved.body.providers.epay.enabled,true);
- assert.equal(saved.body.channels.rsa2.alipay.platformReleased,true);
+ assert.equal(saved.body.channels.rsa2.alipay.platformReleased,false,'legacy global release edits must not unlock RSA2 Alipay');
  assert.equal(saved.body.channels.epay.alipay.platformReleased,false,'legacy global release edits must not unlock Epay Alipay');
  assert.equal(saved.body.operatorEnabled,true);assert.equal(f.sql.prepare("SELECT value FROM system_settings WHERE key='purchase_enabled'").get().value,'1');
  assert.equal(f.sql.prepare('SELECT count(*) n FROM admin_audit_logs').get().n,1);

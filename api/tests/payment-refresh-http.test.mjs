@@ -425,7 +425,7 @@ function makeCheckoutDb() {
     if (sql.includes('system_settings WHERE key IN')) return {bind(){return this;},async all(){return {results:[
       {key:'purchase_enabled',value:'1'},{key:'payment_rsa2_enabled',value:'1'},{key:'payment_epay_enabled',value:'0'},
       {key:'payment_alipay_enabled',value:'1'},{key:'payment_wechat_enabled',value:'0'},
-      {key:'payment_alipay_released',value:'1'},{key:'payment_wechat_released',value:'0'},
+      {key:'payment_rsa2_alipay_released',value:'1'},{key:'payment_wechat_released',value:'0'},
     ]};}};
     if (sql.includes("FROM recharge_packages WHERE id=?")) return {
       bind() { return this; },

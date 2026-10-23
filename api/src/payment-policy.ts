@@ -10,9 +10,9 @@ const settingKeys = [
   'purchase_enabled','payment_rsa2_enabled','payment_epay_enabled',
   'payment_rsa2_alipay_enabled','payment_rsa2_wechat_enabled','payment_epay_alipay_enabled',
   'payment_rsa2_alipay_released','payment_rsa2_wechat_released','payment_epay_alipay_released',
-  // Read legacy values during the migration window for older clients and
-  // databases that have not yet applied 0014.
-  'payment_alipay_enabled','payment_wechat_enabled','payment_alipay_released','payment_wechat_released',
+  // Legacy operation switches remain compatible. The shared Alipay release
+  // cannot establish approval for a specific provider and is never inherited.
+  'payment_alipay_enabled','payment_wechat_enabled','payment_wechat_released',
 ] as const;
 
 async function settings(env:Env):Promise<Record<string,string>> {
@@ -48,11 +48,11 @@ export async function paymentControl(env:Env){
   epay:{enabled:enabled(values.payment_epay_enabled),credentialsConfigured:epayCredentials},
  };
  const rsa2Channels={
-  alipay:{enabled:enabled(values.payment_rsa2_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_rsa2_alipay_released??values.payment_alipay_released)},
+  alipay:{enabled:enabled(values.payment_rsa2_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_rsa2_alipay_released)},
   wechat:{enabled:enabled(values.payment_rsa2_wechat_enabled??values.payment_wechat_enabled),platformReleased:enabled(values.payment_rsa2_wechat_released??values.payment_wechat_released)},
  };
  const epayChannels={
-  alipay:{enabled:enabled(values.payment_epay_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_epay_alipay_released??values.payment_alipay_released)},
+  alipay:{enabled:enabled(values.payment_epay_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_epay_alipay_released)},
  };
  const canSell=environmentReady&&operatorEnabled;
  const methods:PaymentMethod[]=[];
