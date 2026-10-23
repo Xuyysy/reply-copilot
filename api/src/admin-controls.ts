@@ -38,6 +38,15 @@ export async function adminPaymentPlatformCheck(request:Request,env:Env):Promise
 export async function updateAdminPaymentControl(request:Request,env:Env):Promise<Response>{
  const actor=await requireAdminSession(request,env,true),body=await jsonBody(request,2048);
  const before=await paymentControl(env),now=nowMs();
+ if(body.merchantSettings!==undefined){
+  const input=body.merchantSettings as Record<string,unknown>,fields={enabled:'payment_mk99_enabled',alipayEnabled:'payment_mk99_alipay_enabled',wechatEnabled:'payment_mk99_wechat_enabled',alipayReleased:'payment_mk99_alipay_released',wechatReleased:'payment_mk99_wechat_released'};
+  if(!input||typeof input!=='object'||Array.isArray(input)||!['mk99','xiaodou','none'].includes(String(input.activeMerchant))||!Object.keys(fields).every(key=>typeof input[key]==='boolean')||Object.keys(input).some(key=>key!=='activeMerchant'&&!(key in fields)))throw new ApiFailure(400,'INVALID_REQUEST','收款商家配置无效。');
+  const op=await operation(env,actor,body,'merchant_payment_settings','active_merchant');
+  const statements=[env.DB.prepare("UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key='active_merchant'").bind(input.activeMerchant,now,actor.user_id),...Object.entries(fields).map(([field,key])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(input[field]?'1':'0',now,actor.user_id,key))];
+  await commitOperation(env,op,statements,{activeMerchant:before.activeMerchant,mk99:before.providers.mk99,channels:before.channels.mk99},input);
+  return response({ok:true,...await paymentControl(env)},200,env,request);
+ }
+
  if(body.settings!==undefined){
   const input=body.settings as Record<string,unknown>;
   const fields={rsa2Enabled:'payment_rsa2_enabled',rsa2WechatEnabled:'payment_rsa2_wechat_enabled',rsa2AlipayEnabled:'payment_rsa2_alipay_enabled',rsa2WechatReleased:'payment_rsa2_wechat_released',rsa2AlipayReleased:'payment_rsa2_alipay_released',epayEnabled:'payment_epay_enabled',epayAlipayEnabled:'payment_epay_alipay_enabled',epayAlipayReleased:'payment_epay_alipay_released'} as const;

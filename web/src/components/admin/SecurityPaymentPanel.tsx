@@ -1,3 +1,4 @@
+import MerchantPaymentSettings from './MerchantPaymentSettings';
 import {useEffect,useRef,useState} from 'react';
 import {Button} from '../ui/button';
 import {Input} from '../ui/input';
@@ -7,7 +8,7 @@ import type {Language} from '../../lib/language';
 
 type Toggle={enabled:boolean;credentialsConfigured?:boolean;platformReleased?:boolean};
 type Availability=Toggle&{available:boolean;reasons:string[]};
-type Control={environmentReady:boolean;operatorEnabled:boolean;globalEffectiveEnabled:boolean;effectiveEnabled:boolean;providers:{rsa2:Toggle;epay:Toggle};channels:{rsa2:{alipay:Toggle;wechat:Toggle};epay:{alipay:Toggle};alipay?:Toggle;wechat?:Toggle};availability:{rsa2:{alipay:Availability;wechat:Availability};epay:{alipay:Availability}};methods:Array<{provider:string;channel:string}>};
+type Control={activeMerchant:string;environmentReady:boolean;operatorEnabled:boolean;globalEffectiveEnabled:boolean;effectiveEnabled:boolean;providers:{rsa2:Toggle;epay:Toggle;mk99:any};channels:{mk99:any;rsa2:{alipay:Toggle;wechat:Toggle};epay:{alipay:Toggle};alipay?:Toggle;wechat?:Toggle};availability:{mk99:any;rsa2:{alipay:Availability;wechat:Availability};epay:{alipay:Availability}};methods:Array<{provider:string;channel:string}>};
 type Settings={rsa2Enabled:boolean;rsa2WechatEnabled:boolean;rsa2AlipayEnabled:boolean;rsa2WechatReleased:boolean;rsa2AlipayReleased:boolean;epayEnabled:boolean;epayAlipayEnabled:boolean;epayAlipayReleased:boolean};
 type Props={language:Language;busy:boolean;read:(path:string)=>Promise<any>;write:(path:string,body:Record<string,unknown>)=>Promise<any>};
 const initial:Settings={rsa2Enabled:true,rsa2WechatEnabled:false,rsa2AlipayEnabled:true,rsa2WechatReleased:false,rsa2AlipayReleased:false,epayEnabled:false,epayAlipayEnabled:true,epayAlipayReleased:false};
@@ -49,13 +50,15 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
    {control&&<>
     <div role="status" className="rounded-lg border p-4">
      <strong>{!control.environmentReady?t('暂不可收款：环境保护未就绪','Unavailable: environment safety is not ready'):!control.operatorEnabled?t('已暂停收款：全站购买开关关闭','Sales paused: global purchase switch is off'):control.effectiveEnabled?t('可以正常收款','Ready to accept payments'):t('暂不可收款','Not ready to accept payments')}</strong>
-     {!control.effectiveEnabled&&control.operatorEnabled&&control.environmentReady&&<p className="mt-1">{t('原因：','Reason: ')}{[
+     {!control.effectiveEnabled&&control.operatorEnabled&&control.environmentReady&&control.activeMerchant==='xiaodou'&&<p className="mt-1">{t('原因：','Reason: ')}{[
       ...(!control.providers.rsa2.credentialsConfigured&&!control.providers.epay.credentialsConfigured?[t('支付凭证未配置','Payment credentials are not ready')]:[]),
       ...(!settings.rsa2WechatReleased?[t('RSA2 微信通道放行尚未确认','RSA2 WeChat release is unconfirmed')]:[]),
       ...(!settings.rsa2AlipayReleased?[t('RSA2 支付宝通道放行尚未确认','RSA2 Alipay release is unconfirmed')]:[]),
       ...(!settings.epayAlipayReleased?[t('易支付支付宝放行尚未确认','Epay Alipay release is unconfirmed')]:[]),
      ].join('；')}</p>}
     </div>
+    <MerchantPaymentSettings control={control} language={language} locked={locked} reason={reason} write={write} reload={load}/>
+    {control.activeMerchant==='xiaodou'&&<>
     <section className="space-y-3 rounded-lg border p-4" aria-labelledby="rsa2-settings-title">
      <h3 id="rsa2-settings-title" className="font-semibold">RSA2 Open API</h3>
      <p className="text-sm text-muted-foreground">{t('凭证','Credentials')}: {status(control.providers.rsa2.credentialsConfigured===true)} · {control.providers.rsa2.credentialsConfigured?t('服务端格式与密钥可导入检查通过','Server-side format and key import checks passed'):t('缺失或无效（不显示密钥内容）','Missing or invalid (values hidden)')}</p>
@@ -77,8 +80,9 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      <p>{t('请先确认你已在小豆商户后台核实该支付接口、通道和当前申报交易形态已获准。此勾选只记录人工确认，不会查询或改变小豆权限。','Confirm that the provider, channel, and declared trade scope are approved in Xiaodou merchant settings. This records your confirmation only; it does not query or change Xiaodou permissions.')}</p>
      <Button disabled={locked} onClick={confirmChannelRelease}>{t('我已核实，确认并启用通道','Verified — confirm and enable')}</Button><Button variant="outline" disabled={locked} onClick={()=>setPendingRelease(null)}>{t('取消','Cancel')}</Button>
     </div>}
-    <p>{t('当前实际可用的付款方式','Currently available payment methods')}: {control.methods.length?control.methods.map(x=>`${x.provider==='xiaodou'?'RSA2':'Epay'} / ${x.channel}`).join('、'):'无'}</p>
-    <Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存支付接口设置','Save payment settings')}</Button>
+    </>}
+    <p>{t('当前实际可用的付款方式','Currently available payment methods')}: {control.methods.length?control.methods.map(x=>`${x.provider==='mk99'?'MK99':x.provider==='xiaodou'?'RSA2':'Epay'} / ${x.channel}`).join('、'):'无'}</p>
+    {control.activeMerchant==='xiaodou'&&<Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存支付接口设置','Save payment settings')}</Button>}
     <div className="space-y-2 border-t pt-4"><p>{t('全站收款总开关','Global purchase switch')}</p><Button disabled={locked||reason.trim().length<8||(!control.operatorEnabled&&!control.environmentReady)} onClick={()=>control.operatorEnabled?void togglePurchase(false):setConfirmEnable(true)}>{control.operatorEnabled?t('暂停全站收款','Pause all sales'):t('开启全站收款','Enable all sales')}</Button>
      {confirmEnable&&!control.operatorEnabled&&<div role="alert" className="space-y-2"><p>{t('确认开启全站收款？只有接口、凭证、通道及平台放行条件全部满足的付款方式才会展示。','Enable global sales? Only methods passing interface, credentials, channel, and platform release gates will be shown.')}</p><Button disabled={locked||reason.trim().length<8} onClick={()=>void togglePurchase(true)}>{t('确认开启','Confirm')}</Button><Button variant="outline" disabled={locked} onClick={()=>setConfirmEnable(false)}>{t('取消','Cancel')}</Button></div>}
     </div>

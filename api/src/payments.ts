@@ -1,3 +1,6 @@
+import {createMk99Checkout,refreshMk99Order,mk99Notify,adminMk99Check} from './mk99-payments';
+export {mk99Notify,adminMk99Check};
+import {mk99Config} from './mk99';
 import { paymentControl, type PaymentChannel, type PaymentProvider } from "./payment-policy";
 import { CUSTOMER_FEE_RATE_BPS, projectPackagePricing, type PackagePricing } from "./pricing";
 export { projectPaymentFee } from "./pricing";
@@ -12,7 +15,7 @@ import { response } from "./http";
 import { balance } from "./quota";
 import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, reconcileFeeProjection, webhookEventMatchesStatus, XiaodouClient, XiaodouProviderError, safeProviderResponseDiagnostic, xiaodouWebhookIsEnabled } from "./xiaodou.js";
 
-type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number;provider_fee_projection_status?:string;provider_fee_projection_json?:string|null;provider_fee_projection_issue?:string|null;payment_protocol?:"rsa2"|"epay";payment_channel?:"ALIPAY_H5"|"WECHAT_H5"|null;epay_pid?:string|null;epay_trade_no?:string|null };
+export type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number;provider_fee_projection_status?:string;provider_fee_projection_json?:string|null;provider_fee_projection_issue?:string|null;payment_protocol?:"rsa2"|"epay";payment_channel?:"ALIPAY_H5"|"WECHAT_H5"|null;epay_pid?:string|null;epay_trade_no?:string|null;merchant_provider?:string;merchant_account?:string|null;notification_sign_type?:string|null;provider_payment_id?:string|null;amount_contract?:string|null;risk_state?:string };
 type PaymentEvent = { eventId:string;eventType:string;amountFen:number;currency:string;bodySha256?:string;epayTradeNo?:string };
 const LOCAL_WEB_ORIGIN = /^http:\/\/(127\.0\.0\.1|localhost):\d+$/;
 
@@ -23,7 +26,7 @@ function isLocalMock(env:Env,request:Request):boolean {
 function realPaymentsEnabled(env:Env):boolean { return env.PAYMENTS_ENABLED==='1'; }
 async function checkoutAllowedFor(env:Env,transaction:PaymentTransaction):Promise<boolean> {
   const control=await paymentControl(env);
-  const provider=transaction.payment_protocol==="epay"?"xiaodou_epay":"xiaodou";
+  const provider=transaction.merchant_provider==="mk99"?"mk99":transaction.payment_protocol==="epay"?"xiaodou_epay":"xiaodou";
   // Historical rows may not have a channel snapshot. Before channel-aware
   // orders existed, the only supported channel was Alipay H5.
   const channel=transaction.payment_channel??"ALIPAY_H5";
@@ -83,7 +86,7 @@ async function recordProviderFeeProjection(env:Env,transaction:PaymentTransactio
   transaction.provider_fee_projection_issue=next.issue;
   return next;
 }
-async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,event:PaymentEvent):Promise<{duplicate:boolean;quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};status:string}> {
+export async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,event:PaymentEvent):Promise<{duplicate:boolean;quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};status:string}> {
   if(event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   if(event.eventType==="PAYMENT_SUCCEEDED"&&event.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   const now=nowMs(),userId=transaction.order_user_id!,orderId=transaction.order_id;
@@ -104,19 +107,22 @@ async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,event:Pa
     env.DB.prepare("UPDATE payment_transactions SET epay_trade_no=? WHERE id=? AND payment_protocol='epay' AND (epay_trade_no IS NULL OR epay_trade_no=?)").bind(event.epayTradeNo,transaction.id,event.epayTradeNo),
     env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND payment_protocol='epay' AND epay_trade_no=?) THEN 1 ELSE 0 END").bind(`epay:${eventId}`,transaction.id,event.epayTradeNo),
   ]:[];
+  if(transaction.merchant_provider==="mk99")epayGuard.push(
+    env.DB.prepare("UPDATE payment_transactions SET provider_payment_id=COALESCE(provider_payment_id,?),actual_paid_fen=CASE WHEN ?='PAYMENT_SUCCEEDED' THEN ? ELSE actual_paid_fen END WHERE id=? AND merchant_provider='mk99' AND (provider_payment_id IS NULL OR provider_payment_id=?)").bind(transaction.provider_payment_id??null,event.eventType,transaction.amount_fen,transaction.id,transaction.provider_payment_id??null),env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND merchant_provider='mk99' AND risk_state='clear' AND provider_payment_id=?) THEN 1 ELSE 0 END").bind(`mk99:${eventId}`,transaction.id,transaction.provider_payment_id??null));
   const results=await env.DB.batch([
     ...epayGuard,
-    env.DB.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?) ON CONFLICT(provider,provider_event_id) DO NOTHING").bind(eventId,transaction.provider,event.eventId,transaction.id,event.eventType,event.amountFen,event.currency,event.bodySha256??null,now,transaction.id),
+    env.DB.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?) ON CONFLICT(provider,provider_event_id) DO NOTHING").bind(eventId,transaction.provider,event.eventId,transaction.id,event.eventType,event.amountFen,event.currency,event.bodySha256??null,now,transaction.merchant_provider??transaction.provider,transaction.id),
     env.DB.prepare("UPDATE payment_transactions SET status=?,provider_trade_id=COALESCE(provider_trade_id,?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END,updated_at=? WHERE id=? AND status NOT IN ('paid','refunded') AND EXISTS(SELECT 1 FROM provider_payment_events WHERE id=?)").bind(target,transaction.provider_trade_id??null,target,now,now,transaction.id,eventId),
-    env.DB.prepare("UPDATE recharge_orders SET status=CASE WHEN ?='paid' THEN 'paid' WHEN ?='closed' THEN 'expired' WHEN ?='unknown' THEN 'awaiting_payment' ELSE 'failed' END,payment_method=?,provider_reference=COALESCE(provider_reference,?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END WHERE id=? AND status IN ('pending','awaiting_payment','failed','expired') AND credited_at IS NULL AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status=?)").bind(target,target,target,transaction.provider,transaction.provider_trade_id??null,target,now,orderId,transaction.id,target),
+    env.DB.prepare("UPDATE recharge_orders SET status=CASE WHEN ?='paid' THEN 'paid' WHEN ?='closed' THEN 'expired' WHEN ?='unknown' THEN 'awaiting_payment' ELSE 'failed' END,payment_method=?,provider_reference=COALESCE(provider_reference,?),paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END WHERE id=? AND status IN ('pending','awaiting_payment','failed','expired') AND credited_at IS NULL AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status=?)").bind(target,target,target,transaction.merchant_provider==="mk99"?"mk99":transaction.provider,transaction.provider_trade_id??null,target,now,orderId,transaction.id,target),
     env.DB.prepare("UPDATE credit_accounts SET paid_balance=paid_balance+?,version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND status='paid' AND credited_at IS NULL) AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status='paid') AND NOT EXISTS(SELECT 1 FROM credit_ledger WHERE kind='purchase_grant' AND reference_id=?) AND NOT EXISTS(SELECT 1 FROM credit_batches WHERE source_order_id=?)").bind(transaction.order_credits,now,userId,orderId,transaction.id,orderId,orderId),
-    env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'purchase_grant',0,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND status='paid' AND credited_at IS NULL) AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status='paid') ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,transaction.order_credits,orderId,"小豆支付成功到账",now,orderId,transaction.id),
+    env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'purchase_grant',0,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND status='paid' AND credited_at IS NULL) AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status='paid') ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,transaction.order_credits,orderId,transaction.merchant_provider==="mk99"?"MK99支付成功到账":"小豆支付成功到账",now,orderId,transaction.id),
     env.DB.prepare(`INSERT INTO credit_batches(id,user_id,bucket,source_kind,source_order_id,grant_credits,remaining_credits,consumed_credits,permanently_revoked_credits,generation_reserved_credits,refund_reserved_credits,granted_at,paid_at,history_confidence,status)
       SELECT ?,?, 'paid','purchase',?,?,?,0,0,0,0,?,?,'tracked','active'
       WHERE EXISTS(SELECT 1 FROM credit_ledger WHERE kind='purchase_grant' AND reference_id=?) ON CONFLICT DO NOTHING`).bind(uuid(),userId,orderId,transaction.order_credits,transaction.order_credits,now,now,orderId),
     env.DB.prepare("UPDATE recharge_orders SET credited_at=? WHERE id=? AND status='paid' AND credited_at IS NULL AND EXISTS(SELECT 1 FROM credit_ledger WHERE kind='purchase_grant' AND reference_id=?) AND EXISTS(SELECT 1 FROM credit_batches WHERE source_order_id=? AND user_id=? AND grant_credits=?)").bind(now,orderId,orderId,orderId,userId,transaction.order_credits),
     env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN NOT EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status='paid') OR EXISTS(SELECT 1 FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id JOIN credit_batches b ON b.source_order_id=o.id JOIN credit_accounts a ON a.user_id=o.user_id WHERE t.id=? AND o.credited_at IS NOT NULL AND b.grant_credits=o.credits AND a.paid_balance=(SELECT COALESCE(sum(remaining_credits),0) FROM credit_batches WHERE user_id=o.user_id AND bucket='paid')) THEN 1 ELSE 0 END`).bind(eventId,transaction.id,transaction.id),
     env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(eventId),
+    ...(transaction.merchant_provider==="mk99"?[env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(`mk99:${eventId}`)]:[]),
     ...(event.epayTradeNo?[env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(`epay:${eventId}`)]:[]),
   ]);
   if(results[epayGuard.length].meta.changes!==1){
@@ -182,30 +188,38 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   if(!mock&&!real)throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付尚未开放，暂不能创建订单。");
   const channel=(body.channel??control.defaultMethod?.channel??"ALIPAY_H5") as PaymentChannel;
   if(!["ALIPAY_H5","WECHAT_H5"].includes(channel))throw new ApiFailure(400,"INVALID_PAYMENT_CHANNEL","请选择可用的支付方式。");
-  const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel);
+  const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&(body.provider===undefined?control.activeMerchant==='xiaodou':method.provider===body.provider));
   if(!selected)throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","该支付方式暂不可用。");
   const paymentProvider=selected.provider as PaymentProvider|"local_mock";
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
   if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","套餐不存在或已下架。");
   const feeSnapshot=projectPackagePricing(pkg),amountFen=feeSnapshot.totalPaymentFen;
+  const mk99=real&&paymentProvider==="mk99",mkConfig=mk99?mk99Config(env):null;
   const epay=real&&paymentProvider==="xiaodou_epay";
   if(body.restartPayment!==undefined&&(typeof body.restartPayment!=="boolean"||!epay))throw new ApiFailure(400,"INVALID_REQUEST","仅易支付支持主动重新发起订单。");
   const restart=epay&&body.restartPayment===true;
   const paymentProtocol=epay?"epay":"rsa2";
-  const unresolvedProtocol=" AND EXISTS(SELECT 1 FROM payment_transactions existing WHERE existing.order_id=recharge_orders.id AND existing.payment_protocol=?)";
-  const client=real&&!epay?paymentClient(env):null;
+  const unresolvedProtocol=" AND EXISTS(SELECT 1 FROM payment_transactions existing WHERE existing.order_id=recharge_orders.id AND existing.payment_protocol=? AND existing.merchant_provider=?)";
+  const client=real&&!epay&&!mk99?paymentClient(env):null;
   const id=uuid(),now=nowMs(),amountCents=pkg.promo_price_cents??pkg.price_cents,provider=mock?"local_mock":"xiaodou",outTradeNo=`XRH_${id.replaceAll("-","")}`,transactionId=uuid(),attemptId=uuid(),requestId=`xrh-${uuid()}`;
   let paymentForm:ReturnType<typeof epayCheckout>|null=null;
   if(epay){
     try{paymentForm=epayCheckout(epayConfig(env),{orderId:id,outTradeNo,amountFen,name:`x-Reply-Helper ${pkg.credits}次`});}
     catch{throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","易支付配置暂时不可用。");}
   }
+  const merchant=mk99?'mk99':'xiaodou';
+  const gateKeys=mk99?['payment_mk99_enabled',channel==='WECHAT_H5'?'payment_mk99_wechat_enabled':'payment_mk99_alipay_enabled',channel==='WECHAT_H5'?'payment_mk99_wechat_released':'payment_mk99_alipay_released']:epay?['payment_epay_enabled','payment_epay_alipay_enabled','payment_epay_alipay_released']:['payment_rsa2_enabled',channel==='WECHAT_H5'?'payment_rsa2_wechat_enabled':'payment_rsa2_alipay_enabled',channel==='WECHAT_H5'?'payment_rsa2_wechat_released':'payment_rsa2_alipay_released'];
+  const creationGate=" AND (?=1 OR (EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value=?) AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1') AND (SELECT count(*) FROM system_settings WHERE key IN (?,?,?) AND value='1')=3))";
   const created=await env.DB.batch([
-    env.DB.prepare(`INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND (?=1 OR NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND status IN ('pending','awaiting_payment')${unresolvedProtocol}))`).bind(id,session.user_id,pkg.id,pkg.name_zh,pkg.credits,amountCents,provider,outTradeNo,now,session.user_id,restart?1:0,session.user_id,paymentProtocol),
-    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,epay_pid,settlement_mode,exchange_rate_micros) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,epay?"epay":provider,outTradeNo,now,now,paymentProtocol,channel,epay?env.XIAODOU_EPAY_PID:null,feeSnapshot.settlementMode,feeSnapshot.exchangeRateMicros,id,session.user_id),
+    env.DB.prepare(`INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND (?=1 OR NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND status IN ('pending','awaiting_payment')${unresolvedProtocol}))${creationGate}`).bind(id,session.user_id,pkg.id,pkg.name_zh,pkg.credits,amountCents,mk99?"mk99":provider,outTradeNo,now,session.user_id,restart?1:0,session.user_id,paymentProtocol,mk99?"mk99":mock?"local_mock":"xiaodou",mock?1:0,merchant,...gateKeys),
+    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,epay_pid,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,epay?"epay":mk99?"mk99":provider,outTradeNo,now,now,paymentProtocol,channel,epay?env.XIAODOU_EPAY_PID:null,feeSnapshot.settlementMode,feeSnapshot.exchangeRateMicros,mk99?"mk99":mock?"local_mock":"xiaodou",mkConfig?.pid??null,mkConfig?.notifySignType??null,mk99?"CNY_EXACT_BUYER_TOTAL":null,mk99?amountFen:null,id,session.user_id),
     env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,1,?,'prepared',?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?)").bind(attemptId,transactionId,requestId,now,now,transactionId),
   ]);
-  if(created[0].meta.changes!==1)throw new ApiFailure(409,"UNRESOLVED_ORDER_EXISTS","当前通道已有待支付或待确认订单。请查看原订单，或主动选择重新发起支付；旧订单仍保留。");
+  if(created[0].meta.changes!==1){
+    if(!mock&&!(await paymentControl(env)).methods.some(method=>method.provider===selected.provider&&method.channel===channel))throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","支付方式状态已变化，请重新选择。");
+    throw new ApiFailure(409,"UNRESOLVED_ORDER_EXISTS","当前通道已有待支付或待确认订单。请查看原订单，或主动选择重新发起支付；旧订单仍保留。");
+  }
+  if(mk99)return await createMk99Checkout(request,env,(await transactionForOrder(env,id))!,{attemptId,requestId,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,...feeSnapshot});
   if(mock)return response({paymentAvailable:true,paymentProvider:"local_mock",order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",baseAmountFen:feeSnapshot.baseAmountFen,serviceFeeFen:feeSnapshot.serviceFeeFen,feeRateBps:feeSnapshot.feeRateBps,amountFen,currency:"CNY",status:"pending",paymentMode:"mock",message:"本地模拟订单，不会产生真实扣款。"}},201,env,request);
   if(paymentForm){
     const checkout:CheckoutResult={outcome:"ready",issue:"EPAY_FORM_PREPARED",paymentUrl:null,paymentStatus:"pending"};
@@ -239,9 +253,9 @@ async function persistCheckout(env:Env,transactionId:string,attemptId:string,res
   ]);
 }
 export async function getOrder(request:Request,env:Env,orderId:string):Promise<Response>{
-  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,t.provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.cashier_url,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
+  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,t.provider,t.merchant_provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.cashier_url,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
   if(!row)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
-  return response({order:{paymentProvider:row.provider,paymentProtocol:row.payment_protocol,paymentChannel:row.payment_channel??null,checkout:checkoutFromAttempt(row.checkout_marker),id:row.id,packageId:row.package_id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:null},quota:await balance(env,session.user_id)},200,env,request);
+  return response({order:{paymentProvider:row.merchant_provider==="mk99"?"mk99":row.provider,paymentProtocol:row.merchant_provider==="mk99"?"mk99":row.payment_protocol,paymentChannel:row.payment_channel??null,checkout:checkoutFromAttempt(row.checkout_marker),id:row.id,packageId:row.package_id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:row.merchant_provider==="mk99"&&row.payment_status==="pending"?row.cashier_url:null},quota:await balance(env,session.user_id)},200,env,request);
 }
 async function paymentTransactionForOwner(env:Env,orderId:string,userId:string):Promise<PaymentTransaction>{
   const txn=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE o.id=? AND o.user_id=?").bind(orderId,userId).first<PaymentTransaction>();
@@ -261,6 +275,7 @@ export async function simulatePayment(request:Request,env:Env,orderId:string):Pr
 }
 export async function refreshOrder(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
+  if(transaction.merchant_provider==="mk99")return await refreshMk99Order(request,env,transaction);
   // Payment checkout is a separately gated write capability. Existing owners
   // must still be able to reconcile a previously created Xiaodou order after
   // checkout is turned off, using the configured read-only query operation.
@@ -299,6 +314,7 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
 }
 export async function relaunchPayment(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
+  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","请使用原付款链接，MK99不支持自动重新建单。");
   if(transaction.payment_protocol==="epay"){
     if(!await checkoutAllowedFor(env,transaction)||transaction.provider!=="xiaodou"||transaction.status!=="pending"||transaction.order_status!=="awaiting_payment")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","当前订单不能恢复付款表单。");
     let form:ReturnType<typeof epayCheckout>;
@@ -345,8 +361,8 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   if(event.currency!==undefined&&event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   const outTradeNo=String(event.outTradeNo??"");
   if(type.startsWith("PAYMENT_")){
-    const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
-    if(!transaction||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+    const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.merchant_provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
+    if(!transaction||transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
     const amount=event.eventAmountFen as number,gross=event.grossAmountFen;
     if(!Number.isSafeInteger(gross)||gross!==transaction.amount_fen||(type==="PAYMENT_SUCCEEDED"&&amount!==transaction.amount_fen)||(type!=="PAYMENT_SUCCEEDED"&&amount!==0))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付事件金额不匹配。");
     await recordProviderFeeProjection(env,transaction,event.feeProjection);
@@ -355,7 +371,7 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
     const refundNo=String(event.outRefundNo??""),refund=await env.DB.prepare("SELECT r.* FROM payment_refunds r JOIN payment_transactions t ON t.id=r.transaction_id WHERE t.provider='xiaodou' AND r.out_refund_no=?").bind(refundNo).first<Record<string,unknown>>();
     if(!refund)throw new ApiFailure(404,"REFUND_NOT_FOUND","退款记录不存在。");
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=?").bind(refund.transaction_id).first<PaymentTransaction>();
-    if(!transaction||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+    if(!transaction||transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
     if(!refundEventMatchesTransaction(event,refund,transaction))throw new ApiFailure(409,"REFUND_MISMATCH","退款事件与原订单或退款记录不符。");
     await applyRefundEvent(env,transaction,refund,{eventId:verified.eventId,eventType:type,amountFen:event.eventAmountFen as number,currency:"CNY",bodySha256:verified.bodySha256});
   }
@@ -373,7 +389,7 @@ export async function epayNotify(request:Request,env:Env):Promise<Response>{
   if(!/^[A-Za-z0-9_-]{6,64}$/.test(parameters.out_trade_no??"")||!/^[A-Za-z0-9_-]{1,128}$/.test(parameters.trade_no??""))throw new ApiFailure(400,"INVALID_PAYMENT_NOTIFY","支付通知订单标识无效。");
   let amountFen:number;
   try{amountFen=moneyToFen(parameters.money);}catch{throw new ApiFailure(400,"INVALID_PAYMENT_NOTIFY","支付通知金额无效。");}
-  const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.payment_protocol='epay' AND t.provider_trade_id=?").bind(parameters.out_trade_no).first<PaymentTransaction>();
+  const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.merchant_provider='xiaodou' AND t.payment_protocol='epay' AND t.provider_trade_id=?").bind(parameters.out_trade_no).first<PaymentTransaction>();
   if(!transaction)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
   if(transaction.epay_pid!==parameters.pid||transaction.currency!=="CNY"||transaction.amount_fen!==amountFen||(transaction.epay_trade_no&&transaction.epay_trade_no!==parameters.trade_no))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付通知与订单不符。");
   await applyPaymentEvent(env,transaction,{eventId:`epay-paid:${parameters.out_trade_no}`,eventType:"PAYMENT_SUCCEEDED",amountFen,currency:"CNY",epayTradeNo:parameters.trade_no});
@@ -381,6 +397,7 @@ export async function epayNotify(request:Request,env:Env):Promise<Response>{
 }
 
 async function submitRefund(request:Request,env:Env,transaction:PaymentTransaction,spec:{kind:"ordinary"|"special";principal:number;fee:number;credits:number;reason:string;reasonCategory:string;actorId:string|null;confirmed:boolean}):Promise<Response>{
+  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"REFUND_MANUAL_REVIEW_REQUIRED","MK99退款需要独立可信核对，当前不调用退款或调整额度。");
   if(transaction.payment_protocol==="epay")throw new ApiFailure(409,"REFUND_MANUAL_REVIEW_REQUIRED","易支付退款需人工核对并通过商户后台处理，当前接口不会冻结或扣减额度。");
   if(!spec.confirmed||!Number.isSafeInteger(spec.principal)||spec.principal<0||!Number.isSafeInteger(spec.fee)||spec.fee<0||!Number.isSafeInteger(spec.credits)||spec.credits<0||spec.principal+spec.fee<1||spec.reason.length<4||spec.reason.length>256)throw new ApiFailure(400,"INVALID_REFUND","退款需要有效金额、原因和二次确认。");
   if(transaction.order_status!=="paid"||transaction.status!=="paid"||!transaction.credited_at)throw new ApiFailure(409,"ORDER_NOT_REFUNDABLE","只有已支付到账订单才能申请退款。");

@@ -1,7 +1,7 @@
 // Poll only the authenticated local order API. A browser return is never proof of payment.
 const registries=new WeakMap();let serial=0;
 const validId=id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-export function shouldMonitorPayment(order){const protocol=order?.paymentProtocol??order?.payment_protocol,status=order?.status??order?.payment_status;return ['rsa2','epay'].includes(protocol)&&['pending','unknown'].includes(status);}
+export function shouldMonitorPayment(order){const protocol=order?.paymentProtocol??order?.payment_protocol,status=order?.status??order?.payment_status;return ['rsa2','epay','mk99'].includes(protocol)&&['pending','unknown'].includes(status);}
 export function pendingPaymentOrder(orders,now=Date.now()){return (Array.isArray(orders)?orders:[]).find(order=>shouldMonitorPayment(order)&&Number.isFinite(order.created_at)&&now-order.created_at<86400000)?.id??null;}
 export function paymentReturnOrder(href){try{const id=new URL(href).searchParams.get('payment_order');return validId(id)?id:null;}catch{return null;}}
 export function rememberPayment(orderId,env=globalThis){if(validId(orderId))try{env.localStorage?.setItem('reply-copilot:pending-payment',JSON.stringify({orderId,at:Date.now()}));}catch{}}

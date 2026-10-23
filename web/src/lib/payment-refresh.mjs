@@ -3,7 +3,7 @@
  * The lock is shared with the component so rapid clicks cannot duplicate it.
  */
 export function canRefreshPaymentOrder(order) {
-  return order?.provider === "xiaodou"
+  return ["xiaodou","mk99"].includes(order?.provider)
     && order.status === "awaiting_payment"
     && (order.payment_status === "unknown" || order.payment_status === "pending");
 }

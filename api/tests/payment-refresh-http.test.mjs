@@ -421,8 +421,8 @@ function makeCheckoutDb() {
   DB.state.created = false;
   DB.state.checkoutBatches = [];
   DB.prepare = sql => {
-    if (sql.includes("system_settings WHERE key='purchase_enabled'")) return {async first(){return {value:"1"};}};
-    if (sql.includes('system_settings WHERE key IN')) return {bind(){return this;},async all(){return {results:[
+    if (sql.startsWith("SELECT") && sql.includes("system_settings WHERE key='purchase_enabled'")) return {async first(){return {value:"1"};}};
+    if (sql.startsWith('SELECT') && sql.includes('system_settings WHERE key IN')) return {bind(){return this;},async all(){return {results:[
       {key:'purchase_enabled',value:'1'},{key:'payment_rsa2_enabled',value:'1'},{key:'payment_epay_enabled',value:'0'},
       {key:'payment_alipay_enabled',value:'1'},{key:'payment_wechat_enabled',value:'0'},
       {key:'payment_rsa2_alipay_released',value:'1'},{key:'payment_wechat_released',value:'0'},
@@ -456,7 +456,7 @@ test("checkout rejection explicitly reports unavailable payment link, preserves 
       return signedProviderResponse(request, { httpStatus: 403, errorCode: "OPEN_API_SOURCE_IP_REJECTED", errorDetails: { reason: "HEADER_CONFLICT", private: "sensitive-marker" } });
     } };
     const result = await call("/v1/orders", DB, options);
-    assert.equal(result.response.status, 502, "V2 rejects checkout while preserving its local order");
+    assert.equal(result.response.status, 502, JSON.stringify(result.body));
     assert.equal(result.body.order.status, "unknown");
     assert.equal(result.body.order.paymentUrl, null);
     assert.equal(result.body.order.paymentLinkUnavailable, true);

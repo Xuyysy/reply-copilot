@@ -9,7 +9,7 @@ import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTestAccount,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
-import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund} from "./payments";
+import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { acknowledgeDelivery } from "./quota";
@@ -72,6 +72,8 @@ export default {
       if (request.method === "GET" && path === "/v1/activity") return await activity(request,env);
       if (request.method === "GET" && path === "/v1/packages") return await packages(request,env);
       if (request.method === "POST" && path === "/v1/orders") return await createOrder(request,env);
+      if(request.method==="POST"&&path==="/v1/payments/mk99/notify")return await mk99Notify(request,env);
+      if(request.method==="POST"&&path==="/v1/admin/mk99-platform-check")return await adminMk99Check(request,env);
       if (request.method === "GET" && path === "/v1/payments/xiaodou/epay/notify") return await epayNotify(request,env);
       if (request.method === "POST" && path === "/v1/payments/xiaodou/webhook") return await xiaodouWebhook(request,env);
       if (request.method === "POST" && path === "/v1/admin/diagnostics/xiaodou-connectivity") return await xiaodouConnectivityDiagnostic(request,env);

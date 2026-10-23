@@ -9,6 +9,7 @@ test("only unresolved Xiaodou awaiting-payment orders expose the provider refres
   assert.equal(canRefreshPaymentOrder({ ...order, payment_status: "paid" }), false);
   assert.equal(canRefreshPaymentOrder({ ...order, status: "paid" }), false);
   assert.equal(canRefreshPaymentOrder({ ...order, provider: "local_mock" }), false);
+  assert.equal(canRefreshPaymentOrder({ ...order, provider: "mk99" }), true);
   assert.equal(canRefreshPaymentOrder(null), false);
 });
 

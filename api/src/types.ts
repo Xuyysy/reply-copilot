@@ -22,6 +22,16 @@ export interface Env {
   PAYMENTS_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;
   PAYMENT_PROVIDER?: string;
+  MK99_BASE_URL?: string;
+  MK99_PID?: string;
+  MK99_KEY?: string;
+  MK99_PRIVATE_KEY?: string;
+  MK99_PLATFORM_PUBLIC_KEY?: string;
+  MK99_REQUEST_SIGN_TYPE?: string;
+  MK99_NOTIFY_SIGN_TYPE?: string;
+  MK99_PROTOCOL_CONFIRMED?: string;
+  MK99_AMOUNT_CONTRACT?: string;
+  MK99_CASHIER_ORIGINS?: string;
   XIAODOU_BASE_URL?: string;
   XIAODOU_APP_ID?: string;
   XIAODOU_KEY_ID?: string;

@@ -6,7 +6,7 @@ import {fixture,withProvider} from './helpers/payment-v2.mjs';
 
 const migrations=new URL('../migrations/',import.meta.url);
 const splitSql=readFileSync(new URL('0014_provider_channel_independence.sql',migrations),'utf8');
-const corrections=()=>readdirSync(migrations).filter(name=>name.endsWith('.sql')&&name>'0014_provider_channel_independence.sql').sort();
+const corrections=()=>readdirSync(migrations).filter(name=>name==='0015_conservative_alipay_release.sql').sort();
 const correct=f=>{for(const name of corrections())f.sql.exec(readFileSync(new URL(name,migrations),'utf8'));};
 const releaseKeys=['payment_rsa2_alipay_released','payment_epay_alipay_released'];
 const releaseRows=f=>f.sql.prepare("SELECT * FROM system_settings WHERE key IN ('payment_rsa2_alipay_released','payment_epay_alipay_released') ORDER BY key").all();

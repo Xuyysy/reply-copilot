@@ -65,7 +65,7 @@ export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs()
 export async function balance(env: Env, userId: string): Promise<Balance> {
   const row = await env.DB.prepare(`SELECT
     MAX(0,free_balance-free_generation_reserved) free_remaining,
-    MAX(0,paid_balance-paid_generation_reserved-paid_reserved_for_refunds) paid_remaining
+    MAX(0,paid_balance-paid_generation_reserved-paid_reserved_for_refunds-(SELECT COALESCE(sum(remaining_credits-generation_reserved_credits-refund_reserved_credits),0) FROM credit_batches WHERE user_id=credit_accounts.user_id AND bucket='paid' AND status='manual_review' AND manual_review_reason LIKE 'mk99_risk:%')) paid_remaining
     FROM credit_accounts WHERE user_id=?`).bind(userId).first<{free_remaining:number;paid_remaining:number}>();
   const freeRemaining = row?.free_remaining ?? 0;
   const paidRemaining = row?.paid_remaining ?? 0;

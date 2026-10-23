@@ -15,8 +15,8 @@ test('Duplicate subscribers and two tabs do not multiply polling requests',async
 test('401 stops polling, does not signal success, and no credentials are put in storage',async()=>{const store=new Map(),env=runtime(store);let n=0,paid=0;watchPayment({orderId:oid,environment:env,request:async()=>{n++;throw Object.assign(new Error('private'),{status:401});},onPaid:()=>paid++});await env.advance();await env.advance(10000);assert.equal(n,1);assert.equal(paid,0);assert.equal([...store.values()].some(x=>x.includes('private')),false);});
 test('Returning via focus/pageshow/visibility coalesces account updates and disposes listeners',()=>{const env=runtime();let n=0;const stop=watchAccountRefresh(()=>n++,env);env.window.dispatchEvent(new Event('focus'));env.window.dispatchEvent(new Event('pageshow'));env.document.dispatchEvent(new Event('visibilitychange'));assert.equal(n,1);stop();env.window.dispatchEvent(new Event('focus'));assert.equal(n,1);});
 test('Return query identifies an order only, never treats status or money as proof',()=>{assert.equal(paymentReturnOrder('https://web.example/account/?payment_order='+oid+'&trade_status=TRADE_SUCCESS'),oid);assert.equal(paymentReturnOrder('https://web.example/account/?trade_status=TRADE_SUCCESS&money=10.06'),null);assert.equal(paymentReturnOrder('https://web.example/account/?payment_order=bad'),null);});
-test('RSA2 and Epay pending orders share bounded local payment monitoring eligibility',()=>{
- for(const protocol of ['rsa2','epay'])for(const status of ['pending','unknown'])assert.equal(shouldMonitorPayment({paymentProtocol:protocol,status}),true);
+test('All providers pending orders share bounded local payment monitoring eligibility',()=>{
+ for(const protocol of ['rsa2','epay','mk99'])for(const status of ['pending','unknown'])assert.equal(shouldMonitorPayment({paymentProtocol:protocol,status}),true);
  assert.equal(shouldMonitorPayment({paymentProtocol:'rsa2',status:'paid'}),false);
  assert.equal(shouldMonitorPayment({paymentProtocol:'other',status:'pending'}),false);
 });
