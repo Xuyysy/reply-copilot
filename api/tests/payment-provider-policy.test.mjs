@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,pbkdf2Sync} from 'node:crypto';
-import {fixture,withProvider,providerResponse} from './helpers/payment-v2.mjs';
+import {fixture,withProvider,providerResponse,enableEpaySales} from './helpers/payment-v2.mjs';
 
 function adminFixture(){
   const f=fixture();f.env.ADMIN_PORTAL_ENABLED='1';f.env.PASSWORD_PEPPER='payment-policy-test-pepper';
@@ -66,6 +66,22 @@ test('WeChat is the preferred RSA2 channel when both channels are enabled and pl
  });
  assert.equal(requestedChannel,'WECHAT_H5');
  f.sql.close();
+});
+
+test('legacy Epay Alipay sales require the shared Alipay platform-release gate',async()=>{
+ const f=enableEpaySales(fixture({released:false}));
+ f.env.XIAODOU_EPAY_GATEWAY='https://gateway.example.test/submit.php';
+ f.env.XIAODOU_EPAY_PID='12345';
+ f.env.XIAODOU_EPAY_KEY='local-test-key';
+ try {
+  let r=await f.call('/v1/packages',{method:'GET'});
+  assert.equal(r.body.paymentAvailable,false);
+  assert.deepEqual(r.body.paymentMethods,[]);
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_alipay_released'");
+  r=await f.call('/v1/packages',{method:'GET'});
+  assert.equal(r.body.paymentAvailable,true);
+  assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+ } finally { f.sql.close(); }
 });
 
 test('admin can independently toggle providers and channels with audit and no environment purchase reset',async()=>{

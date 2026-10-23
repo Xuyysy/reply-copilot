@@ -56,9 +56,9 @@ export async function paymentControl(env:Env){
   if(channels.wechat.enabled&&channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
   if(channels.alipay.enabled&&channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
  }
- // Legacy Epay is a new-sale fallback only when explicitly enabled. Its old
- // callbacks remain independent of this list and continue to be verified.
- if(canSell&&providers.epay.enabled&&providers.epay.credentialsConfigured&&channels.alipay.enabled
+ // Channel release is a platform-level gate shared by both protocols. Epay
+ // callbacks for historical orders remain independent and continue to verify.
+ if(canSell&&providers.epay.enabled&&providers.epay.credentialsConfigured&&channels.alipay.enabled&&channels.alipay.platformReleased
    &&!methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
  const defaultMethod=methods.find(method=>method.provider==='xiaodou')??methods[0]??null;
  return {

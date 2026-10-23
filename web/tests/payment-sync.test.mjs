@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { watchPayment, watchAccountRefresh, paymentReturnOrder } from '../src/lib/payment-sync.mjs';
+import { watchPayment, watchAccountRefresh, paymentReturnOrder, shouldMonitorPayment, pendingPaymentOrder } from '../src/lib/payment-sync.mjs';
 function runtime(storage=new Map()){
  let now=1000,id=0;const timers=new Map(),window=new EventTarget(),document=new EventTarget();document.visibilityState='visible';
  const env={window,document,AbortController,crypto:{randomUUID:()=>String(++id)},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:(fn,ms)=>{const k=++id;timers.set(k,{fn,at:now+ms});return k;},clearTimeout:k=>timers.delete(k)};
@@ -15,6 +15,20 @@ test('Duplicate subscribers and two tabs do not multiply polling requests',async
 test('401 stops polling, does not signal success, and no credentials are put in storage',async()=>{const store=new Map(),env=runtime(store);let n=0,paid=0;watchPayment({orderId:oid,environment:env,request:async()=>{n++;throw Object.assign(new Error('private'),{status:401});},onPaid:()=>paid++});await env.advance();await env.advance(10000);assert.equal(n,1);assert.equal(paid,0);assert.equal([...store.values()].some(x=>x.includes('private')),false);});
 test('Returning via focus/pageshow/visibility coalesces account updates and disposes listeners',()=>{const env=runtime();let n=0;const stop=watchAccountRefresh(()=>n++,env);env.window.dispatchEvent(new Event('focus'));env.window.dispatchEvent(new Event('pageshow'));env.document.dispatchEvent(new Event('visibilitychange'));assert.equal(n,1);stop();env.window.dispatchEvent(new Event('focus'));assert.equal(n,1);});
 test('Return query identifies an order only, never treats status or money as proof',()=>{assert.equal(paymentReturnOrder('https://web.example/account/?payment_order='+oid+'&trade_status=TRADE_SUCCESS'),oid);assert.equal(paymentReturnOrder('https://web.example/account/?trade_status=TRADE_SUCCESS&money=10.06'),null);assert.equal(paymentReturnOrder('https://web.example/account/?payment_order=bad'),null);});
+test('RSA2 and Epay pending orders share bounded local payment monitoring eligibility',()=>{
+ for(const protocol of ['rsa2','epay'])for(const status of ['pending','unknown'])assert.equal(shouldMonitorPayment({paymentProtocol:protocol,status}),true);
+ assert.equal(shouldMonitorPayment({paymentProtocol:'rsa2',status:'paid'}),false);
+ assert.equal(shouldMonitorPayment({paymentProtocol:'other',status:'pending'}),false);
+});
+test('account recovery selects a recent unresolved order from either payment protocol',()=>{
+ const now=Date.now(),orders=[
+  {id:'old',payment_protocol:'rsa2',payment_status:'pending',created_at:now-86400001},
+  {id:'rsa2-order',payment_protocol:'rsa2',payment_status:'unknown',created_at:now-1000},
+  {id:'epay-order',payment_protocol:'epay',payment_status:'pending',created_at:now-500},
+ ];
+ assert.equal(pendingPaymentOrder(orders,now),'rsa2-order');
+ assert.equal(pendingPaymentOrder([{...orders[1],payment_status:'paid'}],now),null);
+});
 test('Payment confirmation queues fresh account data after any pre-payment refresh finishes',async()=>{
  const {createRefreshGate}=await import('../src/lib/payment-sync.mjs');const gate=createRefreshGate();let release,calls=0;const task=async()=>{const n=++calls;if(n===1)await new Promise(r=>release=r);return n===1?0:400;};
  const before=gate(task);await Promise.resolve();const after=gate(task,{fresh:true});const joined=gate(task);assert.equal(calls,1);release();assert.equal(await before,0);assert.equal(await joined,0);assert.equal(await after,400);assert.equal(calls,2);

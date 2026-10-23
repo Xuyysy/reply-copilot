@@ -36,17 +36,18 @@ import Base from "../layouts/Base.astro";
     </div>
   </section>
   <script>
-    import { watchPayment, rememberPayment } from "../lib/payment-sync.mjs";
+    import { watchPayment, rememberPayment, rememberedPayment, clearRememberedPayment, paymentReturnOrder, shouldMonitorPayment } from "../lib/payment-sync.mjs";
     import { submitEpayForm } from "../lib/epay-form.mjs";
     import { api, ApiError } from "../lib/api";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead } from "../lib/checkout-status.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"local_mock";channel:Channel};
     type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; description_zh?:string; description_en?:string };
-    type Order = { id:string; packageId?:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; baseAmountFen:number; serviceFeeFen:number; feeRateBps:number; amountFen:number; currency:"CNY"; status:string; paymentProvider?:"xiaodou"|"xiaodou_epay"|"local_mock"; paymentProtocol?:"rsa2"|"epay"; paymentChannel?:Channel|null; paymentForm?:{action:string;method:string;fields:Record<string,string>}|null; paymentMode?:"mock"; paymentUrl?:string|null; paymentLinkUnavailable?:boolean; checkout?:{outcome:string;issue:string}|null; message?:string };
+    type Order = { id:string; packageId?:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; baseAmountFen:number; serviceFeeFen:number; feeRateBps:number; amountFen:number; currency:"CNY"; status:string; creditedAt?:number|null; paymentProvider?:"xiaodou"|"xiaodou_epay"|"local_mock"; paymentProtocol?:"rsa2"|"epay"; paymentChannel?:Channel|null; paymentForm?:{action:string;method:string;fields:Record<string,string>}|null; paymentMode?:"mock"; paymentUrl?:string|null; paymentLinkUnavailable?:boolean; checkout?:{outcome:string;issue:string}|null; message?:string };
     type Quota = { freeRemaining:number; paidRemaining:number; totalRemaining:number };
     const pkgId = new URL(location.href).searchParams.get("package") || "";
-    const resumeOrderId = new URL(location.href).searchParams.get("order") || "";
+    const currentUrl = new URL(location.href);
+    const resumeOrderId = currentUrl.searchParams.get("order") || paymentReturnOrder(location.href) || rememberedPayment() || "";
     const label = (zh:string,en:string) => document.documentElement.lang === "en" ? en : zh;
     const byId = <T extends HTMLElement>(id:string) => document.getElementById(id) as T;
     let selected:Package|null = null;
@@ -59,13 +60,17 @@ import Base from "../layouts/Base.astro";
     let restartAvailable = false;
     let monitoredId:string|null=null;
     let stopMonitoring=()=>{};
+    async function syncConfirmedPayment(confirmed:Order){
+      clearRememberedPayment(confirmed.id);
+      try{const [,usage]=await Promise.all([api("/v1/me"),api<{quota:Quota}>("/v1/usage")]);byId("quota-result").hidden=false;byId("quota-result").textContent=label("付费余额："+usage.quota.paidRemaining+" 次 · 总余额："+usage.quota.totalRemaining+" 次","Paid balance: "+usage.quota.paidRemaining+" · Total: "+usage.quota.totalRemaining);setStatus(`支付成功，${confirmed.credits} 次额度已到账。`,`Payment successful. ${confirmed.credits} credits added.`);}
+      catch{setStatus("支付已确认，账户信息暂时无法刷新，请稍后查看。","Payment confirmed; account refresh is temporarily unavailable.");}
+    }
     function monitorPayment(next:Order){
-      if(next.paymentProtocol!=="epay"||!["pending","unknown"].includes(next.status)){stopMonitoring();monitoredId=null;return;}
+      if(!shouldMonitorPayment(next)){stopMonitoring();monitoredId=null;return;}
       if(monitoredId===next.id)return;stopMonitoring();monitoredId=next.id;
       stopMonitoring=watchPayment({orderId:next.id,request:api,onPaid:async(result:any)=>{
         if(!order||order.id!==result.order.id)return;showOrder(mergeCheckoutRead(order,result.order));
-        try{const [,usage]=await Promise.all([api("/v1/me"),api<{quota:Quota}>("/v1/usage")]);byId("quota-result").hidden=false;byId("quota-result").textContent=label("付费余额："+usage.quota.paidRemaining+" 次 · 总余额："+usage.quota.totalRemaining+" 次","Paid balance: "+usage.quota.paidRemaining+" · Total: "+usage.quota.totalRemaining);setStatus(`支付成功，${result.order.credits} 次额度已到账。`,`Payment successful. ${result.order.credits} credits added.`);}
-        catch{setStatus("支付已确认，账户信息暂时无法刷新，请稍后查看。","Payment confirmed; account refresh is temporarily unavailable.");}
+        await syncConfirmedPayment(result.order);
       },onTimeout:()=>{monitoredId=null;setStatus("支付结果仍在确认，请稍后查看或手动刷新；不要重复付款。","Payment is still unconfirmed. Check later or refresh manually; do not pay again.");},onTerminal:(result:any)=>{if(order)showOrder(mergeCheckoutRead(order,result.order));},onError:(error:any)=>{if([401,403,404].includes(error?.status))setStatus("暂时无法读取订单，请登录对应账户后重试。","Cannot read this order. Sign in to the matching account.");}});
     }
     const setStatus = (zh:string,en:string) => { byId("checkout-status").textContent = label(zh,en); };
@@ -127,7 +132,7 @@ import Base from "../layouts/Base.astro";
           const saved=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(resumeOrderId));
           const o=saved.order;
           selected={id:o.packageId||"",name_zh:o.packageName,name_en:o.packageName,credits:o.credits,price_cents:o.displayPriceCents,promo_price_cents:null,currency:"USD",price_cny_fen:o.baseAmountFen,service_fee_fen:o.serviceFeeFen,total_payment_fen:o.amountFen,fee_rate_bps:o.feeRateBps};
-          showOrder(o);return;
+          showOrder(o);if(o.status==="paid"&&o.creditedAt)await syncConfirmedPayment(o);return;
         }
         render();
         if(!selected){setStatus("套餐不存在或已下架。","Package not found or unavailable.");return;}
@@ -178,6 +183,7 @@ import Base from "../layouts/Base.astro";
     }
     byId("create-order").addEventListener("click",()=>{void startOrder();});
     byId("restart-payment").addEventListener("click",()=>{void startOrder(true);});
+    byId("cashier-link").addEventListener("click",()=>{if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending")rememberPayment(order.id);});
     byId("epay-submit").addEventListener("click",async()=>{
       if(busy||!order||order.paymentProtocol!=="epay"||order.status!=="pending"||!paymentAvailable)return;
       busy=true;byId<HTMLButtonElement>("epay-submit").disabled=true;

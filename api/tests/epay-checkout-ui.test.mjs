@@ -46,6 +46,33 @@ test('Actual checkout automatically reloads account/quota after a delayed local 
  runInNewContext(compiled,{document,window,location:{href:'https://web.example.test/checkout/?package=starter&trade_status=TRADE_SUCCESS'},URL,fetch,console,Date:Clock,setTimeout:timer,clearTimeout:id=>timers.delete(id),AbortController});await flush();nodes.get('create-order').dispatchEvent(new Event('click'));await flush();await advance(0);assert.equal(quotaReads,0);assert.notEqual(nodes.get('checkout-status').textContent,'支付成功，400 次额度已到账。');paid=true;await advance(2500);assert.match(nodes.get('checkout-status').textContent,/支付成功，400 次额度已到账/);assert.match(nodes.get('quota-result').textContent,/400/);assert.equal(accountReads,1);assert.equal(quotaReads,1);const count=reads;await advance(10000);assert.equal(reads,count);assert.equal(creates,1);
 });
 
+test('RSA2 cashier return auto-confirms the local paid order, refreshes quota once, and retains manual refresh',async()=>{
+ let now=1000,seq=0,paid=false,reads=0,accountReads=0,quotaReads=0,creates=0;const timers=new Map(),nodes=new Map(),storage=new Map();
+ class Element extends EventTarget{children=[];disabled=false;hidden=false;textContent='';href='';appendChild(c){this.children.push(c);}append(c){this.children.push(c);}replaceChildren(...items){this.children=items;}submit(){throw Error('Must not auto-submit');}remove(){}}
+ const document=Object.assign(new EventTarget(),{visibilityState:'visible',documentElement:{lang:'zh'},getElementById(id){if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},createElement(){return new Element();},body:new Element()}),window=new EventTarget();
+ const timer=(fn,ms)=>{const id=++seq;timers.set(id,{fn,at:now+ms});return id;};const advance=async ms=>{now+=ms;for(let n=0;n<8;n++){const due=[...timers].filter(([,t])=>t.at<=now);if(!due.length)break;for(const[k,t]of due){timers.delete(k);t.fn();}await flush();}};
+ const rsaOrder={...order,paymentProtocol:'rsa2',paymentProvider:'xiaodou',paymentChannel:'WECHAT_H5',paymentUrl:'https://cashier.example.test/session'};
+ const fetch=async(url,init={})=>{const p=new URL(url).pathname;if(p==='/v1/packages')return Response.json({paymentAvailable:true,paymentProvider:'xiaodou',paymentMethods:[{provider:'xiaodou',channel:'WECHAT_H5'}],packages:[{id:'starter',name_zh:'400次',name_en:'400 credits',credits:400,price_cents:149,promo_price_cents:null,price_cny_fen:990,service_fee_fen:16,total_payment_fen:1006,fee_rate_bps:150}]});if(p==='/v1/auth/csrf')return Response.json({csrfToken:'test-only'});if(p==='/v1/orders'){creates++;return Response.json({order:rsaOrder});}if(p==='/v1/orders/'+order.id){reads++;assert.equal(init.method,'GET');return Response.json({order:{...rsaOrder,status:paid?'paid':'pending',creditedAt:paid?123:null}});}if(p==='/v1/me'){accountReads++;return Response.json({user:{}});}if(p==='/v1/usage'){quotaReads++;return Response.json({quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600}});}throw Error('Unexpected network operation: '+p);};
+ class Clock extends Date{static now(){return now;}}
+ const localStorage={getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)};
+ runInNewContext(compiled,{document,window,location:{href:'https://web.example.test/checkout/?package=starter'},URL,fetch,console,Date:Clock,localStorage,setTimeout:timer,clearTimeout:id=>timers.delete(id),AbortController});await flush();
+ nodes.get('create-order').dispatchEvent(new Event('click'));await flush();assert.equal(creates,1);assert.equal(nodes.get('cashier-link').hidden,false);
+ nodes.get('cashier-link').dispatchEvent(new Event('click'));assert.ok(storage.has('reply-copilot:pending-payment'),'remember the RSA2 order before opening the cashier');
+ await advance(0);assert.equal(reads,1);assert.equal(nodes.get('refresh-order').hidden,false,'manual status refresh remains available while payment is pending');paid=true;await advance(2500);
+ assert.match(nodes.get('checkout-status').textContent,/支付成功，400 次额度已到账/);assert.match(nodes.get('quota-result').textContent,/400/);assert.equal(accountReads,1);assert.equal(quotaReads,1);assert.equal(creates,1);
+ const readCount=reads;await advance(10000);assert.equal(reads,readCount,'automatic polling stops after trusted local paid+credited state');
+});
+
+test('reopened checkout restores remembered RSA2 order and refreshes quota only from the paid local order',async()=>{
+ let now=2000,orderReads=0,quotaReads=0,creates=0;const nodes=new Map(),storage=new Map([['reply-copilot:pending-payment',JSON.stringify({orderId:order.id,at:1000})]]),requests=[];
+ class Element extends EventTarget{children=[];disabled=false;hidden=false;textContent='';appendChild(c){this.children.push(c);}append(c){this.children.push(c);}replaceChildren(...items){this.children=items;}submit(){throw Error('Must not auto-submit');}remove(){}}
+ const document=Object.assign(new EventTarget(),{visibilityState:'visible',documentElement:{lang:'zh'},getElementById(id){if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},createElement(){return new Element();},body:new Element()}),window=new EventTarget();
+ const fetch=async(url,init={})=>{const p=new URL(url).pathname;requests.push(p);if(p==='/v1/packages')return Response.json({paymentAvailable:false,paymentProvider:null,paymentMethods:[],packages:[]});if(p==='/v1/orders/'+order.id){orderReads++;assert.ok(!init.method||init.method==='GET');return Response.json({order:{...order,paymentProtocol:'rsa2',paymentProvider:'xiaodou',status:'paid',creditedAt:123}});}if(p==='/v1/me')return Response.json({user:{}});if(p==='/v1/usage'){quotaReads++;return Response.json({quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600}});}if(p==='/v1/orders'){creates++;throw Error('Must not create an order');}throw Error('Unexpected operation: '+p);};
+ class Clock extends Date{static now(){return now;}}
+ runInNewContext(compiled,{document,window,location:{href:'https://web.example.test/checkout/?package=starter'},URL,fetch,console,Date:Clock,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout,clearTimeout,AbortController});await flush();
+ assert.equal(orderReads,1);assert.equal(quotaReads,1);assert.equal(creates,0);assert.match(nodes.get('checkout-status').textContent,/支付成功，400 次额度已到账/);assert.equal(storage.has('reply-copilot:pending-payment'),false);
+});
+
 test('Focus and visibility debounce only local package availability reads, without creating orders',async()=>{
  let enabled=false,reads=0,seq=0;const timers=new Map(),nodes=new Map(),calls=[],delays=[];
  class Element extends EventTarget{disabled=false;hidden=false;textContent='';}

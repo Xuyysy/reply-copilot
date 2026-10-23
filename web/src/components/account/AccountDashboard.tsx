@@ -3,7 +3,7 @@ import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
-import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment } from "../../lib/payment-sync.mjs";
+import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder } from "../../lib/payment-sync.mjs";
 import { canRefreshPaymentOrder, refreshPaymentOrder } from "../../lib/payment-refresh.mjs";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -49,7 +49,7 @@ export default function AccountDashboard() {
   useEffect(()=>{const clean=cleanPaymentReturn(location.href);if(clean!==location.href)history.replaceState(history.state,"",clean);},[]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?30000:0}), [load,state]);
-  const pendingPaymentId=paymentHint||data?.activity?.orders.find(o=>o.payment_protocol==="epay"&&["pending","unknown"].includes(o.payment_status||"")&&Date.now()-o.created_at<86400000)?.id||null;
+  const pendingPaymentId=paymentHint||pendingPaymentOrder(data?.activity?.orders)||null;
   useEffect(()=>{
     if(state!=="ready"||!pendingPaymentId)return;
     setPaymentNotice(phrase(language,"正在确认支付结果…","Confirming payment…"));
