@@ -55,3 +55,5 @@ test('Epay pending text describes a prepared form, and a local read preserves on
  assert.equal(mergeCheckoutRead(current,{id:'epay-order',status:'paid',paymentProtocol:'epay'}).paymentForm,undefined);
  assert.equal(mergeCheckoutRead(current,{id:'different-order',status:'pending',paymentProtocol:'epay'}).paymentForm,undefined);
 });
+
+test('MK99 hold revokes prior cashier and survives stale pending reads without affecting other orders',()=>{const prior={id:'mk',paymentProtocol:'mk99',status:'pending',riskState:'clear',paymentUrl:'https://cashier.example.test/pay'};const held=mergeCheckoutRead(prior,{...prior,riskState:'manual_review',paymentUrl:null});assert.equal(held.paymentUrl,null);assert.equal(mergeCheckoutRead(held,prior).paymentUrl,null);assert.match(checkoutOrderMessage(held,'zh'),/正在人工核对，请勿继续付款/);assert.match(checkoutOrderMessage(held,'en'),/manual review/);assert.equal(mergeCheckoutRead(prior,{...prior,paymentUrl:null}).paymentUrl,null);assert.equal(mergeCheckoutRead(prior,{...prior,id:'other'}).paymentUrl,prior.paymentUrl);});

@@ -1,6 +1,7 @@
 // Checkout availability is separate from the conservative payment state.
 export function checkoutOrderMessage(order, language) {
   const en = language === "en";
+  if(order.paymentProtocol==='mk99'&&order.riskState==='manual_review')return en ? "Payment is under manual review. Do not continue paying." : "正在人工核对，请勿继续付款。";
   if(order.paymentProtocol==='epay'&&order.status==='pending')return en
     ? "Checkout form prepared. Continue to the Alipay cashier; payment is confirmed only after a verified notification."
     : "付款表单已准备，请前往支付宝收银台。只有经验证的异步通知才能确认到账。";
@@ -43,7 +44,18 @@ export function checkoutOrderFromError(error) {
 
 // A query response never renews cashier materials. Retain only the link already
 // verified during creation on this page, until a non-pending result or navigation.
+export function canUseCashierLink(order) {
+  return Boolean(order?.paymentUrl)&&order.status==='pending'
+    &&(order.paymentProtocol!=='mk99'||order.riskState==='clear');
+}
+
 export function mergeCheckoutRead(current, next) {
+  if(next.paymentProtocol==='mk99') {
+    // Risk holds never auto-clear; an older in-flight read cannot restore a link.
+    const held=current?.id===next.id&&current.paymentProtocol==='mk99'&&current.riskState==='manual_review';
+    const result=held?{...next,riskState:'manual_review'}:next;
+    return canUseCashierLink(result)?result:{...result,paymentUrl:null};
+  }
   if(current?.id===next.id&&current.status==='pending'&&next.status==='pending'&&current.paymentProtocol==='epay'&&current.paymentForm&&!next.paymentForm)return {...next,paymentForm:current.paymentForm};
   if (current?.id === next.id && current.status === 'pending' && next.status === 'pending'
     && current.paymentUrl && !next.paymentUrl) return {...next,paymentUrl:current.paymentUrl};
