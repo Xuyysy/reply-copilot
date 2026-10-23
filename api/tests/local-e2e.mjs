@@ -15,6 +15,7 @@ let db;
 const sql=(statement)=>statement.trimStart().toUpperCase().startsWith("SELECT")?Buffer.from(JSON.stringify(db.prepare(statement).all())):(db.exec(statement),Buffer.from("ok"));
 let server,logs="";
 async function call(url,{method="GET",body,cookie,bearer,csrf,extension=false}={}){
+  if(method==="POST"&&url.startsWith("/v1/admin/")&&url!=="/v1/admin/reauth")body={operationId:crypto.randomUUID(),reason:"本地端到端权限与账本验证",...body};
   const result=await fetch(`${base}${url}`,{method,headers:{...(body?{"Content-Type":"application/json"}:{}),...(method==="POST"&&!extension?{Origin:origin}:{}),...(cookie?{Cookie:cookie}:{}),...(bearer?{Authorization:`Bearer ${bearer}`}:{ }),...(csrf?{"X-CSRF-Token":csrf,"X-Reply-Copilot-Action":"1"}:{})},...(body?{body:JSON.stringify(body)}:{})});
   return {status:result.status,headers:result.headers,data:await result.json()};
 }
@@ -149,6 +150,10 @@ try{
   assert.equal((await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf,body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}})).status,403);
   assert.equal((await call("/v1/admin/packages/starter",{method:"POST",cookie,csrf,body:{}})).status,403);
   sql(`UPDATE users SET role='admin' WHERE id='${user.userId}'`);
+  // Local fixture only: role alone must not grant admin access after migration0011.
+  assert.equal((await call("/v1/admin/dashboard",{cookie})).status,403);
+  sql(`INSERT INTO site_administrator(id,user_id,bound_at) VALUES(1,'${user.userId}',${Date.now()})`);
+  assert.equal((await call("/v1/admin/reauth",{method:"POST",cookie,csrf,body:{password:"strong-test-password-123"}})).status,200);
   assert.equal((await call("/v1/admin/mfa/start",{method:"POST",cookie,csrf,body:{}})).status,404);
   const dashboard=await call("/v1/admin/dashboard",{cookie});assert.equal(dashboard.status,200);assert.ok(dashboard.data.users>=1);
   assert.equal(dashboard.data.aiService.enabled,true);
@@ -219,12 +224,13 @@ try{
   const frozenEmail=`frozen-${crypto.randomUUID()}@example.test`,frozenCookie=await register(frozenEmail,`frozen_${crypto.randomUUID().slice(0,8)}`);
   const frozenUser=(await call("/v1/me",{cookie:frozenCookie})).data.user;
   assert.equal((await call("/v1/admin/dashboard",{cookie:frozenCookie})).status,403);
-  const frozenSet=await call(`/v1/admin/users/${frozenUser.userId}/status`,{method:"POST",cookie,csrf,body:{status:"frozen"}});assert.equal(frozenSet.status,200);
   const frozenDevice=await call("/v1/extension/device-code",{method:"POST",extension:true,body:{deviceId:crypto.randomUUID()}});
   const frozenCsrf=(await call("/v1/auth/csrf",{cookie:frozenCookie})).data.csrfToken;
   assert.equal((await call("/v1/extension/approve",{method:"POST",cookie:frozenCookie,csrf:frozenCsrf,body:{deviceCode:frozenDevice.data.deviceCode}})).status,200);
   const frozenBearer=(await call("/v1/extension/exchange",{method:"POST",extension:true,body:{deviceToken:frozenDevice.data.deviceToken}})).data.accessToken;
-  const frozenGeneration=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:frozenBearer,body:{requestId:crypto.randomUUID(),post:{text:"hello",url:"https://x.com/example/status/123"}}});assert.equal(frozenGeneration.status,403);
+  const frozenSet=await call(`/v1/admin/users/${frozenUser.userId}/status`,{method:"POST",cookie,csrf,body:{status:"frozen"}});assert.equal(frozenSet.status,200);
+  assert.equal((await call("/v1/me",{cookie:frozenCookie})).status,401,"freezing revokes prior web sessions");
+  const frozenGeneration=await call("/v1/ai/generate",{method:"POST",extension:true,bearer:frozenBearer,body:{requestId:crypto.randomUUID(),post:{text:"hello",url:"https://x.com/example/status/123"}}});assert.equal(frozenGeneration.status,401,"freezing revokes existing extension sessions too");
   const adjustment=await call(`/v1/admin/users/${user.userId}/credits`,{method:"POST",cookie,csrf,body:{kind:"free",delta:5,reason:"本地测试人工补发",confirm:true}});assert.equal(adjustment.status,200,JSON.stringify(adjustment.data));assert.equal((await quota()).data.quota.freeRemaining,5);
   assert.match(sql(`SELECT action FROM admin_audit_logs WHERE actor_user_id='${user.userId}'`).toString(),/credit_adjustment/);
   const mismatch=await call(`/v1/dev/orders/${order.data.order.id}/simulate-payment`,{method:"POST",cookie,csrf,body:{eventId:"event-local-123456",amountFen:991}});assert.equal(mismatch.status,409);assert.equal((await quota()).data.quota.paidRemaining,0);
@@ -267,7 +273,7 @@ try{
   assert.equal((await call("/v1/admin/dashboard",{cookie:newCookie})).status,403);
   sql(`UPDATE users SET email_verified_at=created_at WHERE id='${user.userId}'`);
   sql(`UPDATE users SET status='frozen' WHERE id='${user.userId}'`);
-  assert.equal((await call("/v1/admin/dashboard",{cookie:newCookie})).status,403);
+  assert.equal((await call("/v1/admin/dashboard",{cookie:newCookie})).status,401);
   sql(`UPDATE users SET status='active' WHERE id='${user.userId}'`);
   sql(`UPDATE sessions SET expires_at=created_at+1 WHERE user_id='${user.userId}'`);
   assert.equal((await call("/v1/admin/dashboard",{cookie:newCookie})).status,401);

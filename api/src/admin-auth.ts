@@ -13,7 +13,13 @@ export async function requireAdminSession(request: Request, env: Env, write = fa
   if (user?.role !== "admin" || user.status !== "active" || !user.email_verified_at) {
     throw new ApiFailure(403, "FORBIDDEN", "没有管理员权限。");
   }
-  if (write) await requireCsrf(request, env, token);
+  const binding = await env.DB.prepare("SELECT user_id FROM site_administrator WHERE id=1").first<{user_id:string}>();
+  if (binding?.user_id !== session.user_id) throw new ApiFailure(403,"FORBIDDEN","没有管理员权限。");
+  if (write) {
+    await requireCsrf(request, env, token);
+    const proof = await env.DB.prepare("SELECT expires_at FROM admin_reauth_sessions WHERE session_id=?").bind(session.id).first<{expires_at:number}>();
+    if (!proof || proof.expires_at <= Date.now()) throw new ApiFailure(403,"ADMIN_REAUTH_REQUIRED","敏感操作需要重新验证登录密码。");
+  }
   return session;
 }
 

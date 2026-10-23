@@ -3,7 +3,7 @@ export const API_BASE = (import.meta.env.PUBLIC_API_BASE_URL || (import.meta.env
 export type ApiDiagnostic = { stage: string; upstreamHttpStatus: number | null };
 
 export class ApiError extends Error {
-  constructor(message: string, public code: string, public status: number, public requestId?: string, public diagnostic?: ApiDiagnostic) { super(message); }
+  constructor(message: string, public code: string, public status: number, public requestId?: string, public diagnostic?: ApiDiagnostic, public order?: unknown) { super(message); }
 }
 
 const refreshStages = new Set(["provider_config", "provider_request_signing", "provider_fetch", "provider_http_response", "provider_response_signature", "provider_response", "order_reconciliation", "unknown"]);
@@ -33,6 +33,6 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   });
   let body: any;
   try { body = await response.json(); } catch { throw new ApiError("服务返回的数据无效。", "INVALID_RESPONSE", response.status); }
-  if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic));
+  if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), path === "/v1/orders" ? body?.order : undefined);
   return body as T;
 }

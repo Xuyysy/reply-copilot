@@ -51,7 +51,11 @@ export function failure(error: unknown, env: Env, request: Request, diagnostics?
     message: safe.message,
     requestId,
     ...(safe.retryAfterSeconds ? { retryAfterSeconds: safe.retryAfterSeconds } : {}),
-    ...(stagingRefreshDiagnostic ? { diagnostic: { stage: stagingRefreshDiagnostic.stage, upstreamHttpStatus: stagingRefreshDiagnostic.upstreamHttpStatus } } : {}),
+    ...(stagingRefreshDiagnostic ? { diagnostic: {
+      stage: stagingRefreshDiagnostic.stage,
+      upstreamHttpStatus: stagingRefreshDiagnostic.upstreamHttpStatus,
+      ...(stagingRefreshDiagnostic.providerResponse ? { providerResponse: stagingRefreshDiagnostic.providerResponse } : {}),
+    } } : {}),
   }, safe.status, env, request, headers);
 }
 export function options(request: Request, env: Env): Response {

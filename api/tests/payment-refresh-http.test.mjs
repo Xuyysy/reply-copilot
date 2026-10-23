@@ -100,28 +100,29 @@ async function csrfToken() {
   return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function signedProviderResponse(request, { status = "SUCCEEDED", amountFen = 1006, outTradeNo = transaction.provider_trade_id, invalidSignature = false } = {}) {
+async function signedProviderResponse(request, { status = "SUCCEEDED", amountFen = 1006, outTradeNo = transaction.provider_trade_id, invalidSignature = false, httpStatus = 200, errorCode, errorDetails } = {}) {
   const requestId = request.headers.get("X-XD-Request-Id");
-  const payload = JSON.stringify({ outTradeNo, amountFen, currency: "CNY", status, feeProjection });
+  const payload = JSON.stringify(errorCode ? { code: errorCode, message: "private-upstream-message", requestId,
+    ...(errorDetails !== undefined ? { details: errorDetails } : {}) } : { outTradeNo, amountFen, currency: "CNY", status, feeProjection });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = "provider-nonce-1234", keyId = "platform-test-key";
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
   const hex = [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const canonical = ["XD-Response-v1", "200", "application/json", requestId, timestamp, nonce, keyId, hex].join("\n");
+  const canonical = ["XD-Response-v1", String(httpStatus), "application/json", requestId, timestamp, nonce, keyId, hex].join("\n");
   const signature = sign("RSA-SHA256", Buffer.from(canonical), platform.privateKey).toString("base64");
-  return new Response(payload, { status: 200, headers: {
+  return new Response(payload, { status: httpStatus, headers: {
     "Content-Type": "application/json", "X-XD-Response-Sign": invalidSignature ? `${signature.slice(1)}A` : signature, "X-XD-Response-Key-Id": keyId,
     "X-XD-Response-Timestamp": timestamp, "X-XD-Response-Nonce": nonce, "X-XD-Request-Id": requestId,
   } });
 }
 
-async function call(path, DB, { userId = "owner-user", method = "POST", body, environment = "staging", envOverrides = {}, query = async (request) => signedProviderResponse(request) } = {}) {
+async function call(path, DB, { userId = "owner-user", method = "POST", body, environment = "staging", envOverrides = {}, authenticated = true, csrfValid = true, query = async (request) => signedProviderResponse(request) } = {}) {
   const csrf = await csrfToken();
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (url, init) => query(new Request(url, init));
   try {
     const request = new Request(`https://api-staging.x-reply-helper.top${path}`, {
-      method, headers: { Origin: webOrigin, Cookie: `rc_session=${sessionToken}`,
-        ...(method === "POST" ? { "X-CSRF-Token": csrf, "X-Reply-Copilot-Action": "1", "Content-Type": "application/json", ...(body ? {} : {}) } : {}),
+      method, headers: { Origin: webOrigin, "CF-Connecting-IP": "8.8.8.8", ...(authenticated ? { Cookie: `rc_session=${sessionToken}` } : {}),
+        ...(method === "POST" ? { "X-CSRF-Token": csrfValid ? csrf : "invalid-csrf", "X-Reply-Copilot-Action": "1", "Content-Type": "application/json", ...(body ? {} : {}) } : {}),
       }, ...(body ? { body: JSON.stringify(body) } : {}),
     });
     DB.state.sessionUser = userId;
@@ -184,7 +185,8 @@ test("provider HTTP errors expose only status and safe category", async () => {
   const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async () => new Response(JSON.stringify({ code: "PRIVATE_PLATFORM_DETAIL", message: "do-not-leak" }), { status: 503 }) });
   assert.equal(result.response.status, 502);
   assert.equal(result.body.code, "PROVIDER_HTTP_ERROR");
-  assert.deepEqual(result.body.diagnostic, { stage: "provider_http_response", upstreamHttpStatus: 503 });
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_http_response", upstreamHttpStatus: 503,
+    providerResponse: { format: "other_json", providerCode: null, signatureState: "absent", sourceIpReason: null } });
   assert.doesNotMatch(JSON.stringify(result.body), /PRIVATE_PLATFORM_DETAIL|do-not-leak/);
   assert.equal(DB.state.transaction.status, "unknown");
   assert.equal(DB.state.paidBalance, 0);
@@ -196,7 +198,8 @@ test("provider response signature failures get a safe classification", async () 
   const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => signedProviderResponse(request, { invalidSignature: true }) });
   assert.equal(result.response.status, 502);
   assert.equal(result.body.code, "PROVIDER_SIGNATURE_ERROR");
-  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200 });
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200,
+    providerResponse: { format: "other_json", providerCode: null, signatureState: "invalid", sourceIpReason: null } });
   assert.equal(DB.state.transaction.status, "unknown");
   assert.equal(DB.state.paidBalance, 0);
   assert.equal(DB.state.batchCalls, 0);
@@ -212,7 +215,8 @@ test("incomplete provider response signature is classified as a signature failur
   } });
   assert.equal(result.response.status, 502);
   assert.equal(result.body.code, "PROVIDER_SIGNATURE_ERROR");
-  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200 });
+  assert.deepEqual(result.body.diagnostic, { stage: "provider_response_signature", upstreamHttpStatus: 200,
+    providerResponse: { format: "other_json", providerCode: null, signatureState: "incomplete", sourceIpReason: null } });
   assert.equal(DB.state.transaction.status, "unknown");
   assert.equal(DB.state.paidBalance, 0);
   assert.equal(DB.state.batchCalls, 0);
@@ -265,4 +269,210 @@ test("repeated trusted queries are idempotent; provider failures never mark paid
   assert.equal(DB.state.paidBalance, 400);
   assert.equal(DB.state.events.size, 1);
   assert.equal(DB.state.attempts, 0);
+});
+
+test("HTTP error provenance survives the entire authenticated refresh chain without writes", async (t) => {
+  const missing = "OPEN_API_RESOURCE_NOT_FOUND";
+  const cases = [
+    { name: "signed business 404", status: 404, code: missing, signature: "verified", format: "business_json", signed: true },
+    { name: "unsigned business 404", status: 404, code: missing, signature: "absent", format: "business_json" },
+    { name: "gateway HTML 404", status: 404, code: null, signature: "absent", format: "html", body: "<html>private-gateway-message</html>", contentType: "text/html" },
+    { name: "invalid signed business 404", status: 404, code: missing, signature: "invalid", format: "business_json", signed: true, invalid: true },
+    { name: "incomplete signature 404", status: 404, code: missing, signature: "incomplete", format: "business_json", signed: true, incomplete: true },
+    { name: "pre-auth unsigned 401", status: 401, code: "OPEN_API_SIGNATURE_INVALID", signature: "absent", format: "business_json" },
+    { name: "signed channel error 422", status: 422, code: "OPEN_API_CHANNEL_UNAVAILABLE", signature: "verified", format: "business_json", signed: true },
+    { name: "signed guard error 503", status: 503, code: "OPEN_API_GUARD_UNAVAILABLE", signature: "verified", format: "business_json", signed: true },
+    { name: "unknown code redacted even if signed", status: 404, code: null, suppliedCode: "PRIVATE_PLATFORM_DETAIL", signature: "verified", format: "business_json", signed: true },
+    { name: "non-business JSON", status: 404, code: null, signature: "absent", format: "other_json", body: '{"code":"OPEN_API_RESOURCE_NOT_FOUND"}' },
+    { name: "invalid JSON", status: 404, code: null, signature: "absent", format: "other", body: "private-invalid-json" },
+    { name: "empty signature header still fails closed", status: 404, code: missing, signature: "invalid", format: "business_json", signed: true, empty: true },
+    { name: "stale complete signature still fails closed", status: 404, code: missing, signature: "invalid", format: "business_json", signed: true, stale: true },
+    { name: "response request ID mismatch still fails closed", status: 404, code: missing, signature: "invalid", format: "business_json", signed: true, wrongId: true },
+  ];
+  for (const c of cases) await t.test(c.name, async () => {
+    const DB = makeDb(); let upstreamId;
+    const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => {
+      upstreamId = request.headers.get("X-XD-Request-Id");
+      if (c.signed) {
+        const response = await signedProviderResponse(request, { httpStatus: c.status, errorCode: c.suppliedCode || c.code, invalidSignature: c.invalid });
+        const headers = new Headers(response.headers);
+        if (c.incomplete) headers.delete("X-XD-Response-Nonce");
+        if (c.empty) headers.set("X-XD-Response-Sign", "");
+        if (c.stale) headers.set("X-XD-Response-Timestamp", "1");
+        if (c.wrongId) headers.set("X-XD-Request-Id", "wrong-request-12345678");
+        return new Response(await response.text(), { status: c.status, headers });
+      }
+      return new Response(c.body ?? JSON.stringify({ code: c.code, message: "private-upstream-message", requestId: upstreamId }),
+        { status: c.status, headers: { "Content-Type": c.contentType || "application/json" } });
+    } });
+    const signatureFailure = ["invalid", "incomplete"].includes(c.signature);
+    assert.equal(result.response.status, 502);
+    assert.equal(result.body.code, signatureFailure ? "PROVIDER_SIGNATURE_ERROR" : "PROVIDER_HTTP_ERROR");
+    assert.equal(result.body.requestId, upstreamId);
+    assert.deepEqual(result.body.diagnostic, {
+      stage: signatureFailure ? "provider_response_signature" : "provider_http_response", upstreamHttpStatus: c.status,
+      providerResponse: { format: c.format, providerCode: c.code, signatureState: c.signature, sourceIpReason: null },
+    });
+    assert.equal(DB.state.writes, 0);
+    assert.equal(DB.state.batchCalls, 0);
+    assert.equal(DB.state.events.size, 0);
+    assert.equal(DB.state.attempts, 0);
+    assert.deepEqual(DB.state.transaction, transaction);
+    assert.equal(DB.state.freeBalance, 200);
+    assert.equal(DB.state.paidBalance, 0);
+    assert.doesNotMatch(JSON.stringify(result.body), /private-|PRIVATE_PLATFORM_DETAIL|merchant\.example\.test|X-XD-Response|BEGIN .*KEY/);
+  });
+});
+
+test("production does not expose signed HTTP error provenance", async () => {
+  const DB = makeDb();
+  const result = await call(`/v1/orders/${orderId}/refresh`, DB, { environment: "production",
+    query: (request) => signedProviderResponse(request, { httpStatus: 404, errorCode: "OPEN_API_RESOURCE_NOT_FOUND" }) });
+  assert.equal(result.response.status, 503);
+  assert.equal(result.body.code, "SERVER_UNAVAILABLE");
+  assert.equal(result.body.diagnostic, undefined);
+  assert.doesNotMatch(JSON.stringify(result.body), /OPEN_API_|providerResponse|private-/);
+  assert.equal(DB.state.writes, 0);
+  assert.equal(DB.state.batchCalls, 0);
+});
+
+test("HTTP provenance is inaccessible without a session and valid CSRF", async () => {
+  for (const options of [{authenticated:false}, {csrfValid:false}]) {
+    const DB = makeDb(); let calls = 0;
+    const result = await call(`/v1/orders/${orderId}/refresh`, DB, { ...options,
+      query: async () => { calls++; throw new Error("must-not-call-provider"); } });
+    assert.equal(result.response.status >= 400, true);
+    assert.equal(result.body.diagnostic, undefined);
+    assert.equal(calls, 0);
+    assert.equal(DB.state.writes, 0);
+    assert.equal(DB.state.batchCalls, 0);
+  }
+});
+
+test("source-IP reasons are filtered and propagated without any payment writes", async (t) => {
+  const sourceCode = "OPEN_API_SOURCE_IP_REJECTED";
+  const reasons = ["PEER_NOT_TRUSTED", "FORWARDED_HEADER_PRESENT", "XFF_MISSING", "XFF_CHAIN_ABNORMAL",
+    "XFF_LAST_INVALID", "REAL_IP_MISSING", "HEADER_CONFLICT"];
+  const cases = [
+    ...reasons.map(reason => ({ name: reason, details: { reason }, expected: reason })),
+    { name: "no details", expected: null },
+    { name: "no reason", details: {}, expected: null },
+    { name: "unknown reason", details: { reason: "private-unknown-reason" }, expected: null },
+    { name: "null details", details: null, expected: null },
+    { name: "string details", details: "private-details", expected: null },
+    { name: "array details", details: [{ reason: "PEER_NOT_TRUSTED" }], expected: null },
+    { name: "number reason", details: { reason: 403 }, expected: null },
+    { name: "array reason", details: { reason: ["PEER_NOT_TRUSTED"] }, expected: null },
+    { name: "object reason", details: { reason: { value: "PEER_NOT_TRUSTED" } }, expected: null },
+    { name: "nested reason", details: { nested: { reason: "PEER_NOT_TRUSTED" } }, expected: null },
+    ...[401, 404, 422, 503].map(status => ({ name: `non-403 ${status}`, status, details: { reason: "PEER_NOT_TRUSTED" }, expected: null })),
+    { name: "other provider code", code: "OPEN_API_RESOURCE_NOT_FOUND", details: { reason: "PEER_NOT_TRUSTED" }, expected: null },
+    { name: "non-business JSON", body: '{"code":"OPEN_API_SOURCE_IP_REJECTED","details":{"reason":"PEER_NOT_TRUSTED"}}', format: "other_json", providerCode: null, expected: null },
+    { name: "HTML response", body: '<html>private-gateway</html>', contentType: "text/html", format: "html", providerCode: null, expected: null },
+    { name: "signed source error", signed: true, details: { reason: "PEER_NOT_TRUSTED", ip: "private-ip-marker" }, expected: "PEER_NOT_TRUSTED", signature: "verified" },
+    { name: "bad signature stays closed", signed: true, invalid: true, details: { reason: "HEADER_CONFLICT" }, expected: "HEADER_CONFLICT", signature: "invalid" },
+    { name: "partial signature stays closed", signed: true, incomplete: true, details: { reason: "XFF_MISSING" }, expected: "XFF_MISSING", signature: "incomplete" },
+  ];
+  for (const c of cases) await t.test(c.name, async () => {
+    const DB = makeDb(); const status = c.status ?? 403, code = c.code ?? sourceCode;
+    const result = await call(`/v1/orders/${orderId}/refresh`, DB, { query: async (request) => {
+      if (c.signed) {
+        const response = await signedProviderResponse(request, { httpStatus: status, errorCode: code, errorDetails: c.details, invalidSignature: c.invalid });
+        const headers = new Headers(response.headers);
+        if (c.incomplete) headers.delete("X-XD-Response-Nonce");
+        return new Response(await response.text(), { status, headers });
+      }
+      return new Response(c.body ?? JSON.stringify({ code, message: "private-upstream-message",
+        requestId: request.headers.get("X-XD-Request-Id"), ...(c.details !== undefined ? { details: c.details } : {}) }),
+        { status, headers: { "Content-Type": c.contentType ?? "application/json" } });
+    } });
+    assert.equal(result.response.status, 502);
+    assert.equal(result.body.code, ["invalid", "incomplete"].includes(c.signature) ? "PROVIDER_SIGNATURE_ERROR" : "PROVIDER_HTTP_ERROR");
+    assert.equal(result.body.diagnostic.upstreamHttpStatus, status);
+    assert.deepEqual(result.body.diagnostic.providerResponse, {
+      format: c.format ?? "business_json", providerCode: c.providerCode === null ? null : code,
+      signatureState: c.signature ?? "absent", sourceIpReason: c.expected,
+    });
+    assert.equal(DB.state.writes, 0); assert.equal(DB.state.batchCalls, 0);
+    assert.equal(DB.state.events.size, 0); assert.equal(DB.state.attempts, 0);
+    assert.deepEqual(DB.state.transaction, transaction);
+    assert.equal(DB.state.freeBalance, 200); assert.equal(DB.state.paidBalance, 0);
+    assert.doesNotMatch(JSON.stringify(result.body), /private-|"details"|merchant\.example\.test|X-XD-Response|BEGIN .*KEY/);
+  });
+});
+
+test("source-IP diagnostics remain isolated from Production and unauthorized requests", async () => {
+  for (const options of [{environment:"production"}, {authenticated:false}, {csrfValid:false}, {method:"GET"}]) {
+    const DB = makeDb(); let calls = 0;
+    const target = options.method === "GET" ? `/v1/orders/${orderId}` : `/v1/orders/${orderId}/refresh`;
+    const result = await call(target, DB, { ...options, query: async request => {
+      calls++;
+      return signedProviderResponse(request, { httpStatus: 403, errorCode: "OPEN_API_SOURCE_IP_REJECTED", errorDetails: { reason: "PEER_NOT_TRUSTED" } });
+    } });
+    assert.equal(result.body.diagnostic, undefined);
+    assert.doesNotMatch(JSON.stringify(result.body), /PEER_NOT_TRUSTED|sourceIpReason|providerResponse/);
+    assert.equal(calls, options.environment === "production" ? 1 : 0);
+    assert.equal(DB.state.writes, 0); assert.equal(DB.state.batchCalls, 0);
+  }
+});
+
+function makeCheckoutDb() {
+  const DB = makeDb(), prepare = DB.prepare.bind(DB);
+  DB.state.created = false;
+  DB.state.checkoutBatches = [];
+  DB.prepare = sql => {
+    if (sql.includes("system_settings WHERE key='purchase_enabled'")) return {async first(){return {value:"1"};}};
+    if (sql.includes('system_settings WHERE key IN')) return {bind(){return this;},async all(){return {results:[
+      {key:'purchase_enabled',value:'1'},{key:'payment_rsa2_enabled',value:'1'},{key:'payment_epay_enabled',value:'0'},
+      {key:'payment_alipay_enabled',value:'1'},{key:'payment_wechat_enabled',value:'0'},
+      {key:'payment_alipay_released',value:'1'},{key:'payment_wechat_released',value:'0'},
+    ]};}};
+    if (sql.includes("FROM recharge_packages WHERE id=?")) return {
+      bind() { return this; },
+      async first() { return { id: "starter", name_zh: "入门包", credits: 400, price_cents: 149, promo_price_cents: null, currency: "USD", price_cny_fen: 990 }; },
+    };
+    return prepare(sql);
+  };
+  DB.batch = async statements => {
+    DB.state.checkoutBatches.push(statements);
+    if (statements.length === 3 && statements[0].args?.[2] === "starter") {
+      const changes = DB.state.created ? 0 : 1;
+      DB.state.created = true;
+      return statements.map(() => ({ meta: { changes } }));
+    }
+    return statements.map(() => ({ meta: { changes: 1 } }));
+  };
+  return DB;
+}
+
+test("checkout rejection explicitly reports unavailable payment link, preserves UNKNOWN and blocks duplicate orders", async () => {
+  for (const environment of ["staging", "production"]) {
+    const DB = makeCheckoutDb();
+    let calls = 0, providerRequestId;
+    const options = { environment, envOverrides: { PAYMENTS_ENABLED: "1" }, body: { packageId: "starter" }, query: async request => {
+      calls++; providerRequestId = request.headers.get("X-XD-Request-Id");
+      assert.equal(request.method, "POST");
+      assert.equal(new URL(request.url).pathname, "/api/open/v1/payments");
+      return signedProviderResponse(request, { httpStatus: 403, errorCode: "OPEN_API_SOURCE_IP_REJECTED", errorDetails: { reason: "HEADER_CONFLICT", private: "sensitive-marker" } });
+    } };
+    const result = await call("/v1/orders", DB, options);
+    assert.equal(result.response.status, 502, "V2 rejects checkout while preserving its local order");
+    assert.equal(result.body.order.status, "unknown");
+    assert.equal(result.body.order.paymentUrl, null);
+    assert.equal(result.body.order.paymentLinkUnavailable, true);
+    assert.match(result.body.message, /付款链接未生成/);
+    assert.doesNotMatch(result.body.message, /刷新/);
+    if (environment === "staging") {
+      assert.equal(result.body.requestId, providerRequestId);
+      assert.equal(result.body.diagnostic.providerResponse.sourceIpReason, "HEADER_CONFLICT");
+      assert.equal(result.body.diagnostic.providerResponse.signatureState, "verified");
+      assert.equal(result.body.diagnostic.upstreamHttpStatus, 403);
+    } else assert.equal(result.body.diagnostic, undefined);
+    assert.doesNotMatch(JSON.stringify(result.body), /sensitive-marker|private-upstream-message|BEGIN.*KEY|X-XD-Sign/);
+    assert.equal(DB.state.paidBalance, 0);
+    assert.equal(DB.state.events.size, 0);
+    const duplicate = await call("/v1/orders", DB, options);
+    assert.equal(duplicate.body.code, "UNRESOLVED_ORDER_EXISTS");
+    assert.equal(calls, 1, "neither automatic query nor second create request");
+  }
 });

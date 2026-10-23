@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import { extensionIdentity } from "./extension-identity.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const channel = process.argv[2];
@@ -26,6 +27,18 @@ if (packagedChannel) {
   writeFileSync(configPath, `export const RUNTIME_CONFIG = Object.freeze({ channel: ${JSON.stringify(channel)}, websiteUrl: ${JSON.stringify(websiteUrl)}, hostedApiUrl: ${JSON.stringify(hostedApiUrl)}, allowedHttpHosts: [], requestTimeoutMs: 30000 });\n`);
   const manifestPath = path.join(output, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  // Production must retain the existing store identity, including across clean builds.
+  const stored = channel === "production" ? JSON.parse(readFileSync(path.join(root,"config/extension-store-identity.json"),"utf8")) : null;
+  const publicKeyFile = process.env.REPLY_COPILOT_EXTENSION_PUBLIC_KEY_FILE;
+  const expectedId = process.env.REPLY_COPILOT_EXTENSION_ID;
+  if (stored && expectedId && expectedId !== stored.id) throw new Error("Production extension ID cannot differ from the existing Web Store item");
+  if (stored || publicKeyFile) {
+    const identity = extensionIdentity(publicKeyFile ? readFileSync(publicKeyFile,"utf8") : stored.publicKey, stored?.id || expectedId);
+    manifest.key = identity.key;
+    console.log(`Stable extension ID: ${identity.id}`);
+  } else if (expectedId) {
+    throw new Error("An expected extension ID requires its Web Store public key file");
+  }
   manifest.host_permissions = [`${hostedApiUrl}/*`];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   if (existsSync(path.join(output, "dev")) || existsSync(path.join(output, "config", "dev-state.js")) || existsSync(path.join(output, "services", "deepseek-client.js"))) throw new Error("Development-only files entered hosted package");

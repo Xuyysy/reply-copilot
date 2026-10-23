@@ -88,8 +88,6 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   await releaseExpiredDeliveryReservations(env, now, session.user_id);
   const prior = await existing(env, session.user_id, requestId);
   if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
-  const siteCap = Number(env.SITE_DAILY_CAP);
-  if (!Number.isInteger(siteCap) || siteCap < 1 || siteCap > 100_000) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "托管 AI 预算尚未配置。");
   const date = shanghaiDay(now);
   const budgetDay = new Date(now).toISOString().slice(0, 10);
   if (!Number.isSafeInteger(budgetReserve) || budgetReserve < 0) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预留无效。");
@@ -112,10 +110,9 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       SELECT ?,?,?,?,'reserved',0,?,?,?, ?,?,'generating' FROM credit_accounts
       WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved>0
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
-      AND EXISTS(SELECT 1 FROM site_daily_usage WHERE quota_date=? AND used<?)
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
       AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND status='reserved')
-      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,session.user_id,session.user_id,date,siteCap,budgetDay,budgetReserve,budgetLimit,session.user_id),
+      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,session.user_id,session.user_id,budgetDay,budgetReserve,budgetLimit,session.user_id),
     env.DB.prepare(`INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,credits,state,created_at)
       SELECT ?,?,?,?,1,'reserved',? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)
       ON CONFLICT(user_id,request_id) DO NOTHING`).bind(allocationId,session.user_id,requestId,lot.id,now,session.user_id,requestId,nonce),
@@ -125,7 +122,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     env.DB.prepare(`UPDATE credit_accounts SET ${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}=${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}+1,version=version+1,updated_at=?
       WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE id=? AND state='reserved')`).bind(now,session.user_id,allocationId),
     env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd+? WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(budgetReserve,budgetDay,budgetReserve,budgetLimit,session.user_id,requestId,nonce),
-    env.DB.prepare("UPDATE site_daily_usage SET used=used+1 WHERE quota_date=? AND used<? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(date,siteCap,session.user_id,requestId,nonce),
+    env.DB.prepare("UPDATE site_daily_usage SET used=used+1 WHERE quota_date=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(date,session.user_id,requestId,nonce),
     env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
       SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
         WHERE r.user_id=? AND r.request_id=? AND r.reservation_nonce=? AND r.status='reserved' AND x.state='reserved' AND b.generation_reserved_credits>0
@@ -141,8 +138,6 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     if (inFlight) throw new ApiFailure(409,"GENERATION_IN_PROGRESS","上一条回复仍在等待交付确认，请先重试该回复或稍后再生成。",3);
     const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
     if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
-    const site = await env.DB.prepare("SELECT used FROM site_daily_usage WHERE quota_date=?").bind(date).first<{used:number}>();
-    if ((site?.used ?? 0) >= siteCap) throw new ApiFailure(503,"HOSTED_BUDGET_EXHAUSTED","今日托管 AI 安全预算已用完，请稍后再试。");
     const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
     if ((budget?.reserved_micro_usd||0)+(budget?.settled_micro_usd||0)+budgetReserve>budgetLimit) throw new ApiFailure(503,"AI_BUDGET_EXHAUSTED","AI 成本安全预算已用完，请稍后再试。");
     throw new ApiFailure(409,"GENERATION_RESERVATION_CONFLICT","额度状态刚刚变化，请重新生成。");

@@ -4,7 +4,11 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-14",
   "workers_dev": false,
-  "triggers": { "crons": ["0 3 * * *"] },
+  "triggers": {
+    "crons": [
+      "0 3 * * *"
+    ]
+  },
   "vars": {
     "ENVIRONMENT": "development",
     "WEB_ORIGIN": "http://127.0.0.1:4321",
@@ -16,12 +20,14 @@
     "PAYMENT_PROVIDER": "mock",
     "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
   },
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "reply-copilot-local",
-    "database_id": "00000000-0000-0000-0000-000000000001",
-    "migrations_dir": "migrations"
-  }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "reply-copilot-local",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
   "env": {
     "staging": {
       "name": "reply-copilot-api-staging",
@@ -30,28 +36,34 @@
         "enabled": true,
         "head_sampling_rate": 1,
         "redact_query_string": true,
-        "logs": { "invocation_logs": false }
+        "logs": {
+          "invocation_logs": false
+        }
       },
       "vars": {
         "ENVIRONMENT": "staging",
-        "AI_MODE": "mock",
-        "ADMIN_PORTAL_ENABLED": "0",
+        "AI_MODE": "production",
+        "ADMIN_PORTAL_ENABLED": "1",
         "XIAODOU_NETWORK_DIAGNOSTIC_ENABLED": "0",
-        "REAL_DEEPSEEK_TEST_ENABLED": "0",
-        "REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD": "50000",
         "DEEPSEEK_INPUT_USD_PER_MILLION": "0.30",
         "DEEPSEEK_OUTPUT_USD_PER_MILLION": "1.32",
         "WEB_ORIGIN": "https://staging.x-reply-helper.top",
         "API_ORIGIN": "https://api-staging.x-reply-helper.top",
         "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",
-        "SITE_DAILY_CAP": "10",
-        "PAYMENTS_ENABLED": "0",
+        "PAYMENTS_ENABLED": "1",
         "XIAODOU_WEBHOOKS_ENABLED": "1",
-        "PAYMENT_PROVIDER": "xiaodou",
+        "PAYMENT_PROVIDER": "xiaodou_epay",
         "XIAODOU_RETURN_URL": "https://staging.x-reply-helper.top/account/",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
-      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-staging", "database_id": "cd44bb44-b525-42c4-b286-2cc84dae7fdb", "migrations_dir": "migrations" }]
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "reply-copilot-staging",
+          "database_id": "cd44bb44-b525-42c4-b286-2cc84dae7fdb",
+          "migrations_dir": "migrations"
+        }
+      ]
     },
     "production": {
       "name": "reply-copilot-api-production",
@@ -60,16 +72,23 @@
         "ENVIRONMENT": "production",
         "AI_MODE": "production",
         "ADMIN_PORTAL_ENABLED": "0",
-        "WEB_ORIGIN": "https://www.example.invalid",
-        "API_ORIGIN": "https://api.example.invalid",
-        "EXTENSION_ORIGIN": "chrome-extension://replace-with-production-extension-id",
+        "WEB_ORIGIN": "https://app.x-reply-helper.top",
+        "API_ORIGIN": "https://api.x-reply-helper.top",
+        "EXTENSION_ORIGIN": "chrome-extension://fgfjajofkapebgphfidblngcjomkbdaj",
         "SITE_DAILY_CAP": "300",
         "PAYMENTS_ENABLED": "0",
-        "XIAODOU_WEBHOOKS_ENABLED": "0",
+        "XIAODOU_WEBHOOKS_ENABLED": "1",
         "PAYMENT_PROVIDER": "xiaodou",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
       },
-      "d1_databases": [{ "binding": "DB", "database_name": "reply-copilot-production", "database_id": "00000000-0000-0000-0000-000000000003", "migrations_dir": "migrations" }]
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "reply-copilot-production",
+          "database_id": "d9df7d23-9b9c-44ac-a33a-c24474c15691",
+          "migrations_dir": "migrations"
+        }
+      ]
     }
   }
 }

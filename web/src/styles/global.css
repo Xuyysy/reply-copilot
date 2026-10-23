@@ -142,3 +142,31 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .section-kicker { color:#3672ab; font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width: 800px) { .header-inner { flex-wrap: wrap; padding: 9px 0; } .nav { order: 3; width: 100%; display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0 7px; } .hero { grid-template-columns: 1fr; padding: 64px 0; } .product-frame { transform: none; } .grid-3, .stat-grid { grid-template-columns: 1fr; } .grid-span-2 { grid-column: auto; } .section { padding: 62px 0; } }
 @media (max-width: 520px) { .container { width: min(100% - 30px, 1160px); } .header-inner { min-height: 64px; } .brand { font-size: 16px; } .header-actions .button { padding: 10px 12px; font-size: 12px; } h1 { font-size: 46px; } .form-card { padding: 22px; } }
+
+/* Compact operational forms share the public design tokens without a CMS dependency. */
+.site-editor { display:grid;gap:18px; }
+.site-editor h2 { font-size:1.35rem;font-weight:650; }
+.site-editor fieldset { border:1px solid var(--border);border-radius:12px;padding:18px;display:grid;gap:16px;min-width:0; }
+.site-editor legend { padding:0 8px;font-weight:650; }
+.site-editor label { display:grid;gap:6px;font-size:14px;min-width:0; }
+.site-editor input:not([type=checkbox]),.site-editor textarea { width:100%;min-width:0;border:1px solid var(--border);border-radius:7px;background:white;padding:9px 11px;font:inherit; }
+.site-editor textarea { min-height:84px;resize:vertical; }
+.site-editor label:has(input[type=checkbox]) { display:flex;align-items:center;gap:8px; }
+.site-editor fieldset>div { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px; }
+.site-editor .content-card { padding:18px; }
+.site-editor .content-card strong { grid-column:1/-1; }
+.site-editor button { justify-self:start;border:1px solid var(--border);border-radius:7px;padding:8px 14px;background:white;font:inherit;font-size:14px;cursor:pointer; }
+.site-editor button:disabled { opacity:.5;cursor:default; }
+@media(max-width:600px){.site-editor fieldset>div{grid-template-columns:1fr}.nav{flex-wrap:wrap}.nav a{max-width:100%;overflow-wrap:anywhere}}
+[data-site-text] { white-space:pre-wrap; }
+
+/* One supported payment method; no fake channel selector. */
+.checkout-payment-method { margin: 24px 0; padding: 20px; border: 1px solid var(--border, #d8dce3); border-radius: 14px; }
+.checkout-payment-method h3 { margin: 0 0 12px; font-size: 1rem; }
+.checkout-payment-option { display: inline-flex; align-items: center; gap: 10px; margin: 0 12px 10px 0; padding: 12px 14px; border: 1px solid var(--border, #d8dce3); border-radius: 10px; cursor: pointer; }
+.checkout-payment-option:has(input:checked) { border-color: var(--accent, #5b63d3); box-shadow: 0 0 0 1px var(--accent, #5b63d3); }
+.checkout-payment-option input { width: 16px; height: 16px; accent-color: var(--accent, #5b63d3); }
+.checkout-payment-provider { display: flex; align-items: center; gap: 12px; }
+.checkout-alipay-mark { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: #1677ff; color: #fff; font-weight: 700; }
+.checkout-pay-button { min-height: 48px; white-space: normal; overflow-wrap: anywhere; text-align: center; }
+@media (max-width: 600px) { .checkout-payment-method { padding: 16px; } .checkout-pay-button { width: 100%; justify-content: center; } }

@@ -1,7 +1,7 @@
 import "../config/version-display.js";
+import { createHistoryRefresh, createHistoryList } from "./history-list.js";
 import { StorageService } from "../services/storage-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
-import { createZaneVoiceProfile } from "../domain/voice-profile.js";
 import { UsageService } from "../services/usage-service.js";
 import { HistoryService } from "../services/history-service.js";
 import { AccountClient } from "../services/account-client.js";
@@ -13,6 +13,7 @@ const accountClient = new AccountClient(), accountStates = new AccountStateServi
 const $ = (id) => document.getElementById(id);
 const message = $("message");
 let profile = null;
+const refreshHistory = createHistoryRefresh(() => history.getRecent(30), createHistoryList($("history-list"), $("history-latest")));
 const titles = { voice: "我的风格", replies: "回复偏好", account: "账户与额度", behavior: "插件行为", data: "历史与数据", about: "关于插件" };
 async function refreshAccount(force = false) {
   const account = await accountStates.getState({ force });
@@ -20,7 +21,7 @@ async function refreshAccount(force = false) {
   const detail = {
     guest: "注册并验证邮箱，即获 200 次永久有效的 AI 生成额度。",
     credits_available: "云端 AI 已连接；一次生成包含三种风格，只扣 1 次。",
-    credits_exhausted: "生成次数已用完。可前往官网查看充值套餐，支付目前尚未开放。",
+    credits_exhausted: "生成次数已用完。可前往官网查看充值套餐和当前购买状态。",
     frozen: "账户已暂停，请联系支持。",
     trial_active: "旧开发模拟状态；正式账户使用云端余额。",
     trial_exhausted: "旧开发模拟状态；正式账户不按天重置。",
@@ -55,9 +56,7 @@ async function refreshUsage() {
   const summary = await usage.getSummary(), box = $("usage-summary"); box.replaceChildren();
   const rows = [["累计生成", summary.totalGenerations], ["最近 7 天", summary.last7DaysGenerations], ["切换候选", summary.selections], ["复制", summary.copies], ["有帮助", summary.feedbackGood], ["不太像我", summary.feedbackBad], ["请求失败", summary.apiFailures]];
   for (const [label, count] of rows) { const item = document.createElement("div"), value = document.createElement("strong"), title = document.createElement("span"); value.textContent = count; title.textContent = label; item.append(value, title); box.append(item); }
-  const list = $("history-list"); list.replaceChildren();
-  for (const item of await history.getRecent(30)) { const li = document.createElement("li"), p = document.createElement("p"), meta = document.createElement("small"); p.textContent = item.reply || "已选择的回复"; meta.textContent = `${item.style || "回复"} · ${new Date(item.updatedAt || item.createdAt).toLocaleString("zh-CN")}`; li.append(p, meta); list.append(li); }
-  if (!list.childElementCount) list.textContent = "还没有已选择的回复记录。";
+  await refreshHistory();
 }
 async function refreshSettings() {
   renderProfile(await profiles.get());
@@ -99,7 +98,6 @@ document.querySelectorAll(".nav-item").forEach((button) => button.addEventListen
 }));
 $("save-voice").addEventListener("click", async () => { try { await saveProfileFields(); showMessage("个人风格已保存在此浏览器。"); } catch (error) { showMessage(error.message || "保存失败，请检查输入。", true); } });
 $("reset-voice").addEventListener("click", async () => { if (!confirm("确定恢复默认风格？当前个人风格设置将被替换。")) return; renderProfile(await profiles.reset()); showMessage("已恢复默认风格。"); announceSettingsChanged(); });
-$("zane-voice").addEventListener("click", async () => { renderProfile(await profiles.save(createZaneVoiceProfile())); showMessage("已切换为 Zane 个人预设。"); announceSettingsChanged(); });
 $("add-sample").addEventListener("click", async () => { try { profile = await profiles.addWritingSample($("sample-input").value); $("sample-input").value = ""; renderSamples(); showMessage("已添加写作样本。"); announceSettingsChanged(); } catch (error) { showMessage(error.message, true); } });
 $("save-replies").addEventListener("click", async () => { try { await saveProfileFields(); await storage.setBehaviorPreferences({ defaultReplyMode: $("default-style").value }); await storage.setReplyStyle($("reply-style").value); showMessage("回复偏好已保存。"); announceSettingsChanged(); } catch (error) { showMessage(error.message || "保存失败。", true); } });
 $("save-behavior").addEventListener("click", async () => { await storage.setBehaviorPreferences({ autoGenerateOnReply: $("auto-generate").checked, showFloatingWindow: $("show-floating").checked, rememberFloatingPosition: $("remember-position").checked, defaultReplyMode: $("default-style").value, ...( $("remember-position").checked ? {} : { floatingPosition: null }) }); showMessage("插件行为设置已保存。"); announceSettingsChanged(); });

@@ -6,34 +6,19 @@ import { response } from "./http";
 import { finishGeneration, reserveGeneration } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
-import { realTestAllowed } from "./real-test-policy.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
+
+import { normalizeAiInput } from "./ai-input.js";
 
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
-function normalizeInput(body: Record<string, unknown>) {
-  const requestId = typeof body.requestId === "string" && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(body.requestId) ? body.requestId : "";
-  const post = body.post && typeof body.post === "object" && !Array.isArray(body.post) ? body.post as Record<string,unknown> : {};
-  const text = typeof post.text === "string" ? post.text.trim() : "";
-  const url = typeof post.url === "string" ? post.url : "";
-  if (!requestId || !text || text.length > 12_000 || (url && !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(url))) throw new ApiFailure(400, "INVALID_REQUEST", "帖子或请求标识无效。");
-  const profile = body.voiceProfile && typeof body.voiceProfile === "object" && !Array.isArray(body.voiceProfile) ? body.voiceProfile : undefined;
-  const history = Array.isArray(body.recentHistory) ? body.recentHistory.slice(0, 20) : [];
-  const styleStats = body.styleStats && typeof body.styleStats === "object" && !Array.isArray(body.styleStats) ? body.styleStats : undefined;
-  const replyStyle = ["natural-friendly", "short", "balanced"].includes(String(body.replyStyle)) ? String(body.replyStyle) : "natural-friendly";
-  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle };
-}
-function aiMode(env:Env, email:string): "mock"|"real" {
+function aiMode(env:Env): "mock"|"real" {
   const mode=env.AI_MODE || (env.AI_MOCK==="1"?"mock":"production");
   if(mode==="mock") {
     if(env.ENVIRONMENT!=="development"&&env.ENVIRONMENT!=="staging") throw new ApiFailure(503,"SERVER_UNAVAILABLE","生产环境不能使用模拟 AI。");
     return "mock";
   }
-  if(mode==="real-test") {
-    if(!realTestAllowed(env,email)) throw new ApiFailure(503,"REAL_AI_TEST_DISABLED","真实 AI 联调尚未由管理员开启。");
-    return "real";
-  }
-  if(mode!=="production"||env.ENVIRONMENT!=="production") throw new ApiFailure(503,"AI_MODE_NOT_CONFIGURED","AI 模式与环境不匹配。");
+  if(mode!=="production"||!["staging","production"].includes(env.ENVIRONMENT)) throw new ApiFailure(503,"AI_MODE_NOT_CONFIGURED","AI 模式与环境不匹配。");
   return "real";
 }
 function reservationCost(env:Env, system:string,user:string,mode:"mock"|"real"):number {
@@ -58,7 +43,12 @@ async function provider(env: Env, system: string, user: string, mode:"mock"|"rea
       inputRateUsdPerMillion: Number(env.DEEPSEEK_INPUT_USD_PER_MILLION),
       outputRateUsdPerMillion: Number(env.DEEPSEEK_OUTPUT_USD_PER_MILLION),
     });
-  } catch {
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+    if(code==='insufficient_balance')throw new ApiFailure(503,'AI_PROVIDER_BALANCE_EXHAUSTED','AI 服务商余额不足，请联系管理员处理。');
+    if(code==='authentication_error')throw new ApiFailure(503,'AI_PROVIDER_CONFIG_ERROR','AI 服务商认证配置异常，请联系管理员。');
+    if(code==='rate_limited')throw new ApiFailure(503,'AI_PROVIDER_RATE_LIMITED','AI 服务商请求繁忙，请稍后重试。');
+    if(code==='timeout')throw new ApiFailure(503,'AI_PROVIDER_TIMEOUT','AI 服务响应超时，请稍后重试。');
     // Do not forward provider messages, response bodies, or credential-bearing request details.
     throw new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
@@ -67,19 +57,17 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const { session } = await sessionFor(request, env);
   if (session.kind !== "extension") throw new ApiFailure(403, "FORBIDDEN", "请在已绑定的插件中生成回复。");
   const body = await jsonBody(request, 24_000);
-  const input = normalizeInput(body);
+  let input: ReturnType<typeof normalizeAiInput>;
+  try { input = normalizeAiInput(body); }
+  catch { throw new ApiFailure(400, "INVALID_REQUEST", "帖子或请求标识无效。"); }
   if (!await takeRate(env, `ai-user:${session.user_id}`, 40, 60_000, nowMs())) throw new ApiFailure(429, "RATE_LIMITED", "请求过于频繁，请稍后再试。", 60);
   const hash = await sha256(JSON.stringify(input));
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
-  const mode=aiMode(env,session.email);
+  const mode=aiMode(env);
   if(mode==="real"&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
   const budgetReserve=reservationCost(env,prompts.system,prompts.user,mode);
-  if(env.ENVIRONMENT==="staging"&&mode==="real") {
-    const configured=await env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>();
-    if(Number(configured?.value)>Number(env.REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD)) throw new ApiFailure(503,"REAL_AI_TEST_DISABLED","真实 AI 联调预算尚未限制。");
-  }
   const execution = await executeAiGeneration({
     reserve: () => reserveGeneration(env, session, input.requestId, hash, budgetReserve),
     provider: () => provider(env, prompts.system, prompts.user, mode),

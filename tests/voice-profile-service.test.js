@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { VoiceProfileService, VOICE_PROFILE_KEY } from "../services/voice-profile-service.js";
-import { DEFAULT_VOICE_PROFILE, createZaneVoiceProfile, validateVoiceProfile } from "../domain/voice-profile.js";
+import { DEFAULT_VOICE_PROFILE, validateVoiceProfile } from "../domain/voice-profile.js";
 import { StorageService, API_KEY_KEY } from "../services/storage-service.js";
 import { memoryStorage } from "./helpers.js";
 
@@ -22,8 +22,8 @@ test("legacy migration is idempotent and preserves legacy user data", async () =
   const store = memoryStorage(), service = new VoiceProfileService(store);
   const first = await service.migrateLegacy({ apiKeyExists: true });
   const again = await service.migrateLegacy({ apiKeyExists: true });
-  assert.equal(first.profile.name, "Zane"); assert.equal(again.migrated, false);
-  assert.equal(again.profile.name, "Zane");
+  assert.equal(first.profile.name, "My Voice"); assert.equal(again.migrated, false);
+  assert.equal(again.profile.name, "My Voice");
 });
 
 test("key-only legacy profile is migrated before retired key removal", async () => {
@@ -31,7 +31,7 @@ test("key-only legacy profile is migrated before retired key removal", async () 
   const old = await store.get(API_KEY_KEY);
   await new VoiceProfileService(store).migrateLegacy({ apiKeyExists: Boolean(old[API_KEY_KEY]) });
   await new StorageService({ local: store }).migrateSchema();
-  assert.equal((await new VoiceProfileService(store).get()).name, "Zane");
+  assert.equal((await new VoiceProfileService(store).get()).name, "My Voice");
   assert.equal(API_KEY_KEY in store.data, false);
 });
 
@@ -40,3 +40,12 @@ test("invalid profile values are rejected and stored corrupt profile falls back"
   const store = memoryStorage(); store.data[VOICE_PROFILE_KEY] = { tone: "bad" };
   assert.equal((await new VoiceProfileService(store).get()).name, "My Voice");
 });
+
+ test("migration preserves an existing personal profile and samples", async () => {
+  const store = memoryStorage();
+  store.data[VOICE_PROFILE_KEY] = { ...DEFAULT_VOICE_PROFILE, name: "Personal", writingSamples: ["My own words"] };
+  const service = new VoiceProfileService(store);
+  await service.migrateLegacy({ historyExists: true });
+  assert.equal((await service.get()).name, "Personal");
+  assert.deepEqual((await service.get()).writingSamples, ["My own words"]);
+ });

@@ -1,3 +1,4 @@
+import {futureCampaignStatements} from "./campaigns";
 import type { Env } from "./types";
 import { ApiFailure, type RegistrationDiagnostics } from "./types";
 import { sendCode, takeRate } from "./auth";
@@ -39,11 +40,11 @@ async function derive(env: Env, password: string, salt: Uint8Array, iterations: 
   const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations},key,256);
   return hex(new Uint8Array(bits));
 }
-async function hashPassword(env: Env, password: string): Promise<string> {
+export async function hashPassword(env: Env, password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   return `pbkdf2-sha256:${ITERATIONS}:${hex(salt)}:${await derive(env,password,salt,ITERATIONS)}`;
 }
-async function verifyPassword(env: Env, password: string, stored: string | null): Promise<boolean> {
+export async function verifyPassword(env: Env, password: string, stored: string | null): Promise<boolean> {
   const parts = stored?.split(":") || [];
   const iterations = Number(parts[1]);
   if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || !SUPPORTED_ITERATIONS.has(iterations) || String(iterations) !== parts[1] || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
@@ -132,6 +133,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
   const setting = await env.DB.prepare("SELECT value FROM system_settings WHERE key='signup_grant'").first<{value:string}>();
   const grant = Number(setting?.value || 200);
   if (!Number.isInteger(grant) || grant<1 || grant>1000) throw new ApiFailure(503,"GRANT_NOT_CONFIGURED","免费额度设置无效。");
+  const futureGrants=await futureCampaignStatements(env,userId,now);
   try { await env.DB.batch([
     env.DB.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,status,role) VALUES(?,?,?,?,?,?,'active','user')").bind(userId,email,now,now,row.username,row.password_hash),
     env.DB.prepare("INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES(?,?,0,?,?)").bind(userId,grant,now,now),
@@ -139,6 +141,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
     env.DB.prepare("INSERT INTO credit_grants(user_id,grant_type,amount,created_at) VALUES(?,'signup',?,?)").bind(userId,grant,now),
     env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,created_at) VALUES(?,?,'signup_grant',?,0,?,?)").bind(uuid(),userId,grant,userId,now),
     session.statement,
+    ...futureGrants,
     env.DB.prepare("DELETE FROM pending_registrations WHERE email=? AND code_hash=?").bind(email,row.code_hash),
   ]); } catch { throw new ApiFailure(409,"REGISTRATION_CONFLICT","注册信息已被使用，请重新注册或登录。"); }
   return response({ok:true},200,env,request,{"Set-Cookie":sessionCookie(session.token,SESSION_MS/1000)});

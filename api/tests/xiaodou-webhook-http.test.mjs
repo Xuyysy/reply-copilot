@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { test } from "node:test";
 import { buildSync } from "esbuild";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -51,7 +51,7 @@ function request(headers = {}, body = "{}") {
 
 function signedEvent(event, eventType=event.eventType) {
   const body=JSON.stringify(event),eventId=event.eventId,timestamp=String(Math.floor(Date.now()/1000)),nonce="abcdefghijklmnop",keyId="platform-test-key";
-  const signingText=["XD-Webhook-v1",eventId,eventType,timestamp,nonce,keyId,Buffer.from(body).toString("hex")].join("\n");
+  const signingText=["XD-Webhook-v1",eventId,eventType,timestamp,nonce,keyId,createHash("sha256").update(body).digest("hex")].join("\n");
   const signature=sign("RSA-SHA256",Buffer.from(signingText),platform.privateKey).toString("base64");
   return request({"X-XD-Webhook-Event-Id":eventId,"X-XD-Webhook-Event-Type":eventType,"X-XD-Webhook-Timestamp":timestamp,"X-XD-Webhook-Nonce":nonce,"X-XD-Webhook-Key-Id":keyId,"X-XD-Webhook-Signature":signature},body);
 }

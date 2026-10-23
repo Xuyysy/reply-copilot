@@ -22,10 +22,12 @@ const pageTitle = `${title} · x-Reply-Helper`;
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="/" aria-label="x-Reply-Helper home"><img class="brand-mark" src="/favicon.svg" alt="" />x-Reply-Helper</a>
-        <nav class="nav" aria-label="Main navigation">
-          <a href="/guide"><span data-zh="使用指南">Guide</span></a>
-          <a href="/pricing"><span data-zh="价格">Pricing</span></a>
-          <a href="/faq">FAQ</a>
+        <nav data-site-navigation class="nav" aria-label="Main navigation">
+          <a data-nav-id="x" data-site-link="xProfileUrl" aria-disabled="true"><span data-zh="我的 X">My X</span></a>
+          <a data-nav-id="install" data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install</span></a>
+          <a data-nav-id="guide" href="/guide"><span data-zh="使用指南">Guide</span></a>
+          <a data-nav-id="pricing" href="/pricing"><span data-zh="价格">Pricing</span></a>
+          <a data-nav-id="faq" href="/faq">FAQ</a>
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
@@ -33,19 +35,31 @@ const pageTitle = `${title} · x-Reply-Helper`;
         </div>
       </div>
     </header>
+    <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>
+    <div class="container notice" data-site-text="maintenance" hidden style="white-space:pre-wrap"></div>
     <main><slot /></main>
     <footer class="footer">
       <div class="container footer-inner">
-        <span>© {new Date().getFullYear()} x-Reply-Helper · <span data-zh="AI 回复草稿，由你决定是否发送">AI drafts. You decide what to send.</span></span>
+        <span>© {new Date().getFullYear()} x-Reply-Helper · <span data-site-text="footerText" data-zh="AI 回复草稿，由你决定是否发送">AI drafts. You decide what to send.</span></span>
         <div class="footer-links">
           <a href="/privacy"><span data-zh="隐私">Privacy</span></a>
           <a href="/terms"><span data-zh="条款">Terms</span></a>
           <a href="/refunds"><span data-zh="退款">Refunds</span></a>
+          <a data-site-email hidden></a>
           <a href="/feedback"><span data-zh="反馈">Feedback</span></a>
         </div>
       </div>
     </footer>
     <script>
+      import { api } from "../lib/api";
+      import { createSiteContentLoader, applySiteContent, shouldHideAccountCta } from "../lib/site-content.mjs";
+      const loadSiteContent = createSiteContentLoader(() => api("/v1/site"));
+      let siteContent = {};
+      const renderSiteContent = () => applySiteContent(document, siteContent, document.documentElement.lang === "en" ? "en" : "zh");
+      window.addEventListener("reply-copilot-language", renderSiteContent);
+      const refreshSiteContent = (refresh = false) => loadSiteContent(refresh).then(content => { siteContent = content; renderSiteContent(); });
+      void refreshSiteContent();
+      window.addEventListener("pageshow", event => { if (event.persisted) void refreshSiteContent(true); });
       const preference = document.documentElement.lang === "en" ? "en" : "zh";
       function setLanguage(lang: "en" | "zh") {
         document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
@@ -67,13 +81,13 @@ const pageTitle = `${title} · x-Reply-Helper`;
         const en=document.documentElement.lang==="en";
         const entry=document.getElementById("account-entry") as HTMLAnchorElement;
         const retry=document.getElementById("account-retry")!;
-        entry.hidden=accountState==="loading"||accountState==="error";
+        entry.hidden=false;
         retry.hidden=accountState!=="error";
-        entry.href=accountState==="guest"?"/login?mode=register":"/account";
+        entry.href=["guest","loading","error"].includes(accountState)?"/login":"/account";
         const label=entry.querySelector("span")!;
-        label.textContent=accountState==="guest"?(en?"Register / Sign in":"注册 / 登录"):(en?"My account":"我的账户");
+        label.textContent=["guest","loading","error"].includes(accountState)?(en?"Sign in / Account":"登录 / 账户"):(en?"My account":"我的账户");
         document.querySelectorAll<HTMLAnchorElement>("[data-account-cta]").forEach((link)=>{
-          link.hidden=accountState==="loading"||accountState==="error";
+          link.hidden=shouldHideAccountCta(accountState,link.dataset.sitePrimaryOverride);
           link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
           const text=link.querySelector("span")||link;
           text.textContent=accountState==="guest"?(en?"Get 200 free generations":"免费领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
@@ -88,6 +102,7 @@ const pageTitle = `${title} · x-Reply-Helper`;
       }
       document.getElementById("account-retry")?.addEventListener("click",()=>void loadAccountLinks());
       window.addEventListener("reply-copilot-language",updateAccountLinks);
+      document.addEventListener("reply-copilot-primary-cta",updateAccountLinks);
       document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&Date.now()-lastAccountCheck>15000)void loadAccountLinks();});
       void loadAccountLinks();
     </script>

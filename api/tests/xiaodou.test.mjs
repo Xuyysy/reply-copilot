@@ -14,6 +14,24 @@ function signedResponse(pair,{status=200,body="{\"ok\":true}",requestId="req-123
   return new Response(body,{status,headers:{"Content-Type":`${contentType}; charset=utf-8`,"X-XD-Request-Id":requestId,"X-XD-Response-Sign":sig,"X-XD-Response-Key-Id":keyId,"X-XD-Response-Timestamp":timestamp,"X-XD-Response-Nonce":nonce}});
 }
 
+test("client retains safe HTTP error provenance before API mapping",async()=>{
+  const merchant=keyPair(),platform=keyPair(),requestId="request-12345678";
+  const body=JSON.stringify({code:"OPEN_API_RESOURCE_NOT_FOUND",message:"private-response-marker",requestId});
+  for(const signed of [false,true]){
+    const client=new XiaodouClient({baseUrl:"https://merchant.test",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,
+      privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},now:()=>1792195200000,
+      fetcher:async()=>signed?signedResponse(platform,{status:404,body,requestId}):new Response(body,{status:404,headers:{"Content-Type":"application/json"}})});
+    await assert.rejects(()=>client.queryPayment("order-12345678",{requestId}),error=>{
+      assert.equal(error.code,"OPEN_API_RESOURCE_NOT_FOUND");
+      assert.equal(error.stage,"provider_http_response");
+      assert.equal(error.upstreamHttpStatus,404);
+      assert.deepEqual(error.responseDiagnostic,{format:"business_json",providerCode:"OPEN_API_RESOURCE_NOT_FOUND",signatureState:signed?"verified":"absent",sourceIpReason:null});
+      assert.doesNotMatch(JSON.stringify(error),/private-response-marker|merchant\.test|BEGIN .*KEY|X-XD-Response/);
+      return true;
+    });
+  }
+});
+
 test("canonical request normalizes path, sorted duplicate query keys, content type, and raw body hash",async()=>{
   const body='{"z":1}';
   assert.equal(canonicalQuery("z=2&a=hello+world&a=!*'()"),"a=hello%20world&a=%21%2A%27%28%29&z=2");
@@ -37,12 +55,12 @@ test("Xiaodou client signs create requests and verifies raw signed responses",as
 test("raw webhook bytes use the dedicated event signature and tampering is rejected",async()=>{
   const platform=keyPair(),body=Buffer.from('{"eventId":"evt-12345678"}');
   const headers={"X-XD-Webhook-Event-Id":"evt-12345678","X-XD-Webhook-Event-Type":"PAYMENT_SUCCEEDED","X-XD-Webhook-Timestamp":"1792195200","X-XD-Webhook-Nonce":"abcdefghijklmnop","X-XD-Webhook-Key-Id":"platform-kid"};
-  const text=webhookSigningText({...headers,rawBody:body});
+  const text=await webhookSigningText({...headers,rawBody:body});
   headers["X-XD-Webhook-Signature"]=sign("RSA-SHA256",Buffer.from(text),platform.privateKey).toString("base64");
   const client=new XiaodouClient({baseUrl:"https://merchant.test",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:keyPair().privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},now:()=>1792195200000,fetcher:async()=>{throw new Error("network not expected");}});
   assert.deepEqual(await client.verifyWebhook(headers,body),{eventId:"evt-12345678",eventType:"PAYMENT_SUCCEEDED",bodySha256:sha(body)});
   await assert.rejects(()=>client.verifyWebhook(headers,Buffer.from(`${body.toString()} `)),error=>error.code==="INVALID_WEBHOOK_SIGNATURE");
-  assert.throws(()=>webhookSigningText({...headers,"X-XD-Webhook-Event-Id":"",rawBody:body}),/header/i);
+  await assert.rejects(()=>webhookSigningText({...headers,"X-XD-Webhook-Event-Id":"",rawBody:body}),/header/i);
 });
 
 test("invalid or unsigned successful provider responses are rejected",async()=>{
@@ -82,6 +100,71 @@ test("provider failures and timeouts stay generic and do not disclose the respon
   await assert.rejects(()=>failed.queryPayment("order-12345678",{requestId:"request-upstream-123"}),error=>error.code==="UPSTREAM_FAILURE"&&error.status===502);
   const timedOut=makeClient(async()=>{throw new Error("credential-example body-example");});
   await assert.rejects(()=>timedOut.queryPayment("order-12345678",{requestId:"request-timeout-123"}),error=>error.code==="NETWORK_UNCERTAIN"&&error.message==="小豆支付暂时无法处理请求。");
+});
+
+async function stagingFetchFailure({baseUrl="https://merchant.test",ownApiOrigin="https://api-staging.x-reply-helper.top",error=new TypeError("private message with url and signature"),ticks=[100,100.126]}={}){
+  const merchant=keyPair(),platform=keyPair(),events=[];
+  const client=new XiaodouClient({baseUrl,ownApiOrigin,appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},environment:"staging",now:()=>1792195200000,monotonicNow:()=>ticks.shift()??100.126,logger:event=>events.push(event),fetcher:async()=>{throw error;}});
+  await assert.rejects(()=>client.queryPayment("order-12345678",{requestId:"request-staging-1234"}),error=>error.code==="NETWORK_UNCERTAIN");
+  assert.equal(events.length,1);
+  return events[0];
+}
+
+test("Staging fetch rejection logs safe cause, URL shape, event and fractional timing",async()=>{
+  const event=await stagingFetchFailure({error:Object.assign(new TypeError("private message with url and signature"),{cause:new Error("private nested cause")})});
+  assert.deepEqual(event,{event:"xiaodou_provider_fetch_failed",requestId:"request-staging-1234",stage:"provider_fetch",elapsedMs:0.13,exceptionName:"TypeError",causeName:"Error",causeCode:"unknown",category:"fetch_rejected",isHttps:true,baseHasPathPrefix:false,baseHasQueryOrFragment:false,hasUnexpectedPort:false,paymentPathMatchesExpected:true,targetMatchesOwnApiOrigin:false,targetUnderOwnDomainZone:"unknown"});
+  assert.doesNotMatch(JSON.stringify(event),/merchant\.test|signature|private message|nested cause|order-12345678/);
+});
+
+test("Staging fetch rejection exposes only an explicitly allowlisted cause code",async()=>{
+  const event=await stagingFetchFailure({error:Object.assign(new TypeError("must not be logged"),{cause:Object.assign(new Error("nested secret"),{code:"ECONNRESET"})})});
+  assert.equal(event.exceptionName,"TypeError");assert.equal(event.causeName,"Error");assert.equal(event.causeCode,"ECONNRESET");
+  const unknown=await stagingFetchFailure({error:Object.assign(new TypeError("secret"),{cause:{name:"CredentialError",code:"secret-value"}})});
+  assert.equal(unknown.causeName,"unknown");assert.equal(unknown.causeCode,"unknown");
+  const malformed=await stagingFetchFailure({error:new Proxy(new TypeError("hidden"),{get(target,key,receiver){if(key==="cause")throw new Error("malformed cause getter");return Reflect.get(target,key,receiver);}})});
+  assert.equal(malformed.causeName,"unknown");assert.equal(malformed.causeCode,"unknown");
+  assert.doesNotMatch(JSON.stringify([event,unknown]),/must not be logged|nested secret|CredentialError|secret-value|merchant\.test/);
+});
+
+test("V2 rejects path-prefixed configuration before any fetch or diagnostic logging",()=>{
+  const merchant=keyPair(),platform=keyPair();let calls=0;
+  assert.throws(()=>new XiaodouClient({baseUrl:"https://merchant.test/api/open/v1",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},fetcher:()=>{calls++;}}),/clean HTTPS origin/);
+  assert.equal(calls,0);
+});
+
+test("Staging URL diagnostics detect the configured API origin exactly",async()=>{
+  const origin="https://api-staging.x-reply-helper.top";
+  const event=await stagingFetchFailure({baseUrl:origin,ownApiOrigin:origin});
+  assert.equal(event.targetMatchesOwnApiOrigin,true);assert.equal(event.targetUnderOwnDomainZone,true);
+  assert.equal(event.isHttps,true);assert.equal(event.paymentPathMatchesExpected,true);
+  assert.doesNotMatch(JSON.stringify(event),/api-staging|x-reply-helper/);
+});
+
+test("a normal signed provider response does not produce a fetch failure diagnostic",async()=>{
+  const merchant=keyPair(),platform=keyPair(),events=[];
+  const client=new XiaodouClient({baseUrl:"https://merchant.test",ownApiOrigin:"https://api-staging.x-reply-helper.top",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},environment:"staging",now:()=>1792195200000,nonce:()=>"abcdefghijklmnop",logger:event=>events.push(event),fetcher:async()=>signedResponse(platform,{requestId:"request-12345678",body:"{\"status\":\"PAYING\"}"})});
+  const result=await client.queryPayment("order-12345678",{requestId:"request-12345678"});
+  assert.equal(result.status,"PAYING");assert.deepEqual(events,[]);
+});
+
+test("Production fetch rejection emits no diagnostic log",async()=>{
+  const merchant=keyPair(),platform=keyPair(),events=[];
+  const client=new XiaodouClient({baseUrl:"https://merchant.test",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},environment:"production",logger:event=>events.push(event),fetcher:async()=>{throw new TypeError("private provider detail");}});
+  await assert.rejects(()=>client.queryPayment("order-12345678",{requestId:"request-production-1234"}),error=>error.code==="NETWORK_UNCERTAIN");
+  assert.deepEqual(events,[]);
+});
+
+test("Staging diagnostics are passed to console as a structured object",async()=>{
+  const merchant=keyPair(),platform=keyPair(),originalWarn=console.warn,logged=[];
+  const client=new XiaodouClient({baseUrl:"https://merchant.test",ownApiOrigin:"https://api-staging.x-reply-helper.top",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},environment:"staging",now:()=>1792195200000,fetcher:async()=>{throw new TypeError("private provider detail");}});
+  console.warn=(...args)=>logged.push(args);
+  try { await assert.rejects(()=>client.queryPayment("order-12345678",{requestId:"request-console-1234"}),error=>error.code==="NETWORK_UNCERTAIN"); }
+  finally { console.warn=originalWarn; }
+  assert.equal(logged.length,1);
+  assert.equal(typeof logged[0][0],"object");
+  assert.equal(logged[0][0].event,"xiaodou_provider_fetch_failed");
+  assert.equal(logged[0][0].requestId,"request-console-1234");
+  assert.doesNotMatch(JSON.stringify(logged[0]),/private provider detail|merchant\.test|order-12345678/);
 });
 
 test("provider and webhook bodies are bounded while streaming",async()=>{
@@ -161,4 +244,43 @@ test("webhook intake can be enabled for Xiaodou while payment order creation rem
   assert.equal(xiaodouPaymentOrdersAreEnabled({...webhookOnly,PAYMENTS_ENABLED:"1"}),true);
   assert.equal(xiaodouWebhookIsEnabled({PAYMENT_PROVIDER:"xiaodou",XIAODOU_WEBHOOKS_ENABLED:"0",PAYMENTS_ENABLED:"1"}),false);
   assert.equal(xiaodouWebhookIsEnabled({PAYMENT_PROVIDER:"mock",XIAODOU_WEBHOOKS_ENABLED:"1",PAYMENTS_ENABLED:"0"}),false);
+});
+
+
+test("signed API requests disable redirects and never forward incoming identity headers", async () => {
+  const merchant=keyPair(),platform=keyPair();let calls=0;
+  const client=new XiaodouClient({baseUrl:"https://merchant.test",appId:"xdop_1234567890abcdef",keyId:merchantKeyId,
+    privateKeyPem:merchant.privatePem,platformPublicKeys:{"platform-kid":platform.publicPem},fetcher:async(url,init)=>{
+      calls++;assert.equal(init.redirect,"manual");
+      const headers=new Headers(init.headers);
+      for(const name of ["Host","Forwarded","X-Forwarded-For","CF-Connecting-IP","X-Real-IP","Cookie","Authorization"])assert.equal(headers.has(name),false);
+      return new Response(null,{status:302,headers:{Location:"https://other.test/"}});
+    }});
+  await assert.rejects(()=>client.queryPayment("order-12345678"),error=>error.stage==="provider_http_response"&&error.upstreamHttpStatus===302);
+  assert.equal(calls,1);
+});
+
+test('V2 API configuration accepts only an HTTPS root origin',()=>{
+ const merchant=keyPair(),platform=keyPair();
+ for(const baseUrl of ['https://merchant.test/?','https://merchant.test/#','https://merchant.test/api/open/v1','https://merchant.test:8443/','https://merchant.test/?a=1','https://user:pass@merchant.test/'])
+  assert.throws(()=>new XiaodouClient({baseUrl,appId:'xdop_1234567890abcdef',keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{'platform-kid':platform.publicPem}}));
+});
+
+test('V2 request timeout aborts once and remains uncertain without retries',async()=>{
+ const merchant=keyPair(),platform=keyPair();let aborted=false,calls=0;
+ const client=new XiaodouClient({baseUrl:'https://merchant.test/',appId:'xdop_1234567890abcdef',keyId:merchantKeyId,privateKeyPem:merchant.privatePem,platformPublicKeys:{'platform-kid':platform.publicPem},timeoutMs:5,
+ fetcher:async(url,init)=>{calls++;return new Promise((resolve,reject)=>{
+  const fallback=setTimeout(()=>reject(new TypeError('mock-fallback')),50);
+  init.signal?.addEventListener('abort',()=>{aborted=true;clearTimeout(fallback);reject(new DOMException('private timeout','AbortError'));},{once:true});
+ });}});
+ await assert.rejects(()=>client.queryPayment('order-12345678'),error=>error.code==='NETWORK_UNCERTAIN');
+ assert.equal(aborted,true);assert.equal(calls,1);
+});
+
+test('official webhook canonical vector hashes raw bytes rather than hex-encoding them',async()=>{
+ const rawBody=Buffer.from(' {"eventId":"evt-vector","text":"中文"}\n');
+ const headers={'X-XD-Webhook-Event-Id':'evt-vector','X-XD-Webhook-Event-Type':'PAYMENT_SUCCEEDED','X-XD-Webhook-Timestamp':'1792195200','X-XD-Webhook-Nonce':'abcdefghijklmnop','X-XD-Webhook-Key-Id':'platform-kid'};
+ const canonical=await webhookSigningText({...headers,rawBody});
+ assert.equal(canonical,['XD-Webhook-v1','evt-vector','PAYMENT_SUCCEEDED','1792195200','abcdefghijklmnop','platform-kid',sha(rawBody)].join('\n'));
+ assert.equal(canonical.split('\n')[6].length,64);
 });

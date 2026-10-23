@@ -4,16 +4,13 @@ export interface Env {
   WEB_ORIGIN: string;
   API_ORIGIN: string;
   EXTENSION_ORIGIN?: string;
-  SITE_DAILY_CAP: string;
+  SITE_DAILY_CAP?: string;
   AUTH_HASH_SECRET?: string;
   DEEPSEEK_API_KEY?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
   AI_MODE?: string;
-  REAL_DEEPSEEK_TEST_ENABLED?: string;
-  REAL_DEEPSEEK_TEST_USER_EMAIL?: string;
-  REAL_DEEPSEEK_TEST_DAILY_BUDGET_MICRO_USD?: string;
   MAIL_API_KEY?: string;
   MAIL_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;
@@ -31,6 +28,9 @@ export interface Env {
   XIAODOU_PRIVATE_KEY?: string;
   XIAODOU_PLATFORM_PUBLIC_KEYS?: string;
   XIAODOU_RETURN_URL?: string;
+  XIAODOU_EPAY_GATEWAY?: string;
+  XIAODOU_EPAY_PID?: string;
+  XIAODOU_EPAY_KEY?: string;
   XIAODOU_NETWORK_DIAGNOSTIC_ENABLED?: string;
 }
 
@@ -59,6 +59,13 @@ export class ApiFailure extends Error {
 
 export type RefreshDiagnosticCode = "PROVIDER_NETWORK_ERROR" | "PROVIDER_HTTP_ERROR" | "PROVIDER_SIGNATURE_ERROR" | "PROVIDER_CONFIG_ERROR" | "ORDER_RECONCILIATION_ERROR" | "SERVER_UNAVAILABLE";
 export type RefreshDiagnosticStage = "provider_config" | "provider_request_signing" | "provider_fetch" | "provider_http_response" | "provider_response_signature" | "provider_response" | "order_reconciliation" | "unknown";
+export type ProviderResponseDiagnostic = {
+  format: "business_json" | "other_json" | "html" | "other";
+  providerCode: string | null;
+  signatureState: "absent" | "incomplete" | "invalid" | "verified";
+  sourceIpReason: "PEER_NOT_TRUSTED" | "FORWARDED_HEADER_PRESENT" | "XFF_MISSING" | "XFF_CHAIN_ABNORMAL"
+    | "XFF_LAST_INVALID" | "REAL_IP_MISSING" | "HEADER_CONFLICT" | null;
+};
 
 export class RefreshDiagnosticFailure extends ApiFailure {
   constructor(
@@ -68,6 +75,7 @@ export class RefreshDiagnosticFailure extends ApiFailure {
     status: number,
     message: string,
     public upstreamHttpStatus: number | null = null,
+    public providerResponse: ProviderResponseDiagnostic | null = null,
   ) {
     super(status, diagnosticCode, message);
   }

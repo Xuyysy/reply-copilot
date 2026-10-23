@@ -83,7 +83,7 @@ export async function sessionFor(request: Request, env: Env): Promise<{ session:
   if (!token || !/^[a-f0-9]{64}$/i.test(token)) throw new ApiFailure(401, "AUTH_REQUIRED", "请先登录。");
   const hash = await sha256(token);
   const kind = bearer ? "extension" : "web";
-  const session = await env.DB.prepare("SELECT sessions.id,sessions.user_id,users.email,sessions.kind,sessions.device_id,sessions.csrf_token_hash,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND sessions.kind=? AND revoked_at IS NULL AND expires_at>?").bind(hash, kind, nowMs()).first<Session>();
+  const session = await env.DB.prepare("SELECT sessions.id,sessions.user_id,users.email,sessions.kind,sessions.device_id,sessions.csrf_token_hash,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND sessions.kind=? AND revoked_at IS NULL AND expires_at>? AND users.status='active'").bind(hash, kind, nowMs()).first<Session>();
   if (!session) throw new ApiFailure(401, "AUTH_REQUIRED", "登录已失效，请重新登录。");
   return { session, token };
 }

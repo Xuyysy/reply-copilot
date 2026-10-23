@@ -68,7 +68,7 @@ export async function requestDeepSeek({
   }
 
   try {
-    if (!upstream.ok) throw new DeepSeekClientError(upstream.status === 429 ? "rate_limited" : "http_error");
+    if (!upstream.ok) throw new DeepSeekClientError(upstream.status === 402 ? "insufficient_balance" : [401,403].includes(upstream.status) ? "authentication_error" : upstream.status === 429 ? "rate_limited" : "http_error");
     let data;
     try {
       data = await upstream.json();

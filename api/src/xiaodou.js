@@ -49,23 +49,75 @@ export function reconcileFeeProjection(currentStatus, currentJson, incoming, gro
   return { status: "verified", json: existing ?? json, issue: null };
 }
 
+// Closed public error vocabulary from the Xiaodou integration specification.
+const SAFE_PROVIDER_BUSINESS_CODES = new Set([
+  "OPEN_API_HEADER_INVALID", "OPEN_API_SIGNATURE_INVALID", "OPEN_API_SOURCE_IP_REJECTED",
+  "OPEN_API_RISK_FROZEN", "OPEN_API_APP_SUSPENDED", "OPEN_API_APP_REVOKED", "OPEN_API_MERCHANT_INACTIVE",
+  "OPEN_API_BODY_INVALID", "OPEN_API_PAYLOAD_TOO_LARGE", "OPEN_API_REPLAY", "OPEN_API_REQUEST_ID_CONFLICT",
+  "OPEN_API_IDEMPOTENCY_CONFLICT", "OPEN_API_RESOURCE_NOT_FOUND", "OPEN_API_STATE_INVALID",
+  "OPEN_API_CHANNEL_UNAVAILABLE", "OPEN_API_CHANNEL_UNSUPPORTED", "OPEN_API_SCOPE_CHANNEL_MISMATCH",
+  "OPEN_API_LIMIT_EXCEEDED", "OPEN_API_RATE_LIMITED", "OPEN_API_PROVIDER_REJECTED", "OPEN_API_GUARD_UNAVAILABLE",
+]);
+const RESPONSE_FORMATS = new Set(["business_json", "other_json", "html", "other"]);
+const SIGNATURE_STATES = new Set(["absent", "incomplete", "invalid", "verified"]);
+const SOURCE_IP_REASONS = new Set([
+  "PEER_NOT_TRUSTED", "FORWARDED_HEADER_PRESENT", "XFF_MISSING", "XFF_CHAIN_ABNORMAL",
+  "XFF_LAST_INVALID", "REAL_IP_MISSING", "HEADER_CONFLICT",
+]);
+
+export function safeProviderResponseDiagnostic(value, upstreamHttpStatus = null) {
+  if (!value || !RESPONSE_FORMATS.has(value.format) || !SIGNATURE_STATES.has(value.signatureState)) return null;
+  return {
+    format: value.format,
+    providerCode: value.format === "business_json" && SAFE_PROVIDER_BUSINESS_CODES.has(value.providerCode) ? value.providerCode : null,
+    signatureState: value.signatureState,
+    sourceIpReason: upstreamHttpStatus === 403 && value.format === "business_json"
+      && value.providerCode === "OPEN_API_SOURCE_IP_REJECTED" && SOURCE_IP_REASONS.has(value.sourceIpReason)
+      ? value.sourceIpReason : null,
+  };
+}
+
+function describeProviderResponse(response, text) {
+  let parsed, isJson = false;
+  try { parsed = JSON.parse(text); isJson = true; } catch { /* Never retain raw response text in diagnostics. */ }
+  const businessEnvelope = parsed && !Array.isArray(parsed) && typeof parsed === "object"
+    && typeof parsed.code === "string" && /^[A-Z0-9_]{1,80}$/.test(parsed.code)
+    && typeof parsed.message === "string" && typeof parsed.requestId === "string"
+    && parsed.requestId.length > 0 && parsed.requestId.length <= 128 && !/[\r\n]/.test(parsed.requestId);
+  return {
+    format: businessEnvelope ? "business_json" : isJson ? "other_json"
+      : normalizeContentType(response.headers.get("Content-Type")) === "text/html" ? "html" : "other",
+    providerCode: businessEnvelope && SAFE_PROVIDER_BUSINESS_CODES.has(parsed.code) ? parsed.code : null,
+    signatureState: "absent",
+    // A pre-auth error may be unsigned. This remains a diagnostic hint only;
+    // signature verification and payment state handling are independent.
+    sourceIpReason: response.status === 403 && businessEnvelope && parsed.code === "OPEN_API_SOURCE_IP_REJECTED"
+      && parsed.details && typeof parsed.details === "object" && !Array.isArray(parsed.details)
+      && typeof parsed.details.reason === "string" && SOURCE_IP_REASONS.has(parsed.details.reason)
+      ? parsed.details.reason : null,
+  };
+}
+
 export class XiaodouProviderError extends Error {
-  constructor(code, status = 502, stage = "provider_response", upstreamHttpStatus = null) {
+  constructor(code, status = 502, stage = "provider_response", upstreamHttpStatus = null, responseDiagnostic = null) {
     super("小豆支付暂时无法处理请求。");
     this.name = "XiaodouProviderError";
     this.code = code;
     this.status = status;
     this.stage = stage;
     this.upstreamHttpStatus = upstreamHttpStatus;
+    this.responseDiagnostic = safeProviderResponseDiagnostic(responseDiagnostic, upstreamHttpStatus);
   }
 }
 
 export function xiaodouWebhookIsEnabled(env) {
-  return env?.PAYMENT_PROVIDER === "xiaodou" && env?.XIAODOU_WEBHOOKS_ENABLED === "1";
+  // Delivery verification must survive provider-sales toggles: old Epay and
+  // RSA2 orders continue settling through their protocol-specific handlers.
+  return env?.PAYMENT_PROVIDER !== "mock" && env?.XIAODOU_WEBHOOKS_ENABLED === "1";
 }
 
 export function xiaodouPaymentOrdersAreEnabled(env) {
-  return env?.PAYMENT_PROVIDER === "xiaodou" && env?.PAYMENTS_ENABLED === "1";
+  return ["xiaodou", "xiaodou_epay"].includes(env?.PAYMENT_PROVIDER) && env?.PAYMENTS_ENABLED === "1";
 }
 
 export function refundEventMatchesTransaction(event, refund, transaction) {
@@ -135,10 +187,10 @@ function validatePublicIp(value) {
 function validateOutId(value, field) {
   if (typeof value !== "string" || !/^[A-Za-z0-9_-]{6,64}$/.test(value)) throw new TypeError(`${field} is invalid`);
 }
-function responseKeyHeaders(response) {
+function responseKeyHeaders(response, diagnostic) {
   const values = SIGNATURE_HEADERS.map((name) => response.headers.get(name));
   if (values.every((value) => value === null)) return null;
-  if (values.some((value) => value === null)) throw new XiaodouProviderError("INCOMPLETE_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status);
+  if (values.some((value) => value === null)) throw new XiaodouProviderError("INCOMPLETE_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status, { ...diagnostic, signatureState: "incomplete" });
   return values;
 }
 async function readResponseBody(response) {
@@ -168,25 +220,64 @@ export async function readLimitedBytes(stream, limit) {
   return bytes;
 }
 
-export function webhookSigningText({ "X-XD-Webhook-Event-Id": eventId, "X-XD-Webhook-Event-Type": eventType, "X-XD-Webhook-Timestamp": timestamp, "X-XD-Webhook-Nonce": nonce, "X-XD-Webhook-Key-Id": keyId, rawBody }) {
+const SAFE_EXCEPTION_NAMES = new Set(["AbortError", "DOMException", "Error", "EvalError", "NetworkError", "RangeError", "ReferenceError", "SyntaxError", "TimeoutError", "TypeError", "URIError"]);
+const SAFE_PROVIDER_CAUSE_CODES = new Set(["CERT_HAS_EXPIRED", "DEPTH_ZERO_SELF_SIGNED_CERT", "EAI_AGAIN", "ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "ERR_INVALID_URL", "ERR_TLS_CERT_ALTNAME_INVALID", "ETIMEDOUT"]);
+
+function safeErrorField(error, key, allowlist) {
+  try {
+    const value = error && typeof error === "object" ? error[key] : undefined;
+    return typeof value === "string" && allowlist.has(value) ? value : "unknown";
+  } catch { return "unknown"; }
+}
+
+function providerFetchUrlDiagnostics({ baseUrl, url, path, ownApiOrigin }) {
+  let base, target, ownOrigin;
+  try { base = new URL(baseUrl); } catch { /* The constructor normally rejects this before fetch. */ }
+  try { target = new URL(url); } catch { /* Keep diagnostics non-throwing. */ }
+  try {
+    const parsed = new URL(ownApiOrigin);
+    if (!parsed.username && !parsed.password && !parsed.search && !parsed.hash && parsed.pathname === "/") ownOrigin = parsed;
+  } catch { /* Missing or malformed trusted config means unknown. */ }
+
+  const targetMatchesOwnApiOrigin = target && ownOrigin ? target.origin === ownOrigin.origin : "unknown";
+  return {
+    isHttps: target ? target.protocol === "https:" : "unknown",
+    baseHasPathPrefix: base ? base.pathname !== "/" : "unknown",
+    baseHasQueryOrFragment: base ? Boolean(base.search || base.hash) : "unknown",
+    hasUnexpectedPort: target ? Boolean(target.port) : "unknown",
+    paymentPathMatchesExpected: target && /^\/api\/open\/v1\/payments\/[^/]+$/.test(path) ? target.pathname === path : "unknown",
+    targetMatchesOwnApiOrigin,
+    // Exact API-origin equality is trusted as an own-domain target. For other
+    // hostnames there is no configured zone suffix, so do not infer by suffix.
+    targetUnderOwnDomainZone: target && ownOrigin && target.hostname === ownOrigin.hostname ? true : "unknown",
+  };
+}
+
+export async function webhookSigningText({ "X-XD-Webhook-Event-Id": eventId, "X-XD-Webhook-Event-Type": eventType, "X-XD-Webhook-Timestamp": timestamp, "X-XD-Webhook-Nonce": nonce, "X-XD-Webhook-Key-Id": keyId, rawBody }) {
   for (const [name, value] of [["eventId", eventId], ["eventType", eventType], ["timestamp", timestamp], ["nonce", nonce], ["keyId", keyId]]) if (typeof value !== "string" || !value.length || /[\r\n]/.test(value)) throw new TypeError(`Webhook header is invalid: ${name}`);
   if (!EVENT_TYPES.has(eventType) || !/^\d{1,10}$/.test(timestamp) || !/^[\x21-\x7e]{16,64}$/.test(nonce) || !/^[\x21-\x7e]{1,128}$/.test(keyId)) throw new TypeError("Webhook headers are invalid");
-  return ["XD-Webhook-v1", eventId, eventType, timestamp, nonce, keyId, hex(rawBody instanceof Uint8Array ? rawBody : encoder.encode(rawBody))].join("\n");
+  return ["XD-Webhook-v1", eventId, eventType, timestamp, nonce, keyId, await sha256(rawBody instanceof Uint8Array ? rawBody : encoder.encode(rawBody))].join("\n");
 }
 
 export class XiaodouClient {
-  constructor({ baseUrl, appId, keyId, privateKeyPem, platformPublicKeys, fetcher = fetch, now = () => Date.now(), nonce = randomToken }) {
+  constructor({ baseUrl, ownApiOrigin, appId, keyId, privateKeyPem, platformPublicKeys, fetcher = fetch, now = () => Date.now(), monotonicNow = () => performance.now(), timeoutMs = 10_000, nonce = randomToken, environment = "", logger = (event) => console.warn(event) }) {
     const base = new URL(baseUrl);
-    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) throw new TypeError("Xiaodou base URL must be a clean HTTPS origin");
+    if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash || base.pathname !== "/" || base.port || base.href !== `${base.origin}/`) throw new TypeError("Xiaodou base URL must be a clean HTTPS origin");
     if (!/^xdop_[A-Za-z0-9]{16}$/.test(appId) || !/^mkid_[0-9a-f]{16}$/.test(keyId) || !platformPublicKeys || typeof platformPublicKeys !== "object") throw new TypeError("Xiaodou credential configuration is invalid");
     this.baseUrl = base.href.replace(/\/$/, "");
+    this.ownApiOrigin = ownApiOrigin;
     this.appId = appId;
     this.keyId = keyId;
     this.privateKeyPem = privateKeyPem;
     this.platformPublicKeys = platformPublicKeys;
     this.fetcher = fetcher;
     this.now = now;
+    this.monotonicNow = monotonicNow;
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw new TypeError("Invalid request timeout");
+    this.timeoutMs = timeoutMs;
     this.nonce = nonce;
+    this.environment = environment;
+    this.logger = logger;
   }
   async #privateKey() { return crypto.subtle.importKey("pkcs8", pemBytes(this.privateKeyPem, "PRIVATE KEY"), { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]); }
   async #verify(keyId, signature, text) {
@@ -209,7 +300,7 @@ export class XiaodouClient {
     };
     if (!timestampIsFresh(values["X-XD-Webhook-Timestamp"], this.now())) throw new XiaodouProviderError("STALE_WEBHOOK", 401);
     let text;
-    try { text = webhookSigningText({ ...values, rawBody }); }
+    try { text = await webhookSigningText({ ...values, rawBody }); }
     catch (error) { if (error instanceof TypeError) throw new XiaodouProviderError("INVALID_WEBHOOK_HEADERS", 401); throw error; }
     const signature = readWebhookHeader(headers, "X-XD-Webhook-Signature");
     if (!await this.#verify(values["X-XD-Webhook-Key-Id"], signature, text)) throw new XiaodouProviderError("INVALID_WEBHOOK_SIGNATURE", 401);
@@ -235,26 +326,64 @@ export class XiaodouClient {
     const headers = { "X-XD-App-Id": this.appId, "X-XD-Timestamp": timestamp, "X-XD-Nonce": nonce, "X-XD-Key-Id": this.keyId, "X-XD-Request-Id": id, "X-XD-Sign": signature };
     if (contentType) headers["Content-Type"] = contentType;
     let response;
-    try { response = await this.fetcher(url, { method, headers, ...(body !== undefined ? { body } : {}) }); }
-    catch { throw new XiaodouProviderError("NETWORK_UNCERTAIN", 503, "provider_fetch"); }
+    const fetchStartedAt = this.monotonicNow();
+    // Workers' global fetch rejects a client instance as its `this` receiver.
+    const fetcher = this.fetcher;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try { response = await fetcher(url, { method, headers, signal: controller.signal, redirect: "manual", ...(body !== undefined ? { body } : {}) }); }
+    catch (error) {
+      if (this.environment === "staging") {
+        try {
+          let cause;
+          try { cause = error && typeof error === "object" ? error.cause : undefined; } catch { cause = undefined; }
+          const exceptionName = safeErrorField(error, "name", SAFE_EXCEPTION_NAMES);
+          const causeName = safeErrorField(cause, "name", SAFE_EXCEPTION_NAMES);
+          let causeCode = "unknown";
+          try {
+            const code = cause && typeof cause === "object" ? cause.code : undefined;
+            if (typeof code === "string" && SAFE_PROVIDER_CAUSE_CODES.has(code)) causeCode = code;
+          } catch { /* Ignore malformed cause objects. */ }
+          const elapsed = this.monotonicNow() - fetchStartedAt;
+          const elapsedMs = Number.isFinite(elapsed) ? Math.round(Math.max(0, elapsed) * 100) / 100 : "unknown";
+          this.logger({
+            event: "xiaodou_provider_fetch_failed",
+            requestId: id,
+            stage: "provider_fetch",
+            elapsedMs,
+            exceptionName,
+            causeName,
+            causeCode,
+            category: exceptionName === "AbortError" || causeName === "AbortError" ? "aborted" : "fetch_rejected",
+            ...providerFetchUrlDiagnostics({ baseUrl: this.baseUrl, url, path, ownApiOrigin: this.ownApiOrigin }),
+          });
+        } catch { /* Diagnostics must never alter provider error handling. */ }
+      }
+      throw new XiaodouProviderError("NETWORK_UNCERTAIN", 503, "provider_fetch");
+    } finally { clearTimeout(timer); }
     let result;
     try { result = await readResponseBody(response); } catch (error) { if (error instanceof XiaodouProviderError) throw error; throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE", 502); }
-    const signatureHeaders = responseKeyHeaders(response);
+    const responseDiagnostic = describeProviderResponse(response, result.text);
+    const signatureHeaders = responseKeyHeaders(response, responseDiagnostic);
     if (signatureHeaders) {
+      // Complete headers are not trusted until every signature check succeeds,
+      // including non-2xx responses. Invalid metadata remains fail-closed.
+      responseDiagnostic.signatureState = "invalid";
       const [responseSign, responseKeyId, responseTimestamp, responseNonce] = signatureHeaders;
-      if (!timestampIsFresh(responseTimestamp, this.now())) throw new XiaodouProviderError("STALE_PROVIDER_RESPONSE", 502, "provider_response_signature", response.status);
+      if (!timestampIsFresh(responseTimestamp, this.now())) throw new XiaodouProviderError("STALE_PROVIDER_RESPONSE", 502, "provider_response_signature", response.status, responseDiagnostic);
       const responseRequestId = response.headers.get("X-XD-Request-Id");
-      if (!responseRequestId) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISSING", 502, "provider_response_signature", response.status);
-      if (responseRequestId !== id) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISMATCH", 502, "provider_response_signature", response.status);
+      if (!responseRequestId) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISSING", 502, "provider_response_signature", response.status, responseDiagnostic);
+      if (responseRequestId !== id) throw new XiaodouProviderError("PROVIDER_REQUEST_ID_MISMATCH", 502, "provider_response_signature", response.status, responseDiagnostic);
       const canonical = ["XD-Response-v1", String(response.status), normalizeContentType(response.headers.get("Content-Type")), responseRequestId, responseTimestamp, responseNonce, responseKeyId, await sha256(result.bytes)].join("\n");
       let verified = false;
       try { verified = await this.#verify(responseKeyId, responseSign, canonical); } catch { /* Do not surface crypto implementation details. */ }
-      if (!verified) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status);
-    } else if (response.ok) throw new XiaodouProviderError("UNSIGNED_PROVIDER_SUCCESS", 502, "provider_response_signature", response.status);
+      if (!verified) throw new XiaodouProviderError("INVALID_PROVIDER_RESPONSE_SIGNATURE", 502, "provider_response_signature", response.status, responseDiagnostic);
+      responseDiagnostic.signatureState = "verified";
+    } else if (response.ok) throw new XiaodouProviderError("UNSIGNED_PROVIDER_SUCCESS", 502, "provider_response_signature", response.status, responseDiagnostic);
     if (!response.ok) {
       let code = "PROVIDER_REJECTED";
       try { const parsed = JSON.parse(result.text); if (typeof parsed.code === "string" && /^[A-Z0-9_]{1,80}$/.test(parsed.code)) code = parsed.code; } catch { /* Deliberately ignore provider response text. */ }
-      throw new XiaodouProviderError(code, response.status >= 500 ? 502 : 409, "provider_http_response", response.status);
+      throw new XiaodouProviderError(code, response.status >= 500 ? 502 : 409, "provider_http_response", response.status, responseDiagnostic);
     }
     let data;
     try { data = JSON.parse(result.text); } catch { throw new XiaodouProviderError("INVALID_PROVIDER_JSON", 502, "provider_response", response.status); }
@@ -263,12 +392,13 @@ export class XiaodouClient {
   }
   async createPayment(input, options = {}) {
     validateOutId(input.outTradeNo, "outTradeNo");
-    if (!Number.isSafeInteger(input.amountFen) || input.amountFen < 1 || input.currency !== "CNY" || input.channel !== "ALIPAY_H5" || !validatePublicIp(input.payerClientIp) || typeof input.subject !== "string" || !input.subject || input.subject.length > 128) throw new TypeError("Payment request is invalid");
+    if (!Number.isSafeInteger(input.amountFen) || input.amountFen < 1 || input.currency !== "CNY" || !["ALIPAY_H5", "WECHAT_H5"].includes(input.channel) || !validatePublicIp(input.payerClientIp) || typeof input.subject !== "string" || !input.subject || input.subject.length > 128) throw new TypeError("Payment request is invalid");
     if (input.returnUrl) { const target = new URL(input.returnUrl); if (target.protocol !== "https:" || target.username || target.password || target.search || target.hash || input.returnUrl.length > 512) throw new TypeError("Payment return URL is invalid"); }
     const body = JSON.stringify({ outTradeNo: input.outTradeNo, channel: input.channel, amountFen: input.amountFen, currency: "CNY", subject: input.subject, payerClientIp: input.payerClientIp, ...(input.description ? { description: input.description } : {}), ...(input.attach ? { attach: input.attach } : {}), ...(input.returnUrl ? { returnUrl: input.returnUrl } : {}) });
     return this.#request("POST", "/api/open/v1/payments", { ...options, body, contentType: "application/json" });
   }
   async queryPayment(outTradeNo, options = {}) { validateOutId(outTradeNo, "outTradeNo"); return this.#request("GET", `/api/open/v1/payments/${encodeURIComponent(outTradeNo)}`, options); }
+  async getSettlementAccounts(options = {}) { return this.#request("GET", "/api/open/v1/settlement/accounts", options); }
   async relaunchPayment(outTradeNo, options = {}) { validateOutId(outTradeNo, "outTradeNo"); return this.#request("POST", `/api/open/v1/payments/${encodeURIComponent(outTradeNo)}/attempts`, { ...options, body: "", contentType: "application/json" }); }
   async closePayment(outTradeNo, options = {}) { validateOutId(outTradeNo, "outTradeNo"); return this.#request("POST", `/api/open/v1/payments/${encodeURIComponent(outTradeNo)}/close`, { ...options, body: "", contentType: "application/json" }); }
   async createRefund(input, options = {}) {

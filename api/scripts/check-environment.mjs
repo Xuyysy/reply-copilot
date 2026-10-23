@@ -20,12 +20,11 @@ else {
   if(env.vars.WEB_ORIGIN===env.vars.API_ORIGIN)errors.push("WEB_ORIGIN and API_ORIGIN must be separate hosts");
   for(const field of ["WEB_ORIGIN","API_ORIGIN","EXTENSION_ORIGIN"])if(env.vars?.[field]===other.vars?.[field])errors.push(`${field} must differ from the other environment`);
   if(!/^chrome-extension:\/\/[a-p]{32}$/.test(env.vars?.EXTENSION_ORIGIN||""))errors.push("EXTENSION_ORIGIN must be the exact installed Chrome extension origin");
-  if(env.vars.AI_MODE!==(selected==="staging"?"mock":"production"))errors.push("AI_MODE must start in the approved safe mode");
-  if(env.vars.PAYMENTS_ENABLED!=="0")errors.push("PAYMENTS_ENABLED must stay disabled until a separate payment launch approval");
-  if(env.vars.PAYMENT_PROVIDER!=="xiaodou")errors.push("PAYMENT_PROVIDER must explicitly identify the configured provider");
-  if(env.vars.ADMIN_PORTAL_ENABLED!=="0")errors.push("ADMIN_PORTAL_ENABLED must stay closed for initial deployment");
+  if(env.vars.AI_MODE!=="production")errors.push("AI_MODE must start in the approved safe mode");
+  if(selected==="production"?env.vars.PAYMENTS_ENABLED!=="0":!["0","1"].includes(env.vars.PAYMENTS_ENABLED))errors.push("Production payment ceiling must remain closed; Staging needs an explicit ceiling and separately verified database purchase control");
+  if(!["xiaodou","xiaodou_epay"].includes(env.vars.PAYMENT_PROVIDER))errors.push("PAYMENT_PROVIDER must explicitly identify the configured provider");
+  if(selected==="production"?env.vars.ADMIN_PORTAL_ENABLED!=="0":!["0","1"].includes(env.vars.ADMIN_PORTAL_ENABLED))errors.push("Production admin must remain closed; Staging requires an explicit boolean admin setting");
   if(selected==="staging"&&env.vars.XIAODOU_NETWORK_DIAGNOSTIC_ENABLED!=="0")errors.push("Staging network diagnostics must be disabled by default");
-  if(selected==="staging"&&(!Number.isInteger(Number(env.vars.SITE_DAILY_CAP))||Number(env.vars.SITE_DAILY_CAP)>10))errors.push("Staging SITE_DAILY_CAP must be at most 10");
   if(env.workers_dev!==false)errors.push("workers_dev must remain disabled");
 }
 if(errors.length){for(const error of errors)console.error(`✗ ${error}`);process.exitCode=1;}

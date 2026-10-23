@@ -1,4 +1,4 @@
-import { DEFAULT_VOICE_PROFILE, createZaneVoiceProfile, validateVoiceProfile } from "../domain/voice-profile.js";
+import { DEFAULT_VOICE_PROFILE, validateVoiceProfile } from "../domain/voice-profile.js";
 
 export const VOICE_PROFILE_KEY = "voiceProfile";
 export const PROFILE_MIGRATION_KEY = "voiceProfileSchemaVersion";
@@ -36,7 +36,7 @@ export class VoiceProfileService {
       await this.storage.set({ [PROFILE_MIGRATION_KEY]: 1 });
       return { migrated: false, profile: values[VOICE_PROFILE_KEY] };
     }
-    const profile = apiKeyExists || historyExists ? createZaneVoiceProfile() : structuredClone(DEFAULT_VOICE_PROFILE);
+    const profile = structuredClone(DEFAULT_VOICE_PROFILE);
     profile.updatedAt = this.clock();
     await this.storage.set({ [VOICE_PROFILE_KEY]: profile, [PROFILE_MIGRATION_KEY]: 1 });
     return { migrated: true, profile };

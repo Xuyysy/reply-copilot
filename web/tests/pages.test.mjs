@@ -29,18 +29,19 @@ test("pricing renders USD reference and server-set CNY settlement values", () =>
   assert.match(html, /注册赠送 200 次/);
   assert.match(html, /无需订阅、买断或自备 API Key/);
   assert.match(html, /付款尚未开放/);
-  assert.match(source, /price_cny_fen/);
+  assert.match(source, /fee_rate_bps|feeRateBps/);
+  assert.doesNotMatch(source, /¥9\.90|¥19\.90|¥32\.90/);
   assert.match(source, /toFixed\(2\)/);
   assert.match(migration, /price_cents=149,price_cny_fen=990/);
   assert.match(migration, /price_cents=299,price_cny_fen=1990/);
   assert.match(migration, /price_cents=499,price_cny_fen=3290/);
-  for (const price of ["$1.49", "$2.99", "$4.99", "¥9.90", "¥19.90", "¥32.90"]) assert.ok(homepage.includes(price), price);
+  assert.doesNotMatch(homepage, /¥9\.90|¥19\.90|¥32\.90/);
   assert.doesNotMatch(html, /Seven consecutive days|Lifetime license/);
 });
 test("checkout offers an explicit payment flow and never trusts a browser-submitted amount", () => {
   const html = page("checkout");
   const source = readFileSync(path.join(root, "src/pages/checkout.astro"), "utf8");
-  assert.match(html, /创建支付订单|Create payment order/);
+  assert.match(html, /使用支付宝付款|Pay with Alipay/);
   assert.match(html, /模拟支付完成|Simulate payment/);
   assert.match(source, /amountFen/);
   assert.match(source, /packageId/);
