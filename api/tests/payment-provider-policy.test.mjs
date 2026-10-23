@@ -4,7 +4,7 @@ import {randomUUID,pbkdf2Sync} from 'node:crypto';
 import {fixture,withProvider,providerResponse,enableEpaySales} from './helpers/payment-v2.mjs';
 
 function adminFixture(){
-  const f=fixture();f.env.ADMIN_PORTAL_ENABLED='1';f.env.PASSWORD_PEPPER='payment-policy-test-pepper';
+  const f=fixture({released:false});f.env.ADMIN_PORTAL_ENABLED='1';f.env.PASSWORD_PEPPER='payment-policy-test-pepper';
   const salt='1234567890abcdef1234567890abcdef',hash=pbkdf2Sync('ExampleAdmin123!\0'+f.env.PASSWORD_PEPPER,Buffer.from(salt,'hex'),100000,32,'sha256').toString('hex');
   f.sql.prepare("UPDATE users SET role='admin',password_hash=? WHERE id='test-user'").run(`pbkdf2-sha256:100000:${salt}:${hash}`);
   f.sql.exec("INSERT INTO site_administrator VALUES(1,'test-user',1)");
@@ -23,14 +23,14 @@ test('migration adds channel snapshot and safe provider defaults without overwri
  f.sql.close();
 });
 
-test('package API does not expose a channel until both operator and platform-release gates are enabled',async()=>{
+test('RSA2 Alipay is not exposed until its own channel and release gates are enabled',async()=>{
  const f=fixture({released:false});
  let r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,false);assert.deepEqual(r.body.paymentMethods,[]);
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_alipay_enabled'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_alipay_enabled'");
  r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,false);assert.deepEqual(r.body.paymentMethods,[]);
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_alipay_released'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_alipay_released'");
  r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
  f.sql.close();
@@ -38,10 +38,10 @@ test('package API does not expose a channel until both operator and platform-rel
 
 test('WeChat is not exposed until its own platform-release gate is enabled',async()=>{
  const f=fixture({released:false});
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_wechat_enabled'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_wechat_enabled'");
  let r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,false);assert.deepEqual(r.body.paymentMethods,[]);
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_wechat_released'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_wechat_released'");
  r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou',channel:'WECHAT_H5'}]);
  f.sql.close();
@@ -49,7 +49,7 @@ test('WeChat is not exposed until its own platform-release gate is enabled',asyn
 
 test('WeChat is the preferred RSA2 channel when both channels are enabled and platform-released',async()=>{
  const f=fixture();
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_alipay_enabled','payment_alipay_released','payment_wechat_enabled','payment_wechat_released')");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released','payment_rsa2_wechat_enabled','payment_rsa2_wechat_released')");
  const r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);
  assert.deepEqual(r.body.paymentMethods,[
@@ -68,7 +68,7 @@ test('WeChat is the preferred RSA2 channel when both channels are enabled and pl
  f.sql.close();
 });
 
-test('legacy Epay Alipay sales require the shared Alipay platform-release gate',async()=>{
+test('legacy Epay Alipay sales require only their own channel and release gates',async()=>{
  const f=enableEpaySales(fixture({released:false}));
  f.env.XIAODOU_EPAY_GATEWAY='https://gateway.example.test/submit.php';
  f.env.XIAODOU_EPAY_PID='12345';
@@ -77,7 +77,7 @@ test('legacy Epay Alipay sales require the shared Alipay platform-release gate',
   let r=await f.call('/v1/packages',{method:'GET'});
   assert.equal(r.body.paymentAvailable,false);
   assert.deepEqual(r.body.paymentMethods,[]);
-  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_alipay_released'");
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_epay_alipay_released'");
   r=await f.call('/v1/packages',{method:'GET'});
   assert.equal(r.body.paymentAvailable,true);
   assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
@@ -89,9 +89,11 @@ test('admin can independently toggle providers and channels with audit and no en
  const before=await f.call('/v1/admin/payment-control',{method:'GET'});
  assert.equal(before.status,200);assert.equal(before.body.operatorEnabled,true);
  assert.equal(before.body.providers.rsa2.enabled,true);assert.equal(before.body.providers.epay.enabled,false);
- const body={...op(),settings:{rsa2Enabled:false,epayEnabled:true,alipayEnabled:true,wechatEnabled:true,alipayReleased:false,wechatReleased:false}};
+ const body={...op(),settings:{rsa2Enabled:false,epayEnabled:true,alipayEnabled:true,wechatEnabled:true,alipayReleased:true,wechatReleased:false}};
  const saved=await f.call('/v1/admin/payment-control',{body});
  assert.equal(saved.status,200);assert.equal(saved.body.providers.rsa2.enabled,false);assert.equal(saved.body.providers.epay.enabled,true);
+ assert.equal(saved.body.channels.rsa2.alipay.platformReleased,true);
+ assert.equal(saved.body.channels.epay.alipay.platformReleased,false,'legacy global release edits must not unlock Epay Alipay');
  assert.equal(saved.body.operatorEnabled,true);assert.equal(f.sql.prepare("SELECT value FROM system_settings WHERE key='purchase_enabled'").get().value,'1');
  assert.equal(f.sql.prepare('SELECT count(*) n FROM admin_audit_logs').get().n,1);
  f.sql.close();
@@ -101,7 +103,7 @@ test('new RSA2 order freezes requested channel; unavailable channels are rejecte
  const f=fixture();
  let r=await f.call('/v1/orders',{body:{packageId:'starter',channel:'WECHAT_H5'}});
  assert.equal(r.status,503);assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,0);
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_alipay_enabled','payment_alipay_released')");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
  await withProvider(captured=>providerResponse(captured,{channel:JSON.parse(captured.body).channel}),async()=>{r=await f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}});});
  assert.equal(r.status,201);assert.equal(f.sql.prepare('SELECT payment_channel FROM payment_transactions').get().payment_channel,'ALIPAY_H5');
  f.sql.close();
@@ -110,7 +112,7 @@ test('new RSA2 order freezes requested channel; unavailable channels are rejecte
 test('RSA2 pending orders relaunch from their immutable protocol when the legacy env default is Epay',async()=>{
  const f=fixture();
  f.env.PAYMENT_PROVIDER='xiaodou_epay';
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_alipay_enabled','payment_alipay_released')");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
  let orderId;
  try {
   await withProvider(req=>providerResponse(req),async()=>{
@@ -134,7 +136,7 @@ test('RSA2 pending orders relaunch from their immutable protocol when the legacy
 test('RSA2 refunds are not misclassified as legacy Epay by a stale provider environment default',async()=>{
  const f=adminFixture();
  f.env.PAYMENT_PROVIDER='xiaodou_epay';
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_alipay_enabled','payment_alipay_released')");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
  let orderId;
  try {
   await withProvider(req=>providerResponse(req),async()=>{orderId=(await f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}})).body.order.id;});

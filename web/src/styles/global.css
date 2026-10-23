@@ -170,3 +170,10 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .checkout-alipay-mark { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; background: #1677ff; color: #fff; font-weight: 700; }
 .checkout-pay-button { min-height: 48px; white-space: normal; overflow-wrap: anywhere; text-align: center; }
 @media (max-width: 600px) { .checkout-payment-method { padding: 16px; } .checkout-pay-button { width: 100%; justify-content: center; } }
+.checkout-wechat-qr { width: min(100%, 360px); margin: 18px auto 0; padding: 18px; display: grid; justify-items: center; gap: 10px; border: 1px solid var(--border, #d8dce3); border-radius: 14px; text-align: center; }
+.checkout-wechat-qr h3, .checkout-wechat-qr p { margin: 0; }
+.checkout-wechat-qr img { display: block; width: min(240px, 100%); height: auto; aspect-ratio: 1; background: #fff; padding: 8px; border-radius: 8px; }
+.checkout-wechat-mobile-note { margin: 12px 0 0; font-size: .9rem; color: var(--muted-foreground, #626b78); }
+.checkout-wechat-qr[hidden], .checkout-wechat-mobile-note[hidden] { display: none !important; }
+@media (min-width: 768px) { .checkout-wechat-mobile-note { display: none; } }
+@media (max-width: 767px) { .checkout-wechat-qr { display: none !important; } }

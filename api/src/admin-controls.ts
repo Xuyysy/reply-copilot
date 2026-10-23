@@ -39,11 +39,26 @@ export async function updateAdminPaymentControl(request:Request,env:Env):Promise
  const actor=await requireAdminSession(request,env,true),body=await jsonBody(request,2048);
  const before=await paymentControl(env),now=nowMs();
  if(body.settings!==undefined){
-  const input=body.settings as Record<string,unknown>,fields={rsa2Enabled:'payment_rsa2_enabled',epayEnabled:'payment_epay_enabled',alipayEnabled:'payment_alipay_enabled',wechatEnabled:'payment_wechat_enabled',alipayReleased:'payment_alipay_released',wechatReleased:'payment_wechat_released'} as const;
-  if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(fields).some(key=>typeof input[key]!=='boolean')||Object.keys(input).some(key=>!(key in fields)))throw new ApiFailure(400,'INVALID_REQUEST','支付配置格式无效。');
-  const normalized=Object.fromEntries(Object.entries(fields).map(([field,key])=>[field,input[field]]));
+  const input=body.settings as Record<string,unknown>;
+  const fields={rsa2Enabled:'payment_rsa2_enabled',rsa2WechatEnabled:'payment_rsa2_wechat_enabled',rsa2AlipayEnabled:'payment_rsa2_alipay_enabled',rsa2WechatReleased:'payment_rsa2_wechat_released',rsa2AlipayReleased:'payment_rsa2_alipay_released',epayEnabled:'payment_epay_enabled',epayAlipayEnabled:'payment_epay_alipay_enabled',epayAlipayReleased:'payment_epay_alipay_released'} as const;
+  const legacyFields={rsa2Enabled:'payment_rsa2_enabled',epayEnabled:'payment_epay_enabled',alipayEnabled:'payment_alipay_enabled',wechatEnabled:'payment_wechat_enabled',alipayReleased:'payment_alipay_released',wechatReleased:'payment_wechat_released'} as const;
+  if(!input||typeof input!=='object'||Array.isArray(input))throw new ApiFailure(400,'INVALID_REQUEST','支付配置格式无效。');
+  const isNew=Object.keys(fields).every(key=>typeof input[key]==='boolean')&&Object.keys(input).every(key=>key in fields);
+  const isLegacy=Object.keys(legacyFields).every(key=>typeof input[key]==='boolean')&&Object.keys(input).every(key=>key in legacyFields);
+  if(!isNew&&!isLegacy)throw new ApiFailure(400,'INVALID_REQUEST','支付配置格式无效。');
+  const normalized=isNew?input:{
+   rsa2Enabled:input.rsa2Enabled,rsa2WechatEnabled:input.wechatEnabled,rsa2AlipayEnabled:input.alipayEnabled,
+   rsa2WechatReleased:input.wechatReleased,rsa2AlipayReleased:input.alipayReleased,
+   // A legacy client only knew the former global Alipay/WeChat flags. Treat
+   // those as RSA2 values and preserve Epay's independent channel decisions.
+   epayEnabled:input.epayEnabled,epayAlipayEnabled:before.channels.epay.alipay.enabled,epayAlipayReleased:before.channels.epay.alipay.platformReleased,
+  };
   const op=await operation(env,actor,body,'payment_provider_settings','payment_providers');
-  const statements=Object.entries(fields).map(([field,key])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(input[field]?'1':'0',now,actor.user_id,key));
+  const values:Array<[string,string]>=Object.entries(fields).map(([field,key])=>[key,normalized[field]?'1':'0']);
+  if(isLegacy){
+   values.push(['payment_alipay_enabled',input.alipayEnabled?'1':'0'],['payment_wechat_enabled',input.wechatEnabled?'1':'0'],['payment_alipay_released',input.alipayReleased?'1':'0'],['payment_wechat_released',input.wechatReleased?'1':'0']);
+  }
+  const statements=values.map(([key,value])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(value,now,actor.user_id,key));
   await commitOperation(env,op,statements,before,{...before.providers,...before.channels,settings:normalized});
   return response({ok:true,...await paymentControl(env)},200,env,request);
  }

@@ -8,8 +8,11 @@ export type PaymentMethod = { provider: PaymentProvider; channel: PaymentChannel
 
 const settingKeys = [
   'purchase_enabled','payment_rsa2_enabled','payment_epay_enabled',
-  'payment_alipay_enabled','payment_wechat_enabled',
-  'payment_alipay_released','payment_wechat_released',
+  'payment_rsa2_alipay_enabled','payment_rsa2_wechat_enabled','payment_epay_alipay_enabled',
+  'payment_rsa2_alipay_released','payment_rsa2_wechat_released','payment_epay_alipay_released',
+  // Read legacy values during the migration window for older clients and
+  // databases that have not yet applied 0014.
+  'payment_alipay_enabled','payment_wechat_enabled','payment_alipay_released','payment_wechat_released',
 ] as const;
 
 async function settings(env:Env):Promise<Record<string,string>> {
@@ -44,27 +47,50 @@ export async function paymentControl(env:Env){
   rsa2:{enabled:enabled(values.payment_rsa2_enabled),credentialsConfigured:rsa2Credentials},
   epay:{enabled:enabled(values.payment_epay_enabled),credentialsConfigured:epayCredentials},
  };
- const channels={
-  alipay:{enabled:enabled(values.payment_alipay_enabled),platformReleased:enabled(values.payment_alipay_released)},
-  wechat:{enabled:enabled(values.payment_wechat_enabled),platformReleased:enabled(values.payment_wechat_released)},
+ const rsa2Channels={
+  alipay:{enabled:enabled(values.payment_rsa2_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_rsa2_alipay_released??values.payment_alipay_released)},
+  wechat:{enabled:enabled(values.payment_rsa2_wechat_enabled??values.payment_wechat_enabled),platformReleased:enabled(values.payment_rsa2_wechat_released??values.payment_wechat_released)},
+ };
+ const epayChannels={
+  alipay:{enabled:enabled(values.payment_epay_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_epay_alipay_released??values.payment_alipay_released)},
  };
  const canSell=environmentReady&&operatorEnabled;
  const methods:PaymentMethod[]=[];
  if(canSell&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
   // Prefer WeChat for new RSA2 checkouts while the Alipay path is being
   // investigated. The platform-release gate remains mandatory for both.
-  if(channels.wechat.enabled&&channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
-  if(channels.alipay.enabled&&channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
+  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
+  if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
  }
- // Channel release is a platform-level gate shared by both protocols. Epay
- // callbacks for historical orders remain independent and continue to verify.
- if(canSell&&providers.epay.enabled&&providers.epay.credentialsConfigured&&channels.alipay.enabled&&channels.alipay.platformReleased
+ // Epay has its own Alipay controls and release confirmation. RSA2 and Epay
+ // never borrow each other's release state. If RSA2 Alipay is ready it wins;
+ // Epay is only the separately configured fallback when its own gates pass.
+ if(canSell&&providers.epay.enabled&&providers.epay.credentialsConfigured&&epayChannels.alipay.enabled&&epayChannels.alipay.platformReleased
    &&!methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
  const defaultMethod=methods.find(method=>method.provider==='xiaodou')??methods[0]??null;
+ const gateReasons=(provider:PaymentProvider,channel:'alipay'|'wechat')=>{
+  const providerState=providers[provider==='xiaodou'?'rsa2':'epay'],channelState=provider==='xiaodou'?rsa2Channels[channel]:channel==='alipay'?epayChannels.alipay:null;
+  const reasons:string[]=[];
+  if(!environmentReady)reasons.push('environment_protection');
+  if(!operatorEnabled)reasons.push('purchase_paused');
+  if(!providerState.enabled)reasons.push('interface_disabled');
+  if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
+  if(!channelState)reasons.push('channel_not_supported');
+  else{
+   if(!channelState.enabled)reasons.push('channel_disabled');
+   if(!channelState.platformReleased)reasons.push('platform_release_unconfirmed');
+  }
+  return {enabled:channelState?.enabled??false,platformReleased:channelState?.platformReleased??false,available:methods.some(method=>method.provider===provider&&method.channel===(channel==='wechat'?'WECHAT_H5':'ALIPAY_H5')),reasons};
+ };
+ const channels={
+  rsa2:rsa2Channels,epay:epayChannels,
+  // Compatibility aliases for older dashboard code; they reflect RSA2 only.
+  alipay:rsa2Channels.alipay,wechat:rsa2Channels.wechat,
+ };
  return {
   environmentReady,operatorEnabled,globalEffectiveEnabled:canSell,
   credentialsConfigured:defaultMethod?providers[defaultMethod.provider==='xiaodou'?'rsa2':'epay'].credentialsConfigured:false,
   effectiveEnabled:methods.length>0,
-  providers,channels,methods,defaultMethod,
+  providers,channels,availability:{rsa2:{alipay:gateReasons('xiaodou','alipay'),wechat:gateReasons('xiaodou','wechat')},epay:{alipay:gateReasons('xiaodou_epay','alipay')}},methods,defaultMethod,
  };
 }
