@@ -50,7 +50,7 @@
         "WEB_ORIGIN": "https://staging.x-reply-helper.top",
         "API_ORIGIN": "https://api-staging.x-reply-helper.top",
         "EXTENSION_ORIGIN": "chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk",
-        "PAYMENTS_ENABLED": "1",
+        "PAYMENTS_ENABLED": "0",
         "XIAODOU_WEBHOOKS_ENABLED": "1",
         "PAYMENT_PROVIDER": "xiaodou_epay",
         "XIAODOU_RETURN_URL": "https://staging.x-reply-helper.top/account/",
