@@ -11,7 +11,7 @@ test("Staging operator control has an environment ceiling while Production remai
   assert.equal(config.vars.PAYMENTS_ENABLED,"0");
   assert.equal(config.vars.PAYMENT_PROVIDER,"mock");
   assert.equal(config.vars.XIAODOU_WEBHOOKS_ENABLED,"0");
-  assert.equal(config.env.staging.vars.PAYMENTS_ENABLED,"1");
+  assert.equal(config.env.staging.vars.PAYMENTS_ENABLED,"0");
   const migration=readFileSync(path.join(root,"migrations/0012_operations_console.sql"),"utf8");
   assert.match(migration,/VALUES\('purchase_enabled','0'/);
   assert.equal(config.env.staging.vars.STAGING_PAYMENT_TEST_ENABLED,undefined);
