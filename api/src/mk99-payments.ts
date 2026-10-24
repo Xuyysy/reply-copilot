@@ -64,18 +64,52 @@ export async function refreshMk99Order(request:Request,env:Env,t:PaymentTransact
  let data;try{data=await client(env).query(t.provider_trade_id!);}catch(e){safeProviderError(e);}
  const result=await reconcile(env,t,data!);return response({ok:true,requestId:`mk99-q-${uuid()}`,orderStatus:result.status,verificationSource:'authenticated_https_query',quota:result.quota},200,env,request);
 }
+type Mk99NotifyStage='received'|'content_type'|'body_read'|'utf8_decode'|'form_parse'|'canonicalize'|'configuration'|'signature_verify'|'signed_fields'|'order_lookup'|'reconcile'|'acknowledged';
+type Mk99NotifyReason='content_type_rejected'|'body_read_failed'|'utf8_invalid'|'form_invalid'|'canonicalization_failed'|'configuration_unavailable'|'signature_invalid'|'signed_event_invalid'|'order_not_found'|'identity_or_amount_mismatch'|'event_conflict'|'internal_error';
+function notifyContentTypeClass(value:string|null):'missing'|'form_urlencoded'|'json'|'multipart'|'other'{
+ if(!value)return 'missing';const mediaType=value.split(';',1)[0].trim().toLowerCase();
+ if(mediaType==='application/x-www-form-urlencoded')return 'form_urlencoded';
+ if(mediaType==='application/json'||mediaType.endsWith('+json'))return 'json';
+ if(mediaType==='multipart/form-data')return 'multipart';
+ return 'other';
+}
+async function parseMk99MultipartForm(body:Uint8Array,contentType:string,requestUrl:string):Promise<Record<string,string>>{
+ const copy=new ArrayBuffer(body.byteLength);new Uint8Array(copy).set(body);
+ const replay=new Request(requestUrl,{method:'POST',headers:{'Content-Type':contentType},body:copy});
+ const form=await replay.formData(),result=Object.create(null) as Record<string,string>;let count=0;
+ form.forEach((value,key)=>{
+  count++;
+  if(count>64||typeof value!=='string'||!/^[A-Za-z0-9_]{1,64}$/.test(key)||Object.hasOwn(result,key)||value.includes('\uFFFD')||/[\u0000-\u001f\u007f]/.test(value))throw new Error('Invalid multipart fields');
+  result[key]=value;
+ });
+ return result;
+}
+function auditMk99Notify(env:Env,entry:{requestId:string;stage:Mk99NotifyStage;httpStatus:number|null;contentTypeClass:string;bodyBytes:number|null;reason?:Mk99NotifyReason;duplicate?:boolean}){
+ if(env.ENVIRONMENT!=='staging'||env.MK99_NOTIFY_DIAGNOSTICS_ENABLED!=='1')return;
+ // This record intentionally contains no callback values or caller-controlled strings.
+ console.log({event:'mk99_notify_diagnostic',...entry});
+}
 export async function mk99Notify(request:Request,env:Env){
  // Independent of new-sales and active-merchant switches: historical callbacks survive a switch.
- if(!request.headers.get('content-type')?.toLowerCase().startsWith('application/x-www-form-urlencoded'))throw new ApiFailure(415,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');
- let p:Record<string,string>,hash:string;
- try{const body=await readMk99Body(request.body,16384);p=parseMk99Form(new TextDecoder('utf-8',{fatal:true}).decode(body));const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonicalMk99(p))));hash=Array.from(digest,x=>x.toString(16).padStart(2,'0')).join('');}catch{throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
- let config;try{config=mk99Config(env);}catch{throw new ApiFailure(503,'MK99_NOT_READY','支付通知暂时无法验证。');}
- let event:Mk99PaymentEvent|null;try{event=await verifyAndParseMk99Notification(p,p.out_trade_no??'',config);}catch(error){if(error instanceof Mk99Error)throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');throw error;}
- if(!event)throw new ApiFailure(401,'INVALID_PAYMENT_SIGNATURE','支付通知签名无效。');
- const t=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.merchant_provider='mk99' AND t.provider_trade_id=?").bind(p.out_trade_no??'').first<PaymentTransaction>();
- if(!t)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
- if(event.outTradeNo!==t.provider_trade_id)throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');
- await reconcile(env,t,event,true,hash!);
+ const requestId=uuid(),contentType=request.headers.get('content-type'),contentTypeClass=notifyContentTypeClass(contentType);let bodyBytes:number|null=null;
+ const audit=(stage:Mk99NotifyStage,httpStatus:number|null,reason?:Mk99NotifyReason,duplicate?:boolean)=>auditMk99Notify(env,{requestId,stage,httpStatus,contentTypeClass,bodyBytes,...(reason?{reason}:{}),...(duplicate===undefined?{}:{duplicate})});
+ audit('received',null);
+ if(contentTypeClass!=='form_urlencoded'&&contentTypeClass!=='multipart'){audit('content_type',415,'content_type_rejected');throw new ApiFailure(415,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
+ let body:Uint8Array;try{body=await readMk99Body(request.body,16384);bodyBytes=body.byteLength;}catch{audit('body_read',400,'body_read_failed');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
+ let p:Record<string,string>;
+ try{
+  if(contentTypeClass==='multipart')p=await parseMk99MultipartForm(body,contentType!,request.url);
+  else{let text:string;try{text=new TextDecoder('utf-8',{fatal:true}).decode(body);}catch{audit('utf8_decode',400,'utf8_invalid');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}p=parseMk99Form(text);}
+ }catch(error){if(error instanceof ApiFailure)throw error;audit('form_parse',400,'form_invalid');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
+ let hash:string;try{const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonicalMk99(p))));hash=Array.from(digest,x=>x.toString(16).padStart(2,'0')).join('');}catch{audit('canonicalize',400,'canonicalization_failed');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
+ let config;try{config=mk99Config(env);}catch{audit('configuration',503,'configuration_unavailable');throw new ApiFailure(503,'MK99_NOT_READY','支付通知暂时无法验证。');}
+ let event:Mk99PaymentEvent|null;try{event=await verifyAndParseMk99Notification(p,p.out_trade_no??'',config);}catch(error){if(error instanceof Mk99Error){audit('signed_fields',409,'signed_event_invalid');throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');}audit('signature_verify',500,'internal_error');throw error;}
+ if(!event){audit('signature_verify',401,'signature_invalid');throw new ApiFailure(401,'INVALID_PAYMENT_SIGNATURE','支付通知签名无效。');}
+ let t:PaymentTransaction|null;try{t=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.merchant_provider='mk99' AND t.provider_trade_id=?").bind(p.out_trade_no??'').first<PaymentTransaction>();}catch{audit('order_lookup',500,'internal_error');throw new ApiFailure(500,'SERVER_UNAVAILABLE','暂时无法处理支付通知。');}
+ if(!t){audit('order_lookup',404,'order_not_found');throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');}
+ if(event.outTradeNo!==t.provider_trade_id){audit('signed_fields',409,'identity_or_amount_mismatch');throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');}
+ let result:Awaited<ReturnType<typeof reconcile>>;try{result=await reconcile(env,t,event,true,hash);}catch(error){const status=error instanceof ApiFailure?error.status:500;const reason=error instanceof ApiFailure&&error.code==='PAYMENT_MISMATCH'?'identity_or_amount_mismatch':error instanceof ApiFailure&&error.code==='PAYMENT_EVENT_CONFLICT'?'event_conflict':'internal_error';audit('reconcile',status,reason);throw error;}
+ audit('acknowledged',200,undefined,'duplicate' in result?result.duplicate:false);
  return new Response('success',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
 }
 export async function adminMk99Check(request:Request,env:Env){

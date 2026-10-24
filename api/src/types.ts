@@ -32,6 +32,7 @@ export interface Env {
   MK99_PROTOCOL_CONFIRMED?: string;
   MK99_AMOUNT_CONTRACT?: string;
   MK99_CASHIER_ORIGINS?: string;
+  MK99_NOTIFY_DIAGNOSTICS_ENABLED?: string;
   XIAODOU_BASE_URL?: string;
   XIAODOU_APP_ID?: string;
   XIAODOU_KEY_ID?: string;
