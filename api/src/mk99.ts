@@ -6,8 +6,10 @@ export type Mk99Config={baseUrl:string;pid:string;key?:string;privateKey?:string
 export type Mk99TradeStatus='WAIT_BUYER_PAY'|'TRADE_SUCCESS'|'TRADE_CLOSED'|'TRADE_REFUND'|'TRADE_FREEZE'|'TRADE_UNFREEZE';
 export type Mk99PaymentEvent={provider:'mk99';verification:'authenticated_query'|'verified_notification';outTradeNo:string;tradeNo:string;amountFen:number;tradeStatus:Mk99TradeStatus;merchantId?:string;paytypeCode?:string;currency?:string;refundAmountFen?:number;timestamp?:number};
 export type Mk99CreateResult={provider:'mk99';outTradeNo:string;tradeNo:string;payUrl:string};
+export type Mk99NotifyField='pid'|'trade_no'|'out_trade_no'|'subject'|'paytype_code'|'channel_id'|'trade_status'|'timestamp'|'currency'|'total_amount'|'refund_amount';
+export type Mk99NotifyFieldCheck='required_missing'|'required_type_invalid'|'required_empty'|'value_mismatch'|'format_invalid'|'value_not_allowed'|'type_invalid';
 type Params=Record<string,string|number|null|undefined>;
-export class Mk99Error extends Error{constructor(public code:string,public status:number|null=null){super('Payment provider could not confirm this request.');}}
+export class Mk99Error extends Error{constructor(public code:string,public status:number|null=null,public notifyFieldCheck?:Mk99NotifyFieldCheck,public notifyField?:Mk99NotifyField){super('Payment provider could not confirm this request.');}}
 const bytes=(s:string)=>new TextEncoder().encode(s);
 const signTypes=['MD5','RSA'];
 function pem(pem:string|undefined,label:string){if(!pem?.includes(`-----BEGIN ${label}-----`))throw new Mk99Error('MK99_CONFIG_ERROR');return Uint8Array.from(atob(pem.replace(`-----BEGIN ${label}-----`,'').replace(`-----END ${label}-----`,'').replace(/\s/g,'')),x=>x.charCodeAt(0));}
@@ -120,17 +122,24 @@ export function parseMk99Form(body:string):Record<string,string>{
 export const mk99States=['WAIT_BUYER_PAY','TRADE_SUCCESS','TRADE_CLOSED','TRADE_REFUND','TRADE_FREEZE','TRADE_UNFREEZE'] as const satisfies readonly Mk99TradeStatus[];
 function normalizePaymentEvent(data:Record<string,unknown>,outTradeNo:string,notification:boolean,rawAmountToken?:string):Mk99PaymentEvent{
  const required=notification?['pid','trade_no','out_trade_no','subject','paytype_code','channel_id','trade_status','timestamp']:['trade_no','out_trade_no','trade_status'];
- if(required.some(k=>typeof data[k]!=='string'||!data[k]))throw new Mk99Error('MK99_RESPONSE_INVALID');
- if(data.out_trade_no!==outTradeNo||typeof data.trade_no!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(data.trade_no))throw new Mk99Error('MK99_ORDER_MISMATCH');
- if(typeof data.trade_status!=='string'||!mk99States.includes(data.trade_status as Mk99TradeStatus))throw new Mk99Error('MK99_STATUS_INVALID');
- if(notification&&(!/^2088\d{1,28}$/.test(String(data.pid))||!/^[0-9]{1,20}$/.test(String(data.channel_id))||!/^[0-9]{1,12}$/.test(String(data.timestamp))))throw new Mk99Error('MK99_RESPONSE_INVALID');
- if(data.currency!==undefined&&data.currency!=='CNY')throw new Mk99Error('MK99_AMOUNT_INVALID');
- const event:Mk99PaymentEvent={provider:'mk99',verification:notification?'verified_notification':'authenticated_query',outTradeNo,tradeNo:data.trade_no,amountFen:parseMk99AmountFen(data.total_amount,rawAmountToken),tradeStatus:data.trade_status as Mk99TradeStatus};
- if(data.pid!==undefined){if(typeof data.pid!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID');event.merchantId=data.pid;}
- if(data.paytype_code!==undefined){if(typeof data.paytype_code!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID');event.paytypeCode=data.paytype_code;}
+ for(const key of required){const field=key as Mk99NotifyField;if(!(key in data))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_missing',field);if(typeof data[key]!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_type_invalid',field);if(data[key]==='')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_empty',field);}
+ if(data.out_trade_no!==outTradeNo)throw new Mk99Error('MK99_ORDER_MISMATCH',null,'value_mismatch','out_trade_no');
+ if(typeof data.trade_no!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(data.trade_no))throw new Mk99Error('MK99_ORDER_MISMATCH',null,'format_invalid','trade_no');
+ if(typeof data.trade_status!=='string'||!mk99States.includes(data.trade_status as Mk99TradeStatus))throw new Mk99Error('MK99_STATUS_INVALID',null,'value_not_allowed','trade_status');
+ if(notification){
+  if(typeof data.pid!=='string'||!/^2088\d{1,28}$/.test(data.pid))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','pid');
+  if(typeof data.channel_id!=='string'||!/^[0-9]{1,20}$/.test(data.channel_id))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','channel_id');
+  if(typeof data.timestamp!=='string'||!/^[0-9]{1,12}$/.test(data.timestamp))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','timestamp');
+ }
+ if(data.currency!==undefined&&typeof data.currency!=='string')throw new Mk99Error('MK99_AMOUNT_INVALID',null,'type_invalid','currency');
+ if(data.currency!==undefined&&data.currency!=='CNY')throw new Mk99Error('MK99_AMOUNT_INVALID',null,'value_not_allowed','currency');
+ let amountFen:number;try{amountFen=parseMk99AmountFen(data.total_amount,rawAmountToken);}catch(error){if(error instanceof Mk99Error)throw new Mk99Error(error.code,error.status,'format_invalid','total_amount');throw error;}
+ const event:Mk99PaymentEvent={provider:'mk99',verification:notification?'verified_notification':'authenticated_query',outTradeNo,tradeNo:data.trade_no,amountFen,tradeStatus:data.trade_status as Mk99TradeStatus};
+ if(data.pid!==undefined){if(typeof data.pid!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'type_invalid','pid');event.merchantId=data.pid;}
+ if(data.paytype_code!==undefined){if(typeof data.paytype_code!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'type_invalid','paytype_code');event.paytypeCode=data.paytype_code;}
  if(typeof data.currency==='string')event.currency=data.currency;
- if(data.refund_amount!==undefined)event.refundAmountFen=parseMk99AmountFen(data.refund_amount);
- if(data.timestamp!==undefined){const timestamp=Number(data.timestamp);if(!Number.isSafeInteger(timestamp)||timestamp<1)throw new Mk99Error('MK99_RESPONSE_INVALID');event.timestamp=timestamp;}
+ if(data.refund_amount!==undefined){try{event.refundAmountFen=parseMk99AmountFen(data.refund_amount);}catch(error){if(error instanceof Mk99Error)throw new Mk99Error(error.code,error.status,'format_invalid','refund_amount');throw error;}}
+ if(data.timestamp!==undefined){const timestamp=Number(data.timestamp);if(!Number.isSafeInteger(timestamp)||timestamp<1)throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','timestamp');event.timestamp=timestamp;}
  return event;
 }
 export function parseMk99QueryEvent(data:Record<string,unknown>,outTradeNo:string,rawAmountToken?:string):Mk99PaymentEvent{return normalizePaymentEvent(data,outTradeNo,false,rawAmountToken);}

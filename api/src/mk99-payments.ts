@@ -3,7 +3,7 @@ import {ApiFailure} from './types';
 import {response} from './http';
 import {balance} from './quota';
 import {applyPaymentEvent,type PaymentTransaction} from './payments';
-import {Mk99Client,Mk99Error,mk99Config,parseMk99Form,verifyAndParseMk99Notification,canonicalMk99,type Mk99PaymentEvent} from './mk99';
+import {Mk99Client,Mk99Error,mk99Config,parseMk99Form,verifyAndParseMk99Notification,canonicalMk99,type Mk99PaymentEvent,type Mk99NotifyField,type Mk99NotifyFieldCheck} from './mk99';
 import {requireAdminSession} from './admin-auth';
 import {nowMs,uuid} from './security';
 
@@ -84,7 +84,7 @@ async function parseMk99MultipartForm(body:Uint8Array,contentType:string,request
  });
  return result;
 }
-function auditMk99Notify(env:Env,entry:{requestId:string;stage:Mk99NotifyStage;httpStatus:number|null;contentTypeClass:string;bodyBytes:number|null;reason?:Mk99NotifyReason;duplicate?:boolean}){
+function auditMk99Notify(env:Env,entry:{requestId:string;stage:Mk99NotifyStage;httpStatus:number|null;contentTypeClass:string;bodyBytes:number|null;reason?:Mk99NotifyReason;duplicate?:boolean;fieldCheck?:Mk99NotifyFieldCheck;field?:Mk99NotifyField}){
  if(env.ENVIRONMENT!=='staging'||env.MK99_NOTIFY_DIAGNOSTICS_ENABLED!=='1')return;
  // This record intentionally contains no callback values or caller-controlled strings.
  console.log({event:'mk99_notify_diagnostic',...entry});
@@ -103,7 +103,7 @@ export async function mk99Notify(request:Request,env:Env){
  }catch(error){if(error instanceof ApiFailure)throw error;audit('form_parse',400,'form_invalid');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
  let hash:string;try{const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(canonicalMk99(p))));hash=Array.from(digest,x=>x.toString(16).padStart(2,'0')).join('');}catch{audit('canonicalize',400,'canonicalization_failed');throw new ApiFailure(400,'INVALID_PAYMENT_NOTIFY','支付通知格式无效。');}
  let config;try{config=mk99Config(env);}catch{audit('configuration',503,'configuration_unavailable');throw new ApiFailure(503,'MK99_NOT_READY','支付通知暂时无法验证。');}
- let event:Mk99PaymentEvent|null;try{event=await verifyAndParseMk99Notification(p,p.out_trade_no??'',config);}catch(error){if(error instanceof Mk99Error){audit('signed_fields',409,'signed_event_invalid');throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');}audit('signature_verify',500,'internal_error');throw error;}
+ let event:Mk99PaymentEvent|null;try{event=await verifyAndParseMk99Notification(p,p.out_trade_no??'',config);}catch(error){if(error instanceof Mk99Error){if(env.ENVIRONMENT==='staging'&&env.MK99_NOTIFY_DIAGNOSTICS_ENABLED==='1'){const errorCode=['MK99_RESPONSE_INVALID','MK99_ORDER_MISMATCH','MK99_STATUS_INVALID','MK99_AMOUNT_INVALID'].includes(error.code)?error.code:'MK99_RESPONSE_INVALID';console.log({event:'mk99_notify_field_check',requestId,stage:'signed_fields',fieldCheck:error.notifyFieldCheck??'unclassified',field:error.notifyField??null,errorCode});}audit('signed_fields',409,'signed_event_invalid');throw new ApiFailure(409,'PAYMENT_MISMATCH','支付结果与订单不符。');}audit('signature_verify',500,'internal_error');throw error;}
  if(!event){audit('signature_verify',401,'signature_invalid');throw new ApiFailure(401,'INVALID_PAYMENT_SIGNATURE','支付通知签名无效。');}
  let t:PaymentTransaction|null;try{t=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.merchant_provider='mk99' AND t.provider_trade_id=?").bind(p.out_trade_no??'').first<PaymentTransaction>();}catch{audit('order_lookup',500,'internal_error');throw new ApiFailure(500,'SERVER_UNAVAILABLE','暂时无法处理支付通知。');}
  if(!t){audit('order_lookup',404,'order_not_found');throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');}

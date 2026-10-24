@@ -22,6 +22,38 @@ test('MK99 Staging notify diagnostics distinguish first success from duplicate a
 
 test('MK99 accepts strict multipart form callback from the merchant resend while keeping RSA and ledger checks',async()=>{const f=mkFixture();const lines=[];const original=console.log;console.log=value=>lines.push(value);try{f.env.MK99_NOTIFY_DIAGNOSTICS_ENABLED='1';const {r,params}=await create(f);const result=await notifyMultipart(f,payment(params));assert.equal(result.status,200,result.text);assert.equal(result.text,'success');const accepted=lines.find(x=>x?.event==='mk99_notify_diagnostic'&&x.stage==='acknowledged');assert.equal(accepted?.contentTypeClass,'multipart');assert.ok(Number.isSafeInteger(accepted?.bodyBytes));assert.equal(accepted?.httpStatus,200);const serialized=JSON.stringify(lines);for(const sensitive of ['mock-only','20881234567890','MK99_mock_1','10.59','sign='])assert.equal(serialized.includes(sensitive),false);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant' AND reference_id=? AND paid_delta=400").get(r.body.order.id).n,1);assert.equal(f.sql.prepare('SELECT count(*) n FROM credit_batches WHERE source_order_id=? AND grant_credits=400').get(r.body.order.id).n,1);}finally{console.log=original;f.sql.close();}const invalid=mkFixture();try{const {r,params}=await create(invalid);const duplicate=await notifyMultipart(invalid,payment(params),{extraFields:[['total_amount','10.59']]});assert.equal(duplicate.status,400);const forged=await notifyMultipart(invalid,payment(params),{invalidSignature:true});assert.equal(forged.status,401);assert.equal(invalid.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);assert.equal(invalid.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);assert.equal(invalid.sql.prepare('SELECT count(*) n FROM credit_batches WHERE source_kind=\'purchase\'').get().n,0);assert.equal(invalid.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);}finally{invalid.sql.close();}});
 
+test('MK99 signed notification field failures report only allowlisted checks after RSA verification',async()=>{
+ const f=mkFixture(),lines=[],original=console.log;console.log=value=>lines.push(value);
+ try{
+  f.env.MK99_NOTIFY_DIAGNOSTICS_ENABLED='1';const {r,params}=await create(f);
+  const cases=[
+   ['required_missing','pid','MK99_RESPONSE_INVALID',p=>{const x=payment(params);delete x.pid;return x;}],
+   ['required_missing','channel_id','MK99_RESPONSE_INVALID',p=>{const x=payment(params);delete x.channel_id;return x;}],
+   ['required_empty','subject','MK99_RESPONSE_INVALID',p=>({...payment(params),subject:''})],
+   ['format_invalid','trade_no','MK99_ORDER_MISMATCH',p=>({...payment(params),trade_no:'bad!'})],
+   ['value_not_allowed','trade_status','MK99_STATUS_INVALID',p=>({...payment(params),trade_status:'PAID'})],
+   ['format_invalid','pid','MK99_RESPONSE_INVALID',p=>({...payment(params),pid:'not-a-pid'})],
+   ['format_invalid','channel_id','MK99_RESPONSE_INVALID',p=>({...payment(params),channel_id:'abc'})],
+   ['format_invalid','timestamp','MK99_RESPONSE_INVALID',p=>({...payment(params),timestamp:'1e3'})],
+   ['value_not_allowed','currency','MK99_AMOUNT_INVALID',p=>({...payment(params),currency:'USD'})],
+   ['format_invalid','total_amount','MK99_AMOUNT_INVALID',p=>({...payment(params),total_amount:'10.599'})],
+   ['format_invalid','refund_amount','MK99_AMOUNT_INVALID',p=>({...payment(params),refund_amount:'-0.01'})],
+   ['format_invalid','timestamp','MK99_RESPONSE_INVALID',p=>({...payment(params),timestamp:'000000000000'})],
+  ];
+  for(const [, , ,build] of cases){const result=await notifyMultipart(f,build(params));assert.equal(result.status,409);assert.equal(JSON.parse(result.text).code,'PAYMENT_MISMATCH');}
+  const checks=lines.filter(x=>x?.event==='mk99_notify_field_check');
+  assert.ok(checks.every(x=>x.stage==='signed_fields'));
+  assert.deepEqual(checks.map(x=>[x.fieldCheck,x.field,x.errorCode]),cases.map(([check,field,errorCode])=>[check,field,errorCode]));
+  assert.equal(lines.filter(x=>x?.event==='mk99_notify_diagnostic'&&x.stage==='signature_verify').length,0);
+  const serialized=JSON.stringify(lines);for(const sensitive of ['20881234567890','MK99_mock_1','10.599','10.59','sign=','PAID','USD','not-a-pid'])assert.equal(serialized.includes(sensitive),false);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_batches WHERE source_kind='purchase'").get().n,0);
+  assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);
+  lines.length=0;f.env.ENVIRONMENT='production';const denied=await notifyMultipart(f,{...payment(params),total_amount:'10.599'});assert.equal(denied.status,409);assert.equal(lines.length,0);
+ }finally{console.log=original;f.sql.close();}
+});
+
 test('MK99 temporary diagnostic is removed; observed numeric amount settles only on exact order match',async()=>{const f=mkFixture();try{const {r}=await create(f),path='/v1/orders/'+r.body.order.id;let calls=0;await withProvider(()=>{calls++;return new Response('{"code":1,"data":{"trade_no":"MK99_mock_1","out_trade_no":"XRH_'+r.body.order.id.replaceAll('-','')+'","total_amount":10.59,"trade_status":"TRADE_SUCCESS"}}',{headers:{'Content-Type':'application/json'}});},async()=>{const denied=await f.call(path+'/refresh?diagnostic=amount-shape');assert.equal(denied.status,404);assert.equal(calls,0);const result=await f.call(path+'/refresh');assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.orderStatus,'paid');});assert.equal(calls,1);assert.equal(f.sql.prepare('SELECT status,actual_paid_fen FROM payment_transactions').get().status,'paid');assert.equal(f.sql.prepare('SELECT actual_paid_fen FROM payment_transactions').get().actual_paid_fen,1059);assert.ok(f.sql.prepare('SELECT credited_at FROM recharge_orders').get().credited_at);assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,1);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant' AND paid_delta=400").get().n,1);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_batches WHERE source_kind='purchase' AND grant_credits=400").get().n,1);assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,400);}finally{f.sql.close();}});
 
 test('MK99 queried numeric amount different from local order is rejected with no financial writes',async()=>{const f=mkFixture();try{const {r}=await create(f);const path='/v1/orders/'+r.body.order.id;const result=await withProvider(()=>new Response('{"code":1,"data":{"trade_no":"MK99_mock_1","out_trade_no":"XRH_'+r.body.order.id.replaceAll('-','')+'","total_amount":10.58,"trade_status":"TRADE_SUCCESS"}}',{headers:{'Content-Type':'application/json'}}),()=>f.call(path+'/refresh'));assert.equal(result.status,409);assert.equal(result.body.code,'PAYMENT_MISMATCH');assert.equal(f.sql.prepare('SELECT status,actual_paid_fen FROM payment_transactions').get().status,'pending');assert.equal(f.sql.prepare('SELECT credited_at FROM recharge_orders').get().credited_at,null);assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);assert.equal(f.sql.prepare('SELECT count(*) n FROM credit_ledger').get().n,0);assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);}finally{f.sql.close();}});
