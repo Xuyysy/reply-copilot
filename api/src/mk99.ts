@@ -122,7 +122,7 @@ export function parseMk99Form(body:string):Record<string,string>{
 export const mk99States=['WAIT_BUYER_PAY','TRADE_SUCCESS','TRADE_CLOSED','TRADE_REFUND','TRADE_FREEZE','TRADE_UNFREEZE'] as const satisfies readonly Mk99TradeStatus[];
 function normalizePaymentEvent(data:Record<string,unknown>,outTradeNo:string,notification:boolean,rawAmountToken?:string):Mk99PaymentEvent{
  const required=notification?['pid','trade_no','out_trade_no','subject','paytype_code','channel_id','trade_status','timestamp']:['trade_no','out_trade_no','trade_status'];
- for(const key of required){const field=key as Mk99NotifyField;if(!(key in data))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_missing',field);if(typeof data[key]!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_type_invalid',field);if(data[key]==='')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_empty',field);}
+ for(const key of required){const field=key as Mk99NotifyField;if(!(key in data))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_missing',field);if(typeof data[key]!=='string')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_type_invalid',field);if(data[key]===''&&key!=='subject')throw new Mk99Error('MK99_RESPONSE_INVALID',null,'required_empty',field);}
  if(data.out_trade_no!==outTradeNo)throw new Mk99Error('MK99_ORDER_MISMATCH',null,'value_mismatch','out_trade_no');
  if(typeof data.trade_no!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(data.trade_no))throw new Mk99Error('MK99_ORDER_MISMATCH',null,'format_invalid','trade_no');
  if(typeof data.trade_status!=='string'||!mk99States.includes(data.trade_status as Mk99TradeStatus))throw new Mk99Error('MK99_STATUS_INVALID',null,'value_not_allowed','trade_status');
