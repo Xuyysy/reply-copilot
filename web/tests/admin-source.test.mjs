@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../src/components/admin/AdminDashboard.tsx', import.meta.url), 'utf8');
+const mk99SettingsSource = await readFile(new URL('../src/components/admin/MerchantPaymentSettings.tsx', import.meta.url), 'utf8');
 
 test('admin mutation identity survives network errors and reauthentication', () => {
   assert.match(source, /operationIds\.current\.get\(key\) \|\| crypto\.randomUUID\(\)/);
@@ -12,6 +13,15 @@ test('admin mutation identity survives network errors and reauthentication', () 
   assert.match(source, /payload\.reason\.trim\(\)\.length < 8/);
   assert.match(source, /type="password" autoComplete="current-password"/);
   assert.doesNotMatch(source, /window\.prompt|window\.confirm/);
+});
+
+test('MK99 balance check supplies an audit reason and exposes safe readiness/result feedback', () => {
+  assert.match(mk99SettingsSource, /\/v1\/admin\/mk99-platform-check',\{reason:'MK99 read-only balance connectivity check'\}/);
+  assert.match(mk99SettingsSource, /safeCheckCodes\.has\(r\.code\)/);
+  assert.match(mk99SettingsSource, /credentialsConfigured\?/);
+  assert.match(mk99SettingsSource, /pending\?t\('正在检测/);
+  assert.match(mk99SettingsSource, /role=\{message\.includes/);
+  assert.match(mk99SettingsSource, /role="alert"/);
 });
 
 test('admin tools include safe account operations, content, audit and price controls', () => {
