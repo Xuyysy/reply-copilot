@@ -26,3 +26,9 @@ export function projectPackagePricing(pkg:PackagePricing){
   }else invalid();
   return {...projectPaymentFee(baseAmountFen,feeRateBps),settlementMode:settlementMode as SettlementMode,exchangeRateMicros};
 }
+
+// Commercial estimate only: platform settlement has not been reconciled.
+export function projectMk99Pricing(pkg:PackagePricing){
+ const original=projectPackagePricing(pkg),gross=projectPaymentFee(original.totalPaymentFen,500);
+ return {...original,totalPaymentFen:gross.totalPaymentFen,merchantPricing:{version:'mk99-merchant-5pct-v1',status:'estimate_unverified',feeBearer:'merchant',rateBps:500,netTargetFen:original.totalPaymentFen,costCoverageFen:gross.serviceFeeFen,estimatedFeeFen:gross.serviceFeeFen,estimatedNetFen:original.totalPaymentFen}};
+}

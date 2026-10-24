@@ -38,7 +38,7 @@ export function checkoutOrderFromError(error) {
     || !Number.isSafeInteger(order.amountFen) || order.amountFen < 1
     || !Number.isSafeInteger(order.credits) || order.credits < 1
     || !Number.isSafeInteger(order.baseAmountFen) || !Number.isSafeInteger(order.serviceFeeFen)
-    || order.baseAmountFen + order.serviceFeeFen !== order.amountFen || order.currency !== 'CNY') return null;
+    || order.baseAmountFen + order.serviceFeeFen + (order.paymentProtocol==='mk99'&&Number.isSafeInteger(order.merchantPricing?.costCoverageFen)&&order.merchantPricing.costCoverageFen>=0?order.merchantPricing.costCoverageFen:0) !== order.amountFen || order.currency !== 'CNY') return null;
   return order;
 }
 
