@@ -57,7 +57,12 @@ async function reconcile(env:Env,t:PaymentTransaction,p:Record<string,any>,notif
  if(p.trade_status==='TRADE_CLOSED')return await applyPaymentEvent(env,t,{eventId:`mk99:closed:${p.trade_no}`,eventType:'PAYMENT_CLOSED',amountFen:0,currency:'CNY',bodySha256:hash||undefined});
  return {status:t.status,quota:await balance(env,t.order_user_id!)};
 }
-export async function refreshMk99Order(request:Request,env:Env,t:PaymentTransaction){
+export async function refreshMk99Order(request:Request,env:Env,t:PaymentTransaction,diagnosticOnly=false){
+ if(diagnosticOnly){
+  if(env.ENVIRONMENT!=='staging')throw new ApiFailure(404,'NOT_FOUND','接口不存在。');
+  let diagnostic;try{diagnostic=await client(env).queryAmountDiagnostic(t.provider_trade_id!);}catch(e){safeProviderError(e);}
+  return response({ok:true,requestId:`mk99-shape-${uuid()}`,diagnostic:{amount:diagnostic!.amount,tradeStatus:diagnostic!.tradeStatus}},200,env,request);
+ }
  let data;try{data=await client(env).query(t.provider_trade_id!);}catch(e){safeProviderError(e);}
  const result=await reconcile(env,t,data!);return response({ok:true,requestId:`mk99-q-${uuid()}`,orderStatus:result.status,verificationSource:'authenticated_https_query',quota:result.quota},200,env,request);
 }

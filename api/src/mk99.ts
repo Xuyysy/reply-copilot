@@ -47,6 +47,18 @@ export async function mk99Readiness(env:Env){
  return {credentialsConfigured,protocolConfirmed:env.MK99_PROTOCOL_CONFIRMED==='1',amountContractConfirmed:env.MK99_AMOUNT_CONTRACT==='CNY_EXACT_BUYER_TOTAL'};
 }
 export function mk99Amount(value:unknown){try{return moneyToFen(value);}catch{throw new Mk99Error('MK99_AMOUNT_INVALID');}}
+export function mk99AmountShape(value:unknown){
+ const jsonType=value===undefined?'undefined':value===null?'null':Array.isArray(value)?'array':typeof value;
+ let format:string;
+ if(value===undefined)format='missing';
+ else if(value===null)format='null';
+ else if(Array.isArray(value))format='array';
+ else if(typeof value==='object')format='object';
+ else if(typeof value==='string')format=/^\d{1,14}(?:\.\d{1,2})?$/.test(value)&&Number(value)>0?'yuan_decimal_string':'invalid_string';
+ else if(typeof value==='number')format=Number.isFinite(value)&&Number.isSafeInteger(Math.round(value*100))&&value>0&&/^\d{1,14}(?:\.\d{1,2})?$/.test(String(value))?'decimal_number_candidate':'invalid_number';
+ else format=jsonType;
+ return {present:value!==undefined,jsonType,format};
+}
 export function parseMk99Form(body:string){return parseEpayParameters(body) as Record<string,string>;}
 export const mk99States=['WAIT_BUYER_PAY','TRADE_SUCCESS','TRADE_CLOSED','TRADE_REFUND','TRADE_FREEZE','TRADE_UNFREEZE'] as const;
 export class Mk99Client{
@@ -78,6 +90,7 @@ export class Mk99Client{
   return data;
  }
  async query(outTradeNo:string){const data=await this.request('/openapi/pay/query',{out_trade_no:outTradeNo});this.validateIdentity(data,outTradeNo);if(!mk99States.includes(data.trade_status))throw new Mk99Error('MK99_STATUS_INVALID');mk99Amount(data.total_amount);return data;}
+ async queryAmountDiagnostic(outTradeNo:string){const data=await this.request('/openapi/pay/query',{out_trade_no:outTradeNo});this.validateIdentity(data,outTradeNo);if(!mk99States.includes(data.trade_status))throw new Mk99Error('MK99_STATUS_INVALID');return {amount:mk99AmountShape(data.total_amount),tradeStatus:data.trade_status as typeof mk99States[number]};}
  async balance(){await this.request('/openapi/merchant/balance_query',{});return {ok:true};}
  private validateIdentity(data:Record<string,any>,outTradeNo:string){if(data.out_trade_no!==outTradeNo||typeof data.trade_no!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(data.trade_no))throw new Mk99Error('MK99_ORDER_MISMATCH');}
 }

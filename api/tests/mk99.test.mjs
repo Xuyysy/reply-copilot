@@ -8,7 +8,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 const temp=mkdtempSync(path.join(tmpdir(),'mk99-test-'));
 buildSync({entryPoints:['api/src/mk99.ts'],bundle:true,platform:'node',format:'cjs',outfile:path.join(temp,'client.cjs')});
-const {canonicalMk99,signMk99,verifyMk99,Mk99Client,mk99Config}=createRequire(import.meta.url)(path.join(temp,'client.cjs'));
+const {canonicalMk99,signMk99,verifyMk99,Mk99Client,mk99Config,mk99AmountShape}=createRequire(import.meta.url)(path.join(temp,'client.cjs'));
 const rsa=generateKeyPairSync('rsa',{modulusLength:2048});
 const privateKey=rsa.privateKey.export({type:'pkcs8',format:'pem'}).toString(),publicKey=rsa.publicKey.export({type:'spki',format:'pem'}).toString();
 const cfg={baseUrl:'https://mk99.cn',pid:'20881234567890',key:'mock-key-never-real',signType:'MD5',notifySignType:'RSA',platformPublicKey:publicKey,privateKey,currency:'CNY',cashierOrigins:['https://cashier.example.test']};
@@ -44,6 +44,24 @@ test('MK99 request failure is unknown, not payment failure; unsafe URL rejected'
 });
 test('MK99 real readiness requires independently confirmed notification and exact CNY total contract',()=>{
  assert.throws(()=>mk99Config({MK99_PID:cfg.pid,MK99_KEY:cfg.key}));
+});
+
+test('MK99 amount shape diagnostic reports only type and allowlisted format classes',()=>{
+ assert.deepEqual(mk99AmountShape('10.59'),{present:true,jsonType:'string',format:'yuan_decimal_string'});
+ assert.deepEqual(mk99AmountShape(10.59),{present:true,jsonType:'number',format:'decimal_number_candidate'});
+ assert.deepEqual(mk99AmountShape('10.590'),{present:true,jsonType:'string',format:'invalid_string'});
+ assert.deepEqual(mk99AmountShape(undefined),{present:false,jsonType:'undefined',format:'missing'});
+ assert.deepEqual(mk99AmountShape(null),{present:true,jsonType:'null',format:'null'});
+ assert.deepEqual(mk99AmountShape({secret:'must never escape'}),{present:true,jsonType:'object',format:'object'});
+ assert.ok(!JSON.stringify(mk99AmountShape({secret:'must never escape'})).includes('must never escape'));
+});
+
+test('MK99 diagnostic query validates identity and state but does not parse or expose amount value',async()=>{
+ let calls=0;
+ const c=new Mk99Client(cfg,async(url,init)=>{calls++;assert.equal(url,'https://mk99.cn/openapi/pay/query');assert.equal(init.method,'POST');const p=new URLSearchParams(init.body);assert.equal(p.get('out_trade_no'),'XRH_mock_order');return Response.json({code:1,data:{trade_no:'P_mock_1',out_trade_no:'XRH_mock_order',total_amount:10.59,trade_status:'TRADE_SUCCESS'}});});
+ const result=await c.queryAmountDiagnostic('XRH_mock_order');
+ assert.deepEqual(result,{amount:{present:true,jsonType:'number',format:'decimal_number_candidate'},tradeStatus:'TRADE_SUCCESS'});
+ assert.equal(calls,1);assert.ok(!JSON.stringify(result).includes('10.59'));
 });
 
 test('MK99 abort timeout is classified distinctly and never retries',async t=>{

@@ -276,7 +276,10 @@ export async function simulatePayment(request:Request,env:Env,orderId:string):Pr
 }
 export async function refreshOrder(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
-  if(transaction.merchant_provider==="mk99")return await refreshMk99Order(request,env,transaction);
+  const diagnostic=new URL(request.url).searchParams.get('diagnostic');
+  if(diagnostic&&!(env.ENVIRONMENT==='staging'&&diagnostic==='amount-shape'))throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
+  if(transaction.merchant_provider==="mk99")return await refreshMk99Order(request,env,transaction,diagnostic==='amount-shape');
+  if(diagnostic)throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
   // Payment checkout is a separately gated write capability. Existing owners
   // must still be able to reconcile a previously created Xiaodou order after
   // checkout is turned off, using the configured read-only query operation.
