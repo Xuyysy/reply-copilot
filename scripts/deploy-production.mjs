@@ -15,7 +15,7 @@ if(action==='--worker'){
  run(['npx','--no-install','wrangler','deploy','--config','deploy/production.wrangler.json'],path.join(root,'api'));
 }else{
  if(!process.env.PUBLIC_TURNSTILE_SITE_KEY)throw new Error('A verified Production Turnstile public site key is required');
- run(['npm','run','build'],path.join(root,'web')); // API origin is independently checked below.
+ run(['npm','run','build:production'],path.join(root,'web')); // Validate before building and verify the generated API origin.
  const {readFileSync}=await import('node:fs');
  const files=execFileSync('find',['dist','-type','f','-name','*.js'],{cwd:path.join(root,'web'),encoding:'utf8'}).trim().split('\n').filter(Boolean);
  const content=files.map(f=>readFileSync(path.join(root,'web',f),'utf8')).join('\n');
