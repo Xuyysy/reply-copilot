@@ -14,6 +14,14 @@
   最新审查提交。不要按本文件的旧资源待办重建环境。
 - Staging源码manifest不写商店key，继续当前路径加载的独立ID `kaaehkpihjenlhjjfjcopkjhegmfmchk`，Staging Worker扩展来源不变。商店ID插件不应借用Staging授权Token、登录会话或余额。
 
+## 既有商店草稿上传记录（跨聊天同步：2026-10-25）
+
+- 用户明确确认曾在 Chrome Web Store **上传过一次插件**，并已存在商店条目；**不要重新创建条目或申请新扩展 ID**。既有 Item ID 为 `fgfjajofkapebgphfidblngcjomkbdaj`。
+- 2026-10-22 的早期聊天记录提及首次商店草稿包 `reply-copilot-store-DRAFT-0.3.0.zip`，当时要求将条目保存为草稿，**不要**点击 Submit for Review / Publish。该记录只能证明当时准备的草稿包与操作目标；无法独立核实实际首次上传成功的精确时间、字节哈希及后台上传版本。
+- **状态区分：**“用户曾手动上传插件至商店草稿条目”与“尚未提交商店审核/尚未发布”并不冲突。下文所说的“没有自动上传”仅表示 `scripts/store-release.mjs` 不会上传商店，不是说用户从未手动上传。
+- 目前记录可确认为：已有条目及固定身份、条目仍按 **Draft / 未提交审核 / 未公开发布** 管理。真正审核/上架状态需以 Chrome Web Store 开发者后台为准；GitHub 和 Notion 不能代替商店后台。
+- 新的 Production 候选包 `reply-copilot-production-0.3.0.zip` 不等同于早期草稿包。后续在**同一**商店条目更新经正式环境验收的新版 ZIP、截图、权限解释和隐私资料，仅在用户批准后提交审核。不重新建商店条目，不把 Staging 插件 ID 与正式 ID 混用。
+
 ## 登录与来源校验
 
 网站登录仍只允许各自WEB_ORIGIN；扩展设备码申请/轮询要求精确EXTENSION_ORIGIN，随后由对应网站登录用户批准绑定。Production仅允许商店ID；Staging仅允许原测试ID；不增加通配、缺省Origin或跨环境例外。
