@@ -4,6 +4,34 @@
 
 # 上线前验收与发布顺序（2026-10-22）
 
+## 最新 Staging 支付验收（2026-10-25）
+
+以下为 Staging 只读 D1 与 Cloudflare Workers Logs 核验结果；没有新建订单、主动查单、退款或调整额度。
+
+| 渠道 | 结果 | 证据 |
+|---|---|---|
+| MK99 支付宝 | 真实支付成功；400 次额度仅入账一次 | 订单/交易均为 `paid`，实付 1059 分，`credited_at` 非空；该订单仅 1 条 `purchase_grant`（+400）和 1 个购买批次（400）。|
+| RSA 异步回调验签 | 成功 | 已付款支付宝订单的真实 multipart 通知随后被 Worker 接受，`stage=acknowledged`、HTTP 200、正文 `success`。该通知对应已由主动查单写入的支付事件，因此记录为重复通知。|
+| 重复通知幂等 | 成功 | 支付宝通知记录 `duplicate=true`；订单仍只有一条 +400 购买流水和一个 400 次批次。|
+| MK99 微信 | 真实支付成功；首次 Webhook 自动到账成功 | 订单/交易均为 `paid`，实付 1059 分，`credited_at` 非空；真实 multipart Webhook 在 Worker 版本 `8c6afef2-831d-4c46-9c22-46340d57fb08` 被首次接受，`stage=acknowledged`、HTTP 200、`duplicate=false`。对应 D1 成功事件含非空回调规范字段 SHA-256 摘要（不保存原始请求体）。|
+
+两笔 MK99 订单各自只有 1 条 +400 购买流水和 1 个 400 次购买批次。微信通知时间为 2026-10-25 02:10:31–02:10:34 UTC；该结账回跳监控只读取本地订单状态，不调用主动查单接口。更早的小豆易支付历史订单仍为 `paid`，+400 购买流水和购买批次各一条；没有改动该记录。
+
+本次收尾后 Staging 保持 `PAYMENTS_ENABLED=1`、D1 `purchase_enabled=1`，MK99 及支付宝/微信渠道开关和放行状态均为开启。Webhook 保持接收。仅关闭 Staging 临时详细回调诊断；支付事件、账本和正常错误处理保留。Production 未修改。
+
+## Production 上线阻断（2026-10-25，只读核验）
+
+按优先级处理：
+
+1. **P0：完成增量数据库升级和 MK99 配置。** Production D1 已存在且为空，迁移0001–0013已应用；0014–0017仍待执行。Production Worker 目前 `PAYMENT_PROVIDER=xiaodou`，MK99不能作为新单通道使用。先备份并验证恢复，再迁移；单独录入并核验 Production 商户凭证、RSA模式、金额合同、收银域名和获准渠道。购买总开关继续关闭直到全部就绪。
+2. **P0：建立唯一 Production 管理员。** D1当前无用户，`ADMIN_PORTAL_ENABLED=0`。由经营者注册并验证正式账号，按稳定 user ID绑定唯一管理员，核验审计后再开启管理入口；不要复制Staging用户或角色。
+3. **P1：补齐正式运行 Secrets。** 当前只存在认证、密码 pepper、Turnstile三项。需要分别为Production配置邮件、DeepSeek及MK99所需密钥；不得从Staging读取或复制Secret值。已存在的`PASSWORD_PEPPER`不得旋转。
+4. **P1：确认运营与用户披露。** 完成经营主体、客服/隐私联系邮箱、隐私政策和条款的最终审阅；确认正式MK99通知地址、平台通知重试/原通知重投支持及异常人工对账联系人。Staging验证不能替代生产商户批准。
+5. **P1：统一代码和商店包版本。** 现有Production Worker/Pages均能访问，但部署版本早于当前支付验收代码。迁移与配置完成后，从同一审查提交协调发布API和Pages，固定正式扩展ID/API源，并完成商店隐私披露、权限说明、截图和审核；在此之前不公开收费。
+6. **P2：Production无资金验收后再单独开放购买。** 先验证注册邮件、Turnstile、CORS/登录/CSRF、普通用户真实AI额度扣减、订单/回调以及只入账一次。之后由经营者单独批准一次小额真实订单；不使用Staging数据，不由Codex付款。
+
+Production目前`/health`和`/v1/packages`均为200，购买仍关闭；首页、隐私页和条款页均可访问，但页面可访问不代表法律内容已完成审核。此清单只依据只读资源与配置检查，没有改动Production。
+
 ## 当前结论
 
 真实 DeepSeek 已接入，Staging历史人工测试成功；当前仍mock，不能将本次Mock验收说成新的真实AI验收。模型deepseek-flash，三种非空不同回复、JSON、finish_reason=stop，超时25秒且不自动付费重试。失败释放预占；成功生成后需插件解析及服务端交付确认才扣一次。确认丢响应可同requestId重放，不能换requestId重试付费调用。

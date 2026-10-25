@@ -7,11 +7,11 @@ import { test } from "node:test";
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"..");
 const config=JSON.parse(readFileSync(path.join(root,"wrangler.jsonc"),"utf8"));
 
-test("Staging operator control has an environment ceiling while Production remains disabled",()=>{
+test("Staging purchase remains open while Production remains disabled",()=>{
   assert.equal(config.vars.PAYMENTS_ENABLED,"0");
   assert.equal(config.vars.PAYMENT_PROVIDER,"mock");
   assert.equal(config.vars.XIAODOU_WEBHOOKS_ENABLED,"0");
-  assert.equal(config.env.staging.vars.PAYMENTS_ENABLED,"0");
+  assert.equal(config.env.staging.vars.PAYMENTS_ENABLED,"1");
   const migration=readFileSync(path.join(root,"migrations/0012_operations_console.sql"),"utf8");
   assert.match(migration,/VALUES\('purchase_enabled','0'/);
   assert.equal(config.env.staging.vars.STAGING_PAYMENT_TEST_ENABLED,undefined);

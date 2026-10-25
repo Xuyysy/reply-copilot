@@ -85,9 +85,11 @@ async function parseMk99MultipartForm(body:Uint8Array,contentType:string,request
  return result;
 }
 function auditMk99Notify(env:Env,entry:{requestId:string;stage:Mk99NotifyStage;httpStatus:number|null;contentTypeClass:string;bodyBytes:number|null;reason?:Mk99NotifyReason;duplicate?:boolean;fieldCheck?:Mk99NotifyFieldCheck;field?:Mk99NotifyField}){
- if(env.ENVIRONMENT!=='staging'||env.MK99_NOTIFY_DIAGNOSTICS_ENABLED!=='1')return;
- // This record intentionally contains no callback values or caller-controlled strings.
- console.log({event:'mk99_notify_diagnostic',...entry});
+ if(env.ENVIRONMENT==='staging'&&env.MK99_NOTIFY_DIAGNOSTICS_ENABLED==='1'){
+  // This record intentionally contains no callback values or caller-controlled strings.
+  console.log({event:'mk99_notify_diagnostic',...entry});return;
+ }
+ if(entry.httpStatus!==null&&entry.httpStatus>=400)console.warn({event:'mk99_notify_rejected',requestId:entry.requestId,stage:entry.stage,httpStatus:entry.httpStatus,reason:entry.reason??'internal_error'});
 }
 export async function mk99Notify(request:Request,env:Env){
  // Independent of new-sales and active-merchant switches: historical callbacks survive a switch.

@@ -2,7 +2,15 @@
 
 本文件取代此前描述real-test/$0.05/每日10次/恢复Mock的历史上线指令。当前Staging继续真实AI、普通用户业务流程及后台运营预算。
 
-## 远端已核实（只读）
+## 最新远端基线（2026-10-25，只读核验）
+
+- Staging Worker `reply-copilot-api-staging`：`2fd67173-1785-43f6-8de4-4bac8aec4b23`，100%流量；`PAYMENTS_ENABLED=1`、Webhook=1、`MK99_NOTIFY_DIAGNOSTICS_ENABLED=0`。Staging D1 `cd44bb44-b525-42c4-b286-2cc84dae7fdb`；MK99、支付宝和微信运营开关及放行状态均为1。`/health`=200，`/v1/packages`显示 MK99 支付宝/微信、400次套餐1059分。
+- Production Worker `reply-copilot-api-production`：`5a48f3e0-b8be-4cdb-b1c9-ef3c61657bde`，100%流量；API域名健康200。Pages项目 `x-reply-helper-production` 已有 `app.x-reply-helper.top`，当前可见部署 `8cbf234d-4945-4cc3-b3e6-9349b248cbca`；首页、隐私页和条款页均返回200。Production D1 `reply-copilot-production`（`d9df7d23-9b9c-44ac-a33a-c24474c15691`）存在，业务表当前用户、订单、交易、事件、账本、批次和管理员审计记录均为0。
+- Production 已应用迁移0001–0013；`0014_provider_channel_independence.sql` 至 `0017_mk99_merchant_pricing_snapshot.sql`仍待增量迁移。远端变量为 `PAYMENTS_ENABLED=0`、`XIAODOU_WEBHOOKS_ENABLED=1`、`ADMIN_PORTAL_ENABLED=0`、`PAYMENT_PROVIDER=xiaodou`；`/v1/packages`=200且`paymentAvailable=false`，D1 `purchase_enabled=0`。
+- Production 当前仅核实到 `AUTH_HASH_SECRET`、`PASSWORD_PEPPER`、`TURNSTILE_SECRET_KEY` 三个 Secret 名称。邮件发送、DeepSeek 以及 MK99商户凭证/协议/金额/收银域名配置均未在 Production 配置；未读取任何Secret明文。Staging 配置和凭证未复制到Production。
+- 生产站点和API域名已经绑定并可访问，现有资源不得重建。Production Worker、Pages部署来自较旧代码快照，正式发布需在迁移和凭证齐备后，从同一审查过的版本协调更新。
+
+## 历史 Staging 快照（2026-10-22；以下资源与配置记录已被上方最新基线取代）
 
 - Worker `0bbc895c-85bf-443f-a756-d0fd4deacd57`，100%；Pages `6e6ad26b-ff04-4c5e-9c7c-79ee4cba3b01`，success。
 - AI_MODE=production、PAYMENT_PROVIDER=xiaodou_epay、PAYMENTS_ENABLED=1、后台purchase_enabled=1、Webhook1、admin1、诊断0；运营预算5000000微美元/UTC日。Staging只有本人测试的现有设置保留，没有重新收紧。
@@ -21,9 +29,9 @@
 
 ## 商店草稿
 
-`dist/release/reply-copilot-store-DRAFT-0.3.0.zip`，46文件、ZIP根目录manifest。只连接上述拟正式域名，不连接Staging、不含模型/支付Key。审计摘要在store-draft-audit.json，含ZIP与每文件SHA-256；工作区dirty，HEAD本身并不代表完整包。
+`dist/release/reply-copilot-store-DRAFT-0.3.0.zip`是已有商店草稿包；条目ID已固定为`fgfjajofkapebgphfidblngcjomkbdaj`，公开公钥已提供并绑定到正式扩展来源。需在正式Worker/Pages同步更新后重新构建和扫描最终Production ZIP，确认只连接正式API、不含Staging主机或Secret，再更新商店草稿。
 
-**只上传草稿，不点击提交审核或发布。** 目前正式API未上线，公钥/ID未固定，不能把“可上传”理解为“可发布”。不要上传旧reply-copilot-staging ZIP。商店草稿包与Staging构建保存在不同目录，脚本检查拦截Staging目的地。
+**商店条目仍是草稿；不要提交审核或发布。** 生产API已有基础部署，但支付迁移、MK99配置、管理员和法律/隐私资料尚未完成，不能把草稿包理解为可发布版本。不要上传旧Staging ZIP。
 
 Google后台操作：
 1. 进入 https://chrome.google.com/webstore/devconsole ，使用本人开发者账号；如未完成开发者注册，由本人完成身份/联系资料和条款。
@@ -38,19 +46,17 @@ Google后台操作：
 
 ## Production配置和发布
 
-- `api/deploy/production.wrangler.json`为独立本地发布候选；不改当前wrangler默认Production占位环境、不影响Staging。采用真实AI、保守费率0.30/1.32、Epay、购买0、管理员0、通知1、InvocationLogs关闭且query脱敏。
-- UUID和商店ID故意保留阻断占位。`node scripts/production-preflight.mjs`只验证本地全部迁移及发布参数；缺少真实D1/商店ID时以退出码2停止，不能直接发布。
+- `api/deploy/production.wrangler.json`为独立本地发布候选；当前远端已经存在Production Worker、Pages、D1及`app`/`api`域名，不得重建。线上新购买与管理员入口均关闭，Webhook保持开启。
+- 正式D1 UUID和商店ID已确认，但Production仅应用0001–0013；0014–0017待增量迁移。Production运行配置目前选择旧`xiaodou`，若采用MK99须在审查后的部署中切换，并保持购买关闭，直到商户凭证、协议合同、渠道放行及回调验证完成。
 - `node scripts/store-release.mjs`可重建草稿；正式ID取得后通过现有REPLY_COPILOT_EXTENSION_PUBLIC_KEY_FILE/REPLY_COPILOT_EXTENSION_ID环境变量注入公开元数据。
 - `node scripts/deploy-production.mjs --check`默认只做预检；`--worker/--pages`只在后续正式授权且明确确认目标后运行。本轮没有运行发布动作；该脚本不创建资源、不迁移远端、不录入Secret。
 
 后续获授权后按顺序：
-1. 创建reply-copilot-production独立空D1，核对实际UUID后填候选配置；绝不导入Staging备份、用户、角色、会话、订单和额度。
-2. 使用api cwd，`npx --no-install wrangler d1 migrations list DB --config deploy/production.wrangler.json --remote`，核对目标后按0001–0012 apply。空库迁移本地已验证，包含购买默认关闭、管理员为空、业务数据为空、默认运营预算$1/日；正式预算由本人/后台设置，不复制测试余额。已有正式库则先备份和恢复校验。
-3. 通过wrangler secret put交互逐项录入：AUTH_HASH_SECRET、PASSWORD_PEPPER、MAIL_API_KEY、MAIL_FROM、TURNSTILE_SECRET_KEY、DEEPSEEK_API_KEY、XIAODOU_EPAY_GATEWAY、XIAODOU_EPAY_PID、XIAODOU_EPAY_KEY。与Staging分别绑定，不反向读取Secret、不把私钥/RSA2或旧白名单当Epay必需项。已有正式认证库绝不更换pepper。
-4. 新建x-reply-helper-production Pages；正式邮件域名SPF/DKIM、Turnstile站点和Secret由对应服务确认，Pages PUBLIC_API_BASE_URL固定正式API，PUBLIC_TURNSTILE_SITE_KEY为真实公开sitekey。
-5. 先Worker Custom Domain api再Pages app；不得覆盖根域/www，不添加重叠Route。预检/备份通过后执行Worker、再Pages协调发布；记录版本与HTTP/CORS/会话/无效回调拒绝结果。
-6. 正式注册验邮后，按稳定user ID原子设置唯一admin role与site_administrator(id=1)；先核实无其他admin/绑定，审计并单独启用管理员入口。不能复制Staging user ID。该初始化只执行一次，之后日常运营使用后台。
-7. 商户确认正式通知 `https://api.x-reply-helper.top/v1/payments/xiaodou/epay/notify` 公网可达；回跳由服务端生成 `https://app.x-reply-helper.top/account/?payment_order=<订单ID>`。回跳不能发额度。关闭购买不能关闭合法回调。
+1. 不创建Production资源。先备份现有D1并验证可恢复；核对远端0001–0013，再只增量执行0014–0017，运行只读一致性审计。绝不导入Staging账号、管理员、订单和额度。
+2. 单独录入缺少的Production Secrets：邮件服务、DeepSeek，以及选择MK99所需凭证和已核实协议配置。当前远端仅有AUTH_HASH_SECRET、PASSWORD_PEPPER、TURNSTILE_SECRET_KEY名称；绝不读取或复制Staging Secret。已有认证库不得更换PASSWORD_PEPPER。
+3. 从同一审查提交协调更新Worker与Pages，绑定既有Production D1和正式扩展ID；配置正式Turnstile公开site key及服务端Secret，不覆盖未知DNS或既有运营配置。部署后验证HTTPS、CORS、会话/CSRF、D1、无效签名拒绝和健康/套餐接口。
+4. 正式注册并验证首个账号后，按稳定user ID审计绑定唯一管理员；`ADMIN_PORTAL_ENABLED`只在绑定核实后开启。不能复制Staging user ID。
+5. 如Production选择MK99，在商户后台核实Production通知地址`https://api.x-reply-helper.top/v1/payments/mk99/notify`和原通知重投/异常联系人；保留旧易支付回调路径以兼容历史订单。回跳不能作为到账证据，关闭新购不能关闭合法回调。
 8. 本人批准公开发布及收费后，先普通用户注册/插件/真实AI/扣次，再本人执行一次付款，核对唯一事件、额度批次、账本和自动刷新。Codex不代付；不能对旧UNKNOWN做测试补账。
 9. 异常关闭新购买、保留回调/已付款数据/原Secret；兼容代码版本恢复，不反向回滚已发生资金数据。
 
@@ -60,7 +66,7 @@ Google后台操作：
 
 后台已有客服联系配置；Production需本人确认沿用的邮箱及经营主体、保留期限、数据删除受理流程。网站隐私/条款目前仍标草案，不能擅自宣称已合规。隐私已补明帖子链接及最多20条最近选择回复会用于生成，与扩展本地说明一致；debugger和AI第三方处理需在商店如实披露。
 
-价格以Worker套餐快照为准：USD参考1.49/2.99/4.99；当前CNY总10.06/20.21/33.41，服务费1.5%，不是美元实际扣款。以后后台改价只作用新单。
+价格以Worker订单快照为准：USD参考1.49/2.99/4.99；Staging MK99买家实付为10.59/21.28/35.17 CNY，400次套餐已实测10.59。MK99商家承担5%手续费成本补足目前标注为估算，首笔结算单的商家净结算金额仍须在平台账单核对；页面必须明确实际扣款是人民币，不是美元。后台改价只作用新订单。
 
 ## 真实浏览器验收边界
 
