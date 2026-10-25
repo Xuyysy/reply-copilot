@@ -1,5 +1,57 @@
 # Production readiness — 2026-10-25
 
+## Production release execution (2026-10-25)
+
+This later record supersedes earlier statements in this file that the
+Production release had not been deployed.
+
+- Source branch/commit: `codex/v0.4-credits` at
+  `0effd8ac30f8d457c2ace5439b0f36aeafe6e0ac` (the commit adds release
+  documentation to the previously reviewed code baseline).
+- Existing Worker `reply-copilot-api-production` now serves 100% traffic on
+  version `1372df1f-f290-44cd-957f-b8f3506a4643`, deployment
+  `56620619-65df-407f-b7f9-af8402fdfd24`. Rollback version retained:
+  `5a48f3e0-b8be-4cdb-b1c9-ef3c61657bde`.
+- Existing Pages project `x-reply-helper-production` deployed successfully as
+  `18d8cca1-fc54-47f8-a73f-d1ed49a43242` from the same commit. Its production
+  alias is `https://app.x-reply-helper.top`; the API origin is
+  `https://api.x-reply-helper.top`.
+- Existing D1 `d9df7d23-9b9c-44ac-a33a-c24474c15691` remains bound; no
+  migration or business-data write was performed during this release.
+- The deployed version contains the expected eight Production Secret names
+  and the original D1 binding. Secret values were not read. Existing
+  `PASSWORD_PEPPER`, `AUTH_HASH_SECRET`, and `TURNSTILE_SECRET_KEY` were
+  preserved. AI mode is `production`; the Production Turnstile public site key
+  is included in the Pages build.
+- Runtime gates remain closed: `PAYMENTS_ENABLED=0`,
+  `ADMIN_PORTAL_ENABLED=0`, D1 `purchase_enabled=0`,
+  `active_merchant=xiaodou`, and MK99 new-order enablement is off. No Staging
+  users, orders, balances, or ledger rows were copied.
+- Earlier post-deployment smoke checks returned `/health` 200 and
+  `/v1/packages` 200 with `paymentAvailable=false`. An unauthenticated `/v1/me`
+  returned 401 as expected. These checks do not prove a successful Turnstile
+  challenge, email delivery, account registration, real AI generation,
+  extension use, admin bootstrap, or payment.
+- The registration page is live at
+  `https://app.x-reply-helper.top/login/?mode=register`. The owner must
+  register and verify the intended administrator account before its stable
+  Production user ID can be checked and the one-time bootstrap run. No
+  administrator exists yet.
+- Current Production D1 still selects `active_merchant=xiaodou`; therefore the
+  approved MK99 prices (¥10.43 / ¥20.95 / ¥34.64) are not yet confirmed as the
+  effective Production checkout prices. Keep purchases closed until the admin
+  portal is initialized, MK99 is selected through the audited admin control,
+  and `/v1/packages` confirms those totals.
+- The public privacy page still contains draft/review language. The operator
+  must approve privacy, terms, refund/payment wording, operator identity and a
+  support contact before calling this a public product launch or submitting
+  the Store listing.
+- A Production extension candidate exists at
+  `dist/release/reply-copilot-production-0.3.0.zip`, SHA-256
+  `efe98c8aa5e55de71d34ed42305a40121872cd8eca0fd095f3ab5c3a7135c574`.
+  It uses the existing Store identity and Production origins; it has not been
+  uploaded to the existing item or submitted for review.
+
 ## 2026-10-25 release-preparation update
 
 The operator reports that the Resend production sender domain

@@ -1,5 +1,12 @@
 # Chrome Web Store 身份已固定（2026-10-23）
 
+## Production 发布记录（2026-10-25）
+
+- Production Worker `1372df1f-f290-44cd-957f-b8f3506a4643` 已承接 100% 流量；Pages `18d8cca1-fc54-47f8-a73f-d1ed49a43242` 已部署到 `https://app.x-reply-helper.top`。
+- 正式扩展候选 ZIP：`dist/release/reply-copilot-production-0.3.0.zip`，SHA-256：`efe98c8aa5e55de71d34ed42305a40121872cd8eca0fd095f3ab5c3a7135c574`。包检查确认固定现有 Item ID 和 Production API/Web Origin，无 Staging Origin、测试密钥或服务端凭证。
+- 本 ZIP 尚未上传到开发者后台，也未提交审核。必须继续使用既有 Item ID `fgfjajofkapebgphfidblngcjomkbdaj`，不得新建商店条目。
+- 上线阻断仍包括：Production 普通账号注册与真实 X 页面实测、账号验证和 200 免费额度、唯一管理员初始化、MK99 Production 渠道路由及正式支付验收，以及经营者对隐私/条款/退款与客服披露的最终确认。
+
 > 本文件只作为扩展身份记录。其旧 Production 资源、迁移和待办状态已过期；
 > 当前 Production 上线状态以
 > [production-readiness-2026-10-25.md](production-readiness-2026-10-25.md) 为准。
