@@ -46,6 +46,13 @@ test('MK99 real readiness requires independently confirmed notification and exac
  assert.throws(()=>mk99Config({MK99_PID:cfg.pid,MK99_KEY:cfg.key}));
 });
 
+test('MK99 runtime accepts documented numeric PID without an undocumented length ceiling',()=>{
+ const pid='2088'+'7'.repeat(48);
+ const configured=mk99Config({MK99_PID:pid,MK99_KEY:cfg.key,MK99_REQUEST_SIGN_TYPE:'MD5',MK99_NOTIFY_SIGN_TYPE:'MD5'},false);
+ assert.equal(configured.pid,pid);
+ assert.throws(()=>mk99Config({MK99_PID:'2088notnumeric',MK99_KEY:cfg.key,MK99_REQUEST_SIGN_TYPE:'MD5',MK99_NOTIFY_SIGN_TYPE:'MD5'},false));
+});
+
 test('MK99 has an independent exact yuan parser and rejects unverified or inexact values',()=>{
  assert.equal(parseMk99AmountFen('10.59'),1059);
  assert.equal(parseMk99AmountFen('10'),1000);

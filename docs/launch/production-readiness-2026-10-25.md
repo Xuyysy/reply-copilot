@@ -6,12 +6,11 @@ The operator reports that the Resend production sender domain
 `x-reply-helper.top` is now created and verified, with all four DNS
 authentication checks passing. Use the explicitly selected sender
 `Reply Copilot <no-reply@x-reply-helper.top>`; do not use the old staging
-sender or create another domain. This status and sender are operator-provided
-facts, not independently queried in this task. Before loading the existing
-Resend API key into Production, inspect its permission and domain scope in
-Resend; the read-only key listing does not expose either. Reuse it only if it
-can send from the verified production domain. Do not create, rotate, or expose
-key material during preparation.
+sender or create another domain. Resend read-only metadata confirms the domain
+is verified and sending is enabled. The existing key's permission and domain
+scope are not exposed by the read-only key listing; check them in the
+Dashboard before loading the existing key into Production. Do not infer scope
+from its name or create, rotate, or expose key material during preparation.
 
 The production Turnstile widget is the existing `Reply Copilot Production
 Registration`, with the public site key
@@ -42,17 +41,20 @@ Add only during a separately authorized release window:
 | Worker setting | `MAIL_FROM` | `Reply Copilot <no-reply@x-reply-helper.top>`; operator-approved exact sender. |
 | Pages build variable | `PUBLIC_API_BASE_URL` | `https://api.x-reply-helper.top`; build-time value, not a Worker binding. |
 | Pages build variable | `PUBLIC_TURNSTILE_SITE_KEY` | Existing widget public Site Key above; public value, build-time only. |
-| Worker Secret | `MK99_PID` | Production merchant PID from Production MK99 console. |
-| Worker Secret | `MK99_PRIVATE_KEY` | Production merchant private key, RSA signing. |
-| Worker Secret | `MK99_PLATFORM_PUBLIC_KEY` | Official Production platform public key, RSA notification verification. |
+| Worker Secret | `MK99_PID` | Prefer the existing merchant PID if the merchant console confirms it is enabled for the Production app. |
+| Worker Secret | `MK99_PRIVATE_KEY` | Prefer the existing merchant RSA private key from its original local source if that key remains registered for the Production app. |
+| Worker Secret | `MK99_PLATFORM_PUBLIC_KEY` | Official platform public key for the same MK99 account/application; confirm it in the merchant console. |
 | Worker setting | `MK99_BASE_URL` | Confirm Production API root from the Production merchant console/docs. |
 | Worker setting | `MK99_CASHIER_ORIGINS` | Exact Production cashier HTTPS origin(s), independently confirmed. |
 | Worker settings | `MK99_REQUEST_SIGN_TYPE`, `MK99_NOTIFY_SIGN_TYPE` | `RSA` only after checking the Production account’s protocol settings. |
 | Worker settings | `MK99_PROTOCOL_CONFIRMED`, `MK99_AMOUNT_CONTRACT` | Set to `1` and `CNY_EXACT_BUYER_TOTAL` only after Production terms are verified. |
 
 Do not replace `AUTH_HASH_SECRET`, `PASSWORD_PEPPER`, or `TURNSTILE_SECRET_KEY`.
-Do not copy any Staging MK99 merchant identity, key, channel approval, or
-financial data. Keep `PAYMENTS_ENABLED=0`, D1 `purchase_enabled=0`,
+Do not export or read Staging Worker Secrets. Reuse original merchant
+credentials from their authoritative local files or merchant portal only when
+the existing account/application confirms they apply to Production; do not
+create a new merchant account or key pair by default. Do not copy Staging
+channel approvals or financial data. Keep `PAYMENTS_ENABLED=0`, D1 `purchase_enabled=0`,
 `ADMIN_PORTAL_ENABLED=0`, and all Production MK99 purchase/provider/channel
 controls closed until the acceptance sequence below is authorized.
 
@@ -63,24 +65,25 @@ The supplied MK99 interface document and the repository's reviewed copy of
 state that Staging and Production must use different merchant accounts, nor do
 they describe a sandbox API or account-isolation rule. The documented `pid` is
 the merchant identity; it is not an environment selector. Therefore there is
-no evidence-based requirement to open a second merchant account, and there is
-also no basis to assume that Staging credentials may be reused. In the MK99
-merchant console, confirm whether the existing merchant account has a
-Production-approved application/PID and its own assigned RSA key pair and
-channel approval. Use the credentials the console identifies for that
-Production configuration. If the console only exposes one identity/key set,
-ask MK99 support whether it may serve both Staging and Production hostnames;
-do not invent a separate-account requirement or copy Staging Secrets. The
+no evidence-based requirement to open a second merchant account. The existing
+account, PID, and RSA pair are the preferred candidates for reuse; public
+documents do not prove whether this merchant's app-level approval allows both
+Staging and Production. In the merchant console, check whether the existing
+PID/key registration and approved channels cover the Production callback and
+cashier flow. Reuse them if they do. If the console shows a Production
+restriction or a different registered key, report that concrete reason before
+considering a replacement. Never export Staging Worker Secrets. The
 public documents list payment types but do not prove this merchant's approval
 or the final cashier hostname; confirm those in the console before setting
 `MK99_CASHIER_ORIGINS`.
 
 ### Secure Production Secret candidate workflow
 
-The local helper `scripts/production-secret-bundle.mjs` collects five
-Production-only values without sending them anywhere: DeepSeek and Resend API
-keys are entered with terminal echo disabled, while the MK99 PID and RSA keys
-are sourced from the Production merchant console/local PEM files. It performs
+The local helper `scripts/production-secret-bundle.mjs` collects five values
+without sending them anywhere: the existing DeepSeek and Resend API keys are
+entered with terminal echo disabled, while the existing MK99 PID and RSA keys
+are sourced from their authoritative local files/merchant console when
+approved for Production. It performs
 basic format checks only (not proof of key ownership, merchant approval, or
 platform connectivity), writes a JSON bundle under `/private/tmp` with mode
 `0600`, and prints only the file path. It is local tooling; it makes
@@ -92,13 +95,15 @@ cd "/Users/xuyaoyang/x posst/apps/reply-copilot"
 node scripts/production-secret-bundle.mjs
 ```
 
-Prefer creating a dedicated Resend API key in Resend → API Keys with Sending
-access, restricted to `x-reply-helper.top` if that scope is offered. The
-existing key's permissions are not exposed by the connected read-only view;
-do not reuse it until its access is checked. Supply the existing active
-DeepSeek key through the hidden prompt (do not rotate it). Obtain MK99
-credentials from the Production merchant configuration, never by exporting or
-copying Staging Secrets. The helper does not modify the Worker or upload the
+First inspect the existing Resend key in Resend → API Keys. Reuse it if it has
+email-sending permission and its domain scope includes `x-reply-helper.top`;
+the key's name is not evidence of its scope. Resend says permission and domain
+scope can be edited in its Dashboard, so adjust the existing key there if
+needed before considering replacement. The connected read-only key listing
+does not expose scope. Supply the existing DeepSeek key through the hidden
+prompt after confirming it is active; do not rotate it. Reuse the MK99 PID and
+key pair if the merchant console confirms Production use. Never export
+Staging Worker Secrets. The helper does not modify the Worker or upload the
 bundle. Delete the temporary file after upload and verify it is gone; never
 attach it to Git, chat, a build artifact, or a log.
 
@@ -313,12 +318,14 @@ existing `PASSWORD_PEPPER`.
 | --- | --- | --- |
 | `DEEPSEEK_API_KEY` | Hosted AI | Reuse the existing DeepSeek account/key. Enter through Cloudflare Dashboard → Workers & Pages → `reply-copilot-api-production` → Settings → Variables and Secrets, during an authorized release window; do not create or rotate a key |
 | `MAIL_API_KEY` | Verification and password-reset email | Reuse the existing Resend account/key after the sender identity is approved; enter through the same Production Worker Secret store |
-| `MK99_PID` | Production merchant identity | Obtain from the Production MK99 merchant account and enter in the Worker Secret store |
-| `MK99_PRIVATE_KEY` | Signs MK99 API requests | Use the Production merchant keypair; enter only in the Worker Secret store |
-| `MK99_PLATFORM_PUBLIC_KEY` | Verifies MK99 notifications | Obtain from the official Production merchant configuration; enter only in the Worker Secret store |
+| `MK99_PID` | Merchant identity | Reuse the existing PID if the merchant console shows it is approved for Production; enter via the Worker Secret store |
+| `MK99_PRIVATE_KEY` | Signs MK99 API requests | Reuse the existing local private key if its public pair is registered for Production; enter via the Worker Secret store |
+| `MK99_PLATFORM_PUBLIC_KEY` | Verifies MK99 notifications | Use the official platform public key for the same approved merchant application; enter via the Worker Secret store |
 
-Never copy Staging values. Never put secrets in Git, chat, Pages variables,
-URLs, command arguments, or logs. `MAIL_FROM` is absent from the Production
+Never export values from Staging Worker Secrets. Enter existing credentials
+from their authoritative local source only after confirming they apply to
+Production. Never put secrets in Git, chat, Pages variables, URLs, command
+arguments, or logs. `MAIL_FROM` is absent from the Production
 Worker and is a non-secret Worker variable. The operator now reports that
 `x-reply-helper.top` is verified and all four DNS authentication checks passed.
 The selected Production sender is
@@ -444,22 +451,23 @@ part of this preparation.
 - Confirm the existing DeepSeek key is active and the current $1/day budget
   policy is accepted; enter it through the hidden local helper only in the
   authorized release window. Do not create or rotate a key.
-- In Resend → API Keys, create a dedicated Production Sending key scoped to
-  `x-reply-helper.top` if available; otherwise inspect whether an existing key
-  actually has sufficient sending/domain scope. Enter the selected key through
-  the hidden local helper. `MAIL_FROM` is the approved non-secret value
+- In Resend → API Keys, inspect the existing key's permission and domain scope;
+  reuse it if it covers `x-reply-helper.top`, or edit its existing scope in the
+  Dashboard if necessary. Create a replacement only if the existing key cannot
+  be made compatible. Enter the existing key through the hidden local helper.
+  `MAIL_FROM` is the approved non-secret value
   `Reply Copilot <no-reply@x-reply-helper.top>`.
 - No new Turnstile widget is needed. Inject the existing widget's public Site
   Key into the Pages build. Its pairing with the write-only Worker Secret is
   proven only by the authorized registration flow, which creates a pending D1
   registration and sends a real verification email.
-- Production MK99 PID, merchant private key, platform public key, approved
-  channels, official cashier origin, explicit Production protocol/amount
-  contract confirmation and the exact notify URL. Confirm whether the current
-  merchant account's Production application/PID and key set is approved; the
-  public protocol docs do not require a separate merchant account. Enter only
-  Production credentials via the hidden local helper during the authorized
-  release window.
+- In the existing MK99 merchant console, confirm the current PID/RSA
+  registration and approved channels cover Production; verify cashier origin,
+  callback URL `https://api.x-reply-helper.top/v1/payments/mk99/notify`, RSA
+  request/notify modes and exact CNY buyer-total contract. Reuse the existing
+  account and key material if those settings allow it; public docs do not
+  require a separate merchant account. Enter credentials via the hidden local
+  helper only during the authorized release window.
 - Public business/operator identity, one working support/privacy contact, the
   actual retention and account-deletion process, and approval of existing
   privacy, terms, and legally required refund/payment wording.

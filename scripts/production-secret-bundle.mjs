@@ -1,5 +1,5 @@
 import {closeSync,chmodSync,openSync,readFileSync,unlinkSync,writeFileSync} from 'node:fs';
-import {randomBytes} from 'node:crypto';
+import {createPrivateKey,createPublicKey,randomBytes} from 'node:crypto';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {createInterface} from 'node:readline';
@@ -13,9 +13,19 @@ export function prepareProductionSecretBundle(values,directory='/private/tmp'){
   if(!values||typeof values!=='object'||requiredNames.some(name=>typeof values[name]!=='string'||!values[name].trim())){
     throw new Error('Missing required Production credential.');
   }
-  if(!/^2088\d{1,28}$/.test(values.MK99_PID)||values.MK99_PID!==values.MK99_PID.trim()||
+  if(!/^2088[0-9]+$/.test(values.MK99_PID)||values.MK99_PID!==values.MK99_PID.trim()||
      values.DEEPSEEK_API_KEY!==values.DEEPSEEK_API_KEY.trim()||values.MAIL_API_KEY!==values.MAIL_API_KEY.trim()||
      !privatePem.test(values.MK99_PRIVATE_KEY)||!publicPem.test(values.MK99_PLATFORM_PUBLIC_KEY)){
+    throw new Error('Invalid Production credential format.');
+  }
+  try{
+    const merchantPrivateKey=createPrivateKey(values.MK99_PRIVATE_KEY);
+    const platformPublicKey=createPublicKey(values.MK99_PLATFORM_PUBLIC_KEY);
+    if(merchantPrivateKey.asymmetricKeyType!=='rsa'||(merchantPrivateKey.asymmetricKeyDetails?.modulusLength??0)<2048||
+       platformPublicKey.asymmetricKeyType!=='rsa'||(platformPublicKey.asymmetricKeyDetails?.modulusLength??0)<2048){
+      throw new Error('unsupported key');
+    }
+  }catch{
     throw new Error('Invalid Production credential format.');
   }
   const file=path.join(directory,`reply-copilot-production-secrets-${randomBytes(16).toString('hex')}.json`);
@@ -59,12 +69,12 @@ async function main(){
     originalTerminalSettings=terminalSettings();
     execFileSync('stty',['-echo'],{stdio:['inherit','ignore','ignore']});
     rl=createInterface({input:process.stdin,output:process.stderr,terminal:false});
-    process.stderr.write('Enter Production credentials only. Input is hidden; RSA keys are read from local files.\n');
-    const deepseek=await readHidden(rl,'DeepSeek API key: ');
-    const resend=await readHidden(rl,'Resend Production Sending key: ');
-    const pid=await readHidden(rl,'Production MK99 PID: ');
-    const privatePath=await readPath(rl,'Path to Production merchant PKCS#8 private-key PEM: ');
-    const publicPath=await readPath(rl,'Path to official Production MK99 platform public-key PEM: ');
+    process.stderr.write('Reuse existing credentials when their account, scope and merchant settings allow Production. Input is hidden; RSA keys are read from local files.\n');
+    const deepseek=await readHidden(rl,'Existing DeepSeek API key: ');
+    const resend=await readHidden(rl,'Existing Resend API key (after verifying its production-domain scope): ');
+    const pid=await readHidden(rl,'Existing MK99 merchant PID (if approved for Production): ');
+    const privatePath=await readPath(rl,'Path to the existing merchant PKCS#8 private-key PEM: ');
+    const publicPath=await readPath(rl,'Path to the official MK99 platform public-key PEM: ');
     const result=prepareProductionSecretBundle({
       DEEPSEEK_API_KEY:deepseek,
       MAIL_API_KEY:resend,

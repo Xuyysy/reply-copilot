@@ -39,7 +39,7 @@ export async function verifyMk99(params:Record<string,string>,config:Mk99Config)
 export function mk99Config(env:Env,requireConfirmed=true):Mk99Config{
  if(requireConfirmed&&(env.MK99_PROTOCOL_CONFIRMED!=='1'||env.MK99_AMOUNT_CONTRACT!=='CNY_EXACT_BUYER_TOTAL'))throw new Mk99Error('MK99_CONTRACT_UNCONFIRMED');
  const signType=env.MK99_REQUEST_SIGN_TYPE??'RSA',notifySignType=env.MK99_NOTIFY_SIGN_TYPE??'RSA';
- if(!signTypes.includes(signType)||!signTypes.includes(notifySignType)||!/^2088\d{1,28}$/.test(env.MK99_PID??''))throw new Mk99Error('MK99_CONFIG_ERROR');
+ if(!signTypes.includes(signType)||!signTypes.includes(notifySignType)||!/^2088[0-9]+$/.test(env.MK99_PID??''))throw new Mk99Error('MK99_CONFIG_ERROR');
  if(([signType,notifySignType].includes('MD5')&&!env.MK99_KEY)|| (signType==='RSA'&&!env.MK99_PRIVATE_KEY)||(notifySignType==='RSA'&&!env.MK99_PLATFORM_PUBLIC_KEY))throw new Mk99Error('MK99_CONFIG_ERROR');
  const cashierOrigins=(env.MK99_CASHIER_ORIGINS??'https://mk99.cn').split(',').map(x=>x.trim());
  for(const origin of cashierOrigins){const u=new URL(origin);if(u.protocol!=='https:'||u.origin!==origin||u.username||u.password||u.port)throw new Mk99Error('MK99_CONFIG_ERROR');}
@@ -127,7 +127,7 @@ function normalizePaymentEvent(data:Record<string,unknown>,outTradeNo:string,not
  if(typeof data.trade_no!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(data.trade_no))throw new Mk99Error('MK99_ORDER_MISMATCH',null,'format_invalid','trade_no');
  if(typeof data.trade_status!=='string'||!mk99States.includes(data.trade_status as Mk99TradeStatus))throw new Mk99Error('MK99_STATUS_INVALID',null,'value_not_allowed','trade_status');
  if(notification){
-  if(typeof data.pid!=='string'||!/^2088\d{1,28}$/.test(data.pid))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','pid');
+  if(typeof data.pid!=='string'||!/^2088[0-9]+$/.test(data.pid))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','pid');
   if(typeof data.channel_id!=='string'||!/^[0-9]{1,20}$/.test(data.channel_id))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','channel_id');
   if(typeof data.timestamp!=='string'||!/^[0-9]{1,12}$/.test(data.timestamp))throw new Mk99Error('MK99_RESPONSE_INVALID',null,'format_invalid','timestamp');
  }
