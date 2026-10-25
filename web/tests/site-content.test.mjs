@@ -22,6 +22,13 @@ test('localized configuration is assigned as text and blanks retain existing cop
   assert.equal(element.textContent, '<img src=x onerror=alert(1)>');
   applySiteContent(doc, {homeTitleZh:''}, 'zh'); assert.equal(element.textContent, '原文');
 });
+
+test('site copy cannot override payment-channel labels managed by checkout state',()=>{
+ const label={dataset:{siteText:'checkoutPayButton',siteDynamicText:'true',zh:'使用支付宝付款',en:'Pay with Alipay'},textContent:'使用微信支付'};
+ const doc={querySelectorAll:s=>s==='[data-site-text]'?[label]:[]};
+ applySiteContent(doc,{checkoutPayButtonZh:'通用付款',checkoutPayButtonEn:'Pay now'},'en');
+ assert.equal(label.textContent,'使用微信支付');
+});
 test('configuration removal disables links and hides support contact', () => {
   const link = {dataset:{siteLink:'chromeStoreUrl'},attrs:{},setAttribute(k,v){this.attrs[k]=v;},removeAttribute(k){delete this.attrs[k];}};
   const email = {attrs:{},setAttribute(k,v){this.attrs[k]=v;},removeAttribute(k){delete this.attrs[k];}};

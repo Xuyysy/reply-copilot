@@ -5,7 +5,7 @@ import Base from "../layouts/Base.astro";
   <div class="container page-hero">
     <div class="eyebrow" data-zh="安全结账">Secure checkout</div>
     <h1 data-zh="确认充值套餐。">Review your top-up.</h1>
-    <p class="lead" data-zh="套餐以美元标价，另加支付处理服务费。确认付款前请核对订单的人民币实付合计。">Packages are priced in USD plus a payment handling fee. Review the final CNY total in your order before confirming payment.</p>
+    <p class="lead" data-zh="套餐以美元标价，支付页面会显示人民币实付金额及对应的支付成本说明。付款前请核对订单金额。">Packages are displayed in USD. The checkout shows the CNY amount due and the applicable payment-cost details. Review the order amount before paying.</p>
   </div>
   <section class="container" style="padding-bottom:100px">
     <div class="content-card" style="max-width:680px">
@@ -24,7 +24,7 @@ import Base from "../layouts/Base.astro";
       <p id="quota-result" hidden></p>
       <p id="restart-notice" class="notice" hidden data-zh="重新发起会创建新的独立订单，旧订单不会取消。请勿同时支付多笔订单。">Restarting creates a separate order and does not cancel earlier orders. Do not pay multiple orders unintentionally.</p>
       <div class="button-row">
-        <button id="create-order" class="button checkout-pay-button" type="button" disabled><span id="create-order-label" data-site-text="checkoutPayButton" data-zh="使用支付宝付款">Pay with Alipay</span></button>
+        <button id="create-order" class="button checkout-pay-button" type="button" disabled><span id="create-order-label" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></button>
         <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
         <a id="cashier-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
         <section id="wechat-qr-panel" class="checkout-wechat-qr" hidden aria-labelledby="wechat-qr-title">
@@ -33,7 +33,7 @@ import Base from "../layouts/Base.astro";
           <p data-zh="请使用手机微信扫描。扫码后将在手机微信中打开小豆收银台。">Scan with your phone. The Xiaodou cashier will open in WeChat.</p>
         </section>
         <p id="wechat-mobile-note" class="checkout-wechat-mobile-note" hidden data-zh="手机端请在微信内打开收银台；其他浏览器请复制支付链接并在微信中打开。">On mobile, open the cashier in WeChat. In other browsers, copy the payment link and open it in WeChat.</p>
-        <button id="epay-submit" class="button checkout-pay-button" type="button" hidden><span id="epay-pay-label"><span data-site-text="checkoutPayButton" data-zh="前往支付宝付款">Continue to Alipay</span></span><span id="epay-restore-label" hidden data-zh="恢复付款表单">Restore payment form</span></button>
+        <button id="epay-submit" class="button checkout-pay-button" type="button" hidden><span id="epay-pay-label"><span id="epay-pay-text" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></span><span id="epay-restore-label" hidden data-zh="恢复付款表单">Restore payment form</span></button>
         <button id="simulate-payment" class="button secondary" type="button" hidden data-zh="模拟支付完成">Simulate payment</button>
         <button id="refresh-order" class="button secondary" type="button" hidden data-zh="刷新支付状态">Refresh payment status</button>
         <a id="login-link" class="button secondary" href="/login?mode=login" hidden data-zh="登录后继续">Sign in to continue</a>
@@ -46,12 +46,14 @@ import Base from "../layouts/Base.astro";
     import { submitEpayForm } from "../lib/epay-form.mjs";
     import QRCode from "qrcode";
     import {uniquePaymentMethods,paymentMethodKey} from "../lib/payment-methods.mjs";
+    import {packageSummary} from "../lib/package-summary.mjs";
+    import {paymentActionLabel} from "../lib/payment-presentation.mjs";
     import { api, ApiError } from "../lib/api";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
-    type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
-    type Order = { id:string; packageId?:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; baseAmountFen:number; serviceFeeFen:number; feeRateBps:number; amountFen:number; currency:"CNY"; status:string; merchantPricing?:{rateBps:number;costCoverageFen:number;status:string}|null; riskState?:string; creditedAt?:number|null; paymentProvider?:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock"; paymentProtocol?:"rsa2"|"epay"|"mk99"; paymentChannel?:Channel|null; paymentForm?:{action:string;method:string;fields:Record<string,string>}|null; paymentMode?:"mock"; paymentUrl?:string|null; paymentLinkUnavailable?:boolean; checkout?:{outcome:string;issue:string}|null; message?:string };
+    type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{feeBearer:string;rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
+    type Order = { id:string; packageId?:string; packageName:string; credits:number; displayPriceCents:number; displayCurrency:string; baseAmountFen:number; serviceFeeFen:number; feeRateBps:number; amountFen:number; currency:"CNY"; status:string; merchantPricing?:{feeBearer?:string;rateBps:number;costCoverageFen:number;status:string}|null; riskState?:string; creditedAt?:number|null; paymentProvider?:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock"; paymentProtocol?:"rsa2"|"epay"|"mk99"; paymentChannel?:Channel|null; paymentForm?:{action:string;method:string;fields:Record<string,string>}|null; paymentMode?:"mock"; paymentUrl?:string|null; paymentLinkUnavailable?:boolean; checkout?:{outcome:string;issue:string}|null; message?:string };
     type Quota = { freeRemaining:number; paidRemaining:number; totalRemaining:number };
     const pkgId = new URL(location.href).searchParams.get("package") || "";
     const currentUrl = new URL(location.href);
@@ -105,10 +107,6 @@ import Base from "../layouts/Base.astro";
         renderedQrKey=null;show("wechat-qr-panel",false);show("wechat-mobile-note",false);
       }
     }
-    function paymentActionLabel(channel:Channel|null,action:"pay"|"cashier"="pay"){
-      if(channel==="WECHAT_H5")return action==="cashier"?label("打开微信支付收银台","Open WeChat Pay cashier"):label("使用微信支付","Pay with WeChat Pay");
-      return action==="cashier"?label("打开支付宝收银台","Open Alipay cashier"):label("使用支付宝付款","Pay with Alipay");
-    }
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
       const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
@@ -122,8 +120,9 @@ import Base from "../layouts/Base.astro";
         const text=document.createElement("strong");text.textContent=method.channel==="ALIPAY_H5"?"支付宝 Alipay":"微信支付 WeChat Pay";
         item.append(input,text);root.append(item);
       }
-      byId("create-order-label").textContent=selectedChannel?paymentActionLabel(selectedChannel):label("暂不可付款","Payment unavailable");
-      byId("cashier-link").textContent=paymentActionLabel(selectedChannel,"cashier");
+      byId("create-order-label").textContent=selectedChannel?paymentActionLabel(selectedChannel,"pay",document.documentElement.lang==="en"?"en":"zh"):label("暂不可付款","Payment unavailable");
+      byId("epay-pay-text").textContent=paymentActionLabel("ALIPAY_H5","pay",document.documentElement.lang==="en"?"en":"zh");
+      byId("cashier-link").textContent=paymentActionLabel(selectedChannel,"cashier",document.documentElement.lang==="en"?"en":"zh");
       byId("payment-method-note").textContent=selectedProvider==="mk99"?label("前往收银台按渠道引导完成付款。实际支付币种为人民币 CNY。","Follow the cashier instructions for your payment method. Your payment is charged in CNY."):selectedChannel==="WECHAT_H5"?label("微信支付需要在微信内打开收银台完成支付；其他浏览器请按收银台引导操作。","WeChat Pay works in the WeChat browser. In other browsers, follow the cashier's instructions."):selectedChannel==="ALIPAY_H5"?label("前往收银台，使用支付宝完成付款。实际支付币种为人民币 CNY。","Continue to the cashier and pay with Alipay. Your payment is charged in CNY."):label("当前没有已放行的支付方式，暂时无法创建新订单。","No currently released payment methods; new orders are unavailable.");
     }
     function render(){
@@ -136,8 +135,9 @@ import Base from "../layouts/Base.astro";
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
       byId("package-usd").textContent=label("美元价格：$"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2),"USD price: $"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2));
       byId("package-description").textContent=(document.documentElement.lang==="en"?selected.description_en:selected.description_zh)||"";
-      byId("package-fee").textContent=label("支付处理服务费率："+((selected.fee_rate_bps??150)/100).toFixed(2)+"%","Payment handling fee rate: "+((selected.fee_rate_bps??150)/100).toFixed(2)+"%")+(selected.merchant_pricing?label("；售价已含商家承担的预计支付成本，不由收银台另加。预计费率 5%，实际结算待核对。","; price includes estimated merchant-borne processing cost, with no cashier surcharge. Estimated rate 5%; settlement pending verification."):"");
-      byId("package-cny").textContent=selected.total_payment_fen?label("预计实付合计：¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY；确认付款前以本订单最终金额为准。","Estimated total: ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY. Review the final order total before confirming payment."):label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
+      const pricingSummary=packageSummary(selected,document.documentElement.lang==="en"?"en":"zh");
+      byId("package-fee").textContent=pricingSummary.fee;
+      byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
           byId("create-order").disabled=busy||!paymentAvailable||!selected.total_payment_fen||Boolean(order);
     }
@@ -145,10 +145,10 @@ import Base from "../layouts/Base.astro";
       order=next;render();monitorPayment(next);
       void renderWechatQr(next);
       byId("checkout-status").textContent=checkoutOrderMessage(next,document.documentElement.lang);
-      byId("package-fee").textContent=label("支付处理服务费率："+(next.feeRateBps/100).toFixed(2)+"%","Payment handling fee rate: "+(next.feeRateBps/100).toFixed(2)+"%")+(next.merchantPricing?label("；售价已含商家承担的预计支付成本，实际结算待核对。","; price includes estimated merchant-borne processing cost; settlement pending verification."):"");
+      byId("package-fee").textContent=packageSummary({fee_rate_bps:next.feeRateBps,merchant_pricing:next.merchantPricing},document.documentElement.lang==="en"?"en":"zh").fee;
       byId("package-cny").textContent=label("本订单实付合计：¥"+(next.amountFen/100).toFixed(2)+" CNY","Total due for this order: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
       byId("payment-method-note").textContent=next.paymentChannel==="WECHAT_H5"?label("微信支付订单；请按收银台支持的终端方式完成付款。","WeChat Pay order. Follow the cashier's supported device flow."):label("支付宝订单；请在收银台核对金额后付款。","Alipay order. Confirm the amount in the cashier before paying.");
-      byId("cashier-link").textContent=paymentActionLabel(next.paymentChannel??null,"cashier");
+      byId("cashier-link").textContent=paymentActionLabel(next.paymentChannel??null,"cashier",document.documentElement.lang==="en"?"en":"zh");
       show("cashier-link",canUseCashierLink(next));if(canUseCashierLink(next))byId<HTMLAnchorElement>("cashier-link").href=next.paymentUrl!;else byId<HTMLAnchorElement>("cashier-link").href="";
       show("epay-submit",next.paymentProtocol==="epay"&&next.status==="pending"&&paymentAvailable);
       byId<HTMLButtonElement>("epay-submit").disabled=busy;

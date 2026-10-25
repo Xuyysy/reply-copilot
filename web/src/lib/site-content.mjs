@@ -22,6 +22,7 @@ export function createSiteContentLoader(fetchContent) {
 export function applySiteContent(document, content, language) {
   const suffix = language === "en" ? "En" : "Zh";
   document.querySelectorAll("[data-site-text]").forEach(element => {
+    if (element.dataset.siteDynamicText === "true") return;
     const key = element.dataset.siteText;
     // Keep the original translation for either missing locale.
     if (element.dataset.siteFallbackZh === undefined) {

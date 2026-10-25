@@ -18,3 +18,9 @@ test('checkout action and cashier labels follow the selected payment channel',()
  assert.match(checkout,/paymentChannel===\"WECHAT_H5\"/);
  assert.match(checkout,/byId\("cashier-link"\)\.textContent=paymentActionLabel/);
 });
+test('channel-specific checkout labels are excluded from static CMS replacement and selected route is submitted',()=>{
+ assert.match(checkout,/<span id="create-order-label"[^>]*data-site-dynamic-text/);
+ assert.match(checkout,/<span id="epay-pay-text"[^>]*data-site-dynamic-text/);
+ assert.match(checkout,/input\.addEventListener\("change",\(\)=>\{\s*selectedChannel=method\.channel;\s*selectedProvider=method\.provider;\s*renderPaymentMethods\(\);?\s*\}\)/);
+ assert.match(checkout,/provider:selectedProvider,channel:selectedChannel/);
+});

@@ -31,7 +31,7 @@ test("pricing renders USD reference and server-set CNY settlement values", () =>
   assert.match(html, /付款尚未开放/);
   assert.match(source, /fee_rate_bps|feeRateBps/);
   assert.doesNotMatch(source, /¥9\.90|¥19\.90|¥32\.90/);
-  assert.match(source, /toFixed\(2\)/);
+  assert.match(source, /packageSummary/);
   assert.match(migration, /price_cents=149,price_cny_fen=990/);
   assert.match(migration, /price_cents=299,price_cny_fen=1990/);
   assert.match(migration, /price_cents=499,price_cny_fen=3290/);
