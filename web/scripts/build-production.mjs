@@ -3,10 +3,12 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveProductionApiBase, resolveProductionTurnstileSiteKey } from './production-build-config.mjs';
+import { cleanProductionOutput } from './clean-production-output.mjs';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const apiBase = resolveProductionApiBase(process.env.PUBLIC_API_BASE_URL);
 const turnstileSiteKey = resolveProductionTurnstileSiteKey(process.env.PUBLIC_TURNSTILE_SITE_KEY);
+cleanProductionOutput(path.join(webRoot,'dist'));
 const result = spawnSync('npm', ['run', 'build'], {
   cwd: webRoot,
   env: { ...process.env, PUBLIC_API_BASE_URL: apiBase, PUBLIC_TURNSTILE_SITE_KEY: turnstileSiteKey },
