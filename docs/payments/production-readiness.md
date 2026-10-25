@@ -4,6 +4,10 @@
 
 # Production readiness — 2026-10-21
 
+> **历史记录。** 当前资源、迁移和凭证状态见
+> [`../launch/production-readiness-2026-10-25.md`](../launch/production-readiness-2026-10-25.md)。
+> 本文记录的旧“尚无 Production 资源/迁移”结论已过时；不得据此重建资源或重跑迁移。
+
 ## Current evidence
 
 - Staging received a real CNY10.06 Epay payment, exactly one400-credit batch,

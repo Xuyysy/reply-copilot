@@ -2,6 +2,10 @@
 
 # Production执行清单（尚未执行）
 
+> **历史清单，禁止照旧执行。** Production D1 已完成 0001–0017，Worker、Pages、D1
+> 和正式域名均已存在。请以 [`production-readiness-2026-10-25.md`](production-readiness-2026-10-25.md)
+> 为准；没有单独发布授权前，不录入 Production Secret、不部署、不启用购买或管理员后台。
+
 ## 需要填入并独立核验的真实配置
 
 - 正式WEB_ORIGIN/API_ORIGIN（HTTPS根地址），与商户申报/通知域名、Turnstile widget和Pages域名一致。

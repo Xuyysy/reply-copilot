@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "npm --prefix web run build:staging && node --test",
+    "test": "npm --prefix web run build:staging && node --test --test-concurrency=1",
     "build:dev": "node scripts/build.js development",
     "build:staging": "node scripts/build.js staging",
     "build:pages:staging": "npm --prefix web run build:staging",

@@ -20,3 +20,15 @@ export function resolveProductionApiBase(value) {
   }
   return PRODUCTION_API_BASE;
 }
+
+const TURNSTILE_TEST_SITE_KEYS = new Set([
+  '1x00000000000000000000AA',
+  '2x00000000000000000000AB',
+]);
+
+export function resolveProductionTurnstileSiteKey(value) {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{20,128}$/.test(value) || TURNSTILE_TEST_SITE_KEYS.has(value)) {
+    throw new Error('PUBLIC_TURNSTILE_SITE_KEY must be a valid non-test Production Site Key.');
+  }
+  return value;
+}

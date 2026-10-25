@@ -1,4 +1,9 @@
-# Cloudflare 与外部服务配置（尚未部署）
+# Cloudflare 与外部服务配置（历史记录）
+
+> **本文的资源/迁移状态已过时。** Production Worker、Pages、D1、域名均已存在，
+> D1 已执行 0001–0017。当前唯一有效清单是
+> [`launch/production-readiness-2026-10-25.md`](launch/production-readiness-2026-10-25.md)。
+> 不要照本文重建资源、重跑迁移或录入与当前商户方案不匹配的旧凭证。
 
 当前 `api/wrangler.jsonc` 已有独立 staging / production 模板，远端 D1 ID、Origin 和插件 ID 仍是占位值。只执行过本地迁移；没有检查或改动任何正式 D1。完整的当前步骤与验收清单见 [预发布联调手册](staging-runbook.md)。部署、DNS、Secret 和真实 AI 调用需要运营者另行确认。
 

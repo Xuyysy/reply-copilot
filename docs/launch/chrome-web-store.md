@@ -1,4 +1,5 @@
-> 最新上传包使用 `dist/release/reply-copilot-store-DRAFT-0.3.0.zip`，仅连接候选正式域名；不要上传下文旧Staging包。最新发布清单见 `launch-preparation-2026-10-22.md`。
+> 历史商店记录。当前 Production 状态与唯一发布清单见
+> [`production-readiness-2026-10-25.md`](production-readiness-2026-10-25.md)。旧草稿包/路径不能直接视为可公开上传版本；先按当前正式配置重建并扫描。
 
 # Chrome Web Store 上架材料（2026-10-22）
 

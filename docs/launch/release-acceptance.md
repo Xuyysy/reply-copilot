@@ -1,5 +1,7 @@
 > **历史阶段记录，禁止照其中旧测试开关/恢复Mock或占位Production命令直接执行。当前唯一发布清单为 [launch-preparation-2026-10-22.md](launch-preparation-2026-10-22.md)。**
 
+> **Production 状态以 [`production-readiness-2026-10-25.md`](production-readiness-2026-10-25.md) 为准。** 本文是历史验收记录；旧测试模式、购买开关、迁移与部署快照不代表当前远端状态。
+
 > 运行模式已更新：Staging默认真实AI、使用后台运营预算，不再采用下文历史real-test临时限制。当前规则见 ../operations/staging-business-mode.md。
 
 # 上线前验收与发布顺序（2026-10-22）
