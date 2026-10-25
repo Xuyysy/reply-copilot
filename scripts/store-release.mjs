@@ -13,6 +13,7 @@ export function auditStorePackage(manifest,runtime){
  for(const expected of ['production',website,api])if(!runtime.includes(expected))throw new Error('Missing production runtime destination');
  if(/staging|localhost|127\.0\.0\.1|example\.invalid/i.test(runtime))throw new Error('Non-production runtime destination');
 }
+export function workingTreeIsDirty(status){return typeof status==='string'&&status.trim().length>0;}
 function walk(dir){return readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(path.join(dir,e.name)):[path.join(dir,e.name)]);}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  execFileSync(process.execPath,['scripts/build.js','production'],{cwd:root,env:{...process.env,REPLY_COPILOT_WEBSITE_URL:website,REPLY_COPILOT_API_URL:api},stdio:'inherit'});
@@ -32,7 +33,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
  execFileSync('python3',['-c','import os,sys,zipfile\nwith zipfile.ZipFile(sys.argv[2],"w",zipfile.ZIP_DEFLATED) as z:\n for base,dirs,files in os.walk(sys.argv[1]):\n  for name in sorted(files):\n   p=os.path.join(base,name);z.write(p,os.path.relpath(p,sys.argv[1]))',folder,zip]);
  execFileSync('unzip',['-t',zip],{stdio:'ignore'});
  const hashes=Object.fromEntries(files.map(f=>[path.relative(folder,f),createHash('sha256').update(readFileSync(f)).digest('hex')]));
- const report={status:productionPackage?'PRODUCTION_IDENTITY_BOUND_NOT_READY_TO_PUBLISH':'DRAFT_ONLY_NOT_READY_TO_PUBLISH',builtAt:new Date().toISOString(),head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),dirty:true,website,api,version:manifest.version,extensionId:store.id,identityBound:Boolean(manifest.key),files:files.length,zip:path.basename(zip),sha256:createHash('sha256').update(readFileSync(zip)).digest('hex'),hashes};
+ const gitStatus=execFileSync('git',['status','--porcelain','--untracked-files=all'],{cwd:root,encoding:'utf8'});
+ const report={status:productionPackage?'PRODUCTION_IDENTITY_BOUND_NOT_READY_TO_PUBLISH':'DRAFT_ONLY_NOT_READY_TO_PUBLISH',builtAt:new Date().toISOString(),head:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),dirty:workingTreeIsDirty(gitStatus),website,api,version:manifest.version,extensionId:store.id,identityBound:Boolean(manifest.key),files:files.length,zip:path.basename(zip),sha256:createHash('sha256').update(readFileSync(zip)).digest('hex'),hashes};
  writeFileSync(path.join(release,productionPackage?'production-package-audit.json':'store-draft-audit.json'),JSON.stringify(report,null,2)+'\n');
  console.log(JSON.stringify({...report,hashes:undefined},null,2));
 }
