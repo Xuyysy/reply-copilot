@@ -1,5 +1,23 @@
 # Production readiness — 2026-10-25
 
+## Production Pages pricing-copy deployment (2026-10-26)
+
+- Source commit: `dcdcfe9c63ac8d9148e02a5b68f677d8b53a49b6` on
+  `codex/v0.4-credits` (local commit; GitHub push is pending network
+  availability).
+- Existing Pages project `x-reply-helper-production` deployed successfully as
+  `8ce5274a-d178-4a11-b836-9a59fc2b0c0c`, serving the production alias
+  `https://app.x-reply-helper.top`.
+- The preceding successful Pages deployment retained for rollback is
+  `18d8cca1-fc54-47f8-a73f-d1ed49a43242`.
+- Production-only Pages build variables were injected at build time. The
+  generated assets were checked for the Production API origin and absence of
+  the Staging API origin. Worker, D1, Secrets, payment settings and business
+  data were not changed.
+- Live read-only checks confirmed the three package totals as ¥10.43,
+  ¥20.95 and ¥34.64; the pricing and checkout pages show the exact CNY total
+  and the localized payment-cost statement. No order or payment was created.
+
 ## Production release execution (2026-10-25)
 
 This later record supersedes earlier statements in this file that the
