@@ -10,7 +10,7 @@
   "vars": {
     "ENVIRONMENT": "production",
     "AI_MODE": "production",
-    "ADMIN_PORTAL_ENABLED": "0",
+    "ADMIN_PORTAL_ENABLED": "1",
     "WEB_ORIGIN": "https://app.x-reply-helper.top",
     "API_ORIGIN": "https://api.x-reply-helper.top",
     "EXTENSION_ORIGIN": "chrome-extension://fgfjajofkapebgphfidblngcjomkbdaj",
