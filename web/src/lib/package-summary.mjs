@@ -5,13 +5,12 @@ export function featuredPackages(packages) {
 export function packageSummary(pkg, language) {
  const en=language==='en',price=Number(pkg.promo_price_cents??pkg.price_cents),fee=Number(pkg.fee_rate_bps??150),credits=Number(pkg.credits);
  const merchant=pkg.merchant_pricing??pkg.merchantPricing;
- const merchantRate=(Number(merchant?.rateBps)/100).toFixed(2).replace(/\.?0+$/,'');
  let feeText;
- if(merchant?.feeBearer==='merchant')feeText=en?`Estimated payment cost: ${merchantRate}%, paid by the merchant and included in the CNY price. No extra cashier charge.`:`支付成本：预计 ${merchantRate}%，由商家承担，已包含在人民币售价中。收银台不额外加收。`;
+ if(merchant?.feeBearer==='merchant')feeText=en?'Payment processing costs are included in the displayed CNY price. No additional fee at checkout.':'人民币售价已包含支付渠道成本，收银台不再额外加收。';
  else if(fee>0)feeText=en?`Buyer processing fee: ${(fee/100).toFixed(2)}%, included in the CNY total.`:`支付处理服务费率 ${(fee/100).toFixed(2)}%，由买家承担，已计入人民币实付总额。`;
  else feeText=en?'No additional payment handling fee.':'不另收支付处理服务费。';
- const total=Number(pkg.total_payment_fen),estimated=merchant?.status==='estimate_unverified';
- const cny=Number.isSafeInteger(total)&&total>0?(en?`${estimated?'Estimated final payment':'Final payment'}: ¥${(total/100).toFixed(2)} CNY`:`${estimated?'预计人民币实付':'人民币实付'}：¥${(total/100).toFixed(2)} CNY`):'';
+ const total=Number(pkg.total_payment_fen);
+ const cny=Number.isSafeInteger(total)&&total>0?(en?`Final payment: ¥${(total/100).toFixed(2)} CNY`:`人民币实付：¥${(total/100).toFixed(2)} CNY`):'';
  return {name:String((en?pkg.name_en:pkg.name_zh)||''),badge:String((en?pkg.recommended_label_en:pkg.recommended_label_zh)||''),price:'$'+(price/100).toFixed(2),credits:en?`${credits.toLocaleString()} AI generations`:`${credits.toLocaleString()} 次 AI 生成`,fee:feeText,cny};
 }
 export function renderFeaturedPackages(document, container, packages, language) {

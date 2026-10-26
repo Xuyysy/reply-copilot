@@ -146,7 +146,7 @@ import Base from "../layouts/Base.astro";
       void renderWechatQr(next);
       byId("checkout-status").textContent=checkoutOrderMessage(next,document.documentElement.lang);
       byId("package-fee").textContent=packageSummary({fee_rate_bps:next.feeRateBps,merchant_pricing:next.merchantPricing},document.documentElement.lang==="en"?"en":"zh").fee;
-      byId("package-cny").textContent=label("本订单实付合计：¥"+(next.amountFen/100).toFixed(2)+" CNY","Total due for this order: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
+      byId("package-cny").textContent=label("人民币实付：¥"+(next.amountFen/100).toFixed(2)+" CNY","CNY payment due: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
       byId("payment-method-note").textContent=next.paymentChannel==="WECHAT_H5"?label("微信支付订单；请按收银台支持的终端方式完成付款。","WeChat Pay order. Follow the cashier's supported device flow."):label("支付宝订单；请在收银台核对金额后付款。","Alipay order. Confirm the amount in the cashier before paying.");
       byId("cashier-link").textContent=paymentActionLabel(next.paymentChannel??null,"cashier",document.documentElement.lang==="en"?"en":"zh");
       show("cashier-link",canUseCashierLink(next));if(canUseCashierLink(next))byId<HTMLAnchorElement>("cashier-link").href=next.paymentUrl!;else byId<HTMLAnchorElement>("cashier-link").href="";

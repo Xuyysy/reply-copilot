@@ -79,6 +79,17 @@ test("account orders expose provider refresh for unresolved supported merchant p
   assert.match(api, /diagnostic\?:/);
   assert.match(api, /requestId\?:/);
 });
+test("checkout after order creation labels the server order snapshot as the exact CNY amount due",()=>{
+  const source=readFileSync(path.join(root,"src/pages/checkout.astro"),"utf8");
+  assert.match(source,/人民币实付：¥.*next\.amountFen/);
+  assert.match(source,/CNY payment due: ¥.*next\.amountFen/);
+});
+test("MK99 account orders render the actual transaction total and refund copy avoids an unsupported fee promise",()=>{
+  const source=readFileSync(path.join(root,"src/components/account/AccountDashboard.tsx"),"utf8");
+  assert.match(source,/orderPriceSummary\(order,language\)/);
+  assert.match(source,/退款金额将根据订单记录和适用条款核实后处理/);
+  assert.doesNotMatch(source,/退款仅退套餐本金，支付服务费原则上不退/);
+});
 test("interactive pages hydrate as isolated React islands", () => {
   for (const [pageName, component] of [["login", "AuthPanel"], ["account", "AccountDashboard"], ["admin", "AdminDashboard"]]) {
     assert.match(readFileSync(path.join(root, `src/pages/${pageName}.astro`), "utf8"), new RegExp(`<${component} client:load`));
