@@ -7,7 +7,7 @@ export const ACCOUNT_PENDING_DEVICE_KEY = "replyCopilotPendingDevice";
 function allowedOrigin(raw, config) {
   try {
     const url = new URL(raw);
-    return url.protocol === "https:" || (config.channel === "development" && url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname));
+    return url.protocol === "https:" || (config.channel === "development" && url.protocol === "http:" && config.allowedHttpHosts?.includes(url.hostname));
   } catch { return false; }
 }
 
@@ -19,7 +19,7 @@ export class AccountClient {
     catch { return null; }
   }
   async openWebsite(path) { const url = this.websiteUrl(path); if (!url) throw new Error("官网尚未配置，请稍后再试。"); await this.openTab(url); }
-  openLoginPage() { return this.openWebsite("/login"); }
+  openLoginPage(mode = "login") { return this.openWebsite(mode === "register" ? "/login?mode=register" : "/login"); }
   openAccountPage() { return this.openWebsite("/account"); }
   openPurchasePage() { return this.openWebsite("/pricing"); }
   async token() { return (await this.storage.get(ACCOUNT_TOKEN_KEY))[ACCOUNT_TOKEN_KEY] || ""; }
@@ -40,13 +40,19 @@ export class AccountClient {
   fetchEntitlement() { return this.request("/v1/entitlements"); }
   fetchUsage() { return this.request("/v1/usage"); }
   refreshEntitlement() { return this.fetchEntitlement(); }
-  async beginDeviceAuthorization() {
+  async beginDeviceAuthorization({ mode = "login" } = {}) {
+    if (await this.token()) throw new Error("账户已连接。如需切换账号，请先在设置中心退出当前账户。");
+    const pending = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
+    if (pending?.deviceToken && pending?.deviceCode && Date.parse(pending.expiresAt || "") > Date.now()) {
+      await this.openWebsite(`/account?device_code=${pending.deviceCode}`);
+      return pending.deviceCode;
+    }
     const saved = await this.storage.get(ACCOUNT_DEVICE_ID_KEY);
     const deviceId = saved[ACCOUNT_DEVICE_ID_KEY] || crypto.randomUUID();
     await this.storage.set({ [ACCOUNT_DEVICE_ID_KEY]: deviceId });
     const data = await this.request("/v1/extension/device-code", { method: "POST", authenticate: false, body: { deviceId } });
     if (!/^[A-F0-9]{8}$/.test(data?.deviceCode || "") || !/^[a-f0-9]{64}$/.test(data?.deviceToken || "")) throw new Error("绑定请求返回内容无效。");
-    await this.storage.set({ [ACCOUNT_PENDING_DEVICE_KEY]: { deviceToken: data.deviceToken, expiresAt: data.expiresAt } });
+    await this.storage.set({ [ACCOUNT_PENDING_DEVICE_KEY]: { deviceToken: data.deviceToken, deviceCode: data.deviceCode, expiresAt: data.expiresAt } });
     await this.openWebsite(`/account?device_code=${data.deviceCode}`);
     return data.deviceCode;
   }

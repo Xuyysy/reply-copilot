@@ -1,0 +1,9 @@
+{
+  "name": "payment-connectivity-probe",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "../../api/node_modules/.bin/tsc -p tsconfig.json"
+  }
+}

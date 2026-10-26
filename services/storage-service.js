@@ -6,7 +6,7 @@ export const LEGACY_AUTO_FILL_KEY = "experimentalAutoFill";
 export const ONBOARDING_COMPLETE_KEY = "onboardingComplete";
 export const BEHAVIOR_PREFERENCES_KEY = "behaviorPreferences";
 export const STORAGE_SCHEMA_VERSION_KEY = "replyCopilotStorageSchemaVersion";
-export const STORAGE_SCHEMA_VERSION = 2;
+export const STORAGE_SCHEMA_VERSION = 3;
 export const DEFAULT_BEHAVIOR_PREFERENCES = Object.freeze({ autoGenerateOnReply: true, showFloatingWindow: true, rememberFloatingPosition: true, floatingPosition: null, defaultReplyMode: "natural" });
 
 export class StorageService {
@@ -14,12 +14,12 @@ export class StorageService {
   async migrateSchema() {
     const current = (await this.storage.local.get(STORAGE_SCHEMA_VERSION_KEY))[STORAGE_SCHEMA_VERSION_KEY] || 1;
     if (current > STORAGE_SCHEMA_VERSION) return current;
-    if (current < STORAGE_SCHEMA_VERSION) await this.storage.local.set({ [STORAGE_SCHEMA_VERSION_KEY]: STORAGE_SCHEMA_VERSION });
+    if (current < STORAGE_SCHEMA_VERSION) {
+      await this.storage.local.remove(API_KEY_KEY);
+      await this.storage.local.set({ [STORAGE_SCHEMA_VERSION_KEY]: STORAGE_SCHEMA_VERSION });
+    }
     return STORAGE_SCHEMA_VERSION;
   }
-  async getApiKey() { return (await this.storage.local.get(API_KEY_KEY))[API_KEY_KEY] || ""; }
-  async setApiKey(value) { await this.storage.local.set({ [API_KEY_KEY]: value.trim() }); }
-  async clearApiKey() { await this.storage.local.remove(API_KEY_KEY); }
   async getPendingRequest() { return (await this.storage.session.get(PENDING_REQUEST_KEY))[PENDING_REQUEST_KEY] || null; }
   async savePendingRequest(request) { await this.storage.session.set({ [PENDING_REQUEST_KEY]: request }); }
   async getHistory() { return (await this.storage.local.get(HISTORY_KEY))[HISTORY_KEY] || []; }

@@ -1,7 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="Feedback">
+<Base title="反馈" titleEn="Feedback">
   <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="反馈">Feedback</div><h1 data-zh="告诉我们哪里需要改进。">Tell us what needs work.</h1><p class="lead" style="margin:auto" data-zh="登录后提交反馈。请不要填写 API Key 或其他秘密。">Sign in to share feedback. Please do not include API keys or other secrets.</p></div><div class="form-card"><form id="feedback-form"><label class="field"><span data-zh="反馈内容">Your feedback</span><textarea id="message" required maxlength="2000" rows="7" style="border:1px solid #cfd6df;border-radius:10px;padding:13px;resize:vertical"></textarea></label><button class="button" type="submit" data-zh="提交反馈">Send feedback</button></form><p id="feedback-status" class="status" role="status" hidden></p></div>
   <script>
     import { api } from "../lib/api";

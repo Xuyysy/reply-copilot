@@ -16,7 +16,7 @@ export async function takeRate(env: Env, bucket: string, limit: number, periodMs
   const result = await env.DB.prepare("INSERT INTO rate_limits(bucket,period_start,used) VALUES(?,?,1) ON CONFLICT(bucket,period_start) DO UPDATE SET used=used+1 WHERE used < ? RETURNING used").bind(bucket, period, limit).all();
   return result.results.length === 1;
 }
-async function sendCode(env: Env, email: string, code: string): Promise<void> {
+export async function sendCode(env: Env, email: string, code: string, purpose: "register" | "reset" = "register"): Promise<void> {
   if (env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN)) { console.log(`[LOCAL EMAIL ONLY] ${email}: ${code}`); return; }
   if (!env.MAIL_API_KEY || !env.MAIL_FROM) throw new ApiFailure(503, "MAIL_NOT_CONFIGURED", "邮件服务尚未开放。");
   const controller = new AbortController();
@@ -25,7 +25,7 @@ async function sendCode(env: Env, email: string, code: string): Promise<void> {
     const sent = await fetch("https://api.resend.com/emails", {
       method: "POST", signal: controller.signal,
       headers: { Authorization: `Bearer ${env.MAIL_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: "Reply Copilot sign-in code", text: `Your Reply Copilot sign-in code is ${code}. It expires in 10 minutes. If you did not request this, ignore this email.` }),
+      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: purpose === "reset" ? "x-Reply-Helper 重置密码验证码" : "x-Reply-Helper 注册验证码", text: `您的 x-Reply-Helper ${purpose === "reset" ? "重置密码" : "注册"}验证码：${code}。10 分钟内有效。如果不是您本人操作，请忽略此邮件。`, html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto"><h2>x-Reply-Helper</h2><p>您的${purpose === "reset" ? "重置密码" : "注册"}验证码：</p><p style="font-size:32px;letter-spacing:8px;font-weight:700">${code}</p><p>10 分钟内有效。如果不是您本人操作，请忽略此邮件。</p></div>` }),
     });
     if (!sent.ok) throw new Error("Mail provider rejected request");
   } catch { throw new ApiFailure(503, "MAIL_UNAVAILABLE", "邮件暂时无法发送，请稍后再试。"); }
@@ -83,7 +83,7 @@ export async function sessionFor(request: Request, env: Env): Promise<{ session:
   if (!token || !/^[a-f0-9]{64}$/i.test(token)) throw new ApiFailure(401, "AUTH_REQUIRED", "请先登录。");
   const hash = await sha256(token);
   const kind = bearer ? "extension" : "web";
-  const session = await env.DB.prepare("SELECT sessions.id,sessions.user_id,users.email,sessions.kind,sessions.device_id,sessions.csrf_token_hash,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND sessions.kind=? AND revoked_at IS NULL AND expires_at>?").bind(hash, kind, nowMs()).first<Session>();
+  const session = await env.DB.prepare("SELECT sessions.id,sessions.user_id,users.email,sessions.kind,sessions.device_id,sessions.csrf_token_hash,sessions.expires_at FROM sessions JOIN users ON users.id=sessions.user_id WHERE token_hash=? AND sessions.kind=? AND revoked_at IS NULL AND expires_at>? AND users.status='active'").bind(hash, kind, nowMs()).first<Session>();
   if (!session) throw new ApiFailure(401, "AUTH_REQUIRED", "登录已失效，请重新登录。");
   return { session, token };
 }

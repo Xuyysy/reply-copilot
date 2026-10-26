@@ -1,44 +1,27 @@
 ---
 import Base from "../layouts/Base.astro";
+import AuthPanel from "../components/auth/AuthPanel";
+const localVerification = import.meta.env.DEV;
+const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_KEY || "");
 ---
-<Base title="Sign in">
-  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="邮箱登录">Email sign-in</div><h1 data-zh="欢迎回来。">Welcome back.</h1><p class="lead" style="margin:auto" data-zh="输入邮箱获取短时验证码。新用户验证成功后会开始 7 天免费体验。">Get a short-lived email code. New accounts begin a seven-day trial after verification.</p></div>
-  <div class="form-card">
-    <form id="request-form"><label class="field"><span data-zh="邮箱地址">Email address</span><input id="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@example.com" /></label><button class="button" type="submit" style="width:100%" data-zh="发送验证码">Send code</button></form>
-    <form id="verify-form" hidden><p class="fineprint" id="email-hint"></p><label class="field"><span data-zh="6 位验证码">6-digit code</span><input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required /></label><button class="button" type="submit" style="width:100%" data-zh="验证并登录">Verify and sign in</button><button id="back-to-email" class="language-button" type="button" data-zh="使用其他邮箱">Use another email</button></form>
-    <p id="auth-status" class="status" role="status" hidden></p>
-    <p class="fineprint" style="margin-top:20px" data-zh="本地开发时，验证码仅显示在 Wrangler 终端；正式邮件发送服务尚待配置。">In local development, the code appears only in the Wrangler terminal. Production email delivery is not configured yet.</p>
+<Base title="注册与登录" titleEn="Sign in or register">
+  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="账户">Account</div><h1 data-zh="欢迎使用 x-Reply-Helper">Welcome to x-Reply-Helper</h1><p class="lead" style="margin:auto" data-zh="验证邮箱后赠送 200 次永久有效的 AI 生成额度。">Verify your email for 200 AI generations that do not expire.</p></div>
+  <section class="container app-shell"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} /></section>
+  <div id="auth-load-error" class="container notice" role="alert" hidden style="max-width:540px;margin:-80px auto 80px">
+    <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>
+    <button id="auth-reload" class="button secondary" type="button" style="margin-left:12px"><span data-zh="刷新页面">Reload page</span></button>
   </div>
+  {sitekey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   <script>
-    import { api, ApiError } from "../lib/api";
-    const requestForm = document.querySelector<HTMLFormElement>("#request-form")!;
-    const verifyForm = document.querySelector<HTMLFormElement>("#verify-form")!;
-    const status = document.querySelector<HTMLElement>("#auth-status")!;
-    let email = "";
-    const note = (value: string, error = false) => { status.textContent = value; status.hidden = false; status.classList.toggle("error", error); };
-    requestForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      email = (document.querySelector<HTMLInputElement>("#email")?.value || "").trim();
-      const button = requestForm.querySelector<HTMLButtonElement>("button")!; button.disabled = true;
-      try {
-        await api("/v1/auth/request-code", { method: "POST", body: JSON.stringify({ email }) });
-        requestForm.hidden = true; verifyForm.hidden = false;
-        document.querySelector<HTMLElement>("#email-hint")!.textContent = email;
-        note(document.documentElement.lang === "zh-CN" ? "如果邮箱可用，验证码已发送。" : "If the email can receive codes, one has been sent.");
-      } catch (error) { note(error instanceof ApiError ? error.message : "Network connection failed.", true); }
-      finally { button.disabled = false; }
-    });
-    verifyForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const code = document.querySelector<HTMLInputElement>("#code")!.value;
-      const button = verifyForm.querySelector<HTMLButtonElement>("button")!; button.disabled = true;
-      try {
-        await api("/v1/auth/verify-code", { method: "POST", body: JSON.stringify({ email, code }) });
-        const deviceCode = new URL(location.href).searchParams.get("device_code");
-        window.location.href = deviceCode && /^[A-F0-9]{8}$/.test(deviceCode) ? `/account?device_code=${deviceCode}` : "/account";
-      } catch (error) { note(error instanceof ApiError ? error.message : "Network connection failed.", true); }
-      finally { button.disabled = false; }
-    });
-    document.querySelector("#back-to-email")?.addEventListener("click", () => { verifyForm.hidden = true; requestForm.hidden = false; status.hidden = true; });
+    const island = document.querySelector<HTMLElement>('astro-island[component-url*="AuthPanel"]');
+    const message = document.getElementById("auth-load-error");
+    if (island && message) {
+      const timer = window.setTimeout(() => { if (island.hasAttribute("ssr")) message.hidden = false; }, 8000);
+      const observer = new MutationObserver(() => {
+        if (!island.hasAttribute("ssr")) { window.clearTimeout(timer); message.hidden = true; observer.disconnect(); }
+      });
+      observer.observe(island, { attributes: true, attributeFilter: ["ssr"] });
+    }
+    document.getElementById("auth-reload")?.addEventListener("click", () => location.reload());
   </script>
 </Base>

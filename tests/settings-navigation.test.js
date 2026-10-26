@@ -33,7 +33,7 @@ test("reply composer uses the native input path with a copy fallback", async () 
 test("settings navigation and user-facing page use Chinese labels", async () => {
   const html = await read("../options/options.html");
   assert.match(html, /lang="zh-CN"/);
-  for (const label of ["我的风格", "回复偏好", "AI 配置", "插件行为", "历史与数据", "关于插件"]) assert.ok(html.includes(label));
-  assert.match(html, /id="toggle-key"[^>]*>显示</);
+  for (const label of ["我的风格", "回复偏好", "账户与授权", "插件行为", "历史与数据", "关于插件"]) assert.ok(html.includes(label));
+  assert.doesNotMatch(html, /AI 配置|id="api-key"|id="toggle-key"/);
   assert.match(html, /id="reset-position"[^>]*>重置位置</);
 });

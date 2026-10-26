@@ -1,23 +1,25 @@
-# Reply Copilot v0.3 本地 API 契约
+# x-Reply-Helper API 契约（开发版）
 
-Base URL（本地）：`http://127.0.0.1:8787`。生产只允许 HTTPS。网页用 `Secure; HttpOnly; SameSite=Lax` Cookie；插件用绑定后领取的独立 Bearer 令牌。网页修改状态的请求需同源 `Origin`、`X-CSRF-Token` 和 `X-Reply-Copilot-Action`。错误统一为 `{code,message,requestId,retryAfterSeconds?}`。
+网页使用 HttpOnly、Secure、SameSite=Lax Cookie；插件使用独立 Bearer 令牌。网页写请求除认证入口外均需 CSRF 标记，且 Worker 校验 `WEB_ORIGIN`。普通用户不能调用管理接口。错误响应为 `{code,message,requestId}`。
 
-| 接口 | 认证 | 说明 |
-|---|---|---|
-| `POST /v1/auth/request-code` | 官网 Origin | `{email}`，限流，开发模式只在终端输出验证码 |
-| `POST /v1/auth/verify-code` | 官网 Origin | `{email,code}`，首次成功创建 7 天试用，设置网页 Cookie |
-| `POST /v1/auth/logout` | 网页 Cookie + CSRF，或插件 Bearer | 撤销当前会话 |
-| `GET /v1/auth/csrf` | 网页 Cookie | 取得当前会话的 CSRF 令牌 |
-| `GET /v1/me` | Cookie 或 Bearer | `{user:{userId,email}}` |
-| `GET /v1/entitlements` | Cookie 或 Bearer | `status` 为 `trial_active`、`trial_exhausted`、`trial_expired` 或 `lifetime_active`；同时返回 `trial`、`license` |
-| `GET /v1/usage` | Cookie 或 Bearer | `{quota:{dailyLimit,dailyUsed,dailyRemaining,resetAt}}`；终身版为 `null` |
-| `POST /v1/extension/device-code` | 插件 | `{deviceId}`，返回 10 分钟绑定码和一次性设备令牌 |
-| `POST /v1/extension/approve` | 网页 Cookie + CSRF | `{deviceCode}`，用户明确确认绑定 |
-| `POST /v1/extension/exchange` | 插件 | `{deviceToken}`，批准后仅兑换一次 Bearer |
-| `POST /v1/ai/generate` | 插件 Bearer | `{requestId,post:{text,url},voiceProfile,recentHistory,styleStats,replyStyle,outputSchemaVersion}`，返回 `{requestId,raw,quota}` |
-| `GET /v1/license/devices` | Cookie 或 Bearer | 已激活设备数量与 ID |
-| `POST /v1/feedback` | 网页 Cookie + CSRF | `{message}`，每日限 5 次 |
+| 接口 | 功能 |
+|---|---|
+| `POST /v1/auth/register` | 用户名、邮箱、密码、Turnstile，发送注册邮件 |
+| `POST /v1/auth/verify-registration` | 邮箱验证码验证后建账户并一次性赠送额度 |
+| `POST /v1/auth/login` | 用户名或邮箱加密码登录 |
+| `POST /v1/auth/request-password-reset`、`POST /v1/auth/reset-password` | 邮件找回密码；重置后撤销旧会话 |
+| `GET /v1/me`、`GET /v1/usage`、`GET /v1/activity` | 账户、免费/付费/总余额、流水与订单 |
+| `POST /v1/extension/device-code`、`/approve`、`/exchange` | 插件短码绑定与独立会话 |
+| `POST /v1/ai/generate` | 插件 Hosted AI；同一 `requestId` 幂等，成功消耗 1 次，确认失败返还 |
+| `GET /v1/packages` | 服务端当前上架套餐与支付开放状态 |
+| `POST /v1/orders` | 仅本地开发可保存套餐价格快照；staging/production 支付未开放时拒绝创建新订单 |
+| `GET /v1/admin/dashboard`、`/users`、`/packages`、`/orders`、`/settings`、`/ledger` | 管理数据，需管理员会话和独立安全口令 |
+| `POST /v1/admin/users/{id}/status`、`/credits` | 冻结/解冻与有原因、有确认的额度调整 |
+| `POST /v1/admin/packages/{id}`、`/settings/{key}` | 未来套餐与系统设置修改，记录审计 |
+| `POST /v1/dev/orders/{id}/simulate-payment` | 仅本机 loopback 开发模式；模拟付款事件并验证重复回调不会重复到账 |
 
-`requestId` 必须是 UUID。同一账户和请求 ID 的内容不能变。成功结果在 10 分钟内可重放而不扣第二次额度。上游已调用但失败或状态不确定时保留消耗记录，防止无限免费重试。新的“换一个”必须用新 ID。服务端复用根目录 `prompts/prompt-builder.js`，仍由插件的 `parseAIOutput` 解析同一结构化 JSON。
+订单只接受服务端保存的套餐 ID；人民币金额由 D1 套餐配置决定。浏览器不得提交可信价格。正式小豆支付默认关闭，只有启用后才由服务端 RSA2 请求签名、响应验签、原始 Webhook 验签或签名查单确认支付。套餐当前美元参考价为 $1.49/$2.99/$4.99，对应固定支付宝人民币 ¥9.90/¥19.90/¥32.90；下单不做实时汇率换算。
 
-生产 Worker 只信 D1 的试用、额度与许可证状态；不会接受前端 `isPaid` 字段。开发者 DeepSeek Key 只在 Worker Secret，用户自己的 Key 仅供终身版在扩展可信上下文使用。
+余额字段为 `{freeRemaining,paidRemaining,totalRemaining}`。服务端 D1 是唯一权威；插件缓存只用于展示。套餐价格以订单创建时的服务端快照为准。`paymentAvailable:false` 表示没有真实收款通道。
+
+`trials`、`daily_usage`、`licenses` 和旧邮件验证码表为迁移保留记录，不再决定正式 AI 生成授权。插件中的自带 Key 路由已移除；本地开发使用 Worker Mock AI。

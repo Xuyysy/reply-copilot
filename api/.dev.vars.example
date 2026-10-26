@@ -1,4 +1,9 @@
 AUTH_HASH_SECRET=replace-with-long-random-local-development-value
 ENVIRONMENT=development
 AI_MOCK=1
-# DEEPSEEK_API_KEY is needed only for explicit real-provider development.
+AI_MODE=mock
+PAYMENTS_ENABLED=0
+PAYMENT_PROVIDER=mock
+PASSWORD_PEPPER=replace-with-another-long-random-local-development-value
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+# Real DeepSeek calls are disabled in local development; staging requires a separate explicit approval.

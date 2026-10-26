@@ -14,8 +14,8 @@
       // The extension may have been reloaded while this tab still holds the old content script.
       // Keep mount failures from surfacing as uncaught errors; refreshing the tab loads the new context.
     }
-    const root = document.createElement("section"); root.className = "panel";
-    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>回复助手</strong><span class="disclaimer">AI 草稿 · 由你决定是否发送</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><p class="status">正在准备…</p><button data-action="generate" class="generate hidden">生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="sidepanel" class="text">无法准确匹配时，打开侧栏</button></div>';
+    const root = document.createElement("section"); root.className = "panel"; root.setAttribute("aria-label", "x-Reply-Helper 回复助手");
+    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿 · 由你决定是否发送</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议<small>打开回复框时自动生成</small></label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="sidepanel" class="text">无法准确匹配时，打开侧栏</button></div>';
     shadow.append(root);
     (document.documentElement || document.body).append(host);
     if (preferences.rememberFloatingPosition && preferences.floatingPosition) setPosition(preferences.floatingPosition.left, preferences.floatingPosition.top);
@@ -32,7 +32,21 @@
       const height = Math.min(host.getBoundingClientRect().height || 240, window.innerHeight - 16);
       host.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`; host.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
     }
-    function showReady() { setStatus("点击下方按钮生成回复建议。"); root.querySelector('[data-action="generate"]').classList.remove("hidden"); }
+    function showReady(autoGenerate = true) { setStatus(autoGenerate ? "点击下方按钮生成回复建议。" : "自动生成已关闭。需要时可手动生成建议。"); root.querySelector('[data-action="generate"]').classList.remove("hidden"); }
+    function setAutoGenerate(enabled) { root.querySelector('#auto-generate-toggle').checked = Boolean(enabled); }
+    function showAccount(status, quota, pending) {
+      const group = root.querySelector('.account-actions'); group.classList.toggle('hidden', !['guest','auth_expired','auth_unavailable','credits_exhausted'].includes(status) && !pending);
+      for (const action of ['register','login','pricing','check-account']) root.querySelector(`[data-action="${action}"]`).classList.add('hidden');
+      if (status !== 'credits_available') root.querySelector('[data-action="generate"]').classList.add('hidden');
+      accountBadge.textContent = status === 'credits_available' && quota?.totalRemaining != null ? `剩余 ${quota.totalRemaining} 次` : '';
+      if (pending) { setStatus('正在等待官网确认，请在官网完成绑定。'); root.querySelector('[data-action="check-account"]').classList.remove('hidden'); }
+      else if (status === 'guest' || status === 'auth_expired') { setStatus(status === 'guest' ? '免费领取 200 次 AI 回复。注册并验证邮箱后，即可使用自然、幽默、观点三种建议。' : '登录已过期，请重新连接账户。'); root.querySelector('[data-action="register"]').classList.toggle('hidden', status !== 'guest'); root.querySelector('[data-action="login"]').classList.remove('hidden'); }
+      else if (status === 'credits_exhausted') { setStatus('生成次数已用完。'); root.querySelector('[data-action="pricing"]').classList.remove('hidden'); }
+      else if (status === 'frozen') setStatus('账户已冻结，无法生成回复。请到官网账户中心查看状态。');
+      else if (status === 'auth_unavailable') { setStatus('暂时无法连接账户服务，请重试。'); root.querySelector('[data-action="check-account"]').classList.remove('hidden'); }
+      if (group.classList.contains('hidden')) return;
+      root.querySelector('[data-action="generate"]').classList.add('hidden');
+    }
     function showLoading(message = "正在生成回复建议…") { setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
     function showApplied() {
       appliedValue = candidates[index]?.[1] || null;
@@ -60,7 +74,7 @@
     function showRetry() { root.querySelector('[data-action="retry"]').classList.remove("hidden"); }
     const header = root.querySelector(".top");
     header.addEventListener("pointerdown", (event) => {
-      if (event.target.closest("button")) return;
+      if (event.target.closest("button,input,label")) return;
       const rect = host.getBoundingClientRect(); drag = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
       host.style.position = "fixed"; host.style.margin = "0"; host.style.width = `${rect.width}px`; host.style.right = "auto"; host.style.bottom = "auto"; host.style.left = `${rect.left}px`; host.style.top = `${rect.top}px`;
       header.setPointerCapture(event.pointerId); event.preventDefault();
@@ -73,10 +87,13 @@
     });
     header.addEventListener("pointerup", () => { if (!drag) return; drag = null; onAction("position_changed", { left: host.getBoundingClientRect().left, top: host.getBoundingClientRect().top }); });
     header.addEventListener("pointercancel", () => { drag = null; });
+    root.querySelector('#auto-generate-toggle').checked = Boolean(preferences.autoGenerateOnReply);
+    root.querySelector('#auto-generate-toggle').addEventListener('change', (event) => onAction('toggle_auto_generate', { enabled: event.target.checked }));
     root.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]"); if (!button) return;
       const action = button.dataset.action;
       if (action === "settings") { onAction("settings", {}); return; }
+      if (["register", "login", "pricing", "check-account"].includes(action)) { onAction(action, {}); return; }
       if (action === "minimize") { root.classList.toggle("collapsed"); button.textContent = root.classList.contains("collapsed") ? "+" : "−"; button.title = root.classList.contains("collapsed") ? "展开悬浮框" : "收起悬浮框"; button.setAttribute("aria-label", button.title); return; }
       if (action === "dismiss") { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); onAction("dismiss", {}); return; }
       if (action === "generate") { onAction("generate", { userGesture: true }); return; }
@@ -92,7 +109,7 @@
       else if (action === "feedback-bad") { onAction("feedback", { feedback: "not_my_style", style: candidates[index]?.[0] }); button.disabled = true; button.textContent = "已记录 ✓"; }
       else if (action === "sidepanel") onAction("sidepanel", { userGesture: true });
     });
-    return { host, showResult, showApplied, showReady, showLoading, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };

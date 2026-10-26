@@ -5,10 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --local --ip 127.0.0.1 --port 8787",
+    "dev:log": "umask 077; wrangler dev --local --ip 127.0.0.1 --port 8787 2>&1 | tee -a local-worker.log",
     "migrate:local": "wrangler d1 migrations apply DB --local",
     "license:local": "node scripts/license-local.mjs",
     "test:local": "node tests/local-e2e.mjs",
-    "deploy": "wrangler deploy",
+    "test:ai": "node --test tests/deepseek-client.test.mjs tests/business-ai-mode.test.mjs tests/deepseek-config.test.mjs tests/ai-generation-flow.test.mjs",
+    "test:browser:local": "node tests/browser-smoke.mjs",
+    "test:browser:dev": "RC_WEB_DEV=1 node tests/browser-smoke.mjs",
+    "check:staging": "node scripts/check-environment.mjs staging",
+    "check:production": "node scripts/check-environment.mjs production",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

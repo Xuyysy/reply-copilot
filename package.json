@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test",
+    "test": "npm --prefix web run build:staging && node --test --test-concurrency=1",
     "build:dev": "node scripts/build.js development",
-    "build:production": "node scripts/build.js production"
+    "build:staging": "node scripts/build.js staging",
+    "build:pages:staging": "npm --prefix web run build:staging",
+    "deploy:pages:staging": "node scripts/deploy-staging-pages.mjs",
+    "build:production": "node scripts/build.js production",
+    "test:browser:extension": "node tests/extension-browser-smoke.mjs"
   }
 }
