@@ -10,7 +10,7 @@
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
-  const diagnostic = (stage) => { try { console.info('[xrh-staging-composer]', stage); } catch {} };
+  const diagnostic = (stage, detail) => { try { if (detail) console.info('[xrh-staging-composer]', stage, detail); else console.info('[xrh-staging-composer]', stage); } catch {} };
 
   function stopInvalidContext() {
     if (!contextAlive) return;
@@ -55,6 +55,32 @@
     if (/invalid JSON|invalid.*response|empty response|structured response/i.test(message || "")) return "AI 返回内容暂时无法识别，请重新生成。";
     return "回复生成失败，请稍后重试。";
   }
+  function matchingSnapshot(post) {
+    const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
+    try {
+      const original = post.article?.isConnected ? api.postExtractor.extractPost(post.article) : null;
+      const dialogs = [...document.querySelectorAll('[role="dialog"]')];
+      return {
+        originalConnected: Boolean(post.article?.isConnected),
+        originalExtracted: Boolean(original?.ok),
+        originalMatched: Boolean(original?.ok && original.statusId === post.statusId),
+        dialogCount: dialogs.length,
+        dialogs: dialogs.slice(0, 5).map(dialog => {
+          const articles = [...dialog.querySelectorAll('article')].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
+          const primary = articles[0] && api.postExtractor.extractPost(articles[0]);
+          return {
+            connected: Boolean(dialog.isConnected),
+            hidden: Boolean(dialog.closest('[aria-hidden="true"]')),
+            visibleArticles: articles.length,
+            primaryExtracted: Boolean(primary?.ok),
+            primaryMatched: Boolean(primary?.ok && primary.statusId === post.statusId),
+            editableCount: dialog.querySelectorAll('[contenteditable="true"]').length,
+            eligibleEditors: [...dialog.querySelectorAll(selectors)].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]')).length
+          };
+        })
+      };
+    } catch { return {snapshotUnavailable:true}; }
+  }
   function matchedComposer(post) {
     if (!hasRuntimeContext()) return { editor: null, matchedPost: false };
     const livePost = post.article?.isConnected ? api.postExtractor.extractPost(post.article) : null;
@@ -88,6 +114,7 @@
       if (active?.requestId !== requestId) return;
       active?.observer?.disconnect();
       diagnostic('composer_timeout');
+      diagnostic('composer_timeout_details', matchingSnapshot(post));
       if (active?.requestId === requestId && !active.assistant) showFallback("没有找到与这条帖子明确关联的回复框。请用侧边栏继续。", post.article);
     }, 9000);
     const locate = () => {
