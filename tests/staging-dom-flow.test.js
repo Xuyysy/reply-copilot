@@ -30,7 +30,7 @@ test('timeout reports only safe structural facts about dialog matching',()=>{
  const f=flow(),p=f.post('101');p.article.querySelectorAll=()=>[];f.click(p);p.article.isConnected=false;
  const other=f.post('102');f.setDialogs([{isConnected:true,closest:()=>null,querySelectorAll:s=>s==='article'?[other.article]:s.includes('contenteditable')?[other.editor]:[]}]);f.fireTimeout();
  const item=f.logs.find(parts=>parts[1]==='composer_timeout_details');assert.ok(item);
- assert.equal(item[2].originalConnected,false);assert.equal(item[2].dialogCount,1);assert.equal(item[2].dialogs[0].primaryMatched,false);assert.equal(item[2].dialogs[0].eligibleEditors,1);
+ const detail=JSON.parse(item[2]);assert.equal(detail.originalConnected,false);assert.equal(detail.dialogCount,1);assert.equal(detail.dialogs[0].primaryMatched,false);assert.equal(detail.dialogs[0].eligibleEditors,1);
  const serialized=JSON.stringify(item);assert.doesNotMatch(serialized,/https:|101|102|post|request-/i);
 });
 test('a matching reply dialog can replace a disconnected original post',async()=>{

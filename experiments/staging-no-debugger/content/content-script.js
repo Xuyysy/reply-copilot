@@ -10,7 +10,7 @@
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
-  const diagnostic = (stage, detail) => { try { if (detail) console.info('[xrh-staging-composer]', stage, detail); else console.info('[xrh-staging-composer]', stage); } catch {} };
+  const diagnostic = (stage, detail) => { try { if (detail) console.info('[xrh-staging-composer]', stage, JSON.stringify(detail)); else console.info('[xrh-staging-composer]', stage); } catch {} };
 
   function stopInvalidContext() {
     if (!contextAlive) return;
