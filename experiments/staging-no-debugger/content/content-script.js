@@ -10,6 +10,7 @@
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
+  const diagnostic = (stage) => { try { console.info('[xrh-staging-composer]', stage); } catch {} };
 
   function stopInvalidContext() {
     if (!contextAlive) return;
@@ -57,20 +58,21 @@
   function matchedComposer(post) {
     if (!hasRuntimeContext()) return { editor: null, matchedPost: false };
     const livePost = post.article?.isConnected ? api.postExtractor.extractPost(post.article) : null;
-    if (!livePost?.ok || livePost.statusId !== post.statusId || livePost.sourceUrl !== post.sourceUrl) return { editor: null, matchedPost: false };
     const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
-    const articleEditors = [...(post.article?.querySelectorAll?.(selectors) || [])].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
-    let editor = articleEditors.length === 1 ? articleEditors[0] : null;
-    let matchedPost = Boolean(editor);
-    if (!editor) {
-      const dialog = document.querySelector('[role="dialog"]');
-      if (dialog) {
-        const statusLink = [...dialog.querySelectorAll('a[href*="/status/"]')].some((anchor) => { try { const u = new URL(anchor.href); return ['x.com','twitter.com','www.x.com','www.twitter.com'].includes(u.hostname) && new RegExp(`/status/${post.statusId}(?:/|$)`).test(u.pathname); } catch { return false; } });
-        const candidates = [...dialog.querySelectorAll('[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]')].filter((node) => node.isConnected);
-        if (statusLink && candidates.length === 1) { editor = candidates[0]; matchedPost = true; }
-      }
+    if (livePost?.ok && livePost.statusId === post.statusId) {
+      const editors = [...(post.article?.querySelectorAll?.(selectors) || [])].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
+      if (editors.length === 1) return {editor:editors[0],matchedPost:true};
     }
-    return { editor, matchedPost };
+    const matches = [];
+    for (const dialog of document.querySelectorAll('[role="dialog"]')) {
+      if (!dialog.isConnected || dialog.closest('[aria-hidden="true"]')) continue;
+      const articles = [...dialog.querySelectorAll('article')].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
+      const primary = articles[0] && api.postExtractor.extractPost(articles[0]);
+      if (!primary?.ok || primary.statusId !== post.statusId) continue;
+      const editors = [...dialog.querySelectorAll(selectors)].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
+      if (editors.length === 1) matches.push(editors[0]);
+    }
+    return matches.length === 1 ? {editor:matches[0],matchedPost:true} : {editor:null,matchedPost:false};
   }
   function begin(control, post) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
@@ -83,7 +85,9 @@
     const requestId = crypto.randomUUID();
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set() };
     const setTimeoutId = setTimeout(() => {
+      if (active?.requestId !== requestId) return;
       active?.observer?.disconnect();
+      diagnostic('composer_timeout');
       if (active?.requestId === requestId && !active.assistant) showFallback("没有找到与这条帖子明确关联的回复框。请用侧边栏继续。", post.article);
     }, 9000);
     const locate = () => {
@@ -93,6 +97,7 @@
       try { found = matchedComposer(post); }
       catch (error) { if (/extension context invalidated/i.test(error?.message || "")) stopInvalidContext(); return false; }
       if (!found.editor || !found.matchedPost) return false;
+      diagnostic('composer_matched');
       clearTimeout(setTimeoutId); active.editor = found.editor; active.matchedPost = found.matchedPost;
       const session = active;
       session.initialComposerText = api.composerAdapter.hasContent(found.editor);
@@ -105,9 +110,10 @@
       return true;
     };
     if (!locate()) {
+      diagnostic('composer_waiting');
       const observer = new MutationObserver(() => { try { if (locate()) observer.disconnect(); } catch (error) { if (/extension context invalidated/i.test(error?.message || "")) stopInvalidContext(); } });
       active.observer = observer;
-      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["contenteditable", "role"] });
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["contenteditable", "role", "aria-hidden", "data-testid", "href"] });
     }
   }
   async function prepareCurrent(requestId) {
@@ -118,14 +124,15 @@
       if (!active || active.requestId !== requestId) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
       current.preferences = response.preferences; current.initializing = false;
+      if (!current.preferences.showFloatingWindow) diagnostic('floating_window_disabled');
       if (current.preferences.showFloatingWindow) current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
       const account = await refreshAccount(current);
       if (!active || active.requestId !== requestId) return;
       if (account?.status === "credits_available") {
         if (current.preferences.autoGenerateOnReply && current.preferences.showFloatingWindow) void generateActive(requestId);
         else current.assistant?.showReady(current.preferences.autoGenerateOnReply);
-      }
-    } catch { if (!contextAlive) return; current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
+      } else diagnostic('account_not_ready');
+    } catch { if (!contextAlive) return; diagnostic('settings_or_account_error'); current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
   }
   async function refreshAccount(current) {
     const previousStatus = current.accountStatus;
@@ -171,6 +178,7 @@
     current.attemptedInput.add(requestId);
     const valid = () => contextAlive && document.visibilityState === "visible" && document.hasFocus() && active === current && current.requestId === requestId && !current.cancelled && current.editor?.isConnected && !current.userTouchedComposer && !api.composerAdapter.hasContent(current.editor) && matchedComposer(current.post).editor === current.editor;
     if (!valid() || document.activeElement !== current.editor || !api.composerAdapter.focusEmpty(current.editor)) {
+      diagnostic('insert_context_changed');
       current.assistant?.setStatus("回复框已变化，已保留现有内容；可以复制建议后粘贴。");
       return;
     }
@@ -178,7 +186,7 @@
     const inserted = api.composerAdapter.insertOnce(current.editor, requestId, candidate, valid);
     current.applyingReply = false;
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
-    if (!inserted) { current.assistant?.setStatus("X 回复框未接受自动填入，可复制建议后粘贴。"); return; }
+    if (!inserted) { diagnostic('insert_rejected'); current.assistant?.setStatus("X 回复框未接受自动填入，可复制建议后粘贴。"); return; }
     await new Promise((resolve) => setTimeout(resolve, 80));
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
     if (current.userTouchedComposer) {
@@ -186,10 +194,12 @@
     }
     if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
       nativeInputHealthy = false;
+      diagnostic('insert_content_mismatch');
       current.assistant?.setStatus("X 回复框显示与候选不一致。请关闭这个草稿并刷新 X 后再试；当前建议可复制。");
       return;
     }
     current.appliedText = candidate.trim(); current.appliedStyle = style;
+    diagnostic('insert_verified');
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
   }
@@ -199,12 +209,14 @@
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
     if (!current.editor?.isConnected || !current.matchedPost) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
     current.generating = true; current.assistant?.showLoading();
+    diagnostic('generation_started');
     try {
       const response = await safeSend({ type: "REPLY_COPILOT_GENERATE", requestId, sourceText: current.post.sourceText, sourceUrl: current.post.sourceUrl });
       if (!contextAlive) return;
       if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
       current.generated = true; current.generating = false; current.result = response.result;
+      diagnostic('generation_returned');
       current.retrySameRequestId = false;
       current.assistant?.setAccountLabel(response.accountLabel);
       const selectedStyle = current.preferences?.defaultReplyMode || response.result.defaultStyle || response.result.default_style || "natural";
@@ -280,9 +292,11 @@
     if (!event.isTrusted) return;
     const control = api.replyDetector.findReplyControl(event.target);
     if (!control || control.closest("[data-zane-reply-copilot]")) return;
+    diagnostic('reply_clicked');
     const article = control.closest("article");
     const post = api.postExtractor.extractPost(article);
     if (!post.ok) {
+      diagnostic('post_unrecognized');
       if (active?.requestId) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: active.requestId });
       try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
       active?.observer?.disconnect(); active?.assistant?.close?.();
@@ -293,4 +307,5 @@
     begin(control, post);
   }
   document.addEventListener("click", onDocumentClick, true);
+  diagnostic('content_ready');
 })();
