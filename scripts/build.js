@@ -15,6 +15,7 @@ function productionOrigin(name) {
   return url.origin;
 }
 const packagedChannel = channel === "staging" || channel === "production";
+const stagingDomInputExperiment = channel === "staging" && process.env.REPLY_COPILOT_STAGING_NO_DEBUGGER === "1";
 const websiteUrl = packagedChannel ? productionOrigin("REPLY_COPILOT_WEBSITE_URL") : "";
 const hostedApiUrl = packagedChannel ? productionOrigin("REPLY_COPILOT_API_URL") : "";
 if (packagedChannel && websiteUrl === hostedApiUrl) throw new Error("Website and API origins must be distinct");
@@ -22,11 +23,16 @@ const output = path.join(root, "dist", channel);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
+if (stagingDomInputExperiment) {
+  for (const name of ["background/service-worker.js", "content/content-script.js", "content/composer-adapter.js"]) cpSync(path.join(root, "experiments/staging-no-debugger", name), path.join(output, name));
+  rmSync(path.join(output, "services/native-input-service.js"));
+}
 if (packagedChannel) {
   const configPath = path.join(output, "config", "runtime.js");
   writeFileSync(configPath, `export const RUNTIME_CONFIG = Object.freeze({ channel: ${JSON.stringify(channel)}, websiteUrl: ${JSON.stringify(websiteUrl)}, hostedApiUrl: ${JSON.stringify(hostedApiUrl)}, allowedHttpHosts: [], requestTimeoutMs: 30000 });\n`);
   const manifestPath = path.join(output, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  if (stagingDomInputExperiment) manifest.permissions = manifest.permissions.filter(permission => permission !== "debugger");
   // Production must retain the existing store identity, including across clean builds.
   const stored = channel === "production" ? JSON.parse(readFileSync(path.join(root,"config/extension-store-identity.json"),"utf8")) : null;
   const publicKeyFile = process.env.REPLY_COPILOT_EXTENSION_PUBLIC_KEY_FILE;
