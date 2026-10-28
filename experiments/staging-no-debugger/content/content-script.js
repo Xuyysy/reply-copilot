@@ -113,12 +113,14 @@
     clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
     const requestId = crypto.randomUUID();
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    // The request ID changes on regeneration; the editor session does not.
+    const session = active;
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
-      if (active?.requestId===requestId && !active.editor) rejectAssociation('association_expired');
+      if (active===session && !session.editor) rejectAssociation('association_expired');
     },9000);
     const locate=()=>{
-      if (!hasRuntimeContext() || active?.requestId!==requestId || active.cancelled) return;
+      if (!hasRuntimeContext() || active!==session || session.cancelled) return;
       const found=matchedComposer(post);
       if (!found.editor) return;
       if (active.editor) return; // Keep observing this same node; never rebind after replacement.
@@ -136,7 +138,7 @@
     };
     active.refreshAssociation=locate;
     active.observer=new MutationObserver(records=>{
-      if(active?.requestId!==requestId)return;
+      if(active!==session)return;
       if(active.editor && records?.some(record=>[...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))) {
         const facts=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now());
         if(facts.editors.length===0)endSession('reply_closed');else rejectAssociation('editor_removed');
