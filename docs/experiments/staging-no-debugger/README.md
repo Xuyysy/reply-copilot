@@ -234,3 +234,11 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 - 候选安装路径仍为原 dist/staging；备份 staging-before-delivery-recovery-20261028，一键回滚 restore-staging-before-delivery-recovery-20261028.command。重新加载扩展并刷新 X 一次才能加载新版内容脚本，刷新不能清除旧服务端请求。
 
 交付状态：插件候选已准备，等待用户真实使用验证；旧服务端请求仍是独立阻断项，本轮不处理。
+
+## 2026-10-28：用户追加授权清除 Staging 旧请求阻塞
+
+用户随后要求“把那个阻塞去掉”，授权处理此前明确说明的 Staging 后端收尾。新增仅限 ENVIRONMENT=staging 的超时释放：生成超过10分钟（上游请求超时25秒）、无原始结果/交付确认、consumed=0、仍有reserved allocation，才可收尾；兼容定时任务曾标记为uncertain的同类请求。正常生成、已有结果、已扣次、Production均不受此路径影响。
+
+使用单次随机claim标记和D1原子batch同时收尾请求、释放账户/批次预占、写零余额变动的generation_release审计；不增加余额、不生成退款。未知上游实际成本以原预估额保守结算，避免放开成本预算。事务一致性断言失败时整批回滚。迟到上游结果不能复活已释放请求。正常已认证/v1/usage及下一次生成会在当前用户范围内执行；不增加公网维护入口、不绕过登录。
+
+回归：新增11项，含修复前失败的reserved/uncertain超时恢复、幂等、近期请求/有结果/已扣次保护、Production隔离、未登录和跨账号保护、预算不一致回滚、迟到完成不扣次。全量622/622通过，API类型检查及Staging Wrangler dry-run通过。线上原版本回滚依据：6efab2b5-4a3e-4238-8619-34166f3a3578。只部署Staging，无迁移、不操作Production。

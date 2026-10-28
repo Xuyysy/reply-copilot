@@ -1,3 +1,4 @@
+import { releaseStaleStagingGenerations } from './staging-generation-timeout';
 import type { Env, Session } from "./types";
 import { ApiFailure } from "./types";
 import { nowMs, shanghaiDay, uuid } from "./security";
@@ -16,6 +17,7 @@ type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
  * because their provider outcome may be uncertain.
  */
 export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs(), userId?: string): Promise<void> {
+  await releaseStaleStagingGenerations(env, now, userId);
   const scope = userId ? " AND r.user_id=?" : "";
   const params = userId ? [now, userId] : [now];
   const candidate = await env.DB.prepare(`SELECT 1 AS pending FROM ai_requests r

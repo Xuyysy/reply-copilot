@@ -1,7 +1,7 @@
 import { checkoutFromAttempt } from "./payment-checkout";
 import type { Env, Session } from "./types";
 import { sessionFor } from "./auth";
-import { balance } from "./quota";
+import { balance, releaseExpiredDeliveryReservations } from "./quota";
 import { response } from "./http";
 
 export async function accountState(env: Env, session: Session) {
@@ -20,7 +20,9 @@ export async function entitlements(request: Request, env: Env): Promise<Response
   return response({status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota},200,env,request);
 }
 export async function usage(request: Request, env: Env): Promise<Response> {
-  const {session}=await sessionFor(request,env); const quota=await balance(env,session.user_id);
+  const {session}=await sessionFor(request,env);
+  if(env.ENVIRONMENT==='staging') await releaseExpiredDeliveryReservations(env, Date.now(), session.user_id);
+  const quota=await balance(env,session.user_id);
   return response({quota},200,env,request);
 }
 export async function licenseDevices(request: Request, env: Env): Promise<Response> {
