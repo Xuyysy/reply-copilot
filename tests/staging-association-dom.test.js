@@ -45,7 +45,7 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
   const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
-  assert.equal(result.status,0,result.stderr);
+  assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
   const results=JSON.parse(output);assert.equal(results.length,11);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}

@@ -20,13 +20,13 @@ function flow({associationOnly=false}={}){
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../experiments/staging-no-debugger/content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
  // Browser boundary only: state machine and content-script actions are real.
- api.composerAssociation.baseline=()=>({baselineModalCount:entries.length,baselineEditors:entries.map(x=>x.node)});
- api.composerAssociation.snapshot=(_d,p)=>({now,routeAllowed:currentUrl==='https://x.com/home'||currentUrl==='https://x.com/compose/post',sourceUnchanged:!p.article.isConnected||p.article.post.statusId===p.statusId,editors:entries.map(x=>({...x,focused:x.node===document.activeElement,empty:!x.node.innerText}))});
+ api.composerAssociation.baseline=()=>({baselineModalCount:entries.filter(x=>x.modal!==false).length,visibleEditorCount:entries.length,baselineEditors:entries.map(x=>x.node)});
+ api.composerAssociation.snapshot=(_d,p,_initial,_current,_at,quarantinedPosts=[])=>({now,visibleDialogCount:entries.filter(x=>x.modal!==false).length,routeAllowed:currentUrl==='https://x.com/home'||currentUrl==='https://x.com/compose/post',sourceUnchanged:!p.article.isConnected||p.article.post.statusId===p.statusId,editors:entries.map(x=>({...x,focused:x.node===document.activeElement,empty:!x.node.innerText,quarantinedContextMatch:Boolean(x.contextStatusId!==p.statusId&&quarantinedPosts.some(q=>q.statusId!==p.statusId&&q.sourceText===p.sourceText))}))});
  Object.assign(api,{experimentConfig:{associationOnly},replyDetector:{findReplyControl:target=>target.isReply?target:null},postExtractor:{extractPost:article=>article?.post||{ok:false}},inlineAssistant:{mount:(_anchor,handler)=>{action=handler;return assistant()}}});
  vm.runInNewContext(readFileSync(new URL('../experiments/staging-no-debugger/content/content-script.js',import.meta.url),'utf8'),ctx);
  function post(id){const editor={dispatchEvent(event){commandCount++;event.preventDefault();this.innerText=event.clipboardData.getData('text/plain');return false;},isConnected:true,innerText:'',parentElement:{isConnected:true},contains:n=>n===editor,focus(){document.activeElement=this},addEventListener(_n,cb){this.input=cb},removeEventListener(){}};const article={isConnected:true};article.post={ok:true,article,statusId:id,sourceText:'same post text',sourceUrl:`https://x.com/test/status/${id}`};return {editor,article,control:{isReply:true,closest:s=>s==='article'?article:null}};}
  const mutate=()=>{for(const o of observers)if(o.live)o.cb()};
- return {dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
+ return {dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
 }
 test('missing status link and detached original still bind from a captured activation',async()=>{const f=flow(),p=f.post('101');f.click(p);p.article.isConnected=false;f.open(p);await sleep(0);assert.equal(f.generations(),1);f.resolve(0);await sleep(110);assert.equal(f.commands(),1);assert.equal(p.editor.innerText,'中文 English 😀\nline');});
 test('association-only mode mounts status without calling AI or inserting',async()=>{const f=flow({associationOnly:true}),p=f.post('101');f.click(p);f.open(p);await sleep(0);assert.equal(f.generations(),0);assert.equal(f.commands(),0);assert.ok(f.statuses.some(x=>x.includes('不调用 AI')));});
@@ -117,4 +117,69 @@ test('pre-fill lifecycle failures use user wording while retaining diagnostic re
  const f=flow(),p=f.post('101');f.click(p);f.timeout(9000);
  assert.ok(f.logs.some(x=>x[2]?.includes('association_expired')));
  assert.ok(f.statuses.every(x=>!/association_expired|关联已停止/.test(x)));
+});
+
+test('an expired unbound activation recovers on a fresh click after the page is quiescent',async()=>{
+ const f=flow(),a=f.post('101'),b=f.post('102');
+ b.article.post.sourceText='a distinct second post';
+ f.click(a);f.timeout(9000);
+ f.click(b);f.open(b);await sleep(0);
+ assert.equal(f.generations(),1);
+ f.resolve(0);await sleep(100);
+ assert.equal(f.commands(),1);
+});
+
+test('a competing activation recovers after the old reply dialog is actually closed',async()=>{
+ const f=flow(),a=f.post('101'),b=f.post('102');
+ f.click(a);f.open(a);await sleep(0);
+ f.click(b);f.close(a);
+ f.click(b);f.open(b);await sleep(0);
+ assert.equal(f.generations(),2);
+ f.resolve(0);f.resolve(1);await sleep(100);
+ assert.equal(f.commands(),1);
+});
+
+test('quiescent recovery does not claim a late same-text composer from a quarantined activation',async()=>{
+ const f=flow(),a=f.post('101'),b=f.post('102');
+ f.click(a);f.timeout(9000);f.click(b);f.open(a);await sleep(0);
+ assert.equal(f.generations(),0);
+ assert.ok(f.logs.some(x=>x[2]?.includes('stale_activation_ambiguous')));
+});
+
+test('recovery remains blocked while any old dialog or editor is still visible',async()=>{
+ const f=flow(),a=f.post('101'),b=f.post('102');b.article.post.sourceText='a distinct second post';
+ f.click(a);f.timeout(9000);f.open(a);f.click(b);
+ assert.equal(JSON.parse(f.report()).recoveryRequired,true);
+ assert.equal(f.generations(),0);
+ f.close(a);f.click(b);f.open(b);await sleep(0);
+ assert.equal(f.generations(),1);
+});
+
+test('fresh sessions remain available after 30s, 90s, 3m and 5m idle gaps',async()=>{
+ const f=flow({associationOnly:true});
+ let now=0;
+ for(const [i,gap] of [30_000,90_000,180_000,300_000].entries()){
+  now+=gap;f.time(now);
+  const p=f.post(String(200+i));p.article.post.sourceText=`idle gap post ${i}`;
+  f.click(p);f.open(p);await sleep(0);
+  assert.ok(f.statuses.some(x=>x.includes('关联验证通过')));
+  f.close(p);
+ }
+ assert.equal(f.generations(),0);
+});
+
+test('an expired bound editor closed after background-style time passage permits the next session',async()=>{
+ const f=flow({associationOnly:true}),a=f.post('301'),b=f.post('302');
+ f.click(a);f.open(a);await sleep(0);f.time(180_000);f.timeout(60_000);f.close(a);
+ f.click(b);f.open(b);await sleep(0);
+ assert.ok(f.statuses.filter(x=>x.includes('关联验证通过')).length>=2);
+ assert.equal(JSON.parse(f.report()).recoveryRequired,false);
+});
+
+test('diagnostic report is copyable and contains no post content, URL or request identifier',()=>{
+ const f=flow(),p=f.post('101');f.click(p);
+ const report=JSON.parse(f.report());
+ assert.equal(report.build,'staging-lifecycle-20261028-1');
+ assert.ok(Array.isArray(report.events));
+ assert.doesNotMatch(JSON.stringify(report),/same post text|https:|statusId|sourceUrl|requestId|中文/);
 });

@@ -26,6 +26,6 @@ test('Chrome paste-handled fixture preserves edited state and undo; unhandled pa
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
   const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
-  assert.equal(result.status,0,result.stderr);assert.match(result.stdout,/\{"accepted":true,"edited":true,"undo":true,"unhandled":true\}/);
+  assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);assert.match(result.stdout,/\{"accepted":true,"edited":true,"undo":true,"unhandled":true\}/);
  } finally {rmSync(dir,{recursive:true,force:true});}
 });

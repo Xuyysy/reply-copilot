@@ -144,3 +144,58 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 实验浮窗此前会把 `rejectAssociation()` 的内部 reason 原样拼进“关联已停止”状态，即使生成和填入已成功，编辑器随后关闭/替换也可能覆盖成功提示。现在 reason 继续进入脱敏诊断日志；生命周期错误映射到友好操作提示，已成功填入（`appliedText` 已确认）的会话不再显示 teardown 提示。账号、额度、设置和自动填入失败提示保留。
 
 新增成功填入后编辑器替换、以及获取超时的提示回归测试。完整测试 592/592 通过。此改动只调整实验版 UI 状态提示，不改变关联/生成/输入状态机。
+
+## 2026-10-28：页面驻留/超时后的可恢复性候选
+
+本地与 GitHub 已核对的实验基线为 `cec9d3ff4083497509286a8247ec31253c423911`。用户报告 X 页面停留或使用一段时间后，原生 Reply 偶尔不再出现浮窗；间隔、连续次数、标签页前后台与故障阶段尚未通过真实日志确定。
+
+### 已确认的代码缺陷
+
+- 未绑定会话在 `association_expired`、未绑定 `competing_activation` 等拒绝路径将页面级 `activationTainted` 置为 `true`。
+- `captureActivation()` 此后会在所有后续帖子 Reply 点击上提前 return。
+- 当前源码没有任何代码把 `activationTainted` 清回 `false`；因此一旦该路径发生，同一内容脚本实例会一直静默阻止点击，完整刷新会重置脚本状态。这是确定存在的永久阻断路径，符合“刷新后恢复”现象，但尚不能证明它就是用户每次间歇故障的实际触发原因。后续由用户复制的诊断报告可区分是否出现该路径，当前候选不再保留该永久锁。
+
+### 候选修复与防护
+
+- 将永久 taint 改为 `recoveryRequired`：拒绝仍只终止当前操作；下次可信用户手势会检查可见 dialog/editor。只在页面无可见回复弹窗及编辑器时清理已取消会话、计时器、监听器和浮窗，并接收新的可信回复操作。若旧弹窗/编辑器仍可见，继续阻断，要求先关闭后重试。
+- 未绑定操作被拒绝时，在内存中短暂保留最多 8 个旧帖状态 ID 与内容快照，供关联器排除可能迟到的旧弹窗。若新候选没有状态 ID 且内容与隔离项相同，返回 `stale_activation_ambiguous`，不生成/填入；它不会被写入诊断摘要或持久化。
+- 原 9 秒获取期限、60 秒单操作期限、焦点/节点/草稿/请求 ID 检查均保留。旧 AI 响应仍以会话对象、requestId 和 cancelled 状态阻止串帖；输入最多尝试一次，不自动发送。
+- 增加匿名会话序号、相对时间、内容脚本构建标识、可信手势/Reply 入口计数、定时器、运行时上下文、dialog/editor 计数、会话清理及浮窗挂载/脱离记录。报告通过内容脚本隔离世界的 `__xrhStagingDiagnosticReport()` 复制；只输出状态枚举、布尔值、计数和相对时间，不包含正文、回复、URL、用户/请求 ID、Token 或 Cookie。
+
+### 回归验证及限制
+
+- 新增测试复现未绑定超时后永久拒绝、真实竞争后关闭旧弹窗再操作、页面无操作闲置 30 秒/90 秒/3 分钟/5 分钟、绑定会话后台式时间跨过 60 秒、迟到同文案弹窗隔离和诊断脱敏。
+- 修复前上述两种“超时/竞争后页面已空仍拒绝新会话”回归测试失败；修复后专项 DOM/状态机/输入测试通过。
+- 这些是虚拟时间/模拟 DOM 测试，不等于真实 X 的 5 分钟、标签页休眠或长驻留验证。偶发故障根因仍需用户现场报告证明；若报告的 `trustedGestureCount` 增长但 `replyControlPointerCount` 不增长，优先检查 X 按钮识别；若 Reply 入口增长但 session/mount 阶段缺失，检查激活/关联；若 `runtimeAlive=false`，则是扩展上下文失效，刷新页面只能重建上下文。
+
+待最终专项与全量测试后构建 Staging 输入验收包，备份原 `dist/staging` 后覆盖同一目录；扩展 ID、Staging API 和本地账号授权保持不变。用户在 Chrome 重新加载后负责真实 X 验收；Codex 不以自动化结果代替用户确认。恢复命令继续使用上文保留的 `restore-staging-stable-20261027-204918-82754.command`。
+
+## 2026-10-28：页面驻留稳定性修复候选（等待用户真实 X 验收）
+
+### 根因证据与边界
+
+- 对 `cec9d3f` 的检查确认：`activationTainted` 在未绑定超时/竞争后会置为真，点击捕获随后静默拒绝新帖操作，源码没有清除路径。这是可复现的永久锁定代码缺陷，能够解释“刷新后恢复”；但用户报告有时自行恢复，故尚不能认定它解释了每一次现场故障。
+- 修复前新增的两项 DOM 流程回归均失败：未绑定获取超时后页面已空仍拒绝新点击；以及竞争操作结束、旧弹窗关闭后仍拒绝下一次点击。
+
+### 候选改动
+
+- 改为 `recoveryRequired`：拒绝当前会话后，下一次可信点击只会在可见 dialog/editor 均为零时清理旧会话资源并恢复；旧回复框仍可见时继续 fail-closed。
+- 保留最多 8 个已拒绝来源的短期内存快照，用于拦截没有状态链接且正文相同的迟到弹窗；快照不持久化，也不写入诊断日志。
+- 增加相对时间、匿名会话序号、可信手势/Reply 指针与点击计数、超时、生命周期、编辑器、浮窗挂载状态和 runtime context 诊断。`globalThis.__xrhStagingDiagnosticReport()` 仅输出状态枚举、布尔值、计数和相对时间；不包含帖子/回复文本、URL、用户或请求 ID、Token、Cookie。
+- 保留 9 秒关联期限、60 秒单次会话期限、草稿保护、唯一编辑器/焦点/帖子关联校验、旧异步响应隔离和单次填入检查。
+
+### 自动化验证
+
+- 专项 DOM 状态机/关联/输入测试：56/56 通过。
+- 全量 `npm test`：600/600 通过；包含 Staging Pages 构建并确认生成资源使用 Staging API。
+- 测试包含 30 秒、90 秒、3 分钟、5 分钟虚拟空闲、60 秒会话过期、弹窗关闭延迟、真正竞争、旧响应迟到、旧来源同文案隔离和诊断脱敏。虚拟时间测试不是浏览器真实 5 分钟驻留测试。
+- Staging 构建 ID：`staging-lifecycle-20261028-1`；manifest 没有 `debugger` 权限，产物无 `chrome.debugger` 调用，Host 权限仅为 `https://api-staging.x-reply-helper.top/*`。本次加载配置为 `associationOnly:true`，不请求 AI、不填入文字，避免消耗额度。
+
+### 安装与回滚
+
+- 候选已放回原加载路径 `/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging`，路径不变；原扩展 ID `kaaehkpihjenlhjjfjcopkjhegmfmchk` 和 Staging API 不变。需要在 `chrome://extensions` 对该扩展点击“重新加载”后生效。
+- 本次替换前完整备份：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging-pre-lifecycle-20261028-1805`。
+- 一键恢复替换前版本：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-pre-lifecycle-20261028-1805.command`；运行后再次在 `chrome://extensions` 重新加载。
+- 现有稳定版回滚脚本 `restore-staging-stable-20261027-204918-82754.command` 保持原样。
+
+本候选处于“待用户真实时间维度验收”，不能标为已解决。用户可在同一 X 标签页先闲置 90 秒、再测试回复入口；随后完成一次回复框打开/关闭，再闲置 3–5 分钟并重复。该构建仅验证身份关联，不调用 AI。若浮窗缺失，在 X 页 DevTools 的 Console 执行 `copy(__xrhStagingDiagnosticReport())`（先将执行上下文切到该 X 页的 Staging `content-script.js`），把复制的脱敏摘要发回即可。真实 X 的后台标签、Chrome 休眠与长时间驻留仍需用户现场验证。

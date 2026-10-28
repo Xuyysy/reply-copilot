@@ -6,17 +6,40 @@
   let bindingTimer = null;
   let settingsRevision = 0;
   let pendingActivation = null;
-  let activationTainted = false;
+  let recoveryRequired = false;
+  let recoveryReason = null;
+  let sessionSequence = 0;
+  let trustedGestureCount = 0;
+  let replyControlPointerCount = 0;
+  let replyControlClickCount = 0;
+  const quarantinedPosts = [];
+  const diagnosticStartedAt = performance.now();
+  let diagnosticSequence = 0;
+  const diagnosticEvents = [];
   const associationOnly = api.experimentConfig?.associationOnly !== false;
   const isX = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href);
   if (!isX) return;
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
-  const diagnostic = (stage, detail) => { try { if (detail) console.info('[xrh-staging-composer]', stage, JSON.stringify(detail)); else console.info('[xrh-staging-composer]', stage); } catch {} };
+  const diagnostic = (stage, detail = {}) => {
+    const safeDetail = {};
+    for (const [key, value] of Object.entries(detail || {})) {
+      if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) safeDetail[key] = value;
+      else if (typeof value === 'string' && /^(?:[a-z][a-z0-9_]{0,47})$/.test(value)) safeDetail[key] = value;
+    }
+    const entry = { n: ++diagnosticSequence, t: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), session: active?.diagnosticSession || null, stage, ...safeDetail };
+    diagnosticEvents.push(entry);
+    if (diagnosticEvents.length > 100) diagnosticEvents.shift();
+    try { console.info('[xrh-staging-composer]', stage, JSON.stringify(entry)); } catch {}
+  };
+  // DevTools content-script context: copy(__xrhStagingDiagnosticReport()). The
+  // report contains only lifecycle enums, booleans, counters and relative time.
+  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-lifecycle-20261028-1', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
 
   function stopInvalidContext() {
     if (!contextAlive) return;
+    diagnostic('runtime_context_invalidated',{hadActiveSession:Boolean(active)});
     contextAlive = false;
     try { active?.observer?.disconnect(); } catch {}
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
@@ -30,6 +53,11 @@
       document.removeEventListener("keydown",captureActivation,true);
       document.removeEventListener("focusin",refreshAssociation,true);
       document.removeEventListener("beforeinput",onBeforeInput,true);
+      document.removeEventListener("visibilitychange",onVisibilityChange,true);
+      window.removeEventListener("focus",onWindowFocus,true);
+      window.removeEventListener("blur",onWindowBlur,true);
+      window.removeEventListener("pageshow",onPageShow,true);
+      window.removeEventListener("pagehide",onPageHide,true);
       window.removeEventListener("popstate",refreshAssociation);
     } catch {}
     try { chrome.runtime.onMessage.removeListener(onRuntimeMessage); } catch {}
@@ -77,12 +105,36 @@
     current.assistant?.host?.remove();
     if(!associationOnly)void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     active=null;pendingActivation=null;
+    if (reason === 'quiescent_recovery' || reason === 'reply_closed') { recoveryRequired=false; recoveryReason=null; }
     diagnostic('session_ended',{reason});
+  }
+  function quarantineActivation(post) {
+    if (!post?.statusId || typeof post.sourceText !== 'string') return;
+    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto) };
+    const withoutSame = quarantinedPosts.filter(item => item.statusId !== retained.statusId);
+    withoutSame.unshift(retained);
+    quarantinedPosts.splice(0, quarantinedPosts.length, ...withoutSame.slice(0, 8));
+  }
+  function recoverAfterQuiescence() {
+    if (!recoveryRequired) return true;
+    const baseline = api.composerAssociation.baseline(document);
+    if (baseline.baselineModalCount !== 0 || baseline.visibleEditorCount !== 0) {
+      diagnostic('recovery_waiting_for_quiescence',{visibleDialogs:baseline.baselineModalCount,visibleEditors:baseline.visibleEditorCount,reason:recoveryReason||'unknown'});
+      return false;
+    }
+    if (active?.cancelled) endSession('quiescent_recovery');
+    else { recoveryRequired=false; recoveryReason=null; }
+    diagnostic('recovery_after_quiescence',{visibleDialogs:0,visibleEditors:0});
+    return true;
   }
   function rejectAssociation(reason) {
     const current=active;
     if (!current || current.cancelled) return;
-    if (!current.editor) activationTainted=true;
+    if (!current.editor) {
+      recoveryRequired=true;
+      recoveryReason=reason;
+      quarantineActivation(current.post);
+    }
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
@@ -102,14 +154,14 @@
       cancelled_by_user:"本次回复操作已取消。",
       user_input_before_binding:"检测到你已开始输入，已保留你的内容并停止自动填入。"
     };
-    current.assistant?.setStatus(messages[reason]||"当前回复操作已停止，请重新点击回复按钮。 "+(activationTainted?"如仍无法继续，请刷新页面后重试。":""));
+    current.assistant?.setStatus(messages[reason]||"当前回复操作已停止，请重新点击回复按钮。 "+(recoveryRequired?"请先关闭当前回复框后重试。":""));
   }
   function matchedComposer(post) {
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
-    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now());
+    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
     if (result.state==='rejected') {
-      if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0) endSession('reply_closed');
+      if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0 && facts.visibleDialogCount===0) endSession('reply_closed');
       else rejectAssociation(result.reason);
     }
     return {editor:result.editor,matchedPost:result.state==='bound',reason:result.reason};
@@ -124,13 +176,14 @@
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
     clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
     const requestId = crypto.randomUUID();
-    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl, diagnosticSession:++sessionSequence };
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
-      if (active===session && !session.editor) rejectAssociation('association_expired');
+      if (active===session && !session.editor) { diagnostic('association_timeout_fired',{deadlineMs:9000}); rejectAssociation('association_expired'); }
     },9000);
+    diagnostic('association_timeout_armed',{deadlineMs:9000});
     const locate=()=>{
       if (!hasRuntimeContext() || active!==session || session.cancelled) return;
       const found=matchedComposer(post);
@@ -145,15 +198,21 @@
       current.onComposerInput=()=>{if(!current.applyingReply)current.userTouchedComposer=true;};
       found.editor.addEventListener('input',current.onComposerInput,true);
       current.anchor=found.editor.parentElement||found.editor;
-      current.expiryTimer=setTimeout(()=>{if(active===current)rejectAssociation('operation_expired');},60000);
+      diagnostic('editor_bound',{editorConnected:Boolean(found.editor.isConnected)});
+      current.expiryTimer=setTimeout(()=>{if(active===current){diagnostic('operation_timeout_fired',{deadlineMs:60000});rejectAssociation('operation_expired');}},60000);
+      diagnostic('operation_timeout_armed',{deadlineMs:60000});
       void prepareCurrent(requestId);
     };
     active.refreshAssociation=locate;
     active.observer=new MutationObserver(records=>{
       if(active!==session)return;
+      if(active.assistant?.host && !active.assistant.host.isConnected && !active.assistantDetachedReported) {
+        active.assistantDetachedReported=true;
+        diagnostic('assistant_detached',{editorConnected:Boolean(active.editor?.isConnected),cancelled:Boolean(active.cancelled)});
+      }
       if(active.editor && records?.some(record=>[...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))) {
-        const facts=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now());
-        if(facts.editors.length===0)endSession('reply_closed');else rejectAssociation('editor_removed');
+      const facts=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+        if(facts.editors.length===0&&facts.visibleDialogCount===0)endSession('reply_closed');else rejectAssociation('editor_removed');
         return;
       }
       locate();
@@ -177,8 +236,9 @@
       if (!active || active.requestId !== requestId) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
       current.preferences = response.preferences; current.initializing = false;
-      if (!current.preferences.showFloatingWindow) diagnostic('floating_window_disabled');
+      diagnostic('assistant_mount_started',{enabled:Boolean(current.preferences.showFloatingWindow),anchorConnected:Boolean(current.anchor?.isConnected)});
       if (current.preferences.showFloatingWindow) current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
+      if (current.preferences.showFloatingWindow) diagnostic('assistant_mount_result',{connected:Boolean(current.assistant?.host?.isConnected)});
       const account = await refreshAccount(current);
       if (!active || active.requestId !== requestId) return;
       if (account?.status === "credits_available") {
@@ -343,30 +403,35 @@
   try { chrome.runtime.onMessage.addListener(onRuntimeMessage); } catch { stopInvalidContext(); return; }
   function captureActivation(event) {
     if (!event.isTrusted || !hasRuntimeContext()) return;
+    trustedGestureCount++;
     if (event.type==='keydown' && !['Enter',' '].includes(event.key)) {
       if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
     const control=api.replyDetector.findReplyControl(event.target);
+    if (recoveryRequired) recoverAfterQuiescence();
     // X's modal contains its own Reply button and "Replying to" controls.
     // They are not a fresh activation on a timeline post.
     if (control?.closest('[role="dialog"]')) return;
+    if(control){replyControlPointerCount++;diagnostic('reply_control_pointerdown',{eventKind:event.type});}
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
     if (active?.editor && !active.cancelled) refreshAssociation();
     if (control) {
       const facts=active?.editor?api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now()):null;
-      diagnostic('activation_state',{hasSession:Boolean(active),cancelled:Boolean(active?.cancelled),hasEditor:Boolean(active?.editor),editorConnected:Boolean(active?.editor?.isConnected),visibleEditors:facts?.editors.length??null,tainted:activationTainted});
+      diagnostic('activation_state',{hasSession:Boolean(active),cancelled:Boolean(active?.cancelled),hasEditor:Boolean(active?.editor),editorConnected:Boolean(active?.editor?.isConnected),visibleEditors:facts?.editors.length??null,recoveryRequired});
     }
-    if (activationTainted && control) {pendingActivation=null;diagnostic("association_rejected",{reason:"activation_requires_reload"});return;}
+    if (recoveryRequired && control) {pendingActivation=null;diagnostic('association_rejected',{reason:'awaiting_quiescent_page'});return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
       if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
       return;
     }
     if (active&&!active.cancelled) {
-      activationTainted=true;
+      recoveryRequired=true;
+      recoveryReason='competing_activation';
+      if (!active.editor) quarantineActivation(active.post);
       rejectAssociation('competing_activation');
       pendingActivation={control,blocked:true};return;
     }
@@ -379,6 +444,7 @@
     const control=api.replyDetector.findReplyControl(event.target);
     if (control?.closest('[role="dialog"]')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
+    replyControlClickCount++;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
       diagnostic('association_rejected',{reason:'activation_not_captured'});return;
@@ -394,11 +460,21 @@
   function onBeforeInput(event) {
     if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
   }
+  function onVisibilityChange(){diagnostic('visibility_changed',{visible:document.visibilityState==='visible'});}
+  function onWindowFocus(){diagnostic('window_focus',{focused:true});}
+  function onWindowBlur(){diagnostic('window_focus',{focused:false});}
+  function onPageShow(){diagnostic('page_lifecycle',{state:'pageshow'});}
+  function onPageHide(){diagnostic('page_lifecycle',{state:'pagehide'});}
   document.addEventListener('pointerdown',captureActivation,true);
   document.addEventListener('keydown',captureActivation,true);
   document.addEventListener('focusin',refreshAssociation,true);
   document.addEventListener('beforeinput',onBeforeInput,true);
+  document.addEventListener('visibilitychange',onVisibilityChange,true);
+  window.addEventListener('focus',onWindowFocus,true);
+  window.addEventListener('blur',onWindowBlur,true);
+  window.addEventListener('pageshow',onPageShow,true);
+  window.addEventListener('pagehide',onPageHide,true);
   window.addEventListener('popstate',refreshAssociation);
   document.addEventListener('click',onDocumentClick,true);
-  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'session-controls-20261028'});
+  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'staging-lifecycle-20261028-1'});
 })();

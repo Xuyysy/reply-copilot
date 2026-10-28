@@ -21,6 +21,7 @@
       if (state==='bound') {
         if (candidates.length!==1 || candidates[0].node!==editor) return reject('editor_replaced_or_closed');
         if (candidates[0].contextStatusId && candidates[0].contextStatusId!==statusId) return reject('context_identity_conflict');
+        if (candidates[0].quarantinedContextMatch && candidates[0].contextStatusId!==statusId) return reject('stale_activation_ambiguous');
         if (!candidates[0].contextMatches) return reject('reply_context_unconfirmed');
         return result();
       }
@@ -29,6 +30,7 @@
       if (previousEditors.has(candidate.node)) return reject('preexisting_editor');
       if (!candidate.modal) return reject('not_reply_modal');
       if (candidate.contextStatusId && candidate.contextStatusId!==statusId) return reject('context_identity_conflict');
+      if (candidate.quarantinedContextMatch && candidate.contextStatusId!==statusId) return reject('stale_activation_ambiguous');
       if (candidate.contextMatches===null) {reason='awaiting_reply_context';return result();}
       if (!candidate.contextMatches) return reject('reply_context_unconfirmed');
       if (!candidate.empty) return reject('existing_draft');
@@ -43,8 +45,10 @@
     return Boolean(node?.isConnected && !node.closest('[aria-hidden="true"], [hidden]') && node.getClientRects().length && getComputedStyle(node).visibility!=='hidden');
   }
   function baseline(document) {
-    return {baselineModalCount:[...document.querySelectorAll('[role="dialog"]')].filter(visible).length,
-      baselineEditors:[...document.querySelectorAll(editorSelector)]};
+    const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
+    const editors=[...document.querySelectorAll(editorSelector)];
+    return {baselineModalCount:dialogs.length,visibleEditorCount:editors.filter(visible).length,
+      baselineEditors:editors};
   }
   function contextId(article) {
     const ids=new Set();
@@ -77,23 +81,28 @@
     if (initial===current) return true;
     try {const a=new URL(initial),b=new URL(current);return a.origin===b.origin && b.pathname==='/compose/post' && (!b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId);}catch{return false;}
   }
-  function snapshot(document,post,initialUrl,currentUrl,now) {
+  function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[]) {
     const api=globalThis.ZaneReplyCopilotContent;
     const original=post.article?.isConnected?api.postExtractor.extractPost(post.article):null;
     const nodes=new Set();
-    for (const dialog of document.querySelectorAll('[role="dialog"]')) {
-      if (visible(dialog)) for (const editor of dialog.querySelectorAll(editorSelector)) if(visible(editor))nodes.add(editor);
+    const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
+    for (const dialog of dialogs) {
+      for (const editor of dialog.querySelectorAll(editorSelector)) if(visible(editor))nodes.add(editor);
     }
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
       const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node));
       const primary=articles[0];
       const text=primary?[...primary.querySelectorAll('[data-testid="tweetText"]')].filter(n=>n.closest('article')===primary).map(n=>n.innerText).join('\n'):'';
+      const statusId=contextId(primary);
+      const quarantinedContextMatch=Boolean(primary&&text&&quarantinedPosts.some(old=>
+        old?.statusId!==post.statusId&&sameContext(old,text)&&statusId!==post.statusId));
       return {node,modal:Boolean(dialog),focused:node===document.activeElement,
-        empty:!api.composerAdapter.hasContent(node),contextStatusId:primary?contextId(primary):null,
+        empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
+        quarantinedContextMatch,
         contextMatches:!primary||!normalized(text)?null:articles.length===1&&sameContext(post,text)};
     });
-    return {now,editors,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
+    return {now,editors,visibleDialogCount:dialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId&&original.sourceText===post.sourceText)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
