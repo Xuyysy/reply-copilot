@@ -14,10 +14,13 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const api=ZaneReplyCopilotContent,results=[];
   function source(id){const a=document.createElement('article');a.innerHTML='<a href="https://x.com/example/status/'+id+'">time</a><div data-testid="tweetText">same text</div>';document.querySelector('#feed').append(a);return a;}
   function modal(id){const d=document.createElement('div');d.setAttribute('role','dialog');d.innerHTML='<div role="dialog"><article>'+(id?'<a href="https://x.com/example/status/'+id+'">time</a>':'')+'<div data-testid="tweetText">same text</div></article><div role="textbox" contenteditable="true"></div></div>';document.querySelector('#modals').append(d);return d.querySelector('[contenteditable]');}
+  const home=document.createElement('div');home.contentEditable='true';home.setAttribute('role','textbox');document.querySelector('#feed').append(home);
   const original=source('101');source('102');const post=api.postExtractor.extractPost(original),initial='https://x.com/home';
   const b=api.composerAssociation.baseline(document),s=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId:'one',now:0,...b});
+  results.push({name:'home_composer_is_not_reply_ui',ok:b.visibleEditorCount===1&&b.visibleReplyEditorCount===0&&b.baselineModalCount===0&&b.baselineEditors.includes(home)});
   original.remove();const editor=modal();editor.focus();
   let f=api.composerAssociation.snapshot(document,post,initial,'https://x.com/compose/post',10),r=s.evaluate(f);
+  const modalBaseline=api.composerAssociation.baseline(document);results.push({name:'reply_editor_count_excludes_home_composer',ok:modalBaseline.visibleEditorCount===2&&modalBaseline.visibleReplyEditorCount===1});
   results.push({name:'nested_detached_no_link',ok:r.state==='bound'&&r.editor===editor&&f.editors.length===1&&s.statusId==='101'});
   const hidden=modal();hidden.closest('[role="dialog"]').hidden=true;
   f=api.composerAssociation.snapshot(document,post,initial,'https://x.com/compose/post',20);results.push({name:'hidden_ignored',ok:f.editors.length===1});
@@ -40,6 +43,8 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const wrongPhoto=source('106');wrongPhoto.insertAdjacentHTML('beforeend','<a href="https://x.com/example/status/999/photo/1">photo</a>');
   const wrongPost=api.composerAssociation.capturePost?.(api.postExtractor.extractPost(wrongPhoto))||api.postExtractor.extractPost(wrongPhoto);
   results.push({name:'another_status_photo_is_not_evidence',ok:api.composerAssociation.snapshot(document,wrongPost,initial,initial,10).editors[0].contextMatches===false});
+  document.querySelector('#modals').replaceChildren();const shell=document.createElement('div');shell.setAttribute('role','dialog');shell.innerHTML='<div role="textbox" contenteditable="true"></div>';document.querySelector('#modals').append(shell);
+  const emptyShell=api.composerAssociation.snapshot(document,wrongPost,initial,initial,10);results.push({name:'modal_shell_waits_for_source_article',ok:emptyShell.editors.length===1&&emptyShell.editors[0].contextMatches===null&&emptyShell.editors[0].contextStatusId===null});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -47,6 +52,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,11);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,14);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });

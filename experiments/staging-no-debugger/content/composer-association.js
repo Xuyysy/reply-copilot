@@ -48,9 +48,11 @@
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
     const editors=[...document.querySelectorAll(editorSelector)];
     return {baselineModalCount:dialogs.length,visibleEditorCount:editors.filter(visible).length,
+      visibleReplyEditorCount:editors.filter(node=>visible(node)&&node.closest('[role="dialog"]')).length,
       baselineEditors:editors};
   }
   function contextId(article) {
+    if (!article) return null;
     const ids=new Set();
     for (const a of article.querySelectorAll('a[href*="/status/"]')) {
       if (a.closest('article')!==article) continue;
@@ -100,6 +102,8 @@
       return {node,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
+        contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)),
+        contextTextMatches:Boolean(primary&&sameContext(post,text)),
         contextMatches:!primary||!normalized(text)?null:articles.length===1&&sameContext(post,text)};
     });
     return {now,editors,visibleDialogCount:dialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),

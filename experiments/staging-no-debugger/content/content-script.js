@@ -35,7 +35,7 @@
   };
   // DevTools content-script context: copy(__xrhStagingDiagnosticReport()). The
   // report contains only lifecycle enums, booleans, counters and relative time.
-  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-lifecycle-20261028-1', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
+  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-recovery-scope-20261028-2', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
 
   function stopInvalidContext() {
     if (!contextAlive) return;
@@ -118,13 +118,15 @@
   function recoverAfterQuiescence() {
     if (!recoveryRequired) return true;
     const baseline = api.composerAssociation.baseline(document);
-    if (baseline.baselineModalCount !== 0 || baseline.visibleEditorCount !== 0) {
-      diagnostic('recovery_waiting_for_quiescence',{visibleDialogs:baseline.baselineModalCount,visibleEditors:baseline.visibleEditorCount,reason:recoveryReason||'unknown'});
+    // X's persistent home composer is not a reply dialog. Keep all page nodes
+    // in the next activation baseline, but only reply UI blocks recovery.
+    if (baseline.baselineModalCount !== 0 || baseline.visibleReplyEditorCount !== 0) {
+      diagnostic('recovery_waiting_for_quiescence',{visibleDialogs:baseline.baselineModalCount,visibleEditors:baseline.visibleEditorCount,visibleReplyEditors:baseline.visibleReplyEditorCount,reason:recoveryReason||'unknown'});
       return false;
     }
     if (active?.cancelled) endSession('quiescent_recovery');
     else { recoveryRequired=false; recoveryReason=null; }
-    diagnostic('recovery_after_quiescence',{visibleDialogs:0,visibleEditors:0});
+    diagnostic('recovery_after_quiescence',{visibleDialogs:0,visibleEditors:baseline.visibleEditorCount,visibleReplyEditors:baseline.visibleReplyEditorCount});
     return true;
   }
   function rejectAssociation(reason) {
@@ -161,6 +163,7 @@
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
     if (result.state==='rejected') {
+      if(result.reason==='reply_context_unconfirmed')for(const candidate of facts.editors)diagnostic('reply_context_check',{articleCount:candidate.contextArticleCount,textPresent:candidate.contextTextPresent,textMatches:candidate.contextTextMatches,statusLinkPresent:Boolean(candidate.contextStatusId),editorFocused:candidate.focused});
       if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0 && facts.visibleDialogCount===0) endSession('reply_closed');
       else rejectAssociation(result.reason);
     }
@@ -476,5 +479,5 @@
   window.addEventListener('pagehide',onPageHide,true);
   window.addEventListener('popstate',refreshAssociation);
   document.addEventListener('click',onDocumentClick,true);
-  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'staging-lifecycle-20261028-1'});
+  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'staging-recovery-scope-20261028-2'});
 })();

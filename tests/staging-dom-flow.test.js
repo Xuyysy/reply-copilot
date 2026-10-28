@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function flow({associationOnly=false}={}){
+function flow({associationOnly=false,homeComposer=false}={}){
  let next=0,commandCount=0,generationCount=0,now=0,entries=[],currentUrl='https://x.com/home';
  const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[]; let action;
  const document={body:{},visibilityState:'visible',activeElement:null,hasFocus:()=>true,addEventListener:(n,h)=>handlers[n]=h,removeEventListener(){},execCommand(_c,_u,text){commandCount++;this.activeElement.innerText=text;this.activeElement.input?.();return true;}};
@@ -20,7 +20,7 @@ function flow({associationOnly=false}={}){
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../experiments/staging-no-debugger/content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
  // Browser boundary only: state machine and content-script actions are real.
- api.composerAssociation.baseline=()=>({baselineModalCount:entries.filter(x=>x.modal!==false).length,visibleEditorCount:entries.length,baselineEditors:entries.map(x=>x.node)});
+ api.composerAssociation.baseline=()=>({baselineModalCount:entries.filter(x=>x.modal!==false).length,visibleEditorCount:entries.length+(homeComposer?1:0),visibleReplyEditorCount:entries.filter(x=>x.modal!==false).length,baselineEditors:entries.map(x=>x.node)});
  api.composerAssociation.snapshot=(_d,p,_initial,_current,_at,quarantinedPosts=[])=>({now,visibleDialogCount:entries.filter(x=>x.modal!==false).length,routeAllowed:currentUrl==='https://x.com/home'||currentUrl==='https://x.com/compose/post',sourceUnchanged:!p.article.isConnected||p.article.post.statusId===p.statusId,editors:entries.map(x=>({...x,focused:x.node===document.activeElement,empty:!x.node.innerText,quarantinedContextMatch:Boolean(x.contextStatusId!==p.statusId&&quarantinedPosts.some(q=>q.statusId!==p.statusId&&q.sourceText===p.sourceText))}))});
  Object.assign(api,{experimentConfig:{associationOnly},replyDetector:{findReplyControl:target=>target.isReply?target:null},postExtractor:{extractPost:article=>article?.post||{ok:false}},inlineAssistant:{mount:(_anchor,handler)=>{action=handler;return assistant()}}});
  vm.runInNewContext(readFileSync(new URL('../experiments/staging-no-debugger/content/content-script.js',import.meta.url),'utf8'),ctx);
@@ -179,7 +179,18 @@ test('an expired bound editor closed after background-style time passage permits
 test('diagnostic report is copyable and contains no post content, URL or request identifier',()=>{
  const f=flow(),p=f.post('101');f.click(p);
  const report=JSON.parse(f.report());
- assert.equal(report.build,'staging-lifecycle-20261028-1');
+ assert.equal(report.build,'staging-recovery-scope-20261028-2');
  assert.ok(Array.isArray(report.events));
  assert.doesNotMatch(JSON.stringify(report),/same post text|https:|statusId|sourceUrl|requestId|中文/);
+});
+
+test('a permanent home composer does not lock recovery after a rejected reply modal closes',async()=>{
+ const f=flow({homeComposer:true}),a=f.post('401'),b=f.post('402');
+ b.article.post.sourceText='distinct next post';
+ f.click(a);f.entries([{node:a.editor,modal:true,contextMatches:false,contextStatusId:null}]);
+ assert.ok(f.logs.some(x=>x[2]?.includes('reply_context_unconfirmed')));
+ f.close(a);f.click(b);f.open(b);await sleep(0);
+ assert.equal(f.generations(),1);
+ f.resolve(0);await sleep(100);assert.equal(f.commands(),1);
+ assert.equal(JSON.parse(f.report()).recoveryRequired,false);
 });

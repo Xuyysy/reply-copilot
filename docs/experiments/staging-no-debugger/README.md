@@ -199,3 +199,21 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 - 现有稳定版回滚脚本 `restore-staging-stable-20261027-204918-82754.command` 保持原样。
 
 本候选处于“待用户真实时间维度验收”，不能标为已解决。用户可在同一 X 标签页先闲置 90 秒、再测试回复入口；随后完成一次回复框打开/关闭，再闲置 3–5 分钟并重复。该构建仅验证身份关联，不调用 AI。若浮窗缺失，在 X 页 DevTools 的 Console 执行 `copy(__xrhStagingDiagnosticReport())`（先将执行上下文切到该 X 页的 Staging `content-script.js`），把复制的脱敏摘要发回即可。真实 X 的后台标签、Chrome 休眠与长时间驻留仍需用户现场验证。
+
+## 2026-10-28：真实 Chrome 日志确认首页编辑框阻塞恢复
+
+用户反馈 `12f9937` 的真实 AI 构建仍然在后续操作失去浮窗。直接读取当前 Chrome/X 的 DevTools 取得了实际失败路径：匿名会话 13 在相对时间 105818ms 因 `reply_context_unconfirmed` 被拒绝；随后原生回复点击仍被监听，但始终停在 `awaiting_quiescent_page`。真实日志在旧弹窗已关闭时反复显示 `visibleDialogs=0, visibleEditors=1`。通过页面只读 DOM 元数据确认，唯一可见编辑框位于 dialog 外，是 X 首页常驻发帖框。
+
+上一候选的恢复条件错误地要求整个页面不存在任何编辑框，因此首页常驻框导致恢复一直无法通过。本轮将可见回复编辑框数量与页面全部编辑框数量区分：只要求回复 dialog/editor 已关闭，同时继续把所有原有编辑器节点加入下一次点击的 baseline，禁止把常驻或旧节点当成新回复框。真实多个弹窗、已有草稿、同文案迟到弹窗和旧请求保护保持原样。
+
+同时复现了上一轮改动引入的空值回归：modal 初始只有编辑框、原帖副本 article 尚未渲染时，`contextId(undefined)` 会抛异常。新增真实 Chrome fixture 在修复前无法完成，恢复 article 空值保护后正常返回等待状态。等待仍受 9 秒上限约束，不降低身份校验。
+
+- 首页常驻编辑框恢复回归：修复前失败，修复后通过。
+- 真实 Chrome DOM fixture 增加常驻编辑框、独立回复编辑框计数与空弹窗壳，共 14 个断言；真实 Chrome 粘贴/编辑/撤销 fixture 通过。
+- 全量自动化：601/601 通过；专项状态机/输入测试 57/57 通过。
+- 新诊断构建标识 `staging-recovery-scope-20261028-2`。`reply_context_check` 只记录 article 数量、是否存在正文、正文比较是否一致、是否有状态链接以及焦点布尔值，不记录内容或标识。
+- 最初那次 `reply_context_unconfirmed` 的具体 DOM 差异在旧日志中没有足够字段，仍未定位，不能以本次恢复修复声称所有帖子形态都已通过。下一次同类拒绝可区分多 article、正文不一致或焦点变化。
+
+已查询 Chrome 官方 Content scripts、Service Worker lifecycle 及 MDN MutationObserver 文档。此次实际日志显示内容脚本持续收到可信点击，修改依据为已确认的恢复条件错误；未引入后台常驻、无限重连或循环生成。
+
+本轮候选继续开启真实 AI（`associationOnly:false`），无 debugger 权限或调用；已放回原 Staging 目录，并保持 ID 和 API。安装前备份：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging-before-recovery-scope-20261028`；一键回滚：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-before-recovery-scope-20261028.command`。最终候选文件替换后需重新加载对应 Staging ID，并对 X 刷新一次以加载新版内容脚本；本轮尚未完成用户长时间真实使用复验，不宣称完整解决。Production、正式 PR、商店审核与 0.3.2 发布准备保持原状。
