@@ -5,6 +5,9 @@
   let nativeInputHealthy = true;
   let bindingTimer = null;
   let settingsRevision = 0;
+  let pendingActivation = null;
+  let activationTainted = false;
+  const associationOnly = api.experimentConfig?.associationOnly !== false;
   const isX = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href);
   if (!isX) return;
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
@@ -19,8 +22,16 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     try { active?.assistant?.host?.remove(); } catch {}
     if (bindingTimer) clearInterval(bindingTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
     active = null;
-    try { document.removeEventListener("click", onDocumentClick, true); } catch {}
+    try {
+      document.removeEventListener("click",onDocumentClick,true);
+      document.removeEventListener("pointerdown",captureActivation,true);
+      document.removeEventListener("keydown",captureActivation,true);
+      document.removeEventListener("focusin",refreshAssociation,true);
+      document.removeEventListener("beforeinput",onBeforeInput,true);
+      window.removeEventListener("popstate",refreshAssociation);
+    } catch {}
     try { chrome.runtime.onMessage.removeListener(onRuntimeMessage); } catch {}
   }
   function hasRuntimeContext() {
@@ -55,52 +66,27 @@
     if (/invalid JSON|invalid.*response|empty response|structured response/i.test(message || "")) return "AI 返回内容暂时无法识别，请重新生成。";
     return "回复生成失败，请稍后重试。";
   }
-  function matchingSnapshot(post) {
-    const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
-    try {
-      const original = post.article?.isConnected ? api.postExtractor.extractPost(post.article) : null;
-      const dialogs = [...document.querySelectorAll('[role="dialog"]')];
-      return {
-        originalConnected: Boolean(post.article?.isConnected),
-        originalExtracted: Boolean(original?.ok),
-        originalMatched: Boolean(original?.ok && original.statusId === post.statusId),
-        dialogCount: dialogs.length,
-        dialogs: dialogs.slice(0, 5).map(dialog => {
-          const articles = [...dialog.querySelectorAll('article')].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
-          const primary = articles[0] && api.postExtractor.extractPost(articles[0]);
-          return {
-            connected: Boolean(dialog.isConnected),
-            hidden: Boolean(dialog.closest('[aria-hidden="true"]')),
-            visibleArticles: articles.length,
-            primaryExtracted: Boolean(primary?.ok),
-            primaryMatched: Boolean(primary?.ok && primary.statusId === post.statusId),
-            editableCount: dialog.querySelectorAll('[contenteditable="true"]').length,
-            eligibleEditors: [...dialog.querySelectorAll(selectors)].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]')).length
-          };
-        })
-      };
-    } catch { return {snapshotUnavailable:true}; }
+  function rejectAssociation(reason) {
+    const current=active;
+    if (!current || current.cancelled) return;
+    if (!current.editor) activationTainted=true;
+    current.cancelled=true;current.initializing=false;
+    current.association?.interrupt(reason);
+    current.observer?.disconnect();
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
+    current.editor?.removeEventListener("input",current.onComposerInput,true);
+    if (!associationOnly) void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
+    diagnostic('association_rejected',{reason});
+    current.assistant?.setStatus("关联已停止："+reason+(activationTainted?"。请刷新 X 后重新操作。":"。请关闭回复框后重新操作。"));
   }
   function matchedComposer(post) {
-    if (!hasRuntimeContext()) return { editor: null, matchedPost: false };
-    const livePost = post.article?.isConnected ? api.postExtractor.extractPost(post.article) : null;
-    const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
-    if (livePost?.ok && livePost.statusId === post.statusId) {
-      const editors = [...(post.article?.querySelectorAll?.(selectors) || [])].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
-      if (editors.length === 1) return {editor:editors[0],matchedPost:true};
-    }
-    const matches = [];
-    for (const dialog of document.querySelectorAll('[role="dialog"]')) {
-      if (!dialog.isConnected || dialog.closest('[aria-hidden="true"]')) continue;
-      const articles = [...dialog.querySelectorAll('article')].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
-      const primary = articles[0] && api.postExtractor.extractPost(articles[0]);
-      if (!primary?.ok || primary.statusId !== post.statusId) continue;
-      const editors = [...dialog.querySelectorAll(selectors)].filter(node => node.isConnected && !node.closest('[aria-hidden="true"]'));
-      if (editors.length === 1) matches.push(editors[0]);
-    }
-    return matches.length === 1 ? {editor:matches[0],matchedPost:true} : {editor:null,matchedPost:false};
+    if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
+    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now());
+    const result=active.association.evaluate(facts);
+    if (result.state==='rejected') rejectAssociation(result.reason);
+    return {editor:result.editor,matchedPost:result.state==='bound',reason:result.reason};
   }
-  function begin(control, post) {
+  function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
     if (!hasRuntimeContext()) return;
     if (active?.requestId) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: active.requestId });
@@ -108,43 +94,51 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     if (active?.observer) active.observer.disconnect();
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
     const requestId = crypto.randomUUID();
-    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set() };
-    const setTimeoutId = setTimeout(() => {
-      if (active?.requestId !== requestId) return;
-      active?.observer?.disconnect();
-      diagnostic('composer_timeout');
-      diagnostic('composer_timeout_details', matchingSnapshot(post));
-      if (active?.requestId === requestId && !active.assistant) showFallback("没有找到与这条帖子明确关联的回复框。请用侧边栏继续。", post.article);
-    }, 9000);
-    const locate = () => {
-      if (!hasRuntimeContext()) return false;
-      if (!active || active.requestId !== requestId || active.cancelled) return false;
-      let found;
-      try { found = matchedComposer(post); }
-      catch (error) { if (/extension context invalidated/i.test(error?.message || "")) stopInvalidContext(); return false; }
-      if (!found.editor || !found.matchedPost) return false;
-      diagnostic('composer_matched');
-      clearTimeout(setTimeoutId); active.editor = found.editor; active.matchedPost = found.matchedPost;
-      const session = active;
-      session.initialComposerText = api.composerAdapter.hasContent(found.editor);
-      session.userTouchedComposer = false;
-      session.onComposerInput = () => { if (!session.applyingReply) session.userTouchedComposer = true; };
-      found.editor.addEventListener("input", session.onComposerInput, true);
-      active.anchor = found.editor.parentElement || found.editor;
-      active.observer?.disconnect(); active.observer = null;
+    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
+    active.acquireTimer=setTimeout(()=>{
+      if (active?.requestId===requestId && !active.editor) rejectAssociation('association_expired');
+    },9000);
+    const locate=()=>{
+      if (!hasRuntimeContext() || active?.requestId!==requestId || active.cancelled) return;
+      const found=matchedComposer(post);
+      if (!found.editor) return;
+      if (active.editor) return; // Keep observing this same node; never rebind after replacement.
+      clearTimeout(active.acquireTimer);
+      active.editor=found.editor;active.matchedPost=true;
+      diagnostic('association_bound',{reason:found.reason,mode:associationOnly?'association_only':'input_validation'});
+      const current=active;
+      current.initialComposerText=api.composerAdapter.hasContent(found.editor);
+      current.userTouchedComposer=false;
+      current.onComposerInput=()=>{if(!current.applyingReply)current.userTouchedComposer=true;};
+      found.editor.addEventListener('input',current.onComposerInput,true);
+      current.anchor=found.editor.parentElement||found.editor;
+      current.expiryTimer=setTimeout(()=>{if(active===current)rejectAssociation('operation_expired');},60000);
       void prepareCurrent(requestId);
-      return true;
     };
-    if (!locate()) {
-      diagnostic('composer_waiting');
-      const observer = new MutationObserver(() => { try { if (locate()) observer.disconnect(); } catch (error) { if (/extension context invalidated/i.test(error?.message || "")) stopInvalidContext(); } });
-      active.observer = observer;
-      observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["contenteditable", "role", "aria-hidden", "data-testid", "href"] });
-    }
+    active.refreshAssociation=locate;
+    active.observer=new MutationObserver(records=>{
+      if(active?.requestId!==requestId)return;
+      if(active.editor && records?.some(record=>[...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))) {
+        rejectAssociation('editor_removed');return;
+      }
+      locate();
+    });
+    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
+    diagnostic('association_waiting');
+    locate();
   }
   async function prepareCurrent(requestId) {
     const current = active;
+    if (associationOnly) {
+      current.initializing=false;
+      current.assistant=api.inlineAssistant.mount(current.anchor,()=>{},{});
+      current.assistant.setStatus("关联验证通过：已绑定本次点击的唯一新回复框。当前模式不调用 AI、不填入文字。");
+      diagnostic('association_only_ready');
+      return;
+    }
     try {
       const response = await safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" });
       if (!contextAlive) return;
@@ -231,10 +225,11 @@
     record("applied", { style, reply: candidate });
   }
   async function generateActive(requestId) {
+    if (associationOnly) {diagnostic('generation_blocked_association_only');return;}
     const current = active;
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated) return;
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
-    if (!current.editor?.isConnected || !current.matchedPost) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
+    if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
     current.generating = true; current.assistant?.showLoading();
     diagnostic('generation_started');
     try {
@@ -258,7 +253,7 @@
     }
   }
   function handleAction(action, data) {
-    if (!active) return;
+    if (!active || associationOnly) return;
     const current = active;
     if (action === "dismiss") {
       current.cancelled = true; current.dismissed = true;
@@ -301,7 +296,7 @@
   }
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;
-    if (message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
+    if (associationOnly || message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
     const current = active, requestId = current.requestId, revision = ++settingsRevision;
     void safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }).then((response) => {
       if (!contextAlive) return;
@@ -314,25 +309,52 @@
     return false;
   }
   try { chrome.runtime.onMessage.addListener(onRuntimeMessage); } catch { stopInvalidContext(); return; }
-  function onDocumentClick(event) {
-    if (!hasRuntimeContext()) return;
-    if (!event.isTrusted) return;
-    const control = api.replyDetector.findReplyControl(event.target);
-    if (!control || control.closest("[data-zane-reply-copilot]")) return;
-    diagnostic('reply_clicked');
-    const article = control.closest("article");
-    const post = api.postExtractor.extractPost(article);
-    if (!post.ok) {
-      diagnostic('post_unrecognized');
-      if (active?.requestId) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: active.requestId });
-      try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
-      active?.observer?.disconnect(); active?.assistant?.close?.();
-      active = { requestId: crypto.randomUUID(), post: { article, sourceText: "", sourceUrl: "" }, assistant: null };
-      showFallback("无法准确识别这条帖子，因此未发送文本给 AI。", article || control.parentElement || control);
+  function captureActivation(event) {
+    if (!event.isTrusted || !hasRuntimeContext()) return;
+    if (event.type==='keydown' && !['Enter',' '].includes(event.key)) {
+      if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
-    begin(control, post);
+    const control=api.replyDetector.findReplyControl(event.target);
+    if (activationTainted && control) {pendingActivation=null;diagnostic("association_rejected",{reason:"activation_requires_reload"});return;}
+    if (!control || control.closest('[data-zane-reply-copilot]')) {
+      pendingActivation=null;
+      if(active&&!active.cancelled&&!active.editor?.contains(event.target)&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
+      return;
+    }
+    if (active&&!active.cancelled) {
+      activationTainted=true;
+      rejectAssociation('competing_activation');
+      pendingActivation={control,blocked:true};return;
+    }
+    const post=api.postExtractor.extractPost(control.closest('article'));
+    if (!post.ok) {pendingActivation=null;diagnostic('association_rejected',{reason:'source_unverified'});return;}
+    pendingActivation={control,post:Object.freeze({...post}),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
-  document.addEventListener("click", onDocumentClick, true);
-  diagnostic('content_ready');
+  function onDocumentClick(event) {
+    if (!hasRuntimeContext() || !event.isTrusted) return;
+    const control=api.replyDetector.findReplyControl(event.target);
+    if (!control || control.closest('[data-zane-reply-copilot]')) return;
+    const activation=pendingActivation;pendingActivation=null;
+    if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
+      diagnostic('association_rejected',{reason:'activation_not_captured'});return;
+    }
+    const live=api.postExtractor.extractPost(control.closest('article'));
+    if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
+      diagnostic('association_rejected',{reason:'source_changed'});return;
+    }
+    diagnostic('reply_clicked');
+    begin(control,activation.post,activation);
+  }
+  function refreshAssociation(){active?.refreshAssociation?.();}
+  function onBeforeInput(event) {
+    if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
+  }
+  document.addEventListener('pointerdown',captureActivation,true);
+  document.addEventListener('keydown',captureActivation,true);
+  document.addEventListener('focusin',refreshAssociation,true);
+  document.addEventListener('beforeinput',onBeforeInput,true);
+  window.addEventListener('popstate',refreshAssociation);
+  document.addEventListener('click',onDocumentClick,true);
+  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation'});
 })();

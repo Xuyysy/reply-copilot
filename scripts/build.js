@@ -24,7 +24,8 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
 if (stagingDomInputExperiment) {
-  for (const name of ["background/service-worker.js", "content/content-script.js", "content/composer-adapter.js"]) cpSync(path.join(root, "experiments/staging-no-debugger", name), path.join(output, name));
+  for (const name of ["background/service-worker.js", "content/content-script.js", "content/composer-adapter.js", "content/composer-association.js"]) cpSync(path.join(root, "experiments/staging-no-debugger", name), path.join(output, name));
+  writeFileSync(path.join(output,"content/experiment-config.js"),`globalThis.ZaneReplyCopilotContent ||= {};\nglobalThis.ZaneReplyCopilotContent.experimentConfig=Object.freeze({associationOnly:${process.env.REPLY_COPILOT_STAGING_INPUT_VALIDATION !== "1"}});\n`);
   rmSync(path.join(output, "services/native-input-service.js"));
 }
 if (packagedChannel) {
@@ -32,7 +33,11 @@ if (packagedChannel) {
   writeFileSync(configPath, `export const RUNTIME_CONFIG = Object.freeze({ channel: ${JSON.stringify(channel)}, websiteUrl: ${JSON.stringify(websiteUrl)}, hostedApiUrl: ${JSON.stringify(hostedApiUrl)}, allowedHttpHosts: [], requestTimeoutMs: 30000 });\n`);
   const manifestPath = path.join(output, "manifest.json");
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-  if (stagingDomInputExperiment) manifest.permissions = manifest.permissions.filter(permission => permission !== "debugger");
+  if (stagingDomInputExperiment) {
+    manifest.permissions = manifest.permissions.filter(permission => permission !== "debugger");
+    const files=manifest.content_scripts[0].js;
+    files.splice(files.indexOf("content/content-script.js"),0,"content/experiment-config.js","content/composer-association.js");
+  }
   // Production must retain the existing store identity, including across clean builds.
   const stored = channel === "production" ? JSON.parse(readFileSync(path.join(root,"config/extension-store-identity.json"),"utf8")) : null;
   const publicKeyFile = process.env.REPLY_COPILOT_EXTENSION_PUBLIC_KEY_FILE;

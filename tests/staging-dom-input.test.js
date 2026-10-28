@@ -29,3 +29,10 @@ test('failed editing command is never retried for the same request',()=>{
  assert.equal(f.adapter.insertOnce(f.editor,'request-3','hello',()=>true),false);
  assert.equal(f.adapter.insertOnce(f.editor,'request-3','hello',()=>true),false); assert.equal(calls,1);
 });
+test('X structural single BR is empty, but user whitespace, extra breaks and attachments stay protected',()=>{
+ const f=fixture();Object.assign(f.editor,{innerText:'\n',textContent:'',querySelector:()=>null,querySelectorAll:()=>[{}]});
+ assert.equal(f.adapter.hasContent(f.editor),false);
+ for(const update of [{textContent:' '},{textContent:'',innerText:'\n\n',querySelectorAll:()=>[{},{}]},{innerText:'\n',textContent:'',querySelector:()=>({})}]){
+  Object.assign(f.editor,update);assert.equal(f.adapter.hasContent(f.editor),true);
+ }
+});

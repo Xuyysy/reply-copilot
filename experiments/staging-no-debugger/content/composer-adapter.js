@@ -7,7 +7,14 @@
     return candidates.length === 1 ? candidates[0] : null;
   }
   function readText(editor) { return (editor?.innerText ?? editor?.textContent ?? "").replace(/\u00a0/g, " ").trim(); }
-  function hasContent(editor) { return Boolean((editor?.innerText ?? editor?.textContent ?? "").replace(/\u00a0/g, " ")); }
+  function hasContent(editor) {
+    if (editor?.querySelector?.('img,video,[data-testid="attachments"]')) return true;
+    const raw=editor?.innerText ?? editor?.textContent ?? "";
+    // X/Draft.js's pristine editor renders a single BR as a layout newline.
+    // Do not trim arbitrary whitespace: a user's spaces or extra blank lines are drafts.
+    if (raw==="\n" && editor.textContent==="" && editor.querySelectorAll?.('br').length===1) return false;
+    return Boolean(raw.replace(/\u00a0/g," "));
+  }
   function focusEmpty(editor) {
     if (!editor?.isConnected || hasContent(editor)) return false;
     editor.focus();
