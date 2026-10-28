@@ -242,3 +242,10 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 使用单次随机claim标记和D1原子batch同时收尾请求、释放账户/批次预占、写零余额变动的generation_release审计；不增加余额、不生成退款。未知上游实际成本以原预估额保守结算，避免放开成本预算。事务一致性断言失败时整批回滚。迟到上游结果不能复活已释放请求。正常已认证/v1/usage及下一次生成会在当前用户范围内执行；不增加公网维护入口、不绕过登录。
 
 回归：新增11项，含修复前失败的reserved/uncertain超时恢复、幂等、近期请求/有结果/已扣次保护、Production隔离、未登录和跨账号保护、预算不一致回滚、迟到完成不扣次。全量622/622通过，API类型检查及Staging Wrangler dry-run通过。线上原版本回滚依据：6efab2b5-4a3e-4238-8619-34166f3a3578。只部署Staging，无迁移、不操作Production。
+
+### 本次线上执行结果
+
+- 代码提交 b4630bccd3d64672069149082bac1d9a8f3f8a3c；Staging部署 e3de8e40-fd6d-4834-b12f-ab017eb0bf09，health正常。
+- Chrome当前会话控制持续超时/用户切换窗口，未提取Cookie或凭证。临时增加每分钟scheduled触发现有cleanup后，已通过同一原子收尾逻辑处理旧请求，并恢复唯一原调度0 3 * * *。
+- D1只读后验：stuck=0、generation_reserved合计从1降至0；免费余额合计179、付费余额合计1200，前后不变；generation_release新增恰好1条、free_delta=0及paid_delta=0；原请求安全关闭、consumed=0。未直接执行财务UPDATE、未调用真实AI。
+- 用户可重新生成；若界面仍显示旧提示，关闭旧回复框后重新点击回复。插件候选仍需在Chrome重新加载并刷新X一次；不把后端阻塞解除等同于真实X长期稳定性验收。
