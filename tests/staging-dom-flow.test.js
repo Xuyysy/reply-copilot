@@ -106,3 +106,15 @@ test('ten consecutive reply associations without AI',async()=>{
  const f=flow({associationOnly:true});for(let i=0;i<10;i++){const p=f.post(String(100+i));f.click(p);f.open(p);await sleep(0);assert.equal(f.statuses.filter(x=>x.includes('关联验证通过')).length,i+1);f.close(p,{notify:i%2===0,detach:i%3!==0});}
  assert.equal(f.generations(),0);assert.ok(!f.logs.some(x=>x[2]?.includes('competing_activation')));
 });
+
+test('successful fill is not replaced by internal editor lifecycle text',async()=>{
+ const f=flow(),p=f.post('101'),replacement=f.post('102');f.click(p);f.open(p);await sleep(0);f.resolve(0);await sleep(100);assert.equal(f.commands(),1);
+ f.entries([{node:replacement.editor,modal:true,contextMatches:true,contextStatusId:null}]);
+ assert.ok(f.logs.some(x=>x[2]?.includes('editor_replaced_or_closed')));
+ assert.ok(!f.statuses.some(x=>/关联已停止|editor_replaced_or_closed|competing_activation|association_expired/.test(x)));
+});
+test('pre-fill lifecycle failures use user wording while retaining diagnostic reasons',async()=>{
+ const f=flow(),p=f.post('101');f.click(p);f.timeout(9000);
+ assert.ok(f.logs.some(x=>x[2]?.includes('association_expired')));
+ assert.ok(f.statuses.every(x=>!/association_expired|关联已停止/.test(x)));
+});

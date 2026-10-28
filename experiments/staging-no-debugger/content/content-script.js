@@ -90,7 +90,19 @@
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     if (!associationOnly) void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     diagnostic('association_rejected',{reason});
-    current.assistant?.setStatus("关联已停止："+reason+(activationTainted?"。请刷新 X 后重新操作。":"。请关闭回复框后重新操作。"));
+    // Lifecycle codes belong in diagnostics only. Never replace a successful
+    // applied state with an internal teardown message.
+    if (current.appliedText) return;
+    const messages={
+      competing_activation:"检测到另一个回复操作，已暂停本次操作。请关闭其他回复框后重新点击。",
+      association_expired:"未能找到本次点击对应的回复框，请重新点击帖子下方的回复按钮。",
+      operation_expired:"本次回复操作已结束，请重新点击回复按钮开始。",
+      editor_replaced_or_closed:"回复框已关闭或发生变化，本次没有继续写入。",
+      editor_removed:"回复框已关闭或发生变化，本次没有继续写入。",
+      cancelled_by_user:"本次回复操作已取消。",
+      user_input_before_binding:"检测到你已开始输入，已保留你的内容并停止自动填入。"
+    };
+    current.assistant?.setStatus(messages[reason]||"当前回复操作已停止，请重新点击回复按钮。 "+(activationTainted?"如仍无法继续，请刷新页面后重试。":""));
   }
   function matchedComposer(post) {
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
