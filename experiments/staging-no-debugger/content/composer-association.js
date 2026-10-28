@@ -57,6 +57,22 @@
     return ids.size>1?'conflicting_status_links':([...ids][0]||null);
   }
   const normalized=text=>(text||'').replace(/\s+/g,' ').trim();
+  function capturePost(post) {
+    const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
+      if(a.closest('article')!==post.article)return false;
+      try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
+    });
+    return {...post,hasCapturedPhoto};
+  }
+  function sameContext(post,text) {
+    const source=normalized(post.sourceText),copy=normalized(text);
+    if(copy===source)return true;
+    if(!post.hasCapturedPhoto || !source || !copy.startsWith(source+' '))return false;
+    // X's modal can append a plain picture reference absent from feed text,
+    // including a presentation space after https://. This is auxiliary text
+    // comparison only: never navigate to it or treat it as identity evidence.
+    return /^(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+$/.test(copy.slice(source.length).trim());
+  }
   function routeAllowed(initial,current,statusId) {
     if (initial===current) return true;
     try {const a=new URL(initial),b=new URL(current);return a.origin===b.origin && b.pathname==='/compose/post' && (!b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId);}catch{return false;}
@@ -75,10 +91,10 @@
       const text=primary?[...primary.querySelectorAll('[data-testid="tweetText"]')].filter(n=>n.closest('article')===primary).map(n=>n.innerText).join('\n'):'';
       return {node,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:primary?contextId(primary):null,
-        contextMatches:!primary||!normalized(text)?null:articles.length===1&&normalized(text)===normalized(post.sourceText)};
+        contextMatches:!primary||!normalized(text)?null:articles.length===1&&sameContext(post,text)};
     });
     return {now,editors,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId&&original.sourceText===post.sourceText)};
   }
-  globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot};
+  globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
 })();

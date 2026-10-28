@@ -66,6 +66,19 @@
     if (/invalid JSON|invalid.*response|empty response|structured response/i.test(message || "")) return "AI 返回内容暂时无法识别，请重新生成。";
     return "回复生成失败，请稍后重试。";
   }
+  function endSession(reason) {
+    const current=active;
+    if(!current)return;
+    current.cancelled=true;
+    current.observer?.disconnect();
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
+    if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
+    current.editor?.removeEventListener("input",current.onComposerInput,true);
+    current.assistant?.host?.remove();
+    if(!associationOnly)void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
+    active=null;pendingActivation=null;
+    diagnostic('session_ended',{reason});
+  }
   function rejectAssociation(reason) {
     const current=active;
     if (!current || current.cancelled) return;
@@ -83,7 +96,10 @@
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now());
     const result=active.association.evaluate(facts);
-    if (result.state==='rejected') rejectAssociation(result.reason);
+    if (result.state==='rejected') {
+      if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0) endSession('reply_closed');
+      else rejectAssociation(result.reason);
+    }
     return {editor:result.editor,matchedPost:result.state==='bound',reason:result.reason};
   }
   function begin(control, post, activation) {
@@ -122,7 +138,9 @@
     active.observer=new MutationObserver(records=>{
       if(active?.requestId!==requestId)return;
       if(active.editor && records?.some(record=>[...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))) {
-        rejectAssociation('editor_removed');return;
+        const facts=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now());
+        if(facts.editors.length===0)endSession('reply_closed');else rejectAssociation('editor_removed');
+        return;
       }
       locate();
     });
@@ -316,10 +334,14 @@
       return;
     }
     const control=api.replyDetector.findReplyControl(event.target);
+    // X can remove/hide its modal before our MutationObserver callback runs.
+    // Reconcile the already-bound node synchronously before classifying a new
+    // trusted gesture as competition. Never reset an ambiguous unbound session.
+    if (active?.editor && !active.cancelled) refreshAssociation();
     if (activationTainted && control) {pendingActivation=null;diagnostic("association_rejected",{reason:"activation_requires_reload"});return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
-      if(active&&!active.cancelled&&!active.editor?.contains(event.target)&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
+      if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
       return;
     }
     if (active&&!active.cancelled) {
@@ -329,7 +351,7 @@
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
     if (!post.ok) {pendingActivation=null;diagnostic('association_rejected',{reason:'source_unverified'});return;}
-    pendingActivation={control,post:Object.freeze({...post}),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
+    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     if (!hasRuntimeContext() || !event.isTrusted) return;

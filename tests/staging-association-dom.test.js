@@ -27,6 +27,19 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const s2=api.composerAssociation.create({trusted:true,statusId:'103',requestId:'two',now:0,...api.composerAssociation.baseline(document)});
   const draft=modal();draft.textContent='user text';draft.focus();r=s2.evaluate(api.composerAssociation.snapshot(document,p2,initial,initial,10));results.push({name:'draft_protected',ok:r.reason==='existing_draft'&&draft.textContent==='user text'});
   const old=api.composerAssociation.create({trusted:true,statusId:'103',requestId:'three',now:0,...api.composerAssociation.baseline(document)});results.push({name:'preexisting_modal',ok:old.evaluate(api.composerAssociation.snapshot(document,p2,initial,initial,10)).reason==='preexisting_modal'});
+  document.querySelector('#modals').replaceChildren();
+  const mediaOriginal=source('104');mediaOriginal.insertAdjacentHTML('beforeend','<a href="https://x.com/example/status/104/photo/1">photo</a>');
+  const mediaPost=api.composerAssociation.capturePost?.(api.postExtractor.extractPost(mediaOriginal))||api.postExtractor.extractPost(mediaOriginal);
+  mediaOriginal.remove();
+  for(const [name,suffix,expected] of [['photo_rendered_url',' https:// pic.x.com/Ab123',true],['photo_plain_url',' pic.x.com/Ab123',true],['arbitrary_url',' https://evil.example/Ab123',false],['extra_words',' changed pic.x.com/Ab123',false]]){
+   document.querySelector('#modals').replaceChildren();const e=modal();e.closest('[role="dialog"]').querySelector('[data-testid="tweetText"]').textContent='same text'+suffix;e.focus();
+   const facts=api.composerAssociation.snapshot(document,mediaPost,initial,initial,10);results.push({name,ok:facts.editors[0].contextMatches===expected});
+  }
+  document.querySelector('#modals').replaceChildren();const nonMedia=api.postExtractor.extractPost(source('105')),e=modal();e.closest('[role="dialog"]').querySelector('[data-testid="tweetText"]').textContent='same text https:// pic.x.com/Ab123';e.focus();
+  results.push({name:'no_captured_photo_rejects_suffix',ok:api.composerAssociation.snapshot(document,nonMedia,initial,initial,10).editors[0].contextMatches===false});
+  const wrongPhoto=source('106');wrongPhoto.insertAdjacentHTML('beforeend','<a href="https://x.com/example/status/999/photo/1">photo</a>');
+  const wrongPost=api.composerAssociation.capturePost?.(api.postExtractor.extractPost(wrongPhoto))||api.postExtractor.extractPost(wrongPhoto);
+  results.push({name:'another_status_photo_is_not_evidence',ok:api.composerAssociation.snapshot(document,wrongPost,initial,initial,10).editors[0].contextMatches===false});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -34,6 +47,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,result.stderr);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,5);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,11);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
