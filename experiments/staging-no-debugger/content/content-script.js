@@ -336,10 +336,17 @@
       return;
     }
     const control=api.replyDetector.findReplyControl(event.target);
+    // X's modal contains its own Reply button and "Replying to" controls.
+    // They are not a fresh activation on a timeline post.
+    if (control?.closest('[role="dialog"]')) return;
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
     if (active?.editor && !active.cancelled) refreshAssociation();
+    if (control) {
+      const facts=active?.editor?api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now()):null;
+      diagnostic('activation_state',{hasSession:Boolean(active),cancelled:Boolean(active?.cancelled),hasEditor:Boolean(active?.editor),editorConnected:Boolean(active?.editor?.isConnected),visibleEditors:facts?.editors.length??null,tainted:activationTainted});
+    }
     if (activationTainted && control) {pendingActivation=null;diagnostic("association_rejected",{reason:"activation_requires_reload"});return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
@@ -358,6 +365,7 @@
   function onDocumentClick(event) {
     if (!hasRuntimeContext() || !event.isTrusted) return;
     const control=api.replyDetector.findReplyControl(event.target);
+    if (control?.closest('[role="dialog"]')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
@@ -380,5 +388,5 @@
   document.addEventListener('beforeinput',onBeforeInput,true);
   window.addEventListener('popstate',refreshAssociation);
   document.addEventListener('click',onDocumentClick,true);
-  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation'});
+  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'session-controls-20261028'});
 })();
