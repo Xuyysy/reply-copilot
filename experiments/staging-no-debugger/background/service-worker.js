@@ -8,6 +8,8 @@ import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
 import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
+import { HostedAIClient } from "../services/hosted-ai-client.js";
+import { StagingDeliveryCoordinator } from "../services/staging-delivery-coordinator.js";
 
 const MENU_ID = "generate-reply-copilot";
 const storage = new StorageService();
@@ -16,7 +18,12 @@ const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
-const aiProvider = new AIProviderRouter({ accountStates });
+const deliveryCoordinator = new StagingDeliveryCoordinator({
+  storage: chrome.storage.session,
+  getAccountId: async () => (await accountClient.fetchCurrentUser()).user?.userId,
+  createClient: () => new HostedAIClient({ accountClient }),
+});
+const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
 const activeRequests = new Map();
 const generatedInputs = new Map();
 let settingsOpenPromise = null;

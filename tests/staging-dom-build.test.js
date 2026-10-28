@@ -9,6 +9,7 @@ test('opt-in staging build removes debugger and keeps the staging backend',()=>{
  assert.equal(manifest.permissions.includes('debugger'),false);
  assert.deepEqual(manifest.host_permissions,['https://api-staging.x-reply-helper.top/*']);
  assert.equal(existsSync('dist/staging/services/native-input-service.js'),false);
+ assert.equal(existsSync('dist/staging/services/staging-delivery-coordinator.js'),true);
  for(const name of ['background/service-worker.js','content/content-script.js','content/composer-adapter.js']) assert.doesNotMatch(readFileSync('dist/staging/'+name,'utf8'),/chrome\.debugger|Input\.insertText/);
  const content=readFileSync('dist/staging/content/content-script.js','utf8');
  assert.match(content,/matchedComposer\(current\.post\)\.editor === current\.editor/);
@@ -22,5 +23,6 @@ test('production build retains the existing store identity and debugger implemen
  const identity=JSON.parse(readFileSync('config/extension-store-identity.json','utf8'));
  assert.equal(manifest.key,identity.publicKey);
  assert.equal(manifest.permissions.includes('debugger'),true);
+ assert.equal(existsSync('dist/production/services/staging-delivery-coordinator.js'),false);
  assert.match(readFileSync('dist/production/background/service-worker.js','utf8'),/chrome\.debugger/);
 });

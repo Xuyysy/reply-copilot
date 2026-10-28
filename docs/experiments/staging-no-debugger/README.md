@@ -217,3 +217,20 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 已查询 Chrome 官方 Content scripts、Service Worker lifecycle 及 MDN MutationObserver 文档。此次实际日志显示内容脚本持续收到可信点击，修改依据为已确认的恢复条件错误；未引入后台常驻、无限重连或循环生成。
 
 本轮候选继续开启真实 AI（`associationOnly:false`），无 debugger 权限或调用；已放回原 Staging 目录，并保持 ID 和 API。安装前备份：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging-before-recovery-scope-20261028`；一键回滚：`/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-before-recovery-scope-20261028.command`。最终候选文件替换后需重新加载对应 Staging ID，并对 X 刷新一次以加载新版内容脚本；本轮尚未完成用户长时间真实使用复验，不宣称完整解决。Production、正式 PR、商店审核与 0.3.2 发布准备保持原状。
+
+## 2026-10-28：插件交付确认收尾候选（后端保持不动）
+
+源码确认一个可复现的风险：回复框关闭时取消了生成 fetch，但服务端可能仍在生成，且插件没有继续原请求的 delivered 确认。后续使用新请求 ID 会被预占保护拒绝。界面截图本身不能证明每一次阻塞都来自这条路径。
+
+本轮只读查询发现 Staging 有一笔 reserved/generating、consumed=0、没有结果过期时间的旧请求，查询时已超过17分钟。用户明确选择仅修复插件，不授权修改后端。该旧记录没有被解除；刷新页面或安装插件也不会清除它，不能宣称当前账号阻塞已经恢复。
+
+新增 Staging 专用交付协调器：提交后不随编辑框取消而中断有界的原请求交付；旧响应仍受内容脚本会话校验保护，不得填入新编辑器。按账号在可信 extension session storage 保存原请求 ID 及不可变输入；确认响应丢失后，在下一次用户操作中最多尝试一次原请求恢复，不循环重试，不生成替代 ID。相同 ID 重试沿用原风格和历史快照，避免动态设置导致幂等冲突。成功结果最多保留4条、读取时排除10分钟前的数据，浏览器会话结束清除；不写日志、不包含凭证，不宣称已加入用户历史。取消界面后的有效生成仍可能完成正常交付并消耗一次额度。
+
+此协调器仅覆盖页面内后台生成路径；侧栏仍遵循原业务流程，服务端并发保护不变。无法恢复没有原始输入快照的旧请求，也不绕过服务端预占保护。
+
+- 全量 npm test：611/611 通过，0失败；包含实际打包后台取消/排队测试、共享 HostedAIClient 丢失确认响应及幂等测试。
+- 未发出真实 AI 请求，未修改 API、D1、额度、Worker 或 Production。
+- 构建标识：staging-delivery-recovery-20261028-3；associationOnly=false，Staging API不变，无debugger权限和调用。
+- 候选安装路径仍为原 dist/staging；备份 staging-before-delivery-recovery-20261028，一键回滚 restore-staging-before-delivery-recovery-20261028.command。重新加载扩展并刷新 X 一次才能加载新版内容脚本，刷新不能清除旧服务端请求。
+
+交付状态：插件候选已准备，等待用户真实使用验证；旧服务端请求仍是独立阻断项，本轮不处理。

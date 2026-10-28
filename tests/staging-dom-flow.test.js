@@ -179,7 +179,7 @@ test('an expired bound editor closed after background-style time passage permits
 test('diagnostic report is copyable and contains no post content, URL or request identifier',()=>{
  const f=flow(),p=f.post('101');f.click(p);
  const report=JSON.parse(f.report());
- assert.equal(report.build,'staging-recovery-scope-20261028-2');
+ assert.equal(report.build,'staging-delivery-recovery-20261028-3');
  assert.ok(Array.isArray(report.events));
  assert.doesNotMatch(JSON.stringify(report),/same post text|https:|statusId|sourceUrl|requestId|中文/);
 });

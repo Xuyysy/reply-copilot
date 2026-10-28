@@ -24,6 +24,7 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
 if (stagingDomInputExperiment) {
+  cpSync(path.join(root,"experiments/staging-no-debugger/services/delivery-coordinator.js"),path.join(output,"services/staging-delivery-coordinator.js"));
   for (const name of ["background/service-worker.js", "content/content-script.js", "content/composer-adapter.js", "content/composer-association.js"]) cpSync(path.join(root, "experiments/staging-no-debugger", name), path.join(output, name));
   writeFileSync(path.join(output,"content/experiment-config.js"),`globalThis.ZaneReplyCopilotContent ||= {};\nglobalThis.ZaneReplyCopilotContent.experimentConfig=Object.freeze({associationOnly:${process.env.REPLY_COPILOT_STAGING_INPUT_VALIDATION !== "1"}});\n`);
   rmSync(path.join(output, "services/native-input-service.js"));

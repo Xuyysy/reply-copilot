@@ -35,7 +35,7 @@
   };
   // DevTools content-script context: copy(__xrhStagingDiagnosticReport()). The
   // report contains only lifecycle enums, booleans, counters and relative time.
-  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-recovery-scope-20261028-2', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
+  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-delivery-recovery-20261028-3', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
 
   function stopInvalidContext() {
     if (!contextAlive) return;
@@ -343,7 +343,8 @@
       else await autoFillCurrent(current, requestId, selectedStyle);
     } catch (error) {
       current.generating = false;
-      current.retrySameRequestId = error?.code === "DELIVERY_CONFIRMATION_PENDING" || error?.code === "NETWORK_ERROR";
+      diagnostic('generation_failed',{reason:typeof error?.code==='string'?error.code.toLowerCase():'unknown_error'});
+      current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN"].includes(error?.code);
       if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); }
     }
   }
@@ -479,5 +480,5 @@
   window.addEventListener('pagehide',onPageHide,true);
   window.addEventListener('popstate',refreshAssociation);
   document.addEventListener('click',onDocumentClick,true);
-  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'staging-recovery-scope-20261028-2'});
+  diagnostic('content_ready',{mode:associationOnly?'association_only':'input_validation',build:'staging-delivery-recovery-20261028-3'});
 })();
