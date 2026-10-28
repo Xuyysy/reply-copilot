@@ -199,7 +199,7 @@
     current.attemptedInput.add(requestId);
     const valid = () => contextAlive && document.visibilityState === "visible" && document.hasFocus() && active === current && current.requestId === requestId && !current.cancelled && current.editor?.isConnected && !current.userTouchedComposer && !api.composerAdapter.hasContent(current.editor) && matchedComposer(current.post).editor === current.editor;
     if (!valid() || document.activeElement !== current.editor || !api.composerAdapter.focusEmpty(current.editor)) {
-      diagnostic('insert_context_changed');
+      diagnostic('insert_context_changed',{visible:document.visibilityState==='visible',documentFocused:document.hasFocus(),editorFocused:document.activeElement===current.editor,connected:Boolean(current.editor?.isConnected),userTouched:Boolean(current.userTouchedComposer),empty:!api.composerAdapter.hasContent(current.editor),cancelled:Boolean(current.cancelled)});
       current.assistant?.setStatus("回复框已变化，已保留现有内容；可以复制建议后粘贴。");
       return;
     }

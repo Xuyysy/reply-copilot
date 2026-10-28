@@ -2,7 +2,7 @@
 
 本实验仅在 `codex/staging-no-debugger` 分支维护，不属于 Production 0.3.1 或其商店审核。
 
-## 现有证据
+## 2026-10-27 历史证据
 
 真实 X 点击触发后，原帖可提取并匹配，随后编辑器关联超时。浏览器中确认回复弹窗的原帖副本包含正文，但没有状态链接；两个嵌套 dialog 共享同一个编辑器节点。当前逻辑依赖状态链接，未进入页面内 AI 生成或输入。正文相同不能单独证明身份。真实 X 的无 debugger 填入、编辑和撤销尚未验收。
 
@@ -10,7 +10,7 @@
 
 只使用 Staging，保留原扩展加载路径与身份；不自动发布，不覆盖用户草稿。对关联不确定、多编辑器、旧弹窗、切帖和过期操作失败关闭；日志不记录帖子、凭证或个人信息。禁止将实验直接合入正式分支或修改 Production。
 
-## 待完成
+## 当时待完成
 
 先以无 AI 请求的方式验证可信点击到唯一编辑器的关联，包括节点卸载、嵌套弹窗、重复正文、旧弹窗和快速切换；仅在安全关联可靠后验证真实生成、编辑器状态、撤销、发送按钮及单次额度消耗。
 
@@ -36,7 +36,7 @@
 
 第一轮新验证发现空白 Draft.js 编辑器实际为 `innerText` 单个换行、`textContent` 为空、一个 BR。旧的空白判断误报 `existing_draft`。仅在实验适配器识别这一个结构性空行；空格、多空行、附件与用户文字继续视为草稿。修复后取得上述真实匹配证据。
 
-截图中没有本扩展的 debugger 调试横幅。真实 X 的 AI 生成、自动输入、内部编辑状态、撤销与扣次仍待一次受控生成验收。原帖卸载、多编辑器、同文案竞争、快速操作和错误导航等边界主要由自动化测试覆盖，不宣称全部已在真实 X 实测。
+截图中没有本扩展的 debugger 调试横幅。本节记录关联阶段；后续真实生成及输入结果见下方2026-10-28补充。原帖卸载、多编辑器、同文案竞争、快速操作和错误导航等边界主要由自动化测试覆盖，不宣称全部已在真实 X 实测。
 
 ### 构建及安装
 
@@ -49,9 +49,9 @@ REPLY_COPILOT_WEBSITE_URL=https://staging.x-reply-helper.top \
 node scripts/build.js staging
 ```
 
-只有获准进行一次真实输入验收时，构建才额外设置 `REPLY_COPILOT_STAGING_INPUT_VALIDATION=1`。不要把输入验收包和仅关联包混淆。
+用户已授权本轮继续进行 Staging AI 验证；构建输入验收包时额外设置 `REPLY_COPILOT_STAGING_INPUT_VALIDATION=1`。不要把输入验收包和仅关联包混淆。
 
-实际加载路径仍为 `/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging`，原扩展 ID `kaaehkpihjenlhjjfjcopkjhegmfmchk` 不变。当前磁盘和浏览器安装的是仅关联包；不卸载、不清除 storage。其他正式扩展在本次验证前已处于停用状态，未更改其开关。
+实际加载路径仍为 `/Users/xuyaoyang/x posst/apps/reply-copilot/dist/staging`，原扩展 ID `kaaehkpihjenlhjjfjcopkjhegmfmchk` 不变。当前磁盘和浏览器安装的是输入验收包（标准 paste 方案）；不卸载、不清除 storage。其他正式扩展在本次验证前已处于停用状态，未更改其开关。
 
 安装前完整备份：`dist/staging-backup-association-20261028-091230`（前一版实验文件）。原 debugger 稳定版另保存在 `dist/staging-stable-backup-20261027-204918-82754`。
 
@@ -67,4 +67,44 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 
 这仍是 DOM 层的操作关联，不是 X 提供的正式原帖—编辑器 API 保证。X 的页面结构、焦点行为或编辑器生命周期变更可能导致安全拒绝，需要真实 X 持续验证。出现歧义宁可停止。当前不建议推广 Production，也不改动正式商店0.3.1。
 
-本轮最终本地验证：`npm test` 580/580 通过，包含真实隔离 Chrome 的 DOM/编辑/撤销测试；Web 构建通过。真实 X 仅验证了上述无 AI 关联及浮窗，不能把这580项自动化结果等同于真实 AI 自动填入验收。
+关联阶段本地验证为580/580；最新验证与真实 X 结果如下。
+
+
+## 2026-10-28：真实 X 自动生成与无 debugger 填入已取得成功样本
+
+### 输入方案的证据和选择
+
+1. 原 `execCommand(insertText)` 在真实 X 生成后的试验中出现文字重复；撤销后 DOM 残留与 Reply 按钮状态不同步。该路径不再用于实验包。
+2. 采用标准 `DataTransfer(text/plain)` + `ClipboardEvent(paste)`，交给 X 的公开粘贴处理器。事件仍为 `isTrusted=false`，不伪造可信属性、不访问 React 私有对象、不直接赋值编辑器文本、不访问系统剪贴板、不调用 debugger。
+3. 合成 paste 没有浏览器默认插入行为：必须由页面处理并 `preventDefault`，随后现有代码检查实际完整文本一致。拒绝、异常或不一致时不追加另一种输入策略，保留复制兜底。
+4. 内容脚本仍检查同一节点、请求 ID、空白草稿、可见性、页面及编辑器焦点、Selection 和当前操作有效性。一请求最多一次尝试。插入前失败只记录布尔事实，日志不含帖子/候选正文、URL 或凭证。
+
+官方参考（解释机制，不能替代真实 X 验收）：
+
+- [MDN paste event](https://developer.mozilla.org/en-US/docs/Web/API/Element/paste_event)：合成事件本身不会改变文档内容。
+- [Draft.js paste handler](https://github.com/facebookarchive/draft-js/blob/main/src/component/handlers/edit/editOnPaste.js)：页面编辑器的粘贴路径负责更新编辑状态。
+- [Draft.js controlled state](https://draftjs.org/docs/advanced-topics-editorstate-race-conditions/)：编辑器状态同步的约束。
+- [Chrome isolated content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts)：与页面共享 DOM，JavaScript 环境隔离。
+
+### 真实 X 结果（未发布任何评论）
+
+| 验证 | 实际结果 |
+| --- | --- |
+| 无 AI 关联 | 两条普通多行帖子的唯一新回复框关联成功，浮窗出现；弹窗无状态链接、嵌套 dialog 去重 |
+| 标准粘贴单独试验 | 中英文、Emoji、多行进入真实 X；Reply 可用；追加、撤销追加、撤销整次粘贴正常 |
+| 完整自动流程 | 原生 Reply 点击 → association_bound → generation_started → generation_returned → insert_verified；无需复制或额外插入点击 |
+| 原生内部状态 | 自动草稿只出现一次，Reply 启用；追加普通文字可编辑；第一次撤销追加，第二次撤销整份 AI 草稿，Reply 随之禁用 |
+| 扣次 | 成功样本 UI 额度1318→1317，日志一个生成开始和返回；本轮3次真实生成总计1320→1317（含先前失败试验），无自动重试 |
+| debugger | 实验 manifest 无 debugger，产物无调用，真实浏览器无该扩展调试横幅 |
+
+一次中间试验在生成后被 `insert_context_changed` 拦下，未执行输入；当时未记录细分事实，不能断言唯一原因。另有获取阶段 `association_expired` 的安全拒绝。新增可见性/焦点/连接/草稿布尔诊断，不降低校验。保持 Chrome/X 前台后取得上述成功样本。
+
+### 本地验证及状态
+
+- `npm test`：**582/582**，含本地 Chrome DOM/粘贴接受/编辑/撤销、关联竞态和输入保护；全套命令含 Web 构建，通过。
+- 成功样本来自真实 Chrome X、Staging 内容脚本与真实 AI；隔离编辑器测试没有被当作真实 X 证据。
+- 新输入实现及测试仅在实验覆盖文件与构建开关下生效；Production源文件、商店ZIP、API/D1/支付未改动；正式工作区原有3处隐私修改保留。
+- 仍需用户在不同帖子、线程/详情页、语言、长文、不同X编辑器版本中持续验收。快速切帖、旧弹窗、多编辑器、原帖卸载、用户抢先输入主要有自动化覆盖，未宣称每个边界均真实 X 实测。
+- 这是可继续人工验收的候选方案，不是达到 Production 等效可靠性的证明；不自动推广或合并正式版本。
+
+当前已加载输入验收包，原路径和 Staging ID 不变。用户可重新加载原扩展并完整刷新 X，点击普通帖子的原生 Reply 体验；测试后关闭空草稿即可，不要按发布按钮。失败请提供浮窗状态或仅以 `[xrh-staging-composer]` 开头的阶段日志。出现 `activation_requires_reload` 应完整刷新 X 后再试，不反复点击同一过期操作。

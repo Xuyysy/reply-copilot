@@ -38,7 +38,14 @@
     if (!isCurrent() || !editor?.isConnected || document.activeElement !== editor || hasContent(editor) || !selection?.isCollapsed || !editor.contains(selection.anchorNode) || !editor.contains(selection.focusNode)) return false;
     attempted.add(requestId);
     if (attempted.size > 1000) attempted.delete(attempted.values().next().value);
-    try { return document.execCommand('insertText', false, text) === true; } catch { return false; }
+    try {
+      const data=new DataTransfer();data.setData('text/plain',text);
+      const event=new ClipboardEvent('paste',{bubbles:true,cancelable:true,composed:true,clipboardData:data});
+      // The page's public paste handler must accept this event. There is no
+      // browser default insertion for synthetic paste and no second strategy.
+      editor.dispatchEvent(event);
+      return event.defaultPrevented;
+    } catch { return false; }
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.composerAdapter = { findComposer, readText, hasContent, focusEmpty, insertOnce };
