@@ -7,10 +7,18 @@
     return candidates.length === 1 ? candidates[0] : null;
   }
   function readText(editor) { return (editor?.innerText ?? editor?.textContent ?? "").replace(/\u00a0/g, " ").trim(); }
+  function hasContent(editor) {
+    if (editor?.querySelector?.('img,video,[data-testid="attachments"]')) return true;
+    const raw=editor?.innerText ?? editor?.textContent ?? "";
+    // X/Draft.js's pristine editor renders a single BR as a layout newline.
+    // Do not trim arbitrary whitespace: a user's spaces or extra blank lines are drafts.
+    if (raw==="\n" && editor.textContent==="" && editor.querySelectorAll?.('br').length===1) return false;
+    return Boolean(raw.replace(/\u00a0/g," "));
+  }
   function focusEmpty(editor) {
-    if (!editor?.isConnected || readText(editor)) return false;
+    if (!editor?.isConnected || hasContent(editor)) return false;
     editor.focus();
-    if (document.activeElement !== editor || readText(editor)) return false;
+    if (document.activeElement !== editor || hasContent(editor)) return false;
     const selection = window.getSelection();
     if (!selection) return false;
     if (!editor.contains(selection.anchorNode)) {
@@ -23,8 +31,22 @@
     return editor.contains(selection.anchorNode);
   }
 
-  // This adapter only reads the composer and places the caret. The service
-  // worker sends text through Chrome's Input domain, never by rewriting DOM.
+  const attempted = new Set();
+  function insertOnce(editor, requestId, text, isCurrent) {
+    if (typeof requestId !== 'string' || !requestId || attempted.has(requestId) || typeof text !== 'string' || !text.trim() || typeof isCurrent !== 'function') return false;
+    const selection = window.getSelection();
+    if (!isCurrent() || !editor?.isConnected || document.activeElement !== editor || hasContent(editor) || !selection?.isCollapsed || !editor.contains(selection.anchorNode) || !editor.contains(selection.focusNode)) return false;
+    attempted.add(requestId);
+    if (attempted.size > 1000) attempted.delete(attempted.values().next().value);
+    try {
+      const data=new DataTransfer();data.setData('text/plain',text);
+      const event=new ClipboardEvent('paste',{bubbles:true,cancelable:true,composed:true,clipboardData:data});
+      // The page's public paste handler must accept this event. There is no
+      // browser default insertion for synthetic paste and no second strategy.
+      editor.dispatchEvent(event);
+      return event.defaultPrevented;
+    } catch { return false; }
+  }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.composerAdapter = { findComposer, readText, focusEmpty };
+  globalThis.ZaneReplyCopilotContent.composerAdapter = { findComposer, readText, hasContent, focusEmpty, insertOnce };
 })();

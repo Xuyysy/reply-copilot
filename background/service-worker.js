@@ -7,8 +7,9 @@ import { ReplyEngine } from "../services/reply-engine.js";
 import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
-import { NativeInputService } from "../services/native-input-service.js";
 import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
+import { HostedAIClient } from "../services/hosted-ai-client.js";
+import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
 
 const MENU_ID = "generate-reply-copilot";
 const storage = new StorageService();
@@ -17,10 +18,14 @@ const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
-const aiProvider = new AIProviderRouter({ accountStates });
+const deliveryCoordinator = new DeliveryCoordinator({
+  storage: chrome.storage.session,
+  getAccountId: async () => (await accountClient.fetchCurrentUser()).user?.userId,
+  createClient: () => new HostedAIClient({ accountClient }),
+});
+const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
 const activeRequests = new Map();
 const generatedInputs = new Map();
-const nativeInput = new NativeInputService(chrome.debugger);
 let settingsOpenPromise = null;
 let bindingPromise = null;
 let lastBindingPoll = 0;
@@ -142,21 +147,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void broadcastSettingsChanged();
     sendResponse({ ok: true }); return false;
   }
-  if (message?.type === "REPLY_COPILOT_INPUT_PREPARE") {
-    const draft = generatedInputs.get(message.requestId);
-    const tabId = sender.tab?.id;
-    if (!fromXPage || sender.frameId !== 0 || !Number.isInteger(tabId) || !sender.tab.active || draft?.tabId !== tabId || !["natural", "light_humor", "thoughtful"].includes(message.style) || typeof draft.replies?.[message.style] !== "string") { sendResponse({ ok: false }); return false; }
-    void nativeInput.prepare(tabId, message.requestId).then((ok) => sendResponse({ ok }), () => sendResponse({ ok: false }));
-    return true;
-  }
-  if (message?.type === "REPLY_COPILOT_INPUT_COMMIT") {
-    const draft = generatedInputs.get(message.requestId);
-    const tabId = sender.tab?.id;
-    if (!fromXPage || sender.frameId !== 0 || !Number.isInteger(tabId) || !sender.tab.active || draft?.tabId !== tabId || !["natural", "light_humor", "thoughtful"].includes(message.style) || typeof draft.replies?.[message.style] !== "string") { sendResponse({ ok: false }); return false; }
-    generatedInputs.delete(message.requestId);
-    void nativeInput.commit(tabId, message.requestId, draft.replies[message.style]).then((ok) => sendResponse({ ok }), () => sendResponse({ ok: false }));
-    return true;
-  }
   if (message?.type === "REPLY_COPILOT_GENERATE") {
     if (!fromXPage || typeof message.requestId !== "string" || typeof message.sourceText !== "string" || message.sourceText.length > 12000 || !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) { sendResponse({ ok: false, error: "无法验证当前帖子。请打开侧边栏重试。" }); return false; }
     void (async () => {
@@ -181,7 +171,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })();
     return true;
   }
-  if (message?.type === "REPLY_COPILOT_CANCEL") { if (fromXPage && typeof message.requestId === "string") { activeRequests.get(message.requestId)?.abort(); generatedInputs.delete(message.requestId); if (Number.isInteger(sender.tab?.id)) void nativeInput.cancel(sender.tab.id, message.requestId); } sendResponse({ ok: true }); return false; }
+  if (message?.type === "REPLY_COPILOT_CANCEL") { if (fromXPage && typeof message.requestId === "string") { activeRequests.get(message.requestId)?.abort(); generatedInputs.delete(message.requestId); } sendResponse({ ok: true }); return false; }
   if (message?.type === "REPLY_COPILOT_HISTORY") {
     if (!fromXPage || !["selected", "copied", "applied", "manually_confirmed"].includes(message.event)) { sendResponse({ ok: false }); return false; }
     void Promise.all([history.recordEvent(message.requestId, message.event, { style: message.style, reply: message.reply }), usage.track(message.event, { requestId: message.requestId, style: message.style })]).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));

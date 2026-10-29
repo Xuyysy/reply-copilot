@@ -15,7 +15,7 @@ test("floating settings gear routes through the background to the existing Optio
   assert.doesNotMatch(content, /location\.(?:href|assign)\s*=/);
 });
 
-test("reply composer uses the native input path with a copy fallback", async () => {
+test("reply composer uses the paste input path with a copy fallback", async () => {
   const floating = await read("../content/inline-assistant.js");
   const content = await read("../content/content-script.js");
   const worker = await read("../background/service-worker.js");
@@ -23,11 +23,10 @@ test("reply composer uses the native input path with a copy fallback", async () 
   const manifest = JSON.parse(await read("../manifest.json"));
   assert.match(floating, /data-action="copy"/);
   assert.doesNotMatch(floating, /data-action="(?:fill|replace)"/);
-  assert.match(content, /REPLY_COPILOT_INPUT_PREPARE/);
-  assert.match(content, /REPLY_COPILOT_INPUT_COMMIT/);
-  assert.match(worker, /NativeInputService/);
+  assert.match(content, /composerAdapter\.insertOnce/);
+  assert.doesNotMatch(worker, /NativeInputService|chrome\.debugger/);
   assert.match(options, /自动填入/);
-  assert.ok(manifest.permissions.includes("debugger"));
+  assert.ok(!manifest.permissions.includes("debugger"));
 });
 
 test("settings navigation and user-facing page use Chinese labels", async () => {

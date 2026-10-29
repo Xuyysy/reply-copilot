@@ -26,15 +26,15 @@ test("post extractor fails closed without exact post text and URL", async () => 
   assert.equal(postExtractor.extractPost(article).ok, false);
 });
 
-test("composer adapter locates the X editor and exposes no DOM writer", async () => {
+test("composer adapter locates X editor and avoids direct DOM text writes", async () => {
   const editor = { isConnected: true, innerText: "existing user draft", closest: () => null };
   const { composerAdapter } = await loadContent("composer-adapter", { document: { querySelector: () => null } });
   const article = { querySelectorAll: () => [editor] };
   assert.equal(composerAdapter.findComposer(article), editor);
   assert.equal(composerAdapter.readText(editor), "existing user draft");
-  for (const method of ["fillIfSafe", "replaceOnExplicitClick", "replaceExactDoubleInsertion"]) assert.equal(composerAdapter[method], undefined);
+  for (const method of ["fillIfSafe", "replaceOnExplicitClick", "replaceExactDoubleInsertion"]) assert.equal(composerAdapter[method], undefined); assert.equal(typeof composerAdapter.insertOnce, "function");
   const source = await readFile(new URL("../content/composer-adapter.js", import.meta.url), "utf8");
-  assert.doesNotMatch(source, /execCommand|dispatchEvent|replaceChildren|insertNode|innerHTML\s*=|innerText\s*=|textContent\s*=/);
+  assert.doesNotMatch(source, /execCommand|replaceChildren|insertNode|innerHTML\s*=(?!=)|innerText\s*=(?!=)|textContent\s*=(?!=)/);
 });
 
 test("composer adapter focuses an empty editor and places the caret without inserting text", async () => {
@@ -62,7 +62,7 @@ test("inline assistant exposes copy and no composer mutation actions", async () 
   const content = await readFile(new URL("../content/content-script.js", import.meta.url), "utf8");
   assert.match(source, /data-action="copy"/);
   assert.doesNotMatch(source, /data-action="(?:fill|replace)"/);
-  assert.doesNotMatch(content, /composerAdapter\.(?:fillIfSafe|replaceOnExplicitClick|insertOnce)|action === "(?:fill|replace)"/);
+  assert.doesNotMatch(content, /composerAdapter\.(?:fillIfSafe|replaceOnExplicitClick)|action === "(?:fill|replace)"/);
 });
 
 test("controlled editor fixture models input state and a later rerender", async () => {

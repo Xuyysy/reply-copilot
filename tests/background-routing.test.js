@@ -12,7 +12,7 @@ const event = () => ({ addListener(listener) { this.listener = listener; } });
 globalThis.chrome = { runtime: { id: "test-extension", onInstalled: event(), onMessage: event() }, contextMenus: { onClicked: event() }, storage: { onChanged: event(), local, session: { get: async () => ({}), set: async () => {} } }, debugger: {}, permissions: { contains: async () => true }, sidePanel: {} };
 globalThis.fetch = async (url) => {
   const pathname = new URL(url).pathname;
-  const data = pathname === "/v1/me" ? { user: { username: "tester" } }
+  const data = pathname === "/v1/me" ? { user: { username: "tester", userId: "test-user" } }
     : pathname === "/v1/entitlements" ? { status: "credits_available", entitlement: {} }
     : pathname === "/v1/usage" ? { quota: { freeRemaining: 200, paidRemaining: 0, totalRemaining: 200 } }
     : pathname === "/v1/ai/generate" ? { raw: JSON.stringify(validOutput), quota: { freeRemaining: 199, paidRemaining: 0, totalRemaining: 199 } }
