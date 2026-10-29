@@ -27,5 +27,21 @@ test('Production stale-generation cleanup is atomic under real Workers D1 concur
   assert.deepEqual(await db.prepare('SELECT free_balance,free_generation_reserved FROM credit_accounts').first(),{free_balance:200,free_generation_reserved:0});
   assert.equal((await db.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_release' AND free_delta=0 AND paid_delta=0").first()).n,1);
   assert.equal((await db.prepare('SELECT status FROM ai_requests').first()).status,'upstream_failed');
+  // An inconsistent budget must roll back the entire real D1 batch.
+  for(const sql of [
+    "INSERT INTO users(id,email,email_verified_at,created_at) VALUES('rollback-user','rollback@example.test',1,1)",
+    "INSERT INTO credit_accounts(user_id,free_balance,paid_balance,free_generation_reserved,created_at,updated_at) VALUES('rollback-user',200,0,1,1,1)",
+    "INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,generation_reserved_credits,granted_at,history_confidence,status) VALUES('rollback-batch','rollback-user','free','signup',200,200,1,1,'tracked','active')",
+    "INSERT INTO ai_budget_days(budget_day,reserved_micro_usd) VALUES('2026-10-27',0)",
+    `INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,generation_phase,budget_day,budget_reserved_micro_usd) VALUES('rollback','rollback-user','2026-10-27','rollback-nonce','reserved',0,'hash',${Date.now()-660000},'generating','2026-10-27',100)`,
+    "INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,credits,state,created_at) VALUES('rollback-allocation','rollback-user','rollback','rollback-batch',1,'reserved',1)"
+  ])await db.prepare(sql).run();
+  const rejected=await mf.dispatchFetch('https://isolated.test/global');
+  assert.equal(rejected.status,500);
+  assert.equal((await db.prepare("SELECT status FROM ai_requests WHERE request_id='rollback'").first()).status,'reserved');
+  assert.equal((await db.prepare("SELECT free_generation_reserved FROM credit_accounts WHERE user_id='rollback-user'").first()).free_generation_reserved,1);
+  assert.equal((await db.prepare("SELECT state FROM ai_credit_allocations WHERE id='rollback-allocation'").first()).state,'reserved');
+  assert.equal((await db.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE user_id='rollback-user'").first()).n,0);
+
  }finally{await mf.dispose();}
 });
