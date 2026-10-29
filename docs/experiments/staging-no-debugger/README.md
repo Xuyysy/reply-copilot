@@ -125,6 +125,23 @@ zsh '/Users/xuyaoyang/x posst/apps/reply-copilot/dist/restore-staging-stable-202
 
 当前 Chrome 加载的是完整 Staging 输入验收包，保留原扩展 ID 和 Staging API，不含 debugger 权限与调用；正式版本和正式工作区未改变。上述结果补充真实浏览器证据，自动化结果仍为此前的 587/587；并非本次重新运行的测试。
 
+## 2026-10-29：特定帖子未触发的提取与点击路径候选修复
+
+用户报告可连续处理多帖，但偶发某条帖子不出现浮窗；切换到另一条通常恢复。尚无该次失败的诊断报告，根因**未确认**，也没有执行真实 X 或 Computer Use。
+
+源码审查确认两个可复现的脆弱条件（这是代码证据，不是该现场的因果证明）：
+
+- 旧 Staging 包复用通用提取器，只识别普通 `/<user>/status/<id>` 链接和 `[data-testid="tweetText"]`。嵌套引用内容会被排除（正确），但 `/i/web/status/<id>` 和明确的长文正文节点没有专属处理；任何缺链接或缺 `tweetText` 都合并为一个 `post-context-incomplete`，无法区分身份缺失和纯媒体无正文。
+- click 必须与 pointerdown 命中同一个 Reply DOM 节点。若 X 在两个事件之间替换按钮，点击会进入 `activation_not_captured`；这是一个可能的偶发拒绝路径，但没有现场日志证明该帖子触发了它。
+
+实验候选增加 Staging 专用 `post-extractor.js` 覆盖，不修改通用/Production 提取器。它识别普通与 `/i/web/status/` 的 HTTPS 状态链接，严格限定状态路径和数字 ID；只提取被点击的外层 article 自己的正文，优先 tweetText，缺少时才读取已知 `longformRichText`。无法确认身份返回 `status_id_unavailable`，纯媒体且无正文返回 `post_text_unavailable`。帖子类型诊断仅使用枚举：text/photo/video/poll/quote/longform；不记录正文、链接或作者。
+
+可信点击处理增加两种有边界的恢复：同一 article 对象在 pointerdown/click 之间替换 Reply 控件时，click 阶段重新提取并要求 status ID 与正文快照完全一致；若 pointerdown 缺失/过期，则只从可信 click 的当前 article 重新提取，且要求页面没有既存回复 dialog/editor。相同正文的不同 status 若弹窗缺少 status link，会与最近最多 8 个已点击帖子比较并按歧义拒绝；不以正文相似度绑定。实际状态链接若指向不同 status、多个编辑器、已有草稿、未获焦点或来源变化，仍然失败关闭。最近帖子快照只保存在当前 content-script 内存中，诊断报告不包含它们。
+
+诊断报告 build 改为 `staging-post-context-20261029-1`，增加脱敏 `pathCounts`，覆盖 `source_unverified`（并区分 extractor 子原因及节点计数）、`activation_not_captured`、`source_changed`、`reply_context_unconfirmed`、`awaiting_editor_focus`、`association_expired` 及 click 恢复/拒绝。报告只包含 enum、计数、布尔值和相对时间，不包含帖子内容、回复、URL、请求 ID或账号信息。等待编辑器焦点/上下文时按状态变化记录一次，不由 MutationObserver 反复刷日志。
+
+自动化新增了 post-extractor 变体、外层/引用帖隔离、普通和 `/i/web/status/` 身份、纯媒体拒绝、可信 click 恢复、同文章按钮替换、同正文不同 status 歧义拒绝及失败路径计数测试。此候选尚未通过用户的真实 X 特定帖子验收；不同 X 页面结构与 X 后续 DOM 变更仍有风险。请用户在真人验收前仅安装 Staging 构建并刷新 X；不要将自动化通过写成现场问题已解决。
+
 ## 2026-10-28：连续回复生命周期修正
 
 用户反馈按实际使用顺序仍可稳定复现第二条 `competing_activation`，此前自动化和有限的真实 X 样本不足以证明问题解决。安装目录中关键文件与实验构建的哈希一致，不能仅凭文件一致性证明当时页面已重新加载了对应内容脚本。

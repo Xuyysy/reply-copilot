@@ -13,9 +13,11 @@
   let replyControlPointerCount = 0;
   let replyControlClickCount = 0;
   const quarantinedPosts = [];
+  const recentPostContexts = [];
   const diagnosticStartedAt = performance.now();
   let diagnosticSequence = 0;
   const diagnosticEvents = [];
+  const diagnosticPathCounts = Object.create(null);
   const associationOnly = api.experimentConfig?.associationOnly !== false;
   const isX = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href);
   if (!isX) return;
@@ -33,9 +35,17 @@
     if (diagnosticEvents.length > 100) diagnosticEvents.shift();
     try { console.info('[xrh-staging-composer]', stage, JSON.stringify(entry)); } catch {}
   };
+  const diagnosticPath = (reason, detail = {}) => {
+    diagnosticPathCounts[reason] = (diagnosticPathCounts[reason] || 0) + 1;
+    diagnostic('association_path', { reason, ...detail });
+  };
+  function postKindFlags(post) {
+    const kinds = new Set(post?.postKinds || []);
+    return { hasText: Boolean(post?.sourceText), hasPhoto: kinds.has('photo'), hasVideo: kinds.has('video'), hasPoll: kinds.has('poll'), hasQuote: kinds.has('quote'), hasLongform: kinds.has('longform') };
+  }
   // DevTools content-script context: copy(__xrhStagingDiagnosticReport()). The
   // report contains only lifecycle enums, booleans, counters and relative time.
-  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-delivery-recovery-20261028-3', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
+  globalThis.__xrhStagingDiagnosticReport = () => JSON.stringify({ build: 'staging-post-context-20261029-1', ageMs: Math.max(0, Math.round(performance.now() - diagnosticStartedAt)), runtimeAlive: contextAlive, recoveryRequired, trustedGestureCount, replyControlPointerCount, replyControlClickCount, pathCounts: { ...diagnosticPathCounts }, active: active ? { state: active.cancelled ? 'cancelled' : active.editor ? active.generating ? 'generating' : active.appliedText ? 'applied' : 'bound' : 'acquiring', editorConnected: Boolean(active.editor?.isConnected), assistantConnected: Boolean(active.assistant?.host?.isConnected) } : null, events: diagnosticEvents }, null, 2);
 
   function stopInvalidContext() {
     if (!contextAlive) return;
@@ -115,6 +125,17 @@
     withoutSame.unshift(retained);
     quarantinedPosts.splice(0, quarantinedPosts.length, ...withoutSame.slice(0, 8));
   }
+  function rememberPost(post) {
+    if (!post?.statusId || typeof post.sourceText !== 'string') return;
+    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto) };
+    const withoutSame = recentPostContexts.filter(item => item.statusId !== retained.statusId);
+    recentPostContexts.splice(0, recentPostContexts.length, retained, ...withoutSame.slice(0, 7));
+  }
+  function associationHistory() {
+    const byStatus = new Map();
+    for (const post of [...quarantinedPosts, ...recentPostContexts]) if (post?.statusId) byStatus.set(post.statusId, post);
+    return [...byStatus.values()];
+  }
   function recoverAfterQuiescence() {
     if (!recoveryRequired) return true;
     const baseline = api.composerAssociation.baseline(document);
@@ -143,7 +164,7 @@
     clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     if (!associationOnly) void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
-    diagnostic('association_rejected',{reason});
+    diagnosticPath(reason);
     // Lifecycle codes belong in diagnostics only. Never replace a successful
     // applied state with an internal teardown message.
     if (current.appliedText) return;
@@ -160,7 +181,7 @@
   }
   function matchedComposer(post) {
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
-    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),associationHistory());
     const result=active.association.evaluate(facts);
     if (result.state==='rejected') {
       if(result.reason==='reply_context_unconfirmed')for(const candidate of facts.editors)diagnostic('reply_context_check',{articleCount:candidate.contextArticleCount,textPresent:candidate.contextTextPresent,textMatches:candidate.contextTextMatches,statusLinkPresent:Boolean(candidate.contextStatusId),editorFocused:candidate.focused});
@@ -190,7 +211,14 @@
     const locate=()=>{
       if (!hasRuntimeContext() || active!==session || session.cancelled) return;
       const found=matchedComposer(post);
-      if (!found.editor) return;
+      if (!found.editor) {
+        if (['awaiting_editor_focus','awaiting_reply_context'].includes(found.reason) && session.lastAssociationWaitReason !== found.reason) {
+          session.lastAssociationWaitReason = found.reason;
+          const facts = api.composerAssociation.snapshot(document, post, session.initialUrl, location.href, performance.now(), associationHistory());
+          diagnosticPath(found.reason, { visibleEditorCount: facts.editors.length, visibleDialogCount: facts.visibleDialogCount });
+        }
+        return;
+      }
       if (active.editor) return; // Keep observing this same node; never rebind after replacement.
       clearTimeout(active.acquireTimer);
       active.editor=found.editor;active.matchedPost=true;
@@ -423,10 +451,10 @@
     // trusted gesture as competition. Never reset an ambiguous unbound session.
     if (active?.editor && !active.cancelled) refreshAssociation();
     if (control) {
-      const facts=active?.editor?api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now()):null;
+      const facts=active?.editor?api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),associationHistory()):null;
       diagnostic('activation_state',{hasSession:Boolean(active),cancelled:Boolean(active?.cancelled),hasEditor:Boolean(active?.editor),editorConnected:Boolean(active?.editor?.isConnected),visibleEditors:facts?.editors.length??null,recoveryRequired});
     }
-    if (recoveryRequired && control) {pendingActivation=null;diagnostic('association_rejected',{reason:'awaiting_quiescent_page'});return;}
+    if (recoveryRequired && control) {pendingActivation=null;diagnosticPath('awaiting_quiescent_page');return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
       if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
@@ -440,7 +468,8 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;diagnostic('association_rejected',{reason:'source_unverified'});return;}
+    if (!post.ok) {pendingActivation=null;diagnosticPath('source_unverified',{extractorReason:post.reason||'unknown',statusLinkCount:post.statusLinkCount||0,textNodeCount:post.textNodeCount||0,...postKindFlags(post)});return;}
+    diagnostic('source_verified',{statusIdentityVerified:true,...postKindFlags(post)});
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
@@ -450,13 +479,34 @@
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     replyControlClickCount++;
     const activation=pendingActivation;pendingActivation=null;
-    if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
-      diagnostic('association_rejected',{reason:'activation_not_captured'});return;
+    const elapsed=activation?performance.now()-activation.at:Infinity;
+    if (!activation || activation.blocked || elapsed>1500) {
+      diagnosticPath('activation_not_captured',{hadPointerActivation:Boolean(activation),ageMs:Number.isFinite(elapsed)?Math.max(0,Math.round(elapsed)):null,reason:!activation?'pointerdown_missing':activation.blocked?'pointerdown_blocked':'pointerdown_expired'});
+      if (recoveryRequired) {diagnosticPath('awaiting_quiescent_page');return;}
+      if (active&&!active.cancelled) return;
+      const post=api.postExtractor.extractPost(control.closest('article'));
+      if (!post.ok) {diagnosticPath('source_unverified',{extractorReason:post.reason||'unknown',statusLinkCount:post.statusLinkCount||0,textNodeCount:post.textNodeCount||0,...postKindFlags(post)});return;}
+      const baseline=api.composerAssociation.baseline(document);
+      if (baseline.baselineModalCount || baseline.visibleReplyEditorCount) {diagnosticPath('preexisting_reply_ui',{visibleDialogs:baseline.baselineModalCount,visibleReplyEditors:baseline.visibleReplyEditorCount});return;}
+      diagnosticPath('trusted_click_recovered_activation',{statusIdentityVerified:true});
+      diagnostic('source_verified',{statusIdentityVerified:true,...postKindFlags(post)});
+      const captured=api.composerAssociation.capturePost(post);rememberPost(captured);
+      begin(control,captured,{initialUrl:location.href,at:performance.now(),baseline});
+      return;
+    }
+    if (activation.control!==control) {
+      const clickedArticle=control.closest('article');
+      const live=api.postExtractor.extractPost(clickedArticle);
+      if (activation.post?.article!==clickedArticle || !live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
+        diagnosticPath('activation_not_captured',{hadPointerActivation:true,ageMs:Math.max(0,Math.round(elapsed)),reason:'control_or_source_changed'});return;
+      }
+      diagnosticPath('activation_control_replaced',{statusIdentityVerified:true});
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
-      diagnostic('association_rejected',{reason:'source_changed'});return;
+      diagnosticPath('source_changed');return;
     }
+    rememberPost(activation.post);
     diagnostic('reply_clicked');
     begin(control,activation.post,activation);
   }
