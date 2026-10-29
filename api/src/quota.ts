@@ -1,3 +1,4 @@
+import { releaseStaleProductionGenerations } from "./production-generation-timeout";
 import type { Env, Session } from "./types";
 import { ApiFailure } from "./types";
 import { nowMs, shanghaiDay, uuid } from "./security";
@@ -16,6 +17,7 @@ type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
  * because their provider outcome may be uncertain.
  */
 export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs(), userId?: string): Promise<void> {
+  await releaseStaleProductionGenerations(env, now, userId);
   const scope = userId ? " AND r.user_id=?" : "";
   const params = userId ? [now, userId] : [now];
   const candidate = await env.DB.prepare(`SELECT 1 AS pending FROM ai_requests r
@@ -161,11 +163,11 @@ export async function finishGeneration(env: Env, userId: string, requestId: stri
   if(!allocation)return;
   await env.DB.batch([
     env.DB.prepare("UPDATE ai_requests SET status='upstream_failed',generation_phase='unknown',completed_at=?,refunded_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(now,now,ref,userId,requestId),
-    env.DB.prepare("UPDATE ai_credit_allocations SET state='released',released_at=? WHERE user_id=? AND request_id=? AND state='reserved'").bind(now,userId,requestId),
-    env.DB.prepare("UPDATE credit_batches SET generation_reserved_credits=generation_reserved_credits-1 WHERE id=? AND generation_reserved_credits>0 AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?)").bind(allocation.credit_batch_id,userId,requestId,now),
-    env.DB.prepare("UPDATE credit_accounts SET free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?)").bind(allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now),
+    env.DB.prepare("UPDATE ai_credit_allocations SET state='released',released_at=? WHERE user_id=? AND request_id=? AND state='reserved' AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND status='upstream_failed' AND budget_finalization_ref=?)").bind(now,userId,requestId,userId,requestId,ref),
+    env.DB.prepare("UPDATE credit_batches SET generation_reserved_credits=generation_reserved_credits-1 WHERE id=? AND generation_reserved_credits>0 AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(allocation.credit_batch_id,userId,requestId,now,userId,requestId,ref),
+    env.DB.prepare("UPDATE credit_accounts SET free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now,userId,requestId,ref),
     env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
-    env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_release',0,0,?,?,? WHERE EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"确认生成失败，释放额度预占",now,userId,requestId,now),
+    env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_release',0,0,?,?,? WHERE EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"确认生成失败，释放额度预占",now,userId,requestId,now,userId,requestId,ref),
     env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown-estimated",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,actual,userId,requestId,ref),
   ]);
 }
