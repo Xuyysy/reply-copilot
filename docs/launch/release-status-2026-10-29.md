@@ -1,5 +1,20 @@
 # x-Reply-Helper｜发布与更新状态（2026-10-29；更新于 2026-10-30）
 
+## 2026-10-30｜Production 管理后台三个业务表格滚动/固定表头（已部署；待人工验收）
+
+- **GitHub 独立核实：** 分支 `codex/production-admin-table-scroll` 当前 HEAD 为 [`98155453560209f3c77de069c34735fccb444a65`](https://github.com/Xuyysy/reply-copilot/commit/98155453560209f3c77de069c34735fccb444a65)（2026-10-30 10:28:43 UTC），父提交 `2d58c42e`。本次提交涉及 `web/src/components/admin/AdminDashboard.tsx`、`SecurityPaymentPanel.tsx`、`web/src/lib/api.ts`、`web/src/styles/global.css`，并新增 `web/tests/admin-table-scroll.test.mjs`；仅涉及网站前端文件。三个表格为“用户管理”“最近额度流水”“充值订单”。
+- **实际实现（源码已读）：** 三个表格外框增设 `admin-list-scroll`，把滚动放在 Table 内部容器、表头 `position:sticky;top:0`；桌面最大高度 500px，小屏或较矮视窗使用 `min(500px,65dvh)`（含 `vh` 回退）。外部搜索、筛选、批量操作和导出入口未搬入滚动容器；源码设计保留原有事件与操作。
+- **Cloudflare 已独立确认部署：** Pages 项目 `x-reply-helper-production` 当前 `latest_deployment` 为 `4b19b5a2-4bb3-4f4f-b093-8a2d3ef6a479`（创建 2026-10-30 10:30:51 UTC），`environment=production`、`latest_stage=deploy/success`、别名包含 `https://app.x-reply-helper.top`。部署元数据记录 `commit_hash=98155453560209f3c77de069c34735fccb444a65`。
+- **测试证据类别：** Codex / 用户转述前端 90/90、TypeScript、Production build，以及 48 组隔离 Chrome 布局检查和模拟交互通过；本轮助手查阅新测试脚本，其主循环覆盖桌面/窄屏、中文/英文、0/1/5/100 行以及三个 Tab，且使用模拟 API，不触碰真实用户信息。**本轮没有重跑这些测试，也没有进入管理员登录态核实线上三个 Tab 的视觉效果；人工验收仍待完成。**
+- **部署构建追溯仍需处理：** 此次 Pages `deployment_trigger.type=ad_hoc`，metadata 显示 `branch=main`、`commit_hash=98155453...`、**`commit_dirty=true`**。提交哈希与分支实际对应正确，但该标志不构成线上产物字节精确一致的证明。Codex 报告“线上静态资源与构建一致”，本轮未独立复现哈希比对；先保留已知 P1 发布追溯风险，不误写为彻底解决。
+- **回滚方案已核实存在：** 旧 Pages 部署 `f42e556d-975a-4049-8aa1-6b32ad42cfc0` 可在 Cloudflare Deployments 中选择作为回滚目标；本轮**未执行回滚**。
+- **范围边界：** 本轮仅新增发布记录，没有修改或部署 Worker、D1、Qwen、支付、Chrome 插件，也未操作业务数据；用户说“已包含批准的六项最小编译修正”，本轮未逐项核对其历史修复的具体内容。
+- **下一步：** 由用户刷新 [正式后台](https://app.x-reply-helper.top/admin/) 验证用户管理、额度流水和订单三个 Tab 的表头固定与内部纵横向滚动、按钮位置、搜索筛选/导出（避免实际执行冻结、额度调整等写入操作）。完成后再记录用户明确的通过/问题反馈。
+
+---
+
+
+
 ## 2026-10-30｜Production AI 多模型管理上线，Qwen 激活并通过用户验收
 
 - **发布与人工验收：** 用户报告 AI 模型管理与成本统计已部署 Production，随后明确确认“可以了没问题”。这属于用户本人对最新 Production 功能的验收反馈；不能推断所有长期运行问题或外部服务账单均已独立审计。
