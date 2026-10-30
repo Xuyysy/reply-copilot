@@ -14,6 +14,8 @@ const TEST_PROMPTS = {
   zh: "今天把复杂问题拆成小步骤，终于推进了一点。",
   en: "I finally made progress by breaking a complicated problem into smaller steps today.",
 };
+const CONNECTION_JSON_SYSTEM = 'Return only a valid JSON object with exactly one property: {"ok":true}. Do not use Markdown or add any other text.';
+const CONNECTION_JSON_USER = 'Connection check. Return exactly {"ok":true} as JSON.';
 type Config = {
   id: string; display_name: string; latest_version: number; archived: number;
   provider: string; protocol: string; base_url: string; model_id: string;
@@ -26,6 +28,13 @@ function safeError(error: unknown): string {
   if (error instanceof ModelProviderError) return error.code;
   const code = error instanceof Error ? error.message : "provider_error";
   return /^[a-z_]{3,48}$/.test(code) ? code : "provider_error";
+}
+function isConnectionJson(content: unknown): boolean {
+  if (typeof content !== "string") return false;
+  try {
+    const value = JSON.parse(content);
+    return Boolean(value && typeof value === "object" && !Array.isArray(value) && value.ok === true && Object.keys(value).length === 1);
+  } catch { return false; }
 }
 function decimalRate(value: unknown): number {
   if (typeof value !== "string" && typeof value !== "number") throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Token 价格无效。");
@@ -172,7 +181,7 @@ async function runTest(request: Request, env: Env, id: string, requestedKind: "c
   if (existingTest && (existingTest.admin_user_id!==actor.user_id||existingTest.config_id!==id||existingTest.config_version!==row.latest_version||existingTest.test_kind!==kind)) throw new ApiFailure(409,"MODEL_TEST_ID_CONFLICT","测试编号已用于其他请求。");
   if (existingTest && existingTest.status !== "running") return response({ ok: existingTest.status === "passed", replayed: true, ...testResult(existingTest) }, 200, env, request);
   if (existingTest) throw new ApiFailure(409, "MODEL_TEST_IN_PROGRESS", "本次测试仍在执行，请稍后刷新结果。");
-  const prompt = kind === "connection" ? { system: "Reply exactly with the word OK.", user: "Connection check." } : buildPrompts({ postContext: TEST_PROMPTS[kind === "generation_zh" ? "zh" : "en"], voiceProfile: null, recentHistory: [], styleStats: null, replyStyle: "natural" } as any);
+  const prompt = kind === "connection" ? { system: CONNECTION_JSON_SYSTEM, user: CONNECTION_JSON_USER } : buildPrompts({ postContext: { text: TEST_PROMPTS[kind === "generation_zh" ? "zh" : "en"] }, voiceProfile: null, recentHistory: [], styleStats: null, replyStyle: "natural" } as any);
   const outputLimit = kind === "connection" ? 32 : Math.min(1024, config.maxOutputTokens);
   const reserve = costReservation(config, prompt.system, prompt.user, outputLimit);
   const apiKey = await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY, id, row.latest_version, row.api_key_ciphertext);
@@ -215,8 +224,8 @@ async function runTest(request: Request, env: Env, id: string, requestedKind: "c
       inputRateMicroUsdPerMillion: config.inputRateMicroUsdPerMillion, outputRateMicroUsdPerMillion: config.outputRateMicroUsdPerMillion,
       reservedCostMicroUsd: reserve, testMode: kind === "connection", validateOutput: kind !== "connection" });
     usage = result.usage;
-    jsonValid = kind === "connection" || Boolean(result.raw);
-    if (kind === "connection" && !/\bOK\b/i.test(result.content)) throw new ModelProviderError("connection_check_failed", result.httpStatus, reserve, usage);
+    jsonValid = kind === "connection" ? isConnectionJson(result.content) : Boolean(result.raw);
+    if (kind === "connection" && !jsonValid) throw new ModelProviderError("connection_check_failed", result.httpStatus, reserve, usage);
   } catch (error) { errorCategory = safeError(error); if (error instanceof ModelProviderError) { upstreamHttpStatus=error.status; if (error.usage) usage = error.usage; } }
   const passed = !errorCategory && (!kind.startsWith("generation_") || jsonValid) && usage.usageQuality === "verified";
   const settled = usage?.usageQuality === "verified" && Number.isSafeInteger(usage.costMicroUsd) && usage.costMicroUsd <= reserve ? usage.costMicroUsd : reserve;

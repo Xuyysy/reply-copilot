@@ -23,9 +23,9 @@ async function mockProvider(run){
       return new Response(JSON.stringify({Status:0,Answer:answer}),{headers:{'content-type':'application/dns-json'}});
     }
     upstreamCalls++;
-    if(init.body&&JSON.parse(init.body).messages?.[0]?.content==='Reply exactly with the word OK.'){
+    if(init.body&&JSON.parse(init.body).messages?.[0]?.content.includes('{"ok":true}')){
       await new Promise(resolve=>setTimeout(resolve,15));
-      return Response.json({choices:[{finish_reason:'stop',message:{content:'OK'}}],usage:{prompt_tokens:3,completion_tokens:1}});
+      return Response.json({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'}}],usage:{prompt_tokens:3,completion_tokens:1}});
     }
     const body=JSON.parse(init.body);const language=body.messages[1].content.includes('复杂问题')?'zh':'en';
     await new Promise(resolve=>setTimeout(resolve,15));
@@ -82,4 +82,90 @@ test('verified Chinese and English generation tests are required before activati
   const rollback=await f.call('/v1/admin/ai-models/rollback',{body:operation()});assert.equal(rollback.body.legacyFallback,true);
   assert.equal(f.sql.prepare('SELECT active_config_id FROM ai_provider_runtime WHERE id=1').get().active_config_id,null);
   const settled=f.sql.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days').get();assert.equal(settled.reserved_micro_usd,0);assert.ok(settled.settled_micro_usd>0);
+});
+
+test('Chinese and English model tests send distinct real post text and preserve the full reply contract',async()=>{
+  const f=setup();
+  await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));
+  const requests=[];
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,init={})=>{
+    const parsed=new URL(String(url));
+    if(parsed.hostname==='cloudflare-dns.com'){
+      const answer=parsed.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[];
+      return Response.json({Status:0,Answer:answer});
+    }
+    const body=JSON.parse(init.body);requests.push(body);
+    const isChinese=body.messages[1].content.includes('今天把复杂问题拆成小步骤，终于推进了一点。');
+    return Response.json({choices:[{finish_reason:'stop',message:{content:validOutput(isChinese?'zh':'en')}}],usage:{prompt_tokens:20,completion_tokens:30}});
+  };
+  try{
+    const zh=await f.call(`/v1/admin/ai-models/${modelId}/test-generation`,{body:operation({testId:randomUUID(),language:'zh'})});
+    const en=await f.call(`/v1/admin/ai-models/${modelId}/test-generation`,{body:operation({testId:randomUUID(),language:'en'})});
+    assert.equal(zh.body.ok,true,JSON.stringify(zh.body));assert.equal(en.body.ok,true,JSON.stringify(en.body));
+    assert.equal(requests.length,2);
+    const zhUser=requests[0].messages[1].content,enUser=requests[1].messages[1].content;
+    assert.match(zhUser,/今天把复杂问题拆成小步骤，终于推进了一点。/);
+    assert.match(enUser,/I finally made progress by breaking a complicated problem into smaller steps today\./);
+    assert.notEqual(zhUser,enUser);
+    for(const body of requests){
+      const system=body.messages[0].content;
+      for(const field of ['"recommendation"','"defaultStyle"','"language"','"replies"','"reason"','"quoteCandidate"']) assert.ok(system.includes(field),`missing full contract field ${field}`);
+      for(const style of ['"natural"','"light_humor"','"thoughtful"']) assert.ok(system.includes(style),`missing reply style ${style}`);
+      assert.deepEqual(body.response_format,{type:'json_object'});
+    }
+    assert.equal(zh.body.jsonValid,true);assert.equal(en.body.jsonValid,true);
+  }finally{globalThis.fetch=original;f.sql.close();}
+});
+
+test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini and custom-compatible adapters',async()=>{
+  const cases=[
+    {provider:'deepseek',baseUrl:'https://api.deepseek.com/v1',modelId:'deepseek-chat',jsonMode:true},
+    {provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen-plus',jsonMode:true},
+    {provider:'gemini',baseUrl:'https://generativelanguage.googleapis.com/v1beta/openai',modelId:'gemini-2.5-flash',jsonMode:false},
+    {provider:'openai_compatible',baseUrl:'https://api.example.com/v1',modelId:'custom-chat',jsonMode:false,custom:true},
+  ];
+  for(const item of cases){
+    const f=setup(),id=randomUUID(),captured=[];
+    const body=modelBody({id,name:`${item.provider} connection`,provider:item.provider,baseUrl:item.baseUrl,modelId:item.modelId,options:item.custom?{customEndpointRiskConfirmed:true}:{}});
+    const original=globalThis.fetch;
+    globalThis.fetch=async(url,init={})=>{
+      const parsed=new URL(String(url));
+      if(parsed.hostname==='cloudflare-dns.com'){
+        const answer=parsed.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[];
+        return Response.json({Status:0,Answer:answer});
+      }
+      const request=JSON.parse(init.body);captured.push(request);
+      return Response.json({choices:[{finish_reason:'stop',message:{content:'{"ok":true}'} }],usage:{prompt_tokens:8,completion_tokens:4}});
+    };
+    try{
+      const saved=await f.call('/v1/admin/ai-models',{body});assert.equal(saved.status,200,`${item.provider}: ${JSON.stringify(saved.body)}`);
+      const checked=await f.call(`/v1/admin/ai-models/${id}/test-connection`,{body:operation({testId:randomUUID()})});
+      assert.equal(checked.status,200,`${item.provider}: ${JSON.stringify(checked.body)}`);
+      assert.equal(checked.body.ok,true,item.provider);assert.equal(checked.body.jsonValid,true,item.provider);
+      assert.equal(captured.length,1,item.provider);
+      const prompt=`${captured[0].messages[0].content}\n${captured[0].messages[1].content}`;
+      assert.match(prompt,/JSON/i,item.provider);assert.match(prompt,/\{"ok":true\}/,item.provider);
+      assert.equal(Boolean(captured[0].response_format),item.jsonMode,item.provider);
+      assert.equal(captured[0].max_tokens<=32,true,item.provider);
+    }finally{globalThis.fetch=original;f.sql.close();}
+  }
+});
+
+test('connection tests reject plain OK text, false status and extra JSON fields',async()=>{
+  for(const content of ['OK','{"ok":false}','{"ok":true,"extra":true}','prefix {"ok":true}']){
+    const f=setup();await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));const original=globalThis.fetch;
+    globalThis.fetch=async(url,init={})=>{
+      const parsed=new URL(String(url));
+      if(parsed.hostname==='cloudflare-dns.com'){
+        const answer=parsed.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[];
+        return Response.json({Status:0,Answer:answer});
+      }
+      return Response.json({choices:[{finish_reason:'stop',message:{content}}],usage:{prompt_tokens:8,completion_tokens:4}});
+    };
+    try{
+      const result=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+      assert.equal(result.status,200);assert.equal(result.body.ok,false,content);assert.equal(result.body.jsonValid,false,content);assert.equal(result.body.errorCategory,'connection_check_failed',content);
+    }finally{globalThis.fetch=original;f.sql.close();}
+  }
 });
