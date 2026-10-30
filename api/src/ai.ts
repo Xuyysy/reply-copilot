@@ -3,14 +3,42 @@ import { ApiFailure } from "./types";
 import { sessionFor, takeRate } from "./auth";
 import { jsonBody, nowMs, sha256 } from "./security";
 import { response } from "./http";
-import { finishGeneration, reserveGeneration } from "./quota";
+import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
 import { normalizeAiInput } from "./ai-input.js";
+import { decryptProviderApiKey } from "./ai-model-crypto";
+import { requestConfiguredModel } from "./ai-model-provider.js";
 
 export const DEEPSEEK_MODEL = "deepseek-flash";
+
+async function activeProvider(env: Env): Promise<{ config: any; apiKey: string } | null> {
+  const pointer = await env.DB.prepare("SELECT active_config_id,active_version FROM ai_provider_runtime WHERE id=1").first<{active_config_id:string|null;active_version:number|null}>();
+  if (!pointer?.active_config_id || !pointer.active_version) return null;
+  if (!env.AI_CONFIG_ENCRYPTION_KEY) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型的加密配置不可用，请联系管理员。");
+  const row = await env.DB.prepare(`SELECT c.archived,v.provider,v.protocol,v.base_url,v.model_id,v.api_key_ciphertext,v.input_rate_micro_usd_per_million,v.output_rate_micro_usd_per_million,v.max_output_tokens,v.timeout_ms,v.options_json,v.endpoint_addresses_json
+    FROM ai_provider_configs c JOIN ai_provider_config_versions v ON v.config_id=c.id AND v.version=? WHERE c.id=?`).bind(pointer.active_version,pointer.active_config_id).first<any>();
+  if (!row || row.archived || !row.api_key_ciphertext) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。");
+  let options: Record<string, unknown>, endpointAddresses: string[];
+  try { options=JSON.parse(row.options_json); endpointAddresses=JSON.parse(row.endpoint_addresses_json); } catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。"); }
+  const config={configId:pointer.active_config_id,version:pointer.active_version,provider:row.provider,protocol:row.protocol,baseUrl:row.base_url,modelId:row.model_id,maxOutputTokens:row.max_output_tokens,timeoutMs:row.timeout_ms,options,endpointAddresses,inputRateMicroUsdPerMillion:row.input_rate_micro_usd_per_million,outputRateMicroUsdPerMillion:row.output_rate_micro_usd_per_million};
+  let apiKey: string;
+  try { apiKey=await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY,pointer.active_config_id,pointer.active_version,row.api_key_ciphertext); }
+  catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型加密配置不可用，请联系管理员。"); }
+  return {config,apiKey};
+}
+
+function configuredReservation(model: {config:any}, system: string, user: string): number {
+  const inputBytes = new TextEncoder().encode(system).length + new TextEncoder().encode(user).length;
+  const tokens = Math.ceil(inputBytes / 2); // conservative for multilingual prompts
+  const config=model.config;
+  const cost=Math.ceil(tokens*config.inputRateMicroUsdPerMillion/1_000_000+config.maxOutputTokens*config.outputRateMicroUsdPerMillion/1_000_000);
+  const reserve=Math.ceil(cost*2);
+  if(!Number.isSafeInteger(reserve)||reserve<1)throw new ApiFailure(503,"BUDGET_NOT_CONFIGURED","AI 成本预留无效。");
+  return reserve;
+}
 
 function aiMode(env:Env): "mock"|"real" {
   const mode=env.AI_MODE || (env.AI_MOCK==="1"?"mock":"production");
@@ -65,14 +93,17 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  if(mode==="real"&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
-  const budgetReserve=reservationCost(env,prompts.system,prompts.user,mode);
+  const prior=await checkGenerationReplay(env,session,input.requestId,hash);
+  if(prior?.kind==="replay")return response({requestId:input.requestId,raw:prior.raw,quota:prior.quota},200,env,request);
+  const configuredModel=mode==="real"?await activeProvider(env):null;
+  if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
+  const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
   const execution = await executeAiGeneration({
-    reserve: () => reserveGeneration(env, session, input.requestId, hash, budgetReserve),
-    provider: () => provider(env, prompts.system, prompts.user, mode),
+    reserve: () => reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null),
+    provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve}) : provider(env, prompts.system, prompts.user, mode),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
-    if(mode==="real") {
+    if(mode==="real"&&!configuredModel) {
       try { validateDeepSeekResult(result); }
       catch { throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","AI 服务返回格式无效，请重试。"); }
     }

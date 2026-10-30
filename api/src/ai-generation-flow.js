@@ -16,7 +16,7 @@ export async function executeAiGeneration({ reserve, provider, validate, finish 
   } catch (error) {
     // A confirmed provider/validation failure refunds the credit. Preserve
     // usage when available so any incurred model cost remains accounted for.
-    await finish(null, result?.usage).catch(() => {});
+    await finish(null, result?.usage ?? error?.usage).catch(() => {});
     return { kind: "failed", error };
   }
 

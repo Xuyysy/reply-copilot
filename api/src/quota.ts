@@ -85,7 +85,7 @@ async function replay(env: Env, userId: string, requestId: string, hash: string,
   throw new ApiFailure(503, "GENERATION_STATUS_UNKNOWN", "这次生成的结果尚未确认，请稍后重试或联系支持。");
 }
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number): Promise<Reservation> {
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null): Promise<Reservation> {
   const now = nowMs();
   await releaseExpiredDeliveryReservations(env, now, session.user_id);
   const prior = await existing(env, session.user_id, requestId);
@@ -110,13 +110,14 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   const batch = [
     env.DB.prepare("INSERT INTO site_daily_usage(quota_date,used) VALUES(?,0) ON CONFLICT(quota_date) DO NOTHING").bind(date),
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
-    env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase)
-      SELECT ?,?,?,?,'reserved',0,?,?,?, ?,?,'generating' FROM credit_accounts
+    env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase,provider_config_id,provider_config_version)
+      SELECT ?,?,?,?,'reserved',0,?,?,?,?,?,'generating',?,? FROM credit_accounts
       WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved>0
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
+      AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?))
       AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND status='reserved' AND (COALESCE(generation_phase,'unknown')<>'awaiting_delivery' OR raw_response IS NULL OR response_expires_at IS NULL))
-      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,session.user_id,session.user_id,budgetDay,budgetReserve,budgetLimit,session.user_id),
+      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,providerSnapshot?.id??null,providerSnapshot?.version??null,session.user_id,session.user_id,budgetDay,budgetReserve,budgetLimit,providerSnapshot?.id??null,providerSnapshot?.id??null,providerSnapshot?.version??null,session.user_id),
     env.DB.prepare(`INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,credits,state,created_at)
       SELECT ?,?,?,?,1,'reserved',? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)
       ON CONFLICT(user_id,request_id) DO NOTHING`).bind(allocationId,session.user_id,requestId,lot.id,now,session.user_id,requestId,nonce),
@@ -149,16 +150,24 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   return { kind: "new", quota: await balance(env, session.user_id) };
 }
 
-export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}): Promise<void> {
+export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string): Promise<Reservation | null> {
+  const now = nowMs();
+  await releaseExpiredDeliveryReservations(env, now, session.user_id);
+  const prior = await existing(env, session.user_id, requestId);
+  return prior ? replay(env, session.user_id, requestId, requestHash, prior, now) : null;
+}
+
+
+export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number;usageQuality?:"verified"|"estimated"}): Promise<void> {
   const now=nowMs(), ref=uuid();
-  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved'").bind(userId,requestId).first<{budget_reserved_micro_usd:number}>();
+  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd,provider_config_id,provider_config_version FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved'").bind(userId,requestId).first<{budget_reserved_micro_usd:number;provider_config_id:string|null;provider_config_version:number|null}>();
   if(!row)return;
   const actual=usage&&Number.isSafeInteger(usage.costMicroUsd)&&usage.costMicroUsd>=0?usage.costMicroUsd:row.budget_reserved_micro_usd;
   if(raw){
     await env.DB.batch([
       env.DB.prepare("UPDATE ai_requests SET raw_response=?,generation_phase='awaiting_delivery',response_expires_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(raw,now+10*60_000,ref,userId,requestId),
       env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
-      env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,userId,requestId,ref),
+      env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version,usage_quality) SELECT ?,?,?,?,?,?,?,provider_config_id,provider_config_version,? FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=? ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,usage?.usageQuality||"verified",userId,requestId,ref),
     ]);return;
   }
   const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
@@ -170,7 +179,7 @@ export async function finishGeneration(env: Env, userId: string, requestId: stri
     env.DB.prepare("UPDATE credit_accounts SET free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now,userId,requestId,ref),
     env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
     env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_release',0,0,?,?,? WHERE EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='released' AND released_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"确认生成失败，释放额度预占",now,userId,requestId,now,userId,requestId,ref),
-    env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) SELECT ?,?,?,?,?,?,? WHERE ?>0 AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?) ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown-estimated",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,actual,userId,requestId,ref),
+    env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version,usage_quality) SELECT ?,?,?,?,?,?,?,provider_config_id,provider_config_version,? FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=? AND ?>0 ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown-estimated",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,usage?.usageQuality||"estimated",userId,requestId,ref,actual),
   ]);
 }
 

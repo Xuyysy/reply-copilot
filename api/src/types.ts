@@ -7,6 +7,7 @@ export interface Env {
   SITE_DAILY_CAP?: string;
   AUTH_HASH_SECRET?: string;
   DEEPSEEK_API_KEY?: string;
+  AI_CONFIG_ENCRYPTION_KEY?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;

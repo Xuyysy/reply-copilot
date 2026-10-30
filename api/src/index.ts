@@ -16,6 +16,7 @@ import { acknowledgeDelivery } from "./quota";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
 import { xiaodouConnectivityDiagnostic } from "./xiaodou-connectivity-diagnostic";
+import { listAiModels, saveAiModel, activateAiModel, rollbackAiModel, setAiModelArchived, testAiModelConnection, testAiModelGeneration } from "./admin-ai-models";
 
 async function feedback(request: Request, env: Env): Promise<Response> {
   const { session, token } = await sessionFor(request, env);
@@ -74,6 +75,14 @@ export default {
       if (request.method === "POST" && path === "/v1/orders") return await createOrder(request,env);
       if(request.method==="POST"&&path==="/v1/payments/mk99/notify")return await mk99Notify(request,env);
       if(request.method==="POST"&&path==="/v1/admin/mk99-platform-check")return await adminMk99Check(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/ai-models")return await listAiModels(request,env);
+      if(request.method==="POST"&&path==="/v1/admin/ai-models")return await saveAiModel(request,env);
+      if(request.method==="POST"&&path==="/v1/admin/ai-models/rollback")return await rollbackAiModel(request,env);
+      const aiModelRoute=path.match(/^\/v1\/admin\/ai-models\/([0-9a-f-]{36})(?:\/(test-connection|test-generation|activate|archive))?$/i);
+      if(request.method==="POST"&&aiModelRoute?.[2]==="test-connection")return await testAiModelConnection(request,env,aiModelRoute[1]);
+      if(request.method==="POST"&&aiModelRoute?.[2]==="test-generation")return await testAiModelGeneration(request,env,aiModelRoute[1]);
+      if(request.method==="POST"&&aiModelRoute?.[2]==="activate")return await activateAiModel(request,env,aiModelRoute[1]);
+      if(request.method==="POST"&&aiModelRoute?.[2]==="archive")return await setAiModelArchived(request,env,aiModelRoute[1]);
       if (request.method === "GET" && path === "/v1/payments/xiaodou/epay/notify") return await epayNotify(request,env);
       if (request.method === "POST" && path === "/v1/payments/xiaodou/webhook") return await xiaodouWebhook(request,env);
       if (request.method === "POST" && path === "/v1/admin/diagnostics/xiaodou-connectivity") return await xiaodouConnectivityDiagnostic(request,env);
