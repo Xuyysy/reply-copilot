@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {fixture} from './helpers/payment-v2.mjs';
+import {fixture,worker} from './helpers/payment-v2.mjs';
+import {HostedAIClient} from '../../services/hosted-ai-client.js';
+import {parseAIOutput} from '../../utils/output-parser.js';
 
 const configId='22222222-2222-4222-8222-222222222222';
 const apiKey='test-only';
@@ -16,11 +18,11 @@ function setup(){
  f.sql.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES('extension-ai-session',?,'test-user','extension',1,?)").run(createHash('sha256').update(extensionToken).digest('hex'),Date.now()+600000);
  return f;
 }
-async function saveModel(f){
+async function saveModel(f, overrides={}){
  const original=globalThis.fetch;
  globalThis.fetch=async url=>{const parsed=new URL(String(url));if(parsed.hostname!=='cloudflare-dns.com')throw new Error('unexpected_upstream');const answer=parsed.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[];return Response.json({Status:0,Answer:answer});};
  try{
-  const response=await f.call('/v1/admin/ai-models',{body:operation({id:configId,name:'Pinned model',provider:'deepseek',protocol:'openai_chat',baseUrl:'https://api.deepseek.com/v1',modelId:'deepseek-chat',apiKey,inputRateUsdPerMillion:0.3,outputRateUsdPerMillion:1.32,maxOutputTokens:512,timeoutMs:10000,options:{}})});
+  const response=await f.call('/v1/admin/ai-models',{body:operation({id:configId,name:'Pinned model',provider:'deepseek',protocol:'openai_chat',baseUrl:'https://api.deepseek.com/v1',modelId:'deepseek-chat',apiKey,inputRateUsdPerMillion:0.3,outputRateUsdPerMillion:1.32,maxOutputTokens:512,timeoutMs:10000,options:{},...overrides})});
   assert.equal(response.status,200,JSON.stringify(response.body));
  }finally{globalThis.fetch=original;}
  f.sql.prepare('UPDATE ai_provider_runtime SET active_config_id=?,active_version=1 WHERE id=1').run(configId);
@@ -50,5 +52,65 @@ test('managed AI generation pins its provider version through a switch, charges 
   const replay=await f.call('/v1/ai/generate',{headers,body});assert.equal(replay.status,200,JSON.stringify(replay.body));assert.equal(replay.body.raw,generated.body.raw);
   assert.equal(modelCalls,1);assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts WHERE user_id=?').get('test-user').free_balance,199);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id=?").get(`test-user:${requestId}`).n,1);
+ }finally{globalThis.fetch=original;f.sql.close();}
+});
+
+test('Qwen without score survives backend normalization, plugin parsing and duplicate delivery ACK with one debit',async()=>{
+ const f=setup();const original=globalThis.fetch;let modelCalls=0,acks=0;
+ try{
+  await saveModel(f,{provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen3.7-flash'});
+  globalThis.fetch=async(url)=>{
+   const parsed=new URL(String(url));
+   if(parsed.hostname==='cloudflare-dns.com')return Response.json({Status:0,Answer:parsed.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});
+   assert.equal(parsed.hostname,'dashscope-intl.aliyuncs.com');modelCalls++;
+   assert.equal(Object.hasOwn(JSON.parse(output),'score'),false);
+   return Response.json({choices:[{finish_reason:'stop',message:{content:output}}],usage:{prompt_tokens:30,completion_tokens:45}});
+  };
+  const requestId=randomUUID();
+  const client=new HostedAIClient({config:{hostedApiUrl:f.env.API_ORIGIN},accountClient:{request:async(path,options)=>{
+   const result=await f.call(path,{body:options.body,headers:{Cookie:'',Authorization:`Bearer ${extensionToken}`}});
+   assert.equal(result.status,200,JSON.stringify(result.body));
+   if(path==='/v1/ai/generate'){
+    assert.equal(JSON.parse(result.body.raw).score,null);
+    assert.deepEqual(parseAIOutput(result.body.raw),parseAIOutput(JSON.stringify(parseAIOutput(result.body.raw))));
+   }else{acks++;}
+   return result.body;
+  }}});
+  const input={requestId,sourceText:'A public post. 中文 🙂\nSecond line.',sourceUrl:'https://x.com/example/status/123'};
+  const raw=await client.generateReplies(input);
+  assert.equal(await client.generateReplies(input),raw);
+  assert.equal(acks,2);assert.equal(modelCalls,1);
+  const row=f.sql.prepare('SELECT status,generation_phase,consumed,delivery_confirmed_at FROM ai_requests WHERE request_id=?').get(requestId);
+  assert.equal(row.status,'succeeded');assert.equal(row.consumed,1);assert.ok(row.delivery_confirmed_at);
+  assert.equal(f.sql.prepare('SELECT free_balance,free_generation_reserved FROM credit_accounts').get().free_balance,199);
+  assert.equal(f.sql.prepare('SELECT free_generation_reserved FROM credit_accounts').get().free_generation_reserved,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id=?").get(`test-user:${requestId}`).n,1);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM ai_usage_costs WHERE request_id=?').get(requestId).n,1);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM ai_credit_allocations WHERE request_id=? AND state='consumed'").get(requestId).n,1);
+ }finally{globalThis.fetch=original;f.sql.close();}
+});
+
+test('unacknowledged normalized Qwen output expires and releases only its reservation while preserving provider cost',async()=>{
+ const f=setup();const original=globalThis.fetch;
+ try{
+  await saveModel(f,{provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen3.7-flash'});
+  globalThis.fetch=async(url)=>new URL(String(url)).hostname==='cloudflare-dns.com'
+   ?Response.json({Status:0,Answer:new URL(String(url)).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]})
+   :Response.json({choices:[{finish_reason:'stop',message:{content:output}}],usage:{prompt_tokens:30,completion_tokens:45}});
+  const requestId=randomUUID(),headers={Cookie:'',Authorization:`Bearer ${extensionToken}`};
+  const result=await f.call('/v1/ai/generate',{headers,body:{requestId,post:{text:'Expired delivery sample.'}}});
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  const cost=f.sql.prepare('SELECT estimated_cost_micro_usd FROM ai_usage_costs WHERE request_id=?').get(requestId).estimated_cost_micro_usd;
+  assert.ok(cost>0);
+  f.sql.prepare('UPDATE ai_requests SET response_expires_at=? WHERE request_id=?').run(Date.now()-1,requestId);
+  await worker.scheduled({},f.env);await worker.scheduled({},f.env);
+  const row=f.sql.prepare('SELECT status,consumed,raw_response FROM ai_requests WHERE request_id=?').get(requestId);
+  assert.equal(row.status,'upstream_failed');assert.equal(row.consumed,0);assert.equal(row.raw_response,null);
+  assert.deepEqual({...f.sql.prepare('SELECT free_balance,free_generation_reserved FROM credit_accounts').get()},{free_balance:200,free_generation_reserved:0});
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_release' AND reference_id=?").get(`test-user:${requestId}`).n,1);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,0);
+  assert.equal(f.sql.prepare('SELECT estimated_cost_micro_usd FROM ai_usage_costs WHERE request_id=?').get(requestId).estimated_cost_micro_usd,cost);
+  const ack=await f.call(`/v1/ai/requests/${requestId}/delivered`,{headers,body:{requestId}});
+  assert.equal(ack.status,409);
  }finally{globalThis.fetch=original;f.sql.close();}
 });

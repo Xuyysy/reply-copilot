@@ -21,7 +21,9 @@ export function parseAIOutput(content) {
     thoughtful: data.replies.sharp,
   } : data.replies) : data.replies;
   for (const style of REPLY_STYLES) if (typeof replies[style] !== "string" || !replies[style].trim()) fail();
-  if (data.score !== undefined && (!Number.isInteger(data.score) || data.score < 0 || data.score > 100)) fail();
+  // An omitted optional score normalizes to null; accept that sentinel when
+  // the server's canonical result is parsed again before delivery ACK.
+  if (data.score !== undefined && data.score !== null && (!Number.isInteger(data.score) || data.score < 0 || data.score > 100)) fail();
   const language = isLegacy && data.language === undefined ? "auto" : data.language;
   if (!(["auto", "zh", "en"].includes(language))) fail();
   if (!isLegacy && !Object.hasOwn(data, "quoteCandidate") && !Object.hasOwn(data, "quote_candidate")) fail();

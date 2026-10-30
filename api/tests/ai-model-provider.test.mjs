@@ -35,6 +35,10 @@ test("all model output is normalized through the existing plugin response contra
   const value = validateModelOutput(canonical);
   assert.equal(value.replies.natural, "谢谢分享这个细节。");
   assert.equal(value.quoteCandidate, null);
+  assert.equal(value.score, null);
+  assert.deepEqual(validateModelOutput(JSON.stringify(value)), value);
+  for (const score of [null, 0, 100]) assert.equal(validateModelOutput(JSON.stringify({ ...JSON.parse(canonical), score })).score, score);
+  for (const score of ["90", false, {}, [], -1, 101, 0.5]) assert.throws(() => validateModelOutput(JSON.stringify({ ...JSON.parse(canonical), score })));
   for (const invalid of ["```json\n" + canonical + "\n```", canonical.slice(0, -10), "{}", "{} trailing"]) assert.throws(() => validateModelOutput(invalid));
   const duplicate = JSON.parse(canonical); duplicate.replies.thoughtful = duplicate.replies.natural;
   assert.throws(() => validateModelOutput(JSON.stringify(duplicate)));
