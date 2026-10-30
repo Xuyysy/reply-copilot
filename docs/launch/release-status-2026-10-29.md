@@ -1,5 +1,17 @@
 # x-Reply-Helper｜发布与更新状态（2026-10-29；更新于 2026-10-30）
 
+## 2026-10-30｜Production 密码找回只读核查（代码与环境齐全；端到端未验收）
+
+- **代码已核验：** `web/src/components/auth/AuthPanel.tsx` 有“忘记密码”表单，分别 POST `/v1/auth/request-password-reset`（邮箱）和 `/v1/auth/reset-password`（邮箱、6 位验证码、新密码）；`api/src/index.ts` 正确注册两条路由；`api/src/password-auth.ts` 创建短期验证码记录、调用 `sendCode(..., "reset")`、校验验证码并更新密码哈希、撤销旧会话和删除验证码。新密码至少 12 字符；验证码有效期 10 分钟、校验尝试限制 5 次，重发同邮箱有 60 秒冷却。
+- **Cloudflare Production 只读确认：** `reply-copilot-api-production` Worker 仍部署 `911038c0-36a9-4062-96b9-38de2b26ef55`（100% 流量），Bindings 中存在 `MAIL_API_KEY`（Secret）、`MAIL_FROM`、`PASSWORD_PEPPER`（Secret），不读取任何密钥值；`WEB_ORIGIN` 指向正式站。Production D1 存在 `password_resets` 表；只查匿名聚合显示 **待处理记录 0 条**。成功重置会清除验证码，故不能由 0 条推断历史上从未成功使用。
+- **Resend 只读确认：** 正式发件域 `x-reply-helper.top` verified/sending enabled；最近可见的 12 封邮件标题均为注册验证码、状态为 delivered。**未发现密码重置邮件的实际投递样本**；注册邮件成功不等于重置邮件端到端测试通过。
+- **状态判断：** 当前代码与配置足以支持密码找回功能，具备可用条件；未独立验证浏览器前端现场加载、重置邮件抵达、用户完成改密并用新密码重新登录。不能将“配置正常”写成“Production 密码找回验收通过”。
+- **建议最终验证：** 只使用经授权的隔离测试账号，手动走官网“忘记密码”→收验证码→设置新密码→新密码登录，确认旧密码与旧会话失效；不可对真实用户账号或无授权邮箱发起操作。本轮未发送邮件、未修改用户/密码/数据库/部署。
+
+---
+
+
+
 ## 2026-10-30｜Production 管理后台三个业务表格滚动/固定表头（已部署；待人工验收）
 
 - **GitHub 独立核实：** 分支 `codex/production-admin-table-scroll` 当前 HEAD 为 [`98155453560209f3c77de069c34735fccb444a65`](https://github.com/Xuyysy/reply-copilot/commit/98155453560209f3c77de069c34735fccb444a65)（2026-10-30 10:28:43 UTC），父提交 `2d58c42e`。本次提交涉及 `web/src/components/admin/AdminDashboard.tsx`、`SecurityPaymentPanel.tsx`、`web/src/lib/api.ts`、`web/src/styles/global.css`，并新增 `web/tests/admin-table-scroll.test.mjs`；仅涉及网站前端文件。三个表格为“用户管理”“最近额度流水”“充值订单”。
