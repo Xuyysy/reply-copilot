@@ -1,4 +1,4 @@
-> **当前发布状态（2026-10-29）：** 用户确认 x-Reply-Helper **0.3.1 已在 Chrome Web Store 正式发布**；无 `debugger` 的 **0.3.2** 已由用户在真实 Chrome/X 中试用、正准备商店更新，但**未确认 0.3.2 已公开发布**。下方 0.2.0-beta 内容为历史开发说明，不代表现行 Production 功能。详见 [2026-10-29 发布状态与隐私披露待办](docs/launch/release-status-2026-10-29.md)。
+> **当前商店正式版本（2026-10-30，用户确认）：** x-Reply-Helper 已在原 Chrome Web Store 条目 **正式更新至 0.3.2**（原扩展 ID `fgfjajofkapebgphfidblngcjomkbdaj`）。0.3.1 为此前正式发布的历史版本，0.3.2 不再是“待提交/待审核”的商店候选。此前测试的 0.3.2 方向为移除 `debugger`；最终商店安装包在本次文档同步中未独立下载校验。**Chrome 商店版本更新不等于 Production Worker/Pages 或多模型管理功能已部署。** 下方 0.2.0-beta 内容仅为历史开发说明，不能作为现行产品现状。详见 [10 月 29 日发布记录及 10 月 30 日更新](docs/launch/release-status-2026-10-29.md)。
 
 ---
 
