@@ -1,5 +1,17 @@
 # x-Reply-Helper｜发布与更新状态（2026-10-29；更新于 2026-10-30）
 
+## 2026-10-30｜Production AI 多模型管理上线，Qwen 激活并通过用户验收
+
+- **发布与人工验收：** 用户报告 AI 模型管理与成本统计已部署 Production，随后明确确认“可以了没问题”。这属于用户本人对最新 Production 功能的验收反馈；不能推断所有长期运行问题或外部服务账单均已独立审计。
+- **GitHub Production 发布：** 功能发布分支 `codex/production-ai-model-management`，提交 [`2d58c42e7e6d44382699c29809c4c586afe5fba5`](https://github.com/Xuyysy/reply-copilot/commit/2d58c42e7e6d44382699c29809c4c586afe5fba5)。兼容旧插件的 API 层规范化输出省略可选 `score:null`，兼容旧结果重放；用户转述 Codex 测试 **675/675 通过**，并声明旧 0.3.1 ZIP 解析器通过回归。本次记录不等于重新独立执行测试。
+- **Production Cloudflare 独立只读核验：** Worker `reply-copilot-api-production` 当前 deployment `d58118cc-a49e-45db-8041-3394ef49f5a7`，version `911038c0-36a9-4062-96b9-38de2b26ef55` 100% 流量；D1 `d9df7d23-9b9c-44ac-a33a-c24474c15691` 已记录 `0018_ai_provider_management.sql`。Worker Secrets 绑定包含 `AI_CONFIG_ENCRYPTION_KEY` 和 `DEEPSEEK_API_KEY`（仅核实存在，不读取值）。`AI_MODE=production`、`ADMIN_PORTAL_ENABLED=1`、`PAYMENTS_ENABLED=1`、D1 `active_merchant=mk99` / `purchase_enabled=1`。
+- **当前正式模型状态（后续已变更）：** 初次 Production 部署时激活指针为空，保持 Legacy DeepSeek / `deepseek-flash`。**用户验收后，本次只读查询证实当前指针已切换到已保存的 Qwen v1（`provider=qwen`, `model_id=qwen3.7-flash`），不再将 Legacy DeepSeek 写作当前模型。** Secret 值和具体密文未读取。未在此轮主动触发真实 AI 请求。
+- **Production Pages：** 用户转述部署 ID `f42e556d-975a-4049-8aa1-6b32ad42cfc0`，本次同步未独立复核 Pages 元数据、终端浏览器显示或精确资产哈希。
+- **商店版本独立记录：** 用户同日确认 Chrome Web Store 正式版为 **0.3.2**，原商店 ID `fgfjajofkapebgphfidblngcjomkbdaj`。Codex 的“旧 0.3.1 兼容”是对历史已发布客户端的向后兼容保障，不应误写为“商店当前仍是 0.3.1”。
+- **边界与回退：** DeepSeek 旧服务 Secret 仍在，配置设计允许回退；是否能随时无故障回滚还取决于实际权限和生产运行状态。继续观察模型输出质量、生成与 ACK 幂等、额度只扣一次、历史成本、支付链路以及隐私政策披露；不把本次用户验收等同于全面安全/合规审计。GitHub 状态文档更新不会修改生产 Worker/Pages、D1、模型激活配置或 Chrome 商店包。
+  
+---
+
 > **最新商店状态（2026-10-30，用户亲自确认）：Chrome Web Store 的 x-Reply-Helper 已从已发布的 0.3.1 更新至正式版 0.3.2。** 此前文档中“0.3.2 待审核/尚未发布/暂不上传”均属于 **2026-10-29 的历史阶段记录**，不是今天的最新状态。
 
 ## 2026-10-30｜Chrome Web Store 0.3.2 正式发布确认
