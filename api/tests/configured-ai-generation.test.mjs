@@ -71,7 +71,7 @@ test('Qwen without score survives backend normalization, plugin parsing and dupl
    const result=await f.call(path,{body:options.body,headers:{Cookie:'',Authorization:`Bearer ${extensionToken}`}});
    assert.equal(result.status,200,JSON.stringify(result.body));
    if(path==='/v1/ai/generate'){
-    assert.equal(JSON.parse(result.body.raw).score,null);
+    assert.equal(Object.hasOwn(JSON.parse(result.body.raw),'score'),false);
     assert.deepEqual(parseAIOutput(result.body.raw),parseAIOutput(JSON.stringify(parseAIOutput(result.body.raw))));
    }else{acks++;}
    return result.body;

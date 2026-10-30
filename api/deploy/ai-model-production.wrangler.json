@@ -1,0 +1,21 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "reply-copilot-api-production",
+  "main": "../src/index.ts",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": false,
+  "vars": {},
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "reply-copilot-production",
+    "database_id": "d9df7d23-9b9c-44ac-a33a-c24474c15691",
+    "migrations_dir": "../migrations"
+  }],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "redact_query_string": true,
+    "logs": { "invocation_logs": false }
+  },
+  "triggers": { "crons": ["0 3 * * *"] }
+}

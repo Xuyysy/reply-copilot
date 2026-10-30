@@ -10,7 +10,7 @@ import { executeAiGeneration } from "./ai-generation-flow.js";
 
 import { normalizeAiInput } from "./ai-input.js";
 import { decryptProviderApiKey } from "./ai-model-crypto";
-import { requestConfiguredModel } from "./ai-model-provider.js";
+import { requestConfiguredModel, serializeModelOutput } from "./ai-model-provider.js";
 
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
@@ -95,7 +95,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const mode=aiMode(env);
   const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
   const prior=await checkGenerationReplay(env,session,input.requestId,hash);
-  if(prior?.kind==="replay")return response({requestId:input.requestId,raw:prior.raw,quota:prior.quota},200,env,request);
+  if(prior?.kind==="replay")return response({requestId:input.requestId,raw:serializeModelOutput(prior.raw),quota:prior.quota},200,env,request);
   const configuredModel=mode==="real"?await activeProvider(env):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
@@ -107,13 +107,13 @@ export async function generate(request: Request, env: Env): Promise<Response> {
       try { validateDeepSeekResult(result); }
       catch { throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","AI 服务返回格式无效，请重试。"); }
     }
-    // The extension remains the sole parser of the shared structured response.
-    const parsed = JSON.parse(result.raw);
-    if (!parsed?.replies?.natural || !parsed?.replies?.light_humor || !parsed?.replies?.thoughtful) throw new Error("Invalid output");
+    // Validate the full shared contract for legacy and managed providers and
+    // persist a wire representation accepted by both released client parsers.
+    result.raw = serializeModelOutput(result.raw);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => finishGeneration(env, session.user_id, input.requestId, raw, usage),
   });
-  if (execution.kind === "replay") return response({ requestId: input.requestId, raw: execution.raw, quota: execution.quota }, 200, env, request);
+  if (execution.kind === "replay") return response({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), quota: execution.quota }, 200, env, request);
   if (execution.kind === "failed") {
     const error = execution.error;
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");

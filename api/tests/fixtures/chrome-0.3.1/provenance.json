@@ -1,0 +1,10 @@
+{
+  "source": "reply-copilot-production-0.3.1.zip",
+  "version": "0.3.1",
+  "zipSha256": "e38563797a6d1d98d331af5b01541e41122523e583b241214bdb9252292419a5",
+  "files": {
+    "utils/output-parser.js": "91ffc3ab93dfb2abaa01164b863f5b4a6130afee65fe6df84a86ccbefca9b0b2",
+    "utils/errors.js": "0870d062931f55d855d0e9967f37e1358aa76ee733d3aeeb9a6b152c3f3d6fee",
+    "domain/reply-result.js": "38c69ea5079190df92dbc46320825d0556e4083d498c592ec5953ec447e6f08e"
+  }
+}

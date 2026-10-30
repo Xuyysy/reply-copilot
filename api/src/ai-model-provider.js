@@ -31,6 +31,18 @@ export function validateModelOutput(raw) {
   return parsed;
 }
 
+/** Keep the optional score absent on the wire for released 0.3.1 clients.
+ * Internally the parser still normalizes absence to null. Never strip any
+ * required field or an invalid score to make an invalid response pass. */
+export function serializeModelOutput(raw) {
+  const parsed = validateModelOutput(raw);
+  if (parsed.score === null) {
+    const { score, ...compatible } = parsed;
+    return JSON.stringify(compatible);
+  }
+  return JSON.stringify(parsed);
+}
+
 export function buildChatCompletionRequest(config, system, user, { testMode = false } = {}) {
   const body = {
     model: config.modelId,
@@ -207,7 +219,7 @@ export async function requestConfiguredModel({ config, apiKey, system, user, inp
       try { parsed = validateModelOutput(choice.message.content); }
       catch { throw new ModelProviderError("invalid_output", upstream.status, reservedCostMicroUsd, usage); }
     }
-    return { raw: parsed ? JSON.stringify(parsed) : "", content: choice.message.content, finishReason: choice.finish_reason, httpStatus: upstream.status, usage };
+    return { raw: parsed ? serializeModelOutput(choice.message.content) : "", content: choice.message.content, finishReason: choice.finish_reason, httpStatus: upstream.status, usage };
   } finally {
     clearTimeout(timer);
   }
