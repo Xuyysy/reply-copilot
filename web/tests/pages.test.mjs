@@ -100,3 +100,17 @@ test("interactive pages hydrate as isolated React islands", () => {
   assert.match(admin, /AlertDialog/);
   assert.doesNotMatch(admin, /localStorage|window\.confirm|window\.alert/);
 });
+
+test('privacy policy is public, bilingual and reflects hosted models, retention and manual data requests',()=>{
+ const privacy=page('privacy'),feedback=page('feedback');
+ for(const text of ['第三方 AI 服务','third-party AI service','Cloudflare','Resend','MK99','10 分钟','30 天','reviewed manually','没有账户自助删除功能'])assert.ok(privacy.includes(text),text);
+ assert.doesNotMatch(privacy,/隐私政策草案|Draft privacy policy|尚未经过经营者|require review before launch/);
+ assert.match(privacy,/href="mailto:zake6678@outlook\.com"/);
+ assert.match(privacy,/href="\/feedback\/"/);
+ assert.match(feedback,/href="mailto:zake6678@outlook\.com"/);
+ assert.match(feedback,/not signed in/);
+ assert.doesNotMatch(privacy,/no-reply@|xuyaoyang1@outlook|one-click deletion|DeepSeek|Qwen|Gemini|qwen3/i);
+ assert.match(privacy,/data-zh="隐私政策"/);
+ assert.match(privacy,/>Privacy Policy<\/h1>/);
+ assert.match(privacy,/does not automatically publish X content/);
+});
