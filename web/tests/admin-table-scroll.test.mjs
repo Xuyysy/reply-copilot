@@ -74,6 +74,8 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   }
   await evaluate('window.__mount(20,"en")');await until('!!document.querySelector(\'[role="tablist"]\')');await tab('users');
   await click(`${panel}.querySelector('tbody input[type="checkbox"]')`);
+  // Wait for the controlled React checkbox commit, not just mouse dispatch.
+  await until(`${panel}.querySelector('tbody input[type="checkbox"]').checked===true`);
   assert.equal(await evaluate(`${panel}.querySelector('tbody input[type="checkbox"]').checked`),true);
   await click(`[...${panel}.querySelectorAll('button')].find(el=>el.textContent.includes('CSV'))`);await until('window.__downloads.length===1');
   await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('person0@example.test'));
