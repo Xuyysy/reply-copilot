@@ -26,7 +26,7 @@ function safeDiagnostic(value: unknown): ApiDiagnostic | undefined {
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!API_BASE) throw new ApiError("官网 API 地址尚未配置。", "API_NOT_CONFIGURED", 503);
   try {
-    return await withRequestTimeout(async (signal) => {
+    return await withRequestTimeout(async (signal: AbortSignal) => {
       let csrfHeader: Record<string,string> = {};
       if (options.method?.toUpperCase() === "POST" && !["/v1/auth/register", "/v1/auth/verify-registration", "/v1/auth/login", "/v1/auth/request-password-reset", "/v1/auth/reset-password"].includes(path)) {
         const csrfResponse = await fetch(`${API_BASE}/v1/auth/csrf`, { credentials: "include", signal });

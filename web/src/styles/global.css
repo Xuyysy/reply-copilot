@@ -139,6 +139,28 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .app-muted { color: var(--muted-foreground); }
 .data-table-wrap { width: 100%; overflow-x: auto; }
 .data-table-wrap table { min-width: 690px; }
+/* Only the three operational lists opt in. Table's own container owns both
+   axes, so its sticky header never binds to a second overflow ancestor. */
+.data-table-wrap.admin-list-scroll { min-width: 0; overflow: visible; }
+.admin-list-scroll > [data-slot="table-container"] {
+  max-height: 500px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.admin-list-scroll [data-slot="table-header"] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--card);
+  box-shadow: 0 1px 0 var(--border);
+}
+@media (max-width: 640px), (max-height: 650px) {
+  .admin-list-scroll > [data-slot="table-container"] {
+    max-height: min(500px, 65vh);
+    max-height: min(500px, 65dvh);
+  }
+}
 .section-kicker { color:#3672ab; font-size:12px; font-weight:800; letter-spacing:.12em; text-transform:uppercase; }
 @media (max-width: 800px) { .header-inner { flex-wrap: wrap; padding: 9px 0; } .nav { order: 3; width: 100%; display: flex; justify-content: space-between; gap: 8px; font-size: 12px; padding: 3px 0 7px; } .hero { grid-template-columns: 1fr; padding: 64px 0; } .product-frame { transform: none; } .grid-3, .stat-grid { grid-template-columns: 1fr; } .grid-span-2 { grid-column: auto; } .section { padding: 62px 0; } }
 @media (max-width: 520px) { .container { width: min(100% - 30px, 1160px); } .header-inner { min-height: 64px; } .brand { font-size: 16px; } .header-actions .button { padding: 10px 12px; font-size: 12px; } h1 { font-size: 46px; } .form-card { padding: 22px; } }
