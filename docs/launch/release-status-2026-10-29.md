@@ -1,4 +1,16 @@
-# x-Reply-Helper｜发布与更新状态（2026-10-29）
+# x-Reply-Helper｜发布与更新状态（2026-10-29；更新于 2026-10-30）
+
+> **最新商店状态（2026-10-30，用户亲自确认）：Chrome Web Store 的 x-Reply-Helper 已从已发布的 0.3.1 更新至正式版 0.3.2。** 此前文档中“0.3.2 待审核/尚未发布/暂不上传”均属于 **2026-10-29 的历史阶段记录**，不是今天的最新状态。
+
+## 2026-10-30｜Chrome Web Store 0.3.2 正式发布确认
+
+- **发布确认来源：** 用户于 2026-10-30 在当前对话明确表示“我的谷歌商场插件现在已经更新到0.3.2的版本了”。据此将 **0.3.2** 标记为 **Chrome Web Store 当前正式版本**，0.3.1 归档为前一正式版本。实际审核时间、上架 ZIP 的字节校验、当前商店页面权限列表没有在本次文档同步中独立读取，不能编造。
+- **原商店条目：** x-Reply-Helper，扩展 ID `fgfjajofkapebgphfidblngcjomkbdaj`；商店地址：https://chromewebstore.google.com/detail/fgfjajofkapebgphfidblngcjomkbdaj 。继续使用原条目，不另建扩展。
+- **版本背景：** 此前 0.3.2 的开发和用户人工测试目标是移除 `chrome.debugger`、采用原生回复框兼容填入；Staging 使用 0.3.2 并经用户实际测试成功。上述技术背景不等同于本轮对 Chrome 商店分发包独立验证；若要对外宣称移除全部权限警告，需以已发布安装包的 `manifest.json` 为准。
+- **环境边界：** Chrome Web Store 0.3.2 已发布，**不代表** Staging 的 AI Models 管理、Qwen 激活、成本统计等功能已进入 Production；Production 后端/网站的实际部署状态必须单独核验。此更新**没有**部署 Worker/Pages、执行 D1 SQL、修改生产 AI 模型或支付设置。
+- **持续关注：** 旧客户端兼容、AI 回复 JSON、交付确认 ACK、额度只扣一次、特殊帖识别和正式隐私政策/商店 Data usage 的一致性。历史排障和候选分支记录仍保留，不误写为全部问题已彻底解决。
+
+---
 
 > 状态记录，不是发布批准书。区分用户亲自验收、GitHub 已推送源码、Cloudflare 已部署服务与 Chrome Web Store 已发布条目；各项不互相证明。本文只记录截至 2026-10-29 的已知情况。
 
