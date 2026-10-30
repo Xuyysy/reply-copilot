@@ -27,3 +27,10 @@ test('diagnostics keep failed/cancelled/incomplete separate from successful end-
  assert.deepEqual(c.report().outcomes,{success:1,failed:1,cancelled:1});
  c.clear();assert.equal(c.report().samples,0);
 });
+
+
+test('click origin includes synchronous extraction before a trace is allocated',()=>{
+ let now=20;const trace=perf.createTrace({enabled:true,now:()=>now,startAt:12});
+ trace.mark('reply_click',12);now=24;trace.mark('editor_bound');
+ assert.equal(trace.snapshot().elapsedMs,12);assert.equal(trace.snapshot().marks.reply_click,0);assert.equal(trace.snapshot().marks.editor_bound,12);
+});

@@ -44,13 +44,32 @@
 
 修改前：676/676。新增测试先复现历史重复读取/串行DNS及缺失诊断，再通过实现。
 
-最终：`npm test` **697/697**；API TypeScript、Web TypeScript、Worker dry-run通过；隔离 Staging/Production 扩展构建及最终 manifest/源码审计通过，无 debugger 权限/调用，正式构建保持原商店ID。
+最终：`npm test` **698/698**；API TypeScript、Web TypeScript、Worker dry-run通过；隔离 Staging/Production 扩展构建及最终 manifest/源码审计通过，无 debugger 权限/调用，正式构建保持原商店ID。
 
 覆盖：完整JSON与旧客户端兼容、ACK失败重试/重放与唯一扣费、Worker重建后的待交付重放、账户隔离、取消和迟到响应、草稿保护、重复输入保护、无额度/离线/无效输出、DNS并行/私有AAAA/地址集变更/CNAME/错误与超时。新诊断对象不进入持久化重放输入；默认关闭时无采样上传。
 
 有一次既有隔离表格测试在鼠标事件返回后立即读取 React checkbox 时出现间歇失败；增加有界状态等待后全量通过，未改后台产品逻辑。早期测试与中间修订通过数不作为最终验收。
 
 尚未覆盖：真实X各类DOM的时间分布、真实弱网/后台节流、真实MV3终止与恢复、用户切换账号瞬间的UI行为及付费模型质量。既有关联/编辑器逻辑未改变，已有回归保留，但不能替代用户验收。
+
+### 可复现命令
+
+```sh
+npm test
+npm --prefix api run typecheck
+./web/node_modules/.bin/tsc --noEmit -p web/tsconfig.json
+./api/node_modules/.bin/wrangler deploy --config api/deploy/ai-model-production.wrangler.json --dry-run --outdir /private/tmp/generation-performance-worker-dry-run
+```
+
+基线源码来自已提交快照，不读取任何本地密钥文件：
+
+```sh
+PERF_BASELINE_DIR=$(mktemp -d /private/tmp/xrh-perf-baseline.XXXXXX)
+git archive 98155453560209f3c77de069c34735fccb444a65 | tar -xf - -C "$PERF_BASELINE_DIR"
+node scripts/benchmark-generation-path.mjs --before "$PERF_BASELINE_DIR" --samples 24 --output /private/tmp/generation-performance-comparison.json
+```
+
+夹具从 click 处理入口计时，真实诊断起点也包含同步帖子提取，未等提取成功后才开始计时。数据采集与诊断对象不会进入原请求哈希或持久化重放输入。
 
 ## 诊断开关与取数（未来获授权后）
 

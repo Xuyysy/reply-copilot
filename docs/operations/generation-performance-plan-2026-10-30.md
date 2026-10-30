@@ -22,4 +22,4 @@ No endpoint/DNS caching, no prompt shortening without paid quality comparison au
 
 ## Final status
 
-Local implementation and Mock comparison completed; real-client sampling remains pending separate Staging deployment/install/call authorization. 697/697 final tests passed. User-directed public privacy/FAQ corrections were separately deployed to Pages during this task; no performance code was deployed. The existing table test now waits for its controlled checkbox commit instead of immediately reading after mouse dispatch. See the performance report for limits, evidence and outstanding validation.
+Local implementation and Mock comparison completed; real-client sampling remains pending separate Staging deployment/install/call authorization. 698/698 final tests passed. User-directed public privacy/FAQ corrections were separately deployed to Pages during this task; no performance code was deployed. The existing table test now waits for its controlled checkbox commit instead of immediately reading after mouse dispatch. See the performance report for limits, evidence and outstanding validation.

@@ -415,6 +415,7 @@
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
+    const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
     const control=api.replyDetector.findReplyControl(event.target);
     if (control?.closest('[role="dialog"]')) return;
@@ -427,8 +428,8 @@
     if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
       return;
     }
-    activation.trace = performanceApi?.createTrace({enabled:performanceEnabled});
-    activation.trace?.mark("reply_click");
+    activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
+    activation.trace?.mark("reply_click",clickAt);
     begin(control,activation.post,activation);
   }
   function refreshAssociation(){active?.refreshAssociation?.();}

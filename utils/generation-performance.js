@@ -9,11 +9,12 @@
   const sanitize = sample => sample && outcomes.has(sample.outcome) && valid(sample.elapsedMs) ? {
     outcome:sample.outcome,marks:clean(sample.marks,marks),durations:clean(sample.durations,durations),elapsedMs:Math.round(sample.elapsedMs*100)/100,
   } : null;
-  function createTrace({enabled=false,now=()=>performance.now()}={}) {
-    const start=enabled?now():0, points={},spans={};
+  function createTrace({enabled=false,now=()=>performance.now(),startAt=null}={}) {
+    const observed=enabled?now():0;
+    const start=typeof startAt==='number'&&Number.isFinite(startAt)&&startAt>=0&&startAt<=observed?startAt:observed, points={},spans={};
     return {
       enabled,
-      mark(name){if(enabled&&marks.has(name)&&points[name]===undefined)points[name]=Math.max(0,now()-start);},
+      mark(name,at=null){if(enabled&&marks.has(name)&&points[name]===undefined)points[name]=Math.max(0,(typeof at==='number'&&Number.isFinite(at)?at:now())-start);},
       addDurations(values){if(enabled)for(const [key,value] of Object.entries(clean(values,durations)))spans[key]=(spans[key]||0)+value;},
       async measure(name,fn){
         if(!enabled||!durations.has(name))return fn();
