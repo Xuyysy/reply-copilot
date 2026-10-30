@@ -1,4 +1,4 @@
-> **当前商店正式版本（2026-10-30，用户确认）：** x-Reply-Helper 已在原 Chrome Web Store 条目 **正式更新至 0.3.2**（原扩展 ID `fgfjajofkapebgphfidblngcjomkbdaj`）。0.3.1 为此前正式发布的历史版本，0.3.2 不再是“待提交/待审核”的商店候选。此前测试的 0.3.2 方向为移除 `debugger`；最终商店安装包在本次文档同步中未独立下载校验。**Chrome 商店版本更新不等于 Production Worker/Pages 或多模型管理功能已部署。** 下方 0.2.0-beta 内容仅为历史开发说明，不能作为现行产品现状。详见 [10 月 29 日发布记录及 10 月 30 日更新](docs/launch/release-status-2026-10-29.md)。
+> **当前正式发布状态（2026-10-30）：** Chrome Web Store 原条目已由用户确认更新为 **0.3.2**（扩展 ID `fgfjajofkapebgphfidblngcjomkbdaj`）；**Production AI 模型管理和按模型成本统计功能已上线，当前正式启用 `Qwen / qwen3.7-flash`，用户确认使用正常。** 2026-10-30 Cloudflare 只读核验：Production Worker 版本 `911038c0-36a9-4062-96b9-38de2b26ef55`（100%），D1 已执行 0018，模型激活指针指向 Qwen v1，支付及管理后台仍开启。旧 DeepSeek 保留为 Legacy 回退路径，当前不是激活模型。下面 0.2.0-beta 内容仅是历史开发说明。详见 [发布记录（含 2026-10-30 正式上线与验收）](docs/launch/release-status-2026-10-29.md)。
 
 ---
 
