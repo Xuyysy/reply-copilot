@@ -1,5 +1,7 @@
 # 生成到回复框性能报告（本地候选，未部署）
 
+> 后续状态：已获授权并完成 Staging 部署及原路径测试插件准备，见 [Staging 部署与真人采样交接](staging-generation-performance-validation-2026-10-30.md)。下文保留原本地阶段的历史记录；真实 X 性能尚待用户采样。
+
 ## 状态与依据
 
 - 独立分支：`codex/generation-to-composer-performance`。
