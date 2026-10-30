@@ -49,6 +49,14 @@ Use the existing Staging administrator account at `https://staging.x-reply-helpe
 6. Use **Rollback previous** to return new requests to the prior configuration. In-flight requests stay pinned to the version selected when their reservation was created.
 7. Never paste credentials into chat, issue descriptions, logs or source files. Do not test by publishing an X reply.
 
+## AI cost dashboard
+
+- **AI cost** reads the active configuration/version pointer and reports that version's provider, model and credential readiness. Reporting does not load or decrypt API keys. With no managed pointer, the existing Legacy DeepSeek environment configuration remains the fallback.
+- Today/month token and cost totals continue to include all model usage. The provider/model tables join each usage record to its original configuration version, never the current or latest version. Legacy records remain labeled **Legacy DeepSeek**. An unresolved managed version is labeled explicitly rather than reassigned to the active provider.
+- Request counts in these tables count cost-bearing generation records, including upstream failures with recorded costs. The daily budget remains authoritative for all providers, administrator tests and unsettled reservations; reservations are not included in settled model rows. All reporting periods use UTC.
+- Activation and rollback refresh the Dashboard; entering **AI cost** or using its Refresh button fetches current data. Switching models does not clear costs or recalculate historical costs at new token rates.
+- To accept this change, inspect **Qwen / qwen3.7-flash**, its configured key status, and both cost tables in Chinese/English. If switching or rolling back already-tested models, confirm the active label updates while historical totals and provider rows remain. This does not require a new AI generation.
+
 ## Provider constraints
 
 - DeepSeek uses its documented JSON mode and `thinking.type=disabled` behavior.

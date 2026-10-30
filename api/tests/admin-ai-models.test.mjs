@@ -70,7 +70,10 @@ test('concurrent duplicate provider test IDs make one budget claim and one upstr
 });
 
 test('verified Chinese and English generation tests are required before activation and rollback restores legacy',async()=>{
-  const f=setup();await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));
+  const f=setup();f.env.AI_MODE='production';f.env.DEEPSEEK_API_KEY='synthetic-legacy-key';
+  const metrics=()=>f.call('/v1/admin/dashboard',{method:'GET'}).then(r=>r.body);
+  assert.equal((await metrics()).aiService.provider,'DeepSeek');
+  await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody({provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen3.7-flash'})}));
   const testGeneration=language=>f.call(`/v1/admin/ai-models/${modelId}/test-generation`,{body:operation({testId:randomUUID(),language})});
   const denied=await f.call(`/v1/admin/ai-models/${modelId}/activate`,{body:operation()});assert.equal(denied.status,409);
   const connection=await mockProvider(()=>f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})}));
@@ -79,8 +82,11 @@ test('verified Chinese and English generation tests are required before activati
   assert.equal(connection.body.ok,true);assert.equal(zh.body.jsonValid,true);assert.equal(en.body.jsonValid,true);
   const active=await f.call(`/v1/admin/ai-models/${modelId}/activate`,{body:operation()});assert.equal(active.status,200);
   assert.equal(f.sql.prepare('SELECT active_config_id FROM ai_provider_runtime WHERE id=1').get().active_config_id,modelId);
+  const activeMetrics=await metrics();assert.equal(activeMetrics.aiService.provider,'Qwen');assert.equal(activeMetrics.aiService.model,'qwen3.7-flash');assert.equal(activeMetrics.aiService.keyConfigured,true);
   const rollback=await f.call('/v1/admin/ai-models/rollback',{body:operation()});assert.equal(rollback.body.legacyFallback,true);
   assert.equal(f.sql.prepare('SELECT active_config_id FROM ai_provider_runtime WHERE id=1').get().active_config_id,null);
+  const rolledBackMetrics=await metrics();assert.equal(rolledBackMetrics.aiService.provider,'DeepSeek');assert.equal(rolledBackMetrics.aiService.model,'deepseek-flash');assert.equal(rolledBackMetrics.aiService.keyConfigured,true);
+  assert.equal(rolledBackMetrics.dailyCostMicroUsd,activeMetrics.dailyCostMicroUsd);assert.deepEqual(rolledBackMetrics.cost,activeMetrics.cost);
   const settled=f.sql.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days').get();assert.equal(settled.reserved_micro_usd,0);assert.ok(settled.settled_micro_usd>0);
 });
 
