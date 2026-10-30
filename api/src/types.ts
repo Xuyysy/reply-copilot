@@ -12,6 +12,7 @@ export interface Env {
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
   AI_MODE?: string;
+  AI_PERFORMANCE_DIAGNOSTICS?: string;
   MAIL_API_KEY?: string;
   MAIL_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;

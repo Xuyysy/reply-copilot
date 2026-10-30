@@ -140,10 +140,14 @@ async function resolveWithDoh(host, fetchImpl = fetch) {
       seen.add(current);
       let foundCname = null;
       let foundAddress = false;
-      for (const type of ["A", "AAAA"]) {
+      // Wait for and inspect BOTH families. No DNS caching or early acceptance:
+      // a private AAAA answer must reject even when the A answer is public.
+      const responses = await Promise.all(["A", "AAAA"].map(async (type) => {
         const response = await fetchImpl(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(current)}&type=${type}`, { headers: { accept: "application/dns-json" }, redirect: "manual", signal: controller.signal });
         if (!response.ok || response.status >= 300) throw new ModelProviderError("dns_unavailable");
-        const body = await response.json();
+        return response.json();
+      }));
+      for (const body of responses) {
         if (body.Status !== 0) continue;
         for (const answer of body.Answer || []) {
           if (answer.type === 5 && typeof answer.data === "string") foundCname = answer.data.replace(/\.$/, "").toLowerCase();
@@ -158,6 +162,8 @@ async function resolveWithDoh(host, fetchImpl = fetch) {
     if (error instanceof ModelProviderError) throw error;
     throw new ModelProviderError(controller.signal.aborted ? "dns_timeout" : "dns_unavailable");
   } finally {
+    // If either parallel lookup fails, stop its sibling as well.
+    controller.abort();
     clearTimeout(timer);
   }
 }
@@ -186,12 +192,14 @@ export function classifyProviderFailure(error) {
   return error?.code || "provider_error";
 }
 
-export async function requestConfiguredModel({ config, apiKey, system, user, inputRateMicroUsdPerMillion, outputRateMicroUsdPerMillion, reservedCostMicroUsd = 0, testMode = false, validateOutput = true, fetchImpl = fetch, validateEndpoint = validateProviderEndpoint }) {
+export async function requestConfiguredModel({ config, apiKey, system, user, inputRateMicroUsdPerMillion, outputRateMicroUsdPerMillion, reservedCostMicroUsd = 0, testMode = false, validateOutput = true, fetchImpl = fetch, validateEndpoint = validateProviderEndpoint, performanceTrace = null }) {
   if (typeof apiKey !== "string" || apiKey.length < 8 || apiKey.length > 512 || !Number.isSafeInteger(inputRateMicroUsdPerMillion) || inputRateMicroUsdPerMillion <= 0 || !Number.isSafeInteger(outputRateMicroUsdPerMillion) || outputRateMicroUsdPerMillion <= 0) throw new ModelProviderError("model_not_configured");
-  await validateEndpoint(config);
+  if (performanceTrace) await performanceTrace.measure("dns", () => validateEndpoint(config));
+  else await validateEndpoint(config);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutMs);
   let upstream;
+  const modelStarted = performanceTrace?.enabled ? performance.now() : null;
   try {
     upstream = await fetchImpl(providerRequestUrl(config), {
       method: "POST", redirect: "manual", signal: controller.signal,
@@ -200,6 +208,7 @@ export async function requestConfiguredModel({ config, apiKey, system, user, inp
     });
   } catch (error) {
     clearTimeout(timer);
+    if (modelStarted !== null) performanceTrace.addDurations({model:performance.now()-modelStarted});
     throw new ModelProviderError(controller.signal.aborted ? "timeout" : "transport_error", null, reservedCostMicroUsd);
   }
   try {
@@ -221,6 +230,7 @@ export async function requestConfiguredModel({ config, apiKey, system, user, inp
     }
     return { raw: parsed ? serializeModelOutput(choice.message.content) : "", content: choice.message.content, finishReason: choice.finish_reason, httpStatus: upstream.status, usage };
   } finally {
+    if (modelStarted !== null) performanceTrace.addDurations({model:performance.now()-modelStarted});
     clearTimeout(timer);
   }
 }

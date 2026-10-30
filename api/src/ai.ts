@@ -1,3 +1,4 @@
+import "../../utils/generation-performance.js";
 import type { Env } from "./types";
 import { ApiFailure } from "./types";
 import { sessionFor, takeRate } from "./auth";
@@ -82,6 +83,13 @@ async function provider(env: Env, system: string, user: string, mode:"mock"|"rea
   }
 }
 export async function generate(request: Request, env: Env): Promise<Response> {
+  const trace = (globalThis as any).ReplyCopilotPerformance.createTrace({enabled:env.AI_PERFORMANCE_DIAGNOSTICS === "1"});
+  const started = performance.now();
+  const withTimings = (value: Record<string, unknown>) => {
+    if (!trace.enabled) return value;
+    trace.addDurations({worker_total:performance.now()-started});
+    return {...value,performance:trace.snapshot("success")};
+  };
   const { session } = await sessionFor(request, env);
   if (session.kind !== "extension") throw new ApiFailure(403, "FORBIDDEN", "请在已绑定的插件中生成回复。");
   const body = await jsonBody(request, 24_000);
@@ -95,13 +103,14 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const mode=aiMode(env);
   const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
   const prior=await checkGenerationReplay(env,session,input.requestId,hash);
-  if(prior?.kind==="replay")return response({requestId:input.requestId,raw:serializeModelOutput(prior.raw),quota:prior.quota},200,env,request);
+  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),quota:prior.quota}),200,env,request);
   const configuredModel=mode==="real"?await activeProvider(env):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
+  trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
-    reserve: () => reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null),
-    provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve}) : provider(env, prompts.system, prompts.user, mode),
+    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null)),
+    provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
     if(mode==="real"&&!configuredModel) {
       try { validateDeepSeekResult(result); }
@@ -111,13 +120,13 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     // persist a wire representation accepted by both released client parsers.
     result.raw = serializeModelOutput(result.raw);
     },
-    finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => finishGeneration(env, session.user_id, input.requestId, raw, usage),
+    finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
-  if (execution.kind === "replay") return response({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), quota: execution.quota }, 200, env, request);
+  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), quota: execution.quota }), 200, env, request);
   if (execution.kind === "failed") {
     const error = execution.error;
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
   const { balance } = await import("./quota");
-  return response({ requestId: input.requestId, raw: execution.raw, quota: await balance(env,session.user_id) }, 200, env, request);
+  return response(withTimings({ requestId: input.requestId, raw: execution.raw, quota: await balance(env,session.user_id) }), 200, env, request);
 }

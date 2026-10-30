@@ -44,6 +44,7 @@ test('managed AI generation pins its provider version through a switch, charges 
  try{
   const body={requestId,post:{text:'A representative public post for the Staging model test.',url:'https://x.com/example/status/123'}};
   const generated=await f.call('/v1/ai/generate',{headers,body});assert.equal(generated.status,200,JSON.stringify(generated.body));assert.equal(modelCalls,1);assert.equal(switched,true);
+  assert.equal(generated.body.performance,undefined,'diagnostics are absent by default');
   const pinned=f.sql.prepare('SELECT provider_config_id,provider_config_version,status,generation_phase FROM ai_requests WHERE request_id=?').get(requestId);
   assert.deepEqual({...pinned},{provider_config_id:configId,provider_config_version:1,status:'reserved',generation_phase:'awaiting_delivery'});
   const usage=f.sql.prepare('SELECT provider_config_id,provider_config_version,usage_quality,estimated_cost_micro_usd FROM ai_usage_costs WHERE request_id=?').get(requestId);
@@ -56,7 +57,8 @@ test('managed AI generation pins its provider version through a switch, charges 
 });
 
 test('Qwen without score survives backend normalization, plugin parsing and duplicate delivery ACK with one debit',async()=>{
- const f=setup();const original=globalThis.fetch;let modelCalls=0,acks=0;
+ const f=setup();f.env.AI_PERFORMANCE_DIAGNOSTICS='1';const original=globalThis.fetch;let modelCalls=0,acks=0;
+ const trace=globalThis.ReplyCopilotPerformance.createTrace({enabled:true});
  try{
   await saveModel(f,{provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen3.7-flash'});
   globalThis.fetch=async(url)=>{
@@ -72,13 +74,18 @@ test('Qwen without score survives backend normalization, plugin parsing and dupl
    assert.equal(result.status,200,JSON.stringify(result.body));
    if(path==='/v1/ai/generate'){
     assert.equal(Object.hasOwn(JSON.parse(result.body.raw),'score'),false);
+    const timing=result.body.performance;
+    assert.equal(timing.outcome,'success');assert.ok(timing.durations.worker_total>=0);
+    if(!acks)for(const key of ['worker_prepare','worker_reserve','worker_finish','dns','model'])assert.ok(timing.durations[key]>=0,key);
+    assert.equal(/test-only|test-user|api_key|sourceText/.test(JSON.stringify(timing)),false);
     assert.deepEqual(parseAIOutput(result.body.raw),parseAIOutput(JSON.stringify(parseAIOutput(result.body.raw))));
    }else{acks++;}
    return result.body;
   }}});
   const input={requestId,sourceText:'A public post. 中文 🙂\nSecond line.',sourceUrl:'https://x.com/example/status/123'};
-  const raw=await client.generateReplies(input);
-  assert.equal(await client.generateReplies(input),raw);
+  const raw=await client.generateReplies({...input,performanceTrace:trace});
+  assert.equal(await client.generateReplies({...input,performanceTrace:trace}),raw);
+  assert.ok(trace.snapshot().durations.ack>=0);assert.ok(trace.snapshot().durations.dns>=0);
   assert.equal(acks,2);assert.equal(modelCalls,1);
   const row=f.sql.prepare('SELECT status,generation_phase,consumed,delivery_confirmed_at FROM ai_requests WHERE request_id=?').get(requestId);
   assert.equal(row.status,'succeeded');assert.equal(row.consumed,1);assert.ok(row.delivery_confirmed_at);
