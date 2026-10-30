@@ -56,3 +56,13 @@ test('real hosted delivery handshake with a lost ACK consumes each original requ
  assert.equal(generations,2);assert.equal(debited.size,2);
  assert.equal(await create().generateReplies(first),raw);assert.equal(generations,2);assert.equal(debited.size,2);
 });
+
+
+test('performance instrumentation is transient and never enters persisted replay payloads',async()=>{
+ let received;const f=fixture(async input=>{received=input.performanceTrace;return 'ok';});
+ const trace={enabled:true,measure:async(_name,fn)=>fn()};
+ assert.equal(await f.coordinator.generateReplies({...makeInput(),performanceTrace:trace}),'ok');
+ assert.equal(received,trace);
+ assert.equal(JSON.stringify(f.data).includes('performanceTrace'),false);
+ assert.equal(await f.restart().generateReplies(makeInput()),'ok');
+});

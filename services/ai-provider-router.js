@@ -5,7 +5,7 @@ import { HostedAIClient } from "./hosted-ai-client.js";
 export class AIProviderRouter {
   constructor({ config = RUNTIME_CONFIG, accountStates = new AccountStateService({ config }), hostedFactory = () => new HostedAIClient({ config }) } = {}) { this.config = config; this.accountStates = accountStates; this.hostedFactory = hostedFactory; }
   async generateReplies(input) {
-    const state = await this.accountStates.getState();
+    const state = await (input.performanceTrace ? input.performanceTrace.measure("router_account",()=>this.accountStates.getState()) : this.accountStates.getState());
     if (state.status === "credits_available") {
       if (state.source !== "server") throw new Error("云端 AI 服务尚未配置；当前仅为开发测试状态。");
       const hosted = this.hostedFactory();

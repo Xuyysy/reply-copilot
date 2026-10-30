@@ -1,3 +1,4 @@
+import "../utils/generation-performance.js";
 import { createReplyRequest } from "../domain/reply-request.js";
 import { StorageService, API_KEY_KEY, HISTORY_KEY, ONBOARDING_COMPLETE_KEY } from "../services/storage-service.js";
 import { AIProviderRouter } from "../services/ai-provider-router.js";
@@ -11,6 +12,11 @@ import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js"
 import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
 
+let performanceEnabled = false;
+const performanceSamples = globalThis.ReplyCopilotPerformance.createCollector();
+globalThis.replyCopilotPerformanceReport = () => performanceSamples.report();
+globalThis.clearReplyCopilotPerformance = () => performanceSamples.clear();
+const performanceReady = chrome.storage.session.get("generationPerformanceEnabled").then(value => { performanceEnabled=value.generationPerformanceEnabled===true; }, () => {});
 const MENU_ID = "generate-reply-copilot";
 const storage = new StorageService();
 const history = new HistoryService();
@@ -38,6 +44,10 @@ async function broadcastSettingsChanged() {
   await Promise.allSettled(tabs.filter((tab) => Number.isInteger(tab.id)).map((tab) => chrome.tabs.sendMessage(tab.id, { type: "REPLY_COPILOT_SETTINGS_CHANGED" })));
 }
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "session" && changes.generationPerformanceEnabled) {
+    performanceEnabled=changes.generationPerformanceEnabled.newValue===true;
+    void chrome.tabs.query({url:["https://x.com/*","https://twitter.com/*"]}).then(tabs=>Promise.allSettled(tabs.filter(tab=>Number.isInteger(tab.id)).map(tab=>chrome.tabs.sendMessage(tab.id,{type:"REPLY_COPILOT_PERFORMANCE_STATE",enabled:performanceEnabled})))).catch(()=>{});
+  }
   if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
   if (area === "local" && changes.replyCopilotAccountToken) { accountStates.invalidate(); void broadcastSettingsChanged(); }
 });
@@ -75,6 +85,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   const fromXPage = X_PAGE.test(sender.url || sender.tab?.url || "");
   const fromExtensionPage = EXTENSION_PAGE.test(sender.url || "");
+  if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") {
+    if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
+    void performanceReady.then(()=>sendResponse({enabled:performanceEnabled}));return true;
+  }
+  if (message?.type === "REPLY_COPILOT_PERFORMANCE_SAMPLE") {
+    if (fromXPage && sender.frameId === 0 && performanceEnabled) performanceSamples.record(message.sample);
+    sendResponse({ok:true});return false;
+  }
   if (message?.type === "REPLY_COPILOT_OPEN_SETTINGS") {
     if (!fromXPage) { sendResponse({ ok: false }); return false; }
     if (!settingsOpenPromise) settingsOpenPromise = chrome.runtime.openOptionsPage().finally(() => { settingsOpenPromise = null; });
@@ -150,23 +168,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "REPLY_COPILOT_GENERATE") {
     if (!fromXPage || typeof message.requestId !== "string" || typeof message.sourceText !== "string" || message.sourceText.length > 12000 || !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) { sendResponse({ ok: false, error: "无法验证当前帖子。请打开侧边栏重试。" }); return false; }
     void (async () => {
+      const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
       const controller = new AbortController(); activeRequests.get(message.requestId)?.abort(); activeRequests.set(message.requestId, controller);
       try {
-        const voiceProfile = await profiles.get();
+        const [voiceProfile, replyStyle] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle()]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
-        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, requestId: message.requestId }, { replyStyle: await storage.getReplyStyle(), signal: controller.signal });
+        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, requestId: message.requestId }, { replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         // Local history is best effort: a storage failure must not discard a usable AI draft.
-        await Promise.allSettled([history.recordGeneration({ requestId: message.requestId, result }), usage.track("generated", { requestId: message.requestId })]);
+        // Keep writes awaited for MV3 suspension safety; overlap the independent
+        // account label lookup instead of dropping persistence after sendResponse.
+        const [,accountLabel] = await Promise.all([
+          trace.measure("local_bookkeeping",()=>Promise.allSettled([history.recordGeneration({ requestId: message.requestId, result }), usage.track("generated", { requestId: message.requestId })])),
+          trace.measure("account_label",()=>accountStates.getState().then(accountStatusLabel, () => "授权状态暂时无法确认")),
+        ]);
+        if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         if (Number.isInteger(sender.tab?.id)) {
           generatedInputs.set(message.requestId, { tabId: sender.tab.id, replies: result.replies });
           setTimeout(() => generatedInputs.delete(message.requestId), 120_000);
         }
-        const accountLabel = await accountStates.getState().then(accountStatusLabel, () => "授权状态暂时无法确认");
-        sendResponse({ ok: true, result, accountLabel });
+        const sample = trace.snapshot("success");
+        if(sample) sample.durations.background_total=sample.elapsedMs;
+        sendResponse({ ok: true, result, accountLabel, ...(sample ? {performance:sample} : {}) });
       } catch (error) {
         if (!controller.signal.aborted) void usage.track("api_failure", { requestId: message.requestId }).catch(() => {});
-        sendResponse({ ok: false, error: error?.message || "生成失败，请打开侧边栏重试。", ...(typeof error?.code === "string" ? { code: error.code } : {}) });
+        const sample = trace.snapshot(controller.signal.aborted ? "cancelled" : "failed");
+        if(sample) sample.durations.background_total=sample.elapsedMs;
+        sendResponse({ ok: false, error: error?.message || "生成失败，请打开侧边栏重试。", ...(typeof error?.code === "string" ? { code: error.code } : {}), ...(sample ? {performance:sample} : {}) });
       } finally { if (activeRequests.get(message.requestId) === controller) activeRequests.delete(message.requestId); }
     })();
     return true;

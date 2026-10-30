@@ -6,6 +6,13 @@ export class HistoryService {
   async getRecent(limit = 20) {
     return (await this.getAll()).filter((item) => item.reply && (!item.events || item.events.some((event) => ["selected", "copied", "manually_confirmed"].includes(event)))).slice(-limit).reverse();
   }
+  async getGenerationContext(limit = 20) {
+    const history = await this.getAll();
+    return {
+      recentHistory: history.filter((item) => item.reply && (!item.events || item.events.some((event) => ["selected", "copied", "manually_confirmed"].includes(event)))).slice(-limit).reverse(),
+      styleStats: Object.fromEntries(["natural", "light_humor", "thoughtful", "sharp", "funny", "quote"].map((style) => [style, history.filter((item) => item.style === style && item.reply).length])),
+    };
+  }
   async recordGeneration({ requestId, sourceText, sourceUrl = "", result }) {
     const history = await this.getAll();
     history.push({ id: crypto.randomUUID(), requestId, status: "generated", events: ["generated"], recommendation: result.recommendation, createdAt: this.clock(), generatedAt: this.clock() });

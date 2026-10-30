@@ -1,6 +1,19 @@
 (() => {
   const api = globalThis.ZaneReplyCopilotContent;
   let active = null;
+  let performanceEnabled = false;
+  const performanceApi = globalThis.ReplyCopilotPerformance;
+  const performanceSamples = performanceApi?.createCollector();
+  // Available in the extension's isolated content-script console, not page JS.
+  globalThis.replyCopilotPerformanceReport = () => performanceSamples?.report();
+  globalThis.clearReplyCopilotPerformance = () => performanceSamples?.clear();
+  function completeTrace(current, outcome) {
+    if (!current?.trace?.enabled || !performanceEnabled || current.performanceReported) return;
+    current.performanceReported = true;
+    const sample = current.trace.snapshot(outcome);
+    performanceSamples?.record(sample);
+    void safeSend({type:"REPLY_COPILOT_PERFORMANCE_SAMPLE",sample});
+  }
   let contextAlive = true;
   let nativeInputHealthy = true;
   let bindingTimer = null;
@@ -67,6 +80,7 @@
   function endSession(reason) {
     const current=active;
     if(!current)return;
+    completeTrace(current,"cancelled");
     current.cancelled=true;
     current.observer?.disconnect();
     clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
@@ -104,6 +118,7 @@
       recoveryReason=reason;
       quarantineActivation(current.post);
     }
+    completeTrace(current,"cancelled");
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
@@ -147,6 +162,7 @@
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
+    active.trace = activation.trace;
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor) { rejectAssociation('association_expired'); }
@@ -158,6 +174,7 @@
       if (active.editor) return; // Keep observing this same node; never rebind after replacement.
       clearTimeout(active.acquireTimer);
       active.editor=found.editor;active.matchedPost=true;
+      active.trace?.mark("editor_bound");
       const current=active;
       current.initialComposerText=api.composerAdapter.hasContent(found.editor);
       current.userTouchedComposer=false;
@@ -186,24 +203,29 @@
   async function prepareCurrent(requestId) {
     const current = active;
     try {
+      // Independent reads start together; both remain mandatory before AI.
+      const precheckStart = performance.now();
+      const accountPending = safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
       const response = await safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" });
       if (!contextAlive) return;
-      if (!active || active.requestId !== requestId) return;
+      if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
       current.preferences = response.preferences; current.initializing = false;
       if (current.preferences.showFloatingWindow) current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
-      const account = await refreshAccount(current);
-      if (!active || active.requestId !== requestId) return;
+      const account = await refreshAccount(current, accountPending);
+      if (active !== current || current.requestId !== requestId || current.cancelled) return;
+      current.trace?.addDurations({precheck:performance.now()-precheckStart});
+      current.trace?.mark("precheck_complete");
       if (account?.status === "credits_available") {
         if (current.preferences.autoGenerateOnReply && current.preferences.showFloatingWindow) void generateActive(requestId);
-        else current.assistant?.showReady(current.preferences.autoGenerateOnReply);
-      }
-    } catch { if (!contextAlive) return; current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
+        else { current.assistant?.showReady(current.preferences.autoGenerateOnReply); completeTrace(current,"incomplete"); }
+      } else completeTrace(current,"incomplete");
+    } catch { if (!contextAlive || active !== current || current.cancelled) return; completeTrace(current,"failed"); current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
   }
-  async function refreshAccount(current) {
+  async function refreshAccount(current, pendingResponse = null) {
     const previousStatus = current.accountStatus;
     const wasPending = current.pendingBinding;
-    const response = await safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
+    const response = await (pendingResponse || safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }));
     if (active !== current || !current.assistant) return response;
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
@@ -248,6 +270,7 @@
       return;
     }
     current.applyingReply = true;
+    current.trace?.mark("insert_started");
     const inserted = api.composerAdapter.insertOnce(current.editor, requestId, candidate, valid);
     current.applyingReply = false;
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
@@ -262,6 +285,8 @@
       current.assistant?.setStatus("X 回复框显示与候选不一致。请关闭这个草稿并刷新 X 后再试；当前建议可复制。");
       return;
     }
+    current.trace?.mark("editor_verified");
+    completeTrace(current,"success");
     current.appliedText = candidate.trim(); current.appliedStyle = style;
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
@@ -273,7 +298,10 @@
     if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
     current.generating = true; current.assistant?.showLoading();
     try {
-      const response = await safeSend({ type: "REPLY_COPILOT_GENERATE", requestId, sourceText: current.post.sourceText, sourceUrl: current.post.sourceUrl });
+      current.trace?.mark("background_dispatch");
+      const response = await safeSend({ type: "REPLY_COPILOT_GENERATE", requestId, sourceText: current.post.sourceText, sourceUrl: current.post.sourceUrl, performanceEnabled: Boolean(current.trace?.enabled) });
+      current.trace?.mark("background_return");
+      current.trace?.addDurations(response?.performance?.durations);
       if (!contextAlive) return;
       if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
@@ -282,10 +310,15 @@
       current.assistant?.setAccountLabel(response.accountLabel);
       const selectedStyle = current.preferences?.defaultReplyMode || response.result.defaultStyle || response.result.default_style || "natural";
       current.assistant?.showResult(response.result.replies, selectedStyle);
+      current.trace?.mark("candidates_shown");
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
       if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
       else await autoFillCurrent(current, requestId, selectedStyle);
+      // A protected draft, skip recommendation or unsafe focus is not a
+      // successful automatic insertion. Count it separately, without text.
+      completeTrace(current,"incomplete");
     } catch (error) {
+      completeTrace(current,"failed");
       current.generating = false;
       current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN"].includes(error?.code);
       if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); }
@@ -335,6 +368,7 @@
   }
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;
+    if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") { performanceEnabled=message.enabled===true; return false; }
     if (message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
     const current = active, requestId = current.requestId, revision = ++settingsRevision;
     void safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }).then((response) => {
@@ -393,12 +427,15 @@
     if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
       return;
     }
+    activation.trace = performanceApi?.createTrace({enabled:performanceEnabled});
+    activation.trace?.mark("reply_click");
     begin(control,activation.post,activation);
   }
   function refreshAssociation(){active?.refreshAssociation?.();}
   function onBeforeInput(event) {
     if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
   }
+  void safeSend({type:"REPLY_COPILOT_PERFORMANCE_STATE"}).then(response=>{performanceEnabled=response?.enabled===true;});
   document.addEventListener('pointerdown',captureActivation,true);
   document.addEventListener('keydown',captureActivation,true);
   document.addEventListener('focusin',refreshAssociation,true);

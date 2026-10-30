@@ -19,7 +19,7 @@
   "action": { "default_title": "x-Reply-Helper", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" } },
   "content_scripts": [{
     "matches": ["https://x.com/*", "https://twitter.com/*"],
-    "js": ["content/post-extractor.js", "content/reply-detector.js", "content/composer-adapter.js", "content/composer-association.js", "content/inline-assistant.js", "content/content-script.js"],
+    "js": ["utils/generation-performance.js", "content/post-extractor.js", "content/reply-detector.js", "content/composer-adapter.js", "content/composer-association.js", "content/inline-assistant.js", "content/content-script.js"],
     "run_at": "document_idle"
   }]
 }

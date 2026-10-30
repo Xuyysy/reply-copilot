@@ -17,14 +17,14 @@ export class DeliveryCoordinator {
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
     const frozen=envelope(input),signal=input.signal;
-    const run=this.tail.catch(()=>{}).then(()=>this.run(frozen,signal));
+    const run=this.tail.catch(()=>{}).then(()=>this.run(frozen,signal,input.performanceTrace));
     this.tail=run.catch(()=>{});return run;
   }
-  async run(input,signal){
+  async run(input,signal,performanceTrace){
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
-    const ownerId=await this.getAccountId();
+    const ownerId=await (performanceTrace ? performanceTrace.measure("owner_check",()=>this.getAccountId()) : this.getAccountId());
     if(typeof ownerId!=='string'||!ownerId)throw fail('AUTH_REQUIRED','请重新连接账户。');
-    const stored=await this.storage.get([PENDING,COMPLETED]);
+    const stored=await (performanceTrace ? performanceTrace.measure("delivery_storage",()=>this.storage.get([PENDING,COMPLETED])) : this.storage.get([PENDING,COMPLETED]));
     let pending=stored[PENDING];
     let completed=(stored[COMPLETED]||[]).filter(row=>row.ownerId===ownerId&&this.clock()-row.completedAt<600000);
     const same=completed.find(row=>row.input.requestId===input.requestId);
@@ -36,7 +36,7 @@ export class DeliveryCoordinator {
     if(pending){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
-        const recovered=await this.deliver(pending,completed);
+        const recovered=await this.deliver(pending,completed,performanceTrace);
         completed=recovered.completed;
         if(pending.input.requestId===input.requestId)return recovered.raw;
       }catch(error){
@@ -48,14 +48,14 @@ export class DeliveryCoordinator {
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
     const record={ownerId,input,createdAt:this.clock()};
     await this.storage.set({[PENDING]:record});
-    return (await this.deliver(record,completed)).raw;
+    return (await this.deliver(record,completed,performanceTrace)).raw;
   }
-  async deliver(record,completed){
+  async deliver(record,completed,performanceTrace){
     const client=this.createClient();
     try{
       // Once accepted, UI cancellation detaches the composer only. Let the
       // bounded hosted request finish its original delivery handshake.
-      const raw=await client.generateReplies(record.input);
+      const raw=await client.generateReplies({...record.input,...(performanceTrace ? {performanceTrace} : {})});
       this.lastQuota=client.lastQuota||null;
       const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
       await this.storage.set({[PENDING]:null,[COMPLETED]:retained});
