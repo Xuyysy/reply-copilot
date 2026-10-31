@@ -199,7 +199,9 @@ async function runTest(request: Request, env: Env, id: string, requestedKind: "c
       SELECT ?,?,?,?,? WHERE
         (SELECT reserved_micro_usd+settled_micro_usd FROM ai_budget_days WHERE budget_day=?)+?<=?
       ON CONFLICT(test_id) DO NOTHING`).bind(actorBody.testId,claimToken,day,reserve,nowMs(),day,reserve,globalLimit),
-    env.DB.prepare(`UPDATE ai_provider_test_budget_days SET calls=calls+1,reserved_micro_usd=reserved_micro_usd+?
+    // Legacy schema enforces CHECK(calls<=10): saturate this obsolete metric,
+    // and use ai_provider_tests rows for the authoritative test count.
+    env.DB.prepare(`UPDATE ai_provider_test_budget_days SET calls=CASE WHEN calls<10 THEN calls+1 ELSE calls END,reserved_micro_usd=reserved_micro_usd+?
       WHERE budget_day=? AND EXISTS(SELECT 1 FROM ai_provider_test_budget_claims WHERE test_id=? AND claim_token=? AND budget_day=?)`).bind(reserve,day,actorBody.testId,claimToken,day),
     env.DB.prepare(`UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd+?
       WHERE budget_day=? AND EXISTS(SELECT 1 FROM ai_provider_test_budget_claims WHERE test_id=? AND claim_token=? AND budget_day=?)`).bind(reserve,day,actorBody.testId,claimToken,day),
