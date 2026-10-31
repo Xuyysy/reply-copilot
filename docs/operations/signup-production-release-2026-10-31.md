@@ -26,3 +26,30 @@
 ## 验收与边界
 
 不新增真实账号、不发送邮件、不调用收费模型、不创建支付订单。发布后只读核验结构、领取记录、账户/批次/账本一致性、运营开关、当前模型、健康与未授权接口。新正式账号注册和原插件绑定由用户做最终验收；不修改 Chrome 商店包。
+
+## Production 实际发布结果
+
+- 部署源码：`6c7aaec9efa6021181256e6e38422e0526c29b85`；全量 716/716（失败/跳过 0），包括新增兼容回滚测试和已存在的 >10 次管理员模型测试；API、Web TypeScript 均通过，正式 Pages 构建及 Worker dry-run 通过。
+- D1 仅应用 0019。远端迁移后再次导出恢复核验：47 张既有非迁移表逐行完全一致，integrity=ok，外键错误 0；两张领取表为空。
+- Worker Version `a7de9936-e76c-49bf-8054-a6c95305b49b`，Deployment `fcfc1257-e4aa-46ad-b34d-b008ea9ac95b`，100%。线上代码 SHA-256 `23c1b49ed357811586eb0f0a7960ab099f5a5e16a8a1facd84c77fce25628be4` 与本机构建字节一致。
+- Pages Deployment `3d252f4b-8b07-4fd1-a1eb-4d205e142c7b`，现有正式域名和 Production API 保留。
+- 健康和套餐 200，套餐 JSON 与发布前完全一致；未认证管理接口 401；首页、账户页和实际注册入口 `/login/` 为 200；正式 Turnstile Site Key 与脚本存在。本站没有独立 `/register/` 路由，注册在登录页内进行。
+- 30 项 Worker 绑定逐项相等；Secrets 未读取/修改；Cron `0 3 * * *` 保持。AI/购买/MK99/支付宝/微信开关均保持开启，后台开启，日预算仍 $5。
+- 当前模型配置指针及版本与备份完全一致；本轮未激活、测试或修改任何模型。后台 provider 元数据为 qwen，实际 model_id 为 `deepseek-v4-flash-0731`、版本 2（这是发布前已存在的值，不将旧文档中的 qwen3.7-flash 冒认为当前配置）。
+- 13 个账户：免费总余额 1581、付费 3811、生成预占均 0；账户/批次余额不匹配 0。13 笔 signup grant 合计 2600；5 笔 purchase grant 合计 4200；1283 条额度流水、5 笔订单均保持。未新增账号/邮件/生成/支付/退款。
+- 管理员测试不限每日次数修复保留：线上实际 bundle 包含兼容旧 CHECK 的 calls 饱和计数，没有恢复每日 10 次拦截。单次预留、防滥用及全站预算保持。
+
+### 已上传兼容恢复版本
+
+Version `51967ea6-4c11-4aa7-b80f-566f6758a7e4`，未切流。30 项绑定与原生产一致。
+
+```sh
+# 使用本次私有快照配置，指向唯一 Production Worker；仅在确需回滚时执行
+wrangler versions deploy 51967ea6-4c11-4aa7-b80f-566f6758a7e4@100% --config /private/tmp/signup-prod-release-private/worker.json --yes
+```
+
+Pages 在 Cloudflare 原项目 Deployment 列表中回滚至 `494810f2-3d2f-431a-99f3-87b77833718e`。本次没有实际触发回滚。私有备份和恢复报告持久保存于本机 `~/.codex/backups/reply-copilot/signup-production-20261031/`，不纳入 Git。
+
+### 待用户人工验收
+
+正常新账号邮箱验证→现有正式插件绑定→200 次唯一领取；同安装实例另一账号绑定成功但不重复赠额；已有账号和付费额度使用。用户可按需验证后台第 11 次以后测试；本次仅以自动化覆盖和实际线上 bundle 验证，未消耗真实模型余额。真实 X 由用户操作，不以只读检查代替人工验收。
