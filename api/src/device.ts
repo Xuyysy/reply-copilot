@@ -3,6 +3,7 @@ import { ApiFailure } from "./types";
 import { extensionSessionSeconds, requireCsrf, sessionFor, takeRate } from "./auth";
 import { extensionOriginAllowed, hmac, jsonBody, nowMs, randomToken, sha256, uuid } from "./security";
 import { response } from "./http";
+import { signupClaimStatements } from "./signup-benefits";
 
 const CODE_EXPIRY_MS = 10 * 60_000;
 export async function requestDeviceCode(request: Request, env: Env): Promise<Response> {
@@ -74,9 +75,16 @@ export async function exchangeDevice(request: Request, env: Env): Promise<Respon
   const now = nowMs();
   const nonce = uuid();
   const token = randomToken();
+  const grantStatements = await signupClaimStatements(env, {
+    userId: authorization.user_id, deviceId: authorization.device_id,
+    authorizationId: authorization.id, redeemNonce: nonce, now
+  });
+  // D1.batch is transactional: authorization, session, optional welcome grant
+  // and all balance/lot/ledger entries either commit together or roll back.
   const result = await env.DB.batch([
     env.DB.prepare("UPDATE extension_authorizations SET status='redeemed',redeem_nonce=? WHERE id=? AND status='approved' AND expires_at>? RETURNING user_id").bind(nonce, authorization.id, now),
     env.DB.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,device_id,created_at,expires_at) SELECT ?,?,user_id,'extension',device_id,?,? FROM extension_authorizations WHERE id=? AND redeem_nonce=?").bind(uuid(), await sha256(token), now, now + extensionSessionSeconds() * 1000, authorization.id, nonce),
+    ...grantStatements,
   ]);
   if (!result[0].results.length || result[1].meta.changes !== 1) throw new ApiFailure(400, "DEVICE_CODE_USED", "绑定码已使用。");
   return response({ status: "approved", accessToken: token, expiresAt: new Date(now + extensionSessionSeconds() * 1000).toISOString() }, 200, env, request);

@@ -21,3 +21,19 @@ export function resolveStagingApiBase(value) {
   }
   return STAGING_API_BASE;
 }
+
+/**
+ * The Site Key is public and bound to staging.x-reply-helper.top; the matching
+ * private TURNSTILE_SECRET_KEY stays exclusively on the Staging Worker.
+ * Keep this fallback for local/Direct Upload builds, which don't inherit
+ * Cloudflare Pages project env vars automatically.
+ */
+export const STAGING_TURNSTILE_SITE_KEY = '0x4AAAAAAFYdcIBnXxLTGrT4';
+
+export function resolveStagingTurnstileSiteKey(value) {
+  const key = value === undefined ? STAGING_TURNSTILE_SITE_KEY : value;
+  if (typeof key !== 'string' || key.trim() !== STAGING_TURNSTILE_SITE_KEY) {
+    throw new Error('PUBLIC_TURNSTILE_SITE_KEY must match the Staging Turnstile widget. Never use the Production Site Key in Staging.');
+  }
+  return STAGING_TURNSTILE_SITE_KEY;
+}

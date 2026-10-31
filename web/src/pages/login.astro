@@ -5,7 +5,7 @@ const localVerification = import.meta.env.DEV;
 const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_KEY || "");
 ---
 <Base title="注册与登录" titleEn="Sign in or register">
-  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="账户">Account</div><h1 data-zh="欢迎使用 x-Reply-Helper">Welcome to x-Reply-Helper</h1><p class="lead" style="margin:auto" data-zh="验证邮箱后赠送 200 次永久有效的 AI 生成额度。">Verify your email for 200 AI generations that do not expire.</p></div>
+  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="账户">Account</div><h1 data-zh="欢迎使用 x-Reply-Helper">Welcome to x-Reply-Helper</h1><p class="lead" style="margin:auto" data-zh="验证邮箱后，请在插件中连接账户以领取新人额度。">Verify your email, then connect your account in the extension to receive welcome credits.</p></div>
   <section class="container app-shell"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} /></section>
   <div id="auth-load-error" class="container notice" role="alert" hidden style="max-width:540px;margin:-80px auto 80px">
     <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>

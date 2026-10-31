@@ -2,6 +2,7 @@ import { checkoutFromAttempt } from "./payment-checkout";
 import type { Env, Session } from "./types";
 import { sessionFor } from "./auth";
 import { balance } from "./quota";
+import { signupBenefit } from "./signup-benefits";
 import { response } from "./http";
 
 export async function accountState(env: Env, session: Session) {
@@ -20,8 +21,9 @@ export async function entitlements(request: Request, env: Env): Promise<Response
   return response({status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota},200,env,request);
 }
 export async function usage(request: Request, env: Env): Promise<Response> {
-  const {session}=await sessionFor(request,env); const quota=await balance(env,session.user_id);
-  return response({quota},200,env,request);
+  const {session}=await sessionFor(request,env);
+  const [quota,benefit]=await Promise.all([balance(env,session.user_id),signupBenefit(env,session.user_id)]);
+  return response({quota,signupBenefit:benefit},200,env,request);
 }
 export async function licenseDevices(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
