@@ -134,6 +134,7 @@ test("paid credit and account binding survive an already claimed installation", 
     const device=randomUUID();
     assert.equal((await link(f,"new-a",device)).status,200);
     f.sql.prepare("UPDATE credit_accounts SET paid_balance=50 WHERE user_id='new-b'").run();
+    f.sql.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,granted_at,history_confidence,status) VALUES('new-b-paid','new-b','paid','legacy_paid',50,50,1,'tracked','active')").run();
     const result=await link(f,"new-b",device);
     assert.equal(result.status,200);
     assert.equal(balances(f,"new-b").paid_balance,50);
@@ -163,5 +164,44 @@ test("a database failure during issuance rolls back extension exchange and every
     const retried=await f.call("/v1/extension/exchange",{body:{deviceToken:begin.body.deviceToken},headers:{Origin:f.env.EXTENSION_ORIGIN}});
     assert.equal(retried.status,200,JSON.stringify(retried.body));
     assert.equal(balances(f,"new-a").free_balance,200);
+  } finally {f.sql.close();}
+});
+
+test("email verification creates a pending welcome entitlement without any spendable signup grant", async()=>{
+  const f=withD1Returning(fixture());
+  try {
+    Object.assign(f.env,{
+      ENVIRONMENT:"development",
+      WEB_ORIGIN:"http://127.0.0.1:4321",
+      API_ORIGIN:"http://127.0.0.1:8787",
+      PASSWORD_PEPPER:"test-only-pepper-long-enough-for-password-hash",
+      TURNSTILE_SECRET_KEY:"1x0000000000000000000000000000000AA"
+    });
+    const email="new-registered@example.test";
+    let debug="";
+    const oldLog=console.log;
+    console.log=(...args)=>{debug+=args.map(String).join(" ");};
+    let registered;
+    try {
+      registered=await f.call("/v1/auth/register",{
+        body:{username:"new_registered",email,password:"a-strong-password-12345",turnstileToken:"local-test-token"},
+        headers:{Origin:f.env.WEB_ORIGIN}
+      });
+    } finally {console.log=oldLog;}
+    assert.equal(registered.status,200,JSON.stringify(registered.body));
+    const code=debug.match(/:\s*(\d{6})/ )?.[1];
+    assert.ok(code,"local-only email verification should produce a code");
+    const verified=await f.call("/v1/auth/verify-registration",{
+      body:{email,code},
+      headers:{Origin:f.env.WEB_ORIGIN}
+    });
+    assert.equal(verified.status,200,JSON.stringify(verified.body));
+    const user=f.sql.prepare("SELECT id FROM users WHERE email=?").get(email);
+    assert.ok(user);
+    assert.equal(balances(f,user.id).free_balance,0);
+    assert.equal(f.sql.prepare("SELECT status,grant_amount FROM signup_benefit_claims WHERE user_id=?").get(user.id).status,"pending");
+    assert.equal(count(f,"SELECT count(*) n FROM credit_grants WHERE grant_type='signup' AND user_id='"+user.id+"'"),0);
+    assert.equal(count(f,"SELECT count(*) n FROM credit_ledger WHERE kind='signup_grant' AND user_id='"+user.id+"'"),0);
+    assert.equal(count(f,"SELECT count(*) n FROM credit_batches WHERE source_kind='signup' AND user_id='"+user.id+"'"),0);
   } finally {f.sql.close();}
 });
