@@ -23,3 +23,6 @@ CREATE TABLE device_free_claims (
   claimed_at INTEGER NOT NULL
 );
 CREATE INDEX signup_benefit_claims_status_idx ON signup_benefit_claims(status);
+-- Reuse retained pre-feature extension sessions to detect historical claims.
+CREATE INDEX sessions_signup_device_lookup_idx ON sessions(lower(device_id),user_id)
+  WHERE kind='extension' AND device_id IS NOT NULL;
