@@ -26,7 +26,7 @@ test("pricing renders USD reference and server-set CNY settlement values", () =>
   const source = readFileSync(path.join(root, "src/pages/pricing.astro"), "utf8");
   const migration = readFileSync(path.resolve(root, "../api/migrations/0005_xiaodou_payments.sql"), "utf8");
   const homepage = page("index");
-  assert.match(html, /注册赠送 200 次/);
+  assert.match(html, /新人绑定后领 200 次/);
   assert.match(html, /无需订阅、买断或自备 API Key/);
   assert.match(html, /付款尚未开放/);
   assert.match(source, /fee_rate_bps|feeRateBps/);
@@ -37,6 +37,21 @@ test("pricing renders USD reference and server-set CNY settlement values", () =>
   assert.match(migration, /price_cents=499,price_cny_fen=3290/);
   assert.doesNotMatch(homepage, /¥9\.90|¥19\.90|¥32\.90/);
   assert.doesNotMatch(html, /Seven consecutive days|Lifetime license/);
+});
+test("signup copy gives concise account-connection guidance without exposing claim mechanics",()=>{
+  const login=page("login"),home=page("index");
+  const auth=readFileSync(path.join(root,"src/components/auth/AuthPanel.tsx"),"utf8");
+  const layout=readFileSync(path.join(root,"src/layouts/Base.astro"),"utf8");
+  const pricingSource=readFileSync(path.join(root,"src/pages/pricing.astro"),"utf8");
+  assert.match(login,/验证邮箱后，请在插件中连接账户以领取新人额度/);
+  assert.match(login,/connect your account in the extension to receive welcome credits/);
+  assert.match(auth,/t\("验证邮箱", "Verify email"\)/);
+  assert.doesNotMatch([auth,layout,home,pricingSource].join("\n"),/每个安装实例|One welcome grant per installation|Each installation can claim once|eligible extension installation/);
+  assert.match(layout,/signupBenefit\?\.status==="pending"\?"pending"/);
+  assert.match(layout,/验证邮箱后，请在插件中连接账户以领取新人额度/);
+  assert.match(layout,/Verify your email, then connect your account in the extension to receive welcome credits/);
+  assert.match(home,/Create an account, verify your email, then connect your account in the extension to receive welcome credits/);
+  assert.match(pricingSource,/验证邮箱后，在插件中连接账户即可领取新人免费额度/);
 });
 test("checkout offers an explicit payment flow and never trusts a browser-submitted amount", () => {
   const html = page("checkout");

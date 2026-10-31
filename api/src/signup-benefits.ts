@@ -12,6 +12,45 @@ export async function signupBenefit(env: Env, userId: string): Promise<SignupBen
 }
 
 /**
+ * Preserve retained pre-feature evidence before cleanup removes old extension
+ * sessions. Only accounts with a historical signup grant are eligible. The
+ * raw device ID stays in memory for HMAC derivation and is never copied to a
+ * new table or log. If any HMAC/write fails, cleanup must stop before deleting
+ * the source sessions so the next scheduled run can retry safely.
+ */
+export async function preserveLegacySignupDevicesBeforeSessionCleanup(env: Env, now: number): Promise<void> {
+  const cutoff = now - 86400_000;
+  const rows = await env.DB.prepare(`SELECT s.device_id,s.user_id
+    FROM sessions s
+    WHERE s.kind='extension' AND s.device_id IS NOT NULL
+      AND (s.expires_at<? OR s.revoked_at<?)
+      AND EXISTS(SELECT 1 FROM credit_grants g WHERE g.user_id=s.user_id AND g.grant_type='signup')
+      AND NOT EXISTS(
+        SELECT 1 FROM sessions earlier
+        JOIN credit_grants eg ON eg.user_id=earlier.user_id AND eg.grant_type='signup'
+        WHERE earlier.kind='extension' AND earlier.device_id IS NOT NULL
+          AND lower(earlier.device_id)=lower(s.device_id)
+          AND (earlier.expires_at<? OR earlier.revoked_at<?)
+          AND (earlier.created_at<s.created_at OR (earlier.created_at=s.created_at AND earlier.id<s.id))
+      )
+    ORDER BY s.created_at,s.id`).bind(cutoff,cutoff,cutoff,cutoff).all<{device_id:string;user_id:string}>();
+
+  const seen = new Set<string>();
+  const reservations: D1PreparedStatement[] = [];
+  for (const row of rows.results) {
+    const normalized = row.device_id.toLowerCase();
+    if (seen.has(normalized)) continue;
+    seen.add(normalized);
+    const digest = await hmac(env, `signup-install:v1:${normalized}`);
+    reservations.push(env.DB.prepare(`INSERT INTO device_free_claims(device_digest,user_id,claimed_at)
+      VALUES(?,?,?) ON CONFLICT(device_digest) DO NOTHING`).bind(digest,row.user_id,now));
+  }
+  for (let offset=0; offset<reservations.length; offset+=500) {
+    await env.DB.batch(reservations.slice(offset,offset+500));
+  }
+}
+
+/**
  * Append these statements to the SAME D1 batch that redeems the approved
  * device authorization and creates the extension session.
  *
@@ -35,7 +74,7 @@ export async function signupClaimStatements(
     // reserve that installation so a second new account cannot claim it.
     // A conflict is expected for a different account on the same install;
     // never refuse sign-in or block already-purchased credits.
-    env.DB.prepare(`INSERT OR IGNORE INTO device_free_claims(device_digest,user_id,claimed_at)
+    env.DB.prepare(`INSERT INTO device_free_claims(device_digest,user_id,claimed_at)
       SELECT ?,user_id,? FROM extension_authorizations
       WHERE id=? AND redeem_nonce=? AND status='redeemed' AND user_id=?
         -- Legacy extension sessions can prove an earlier free-grant owner
@@ -45,7 +84,8 @@ export async function signupClaimStatements(
           WHERE s.kind='extension' AND lower(s.device_id)=? AND s.user_id<>?
         )
         AND (EXISTS(SELECT 1 FROM signup_benefit_claims WHERE user_id=? AND status='pending')
-          OR EXISTS(SELECT 1 FROM credit_grants WHERE user_id=? AND grant_type='signup'))`)
+          OR EXISTS(SELECT 1 FROM credit_grants WHERE user_id=? AND grant_type='signup'))
+      ON CONFLICT(device_digest) DO NOTHING`)
       .bind(digest,now,authorizationId,redeemNonce,userId,deviceId.toLowerCase(),userId,userId,userId),
     env.DB.prepare(`UPDATE signup_benefit_claims SET status='granted',
       device_digest=?,claim_nonce=?,granted_at=?
