@@ -14,15 +14,16 @@ CREATE TABLE signup_benefit_claims (
   CHECK(status='pending' OR (device_digest IS NOT NULL AND claim_nonce IS NOT NULL AND granted_at IS NOT NULL))
 );
 
--- A device/install may claim one signup benefit, and an account may claim
--- once even if it connects multiple Chrome profiles. Legacy accounts can
--- reserve their first observed install without changing past credit balances.
+-- Every install may be reserved by only one signup-grant owner. An account
+-- can reserve multiple installations but receives its welcome grant only
+-- once. Legacy accounts reserve installs as they reconnect, with no debit.
 CREATE TABLE device_free_claims (
   device_digest TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE RESTRICT,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   claimed_at INTEGER NOT NULL
 );
 CREATE INDEX signup_benefit_claims_status_idx ON signup_benefit_claims(status);
+CREATE INDEX device_free_claims_user_idx ON device_free_claims(user_id);
 -- Reuse retained pre-feature extension sessions to detect historical claims.
 CREATE INDEX sessions_signup_device_lookup_idx ON sessions(lower(device_id),user_id)
   WHERE kind='extension' AND device_id IS NOT NULL;
