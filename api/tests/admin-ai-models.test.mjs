@@ -175,3 +175,31 @@ test('connection tests reject plain OK text, false status and extra JSON fields'
     }finally{globalThis.fetch=original;f.sql.close();}
   }
 });
+
+test('admin can run more than ten daily model tests without a separate $0.05/day ceiling, while global AI budget still applies', async()=>{
+  const f=setup();
+  try {
+    const created=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));
+    assert.equal(created.status,200,JSON.stringify(created.body));
+    const day=new Date().toISOString().slice(0,10);
+    f.sql.prepare('INSERT INTO ai_provider_test_budget_days(budget_day,calls,reserved_micro_usd,settled_micro_usd) VALUES(?,10,0,50000)').run(day);
+    const total=await mockProvider(async upstreamCount=>{
+      for(let i=0;i<12;i++){
+        const result=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+        assert.equal(result.status,200,`iteration ${i+1}: ${JSON.stringify(result.body)}`);
+        assert.equal(result.body.ok,true);
+      }
+      return upstreamCount();
+    });
+    assert.equal(total,12);
+    const tracked=f.sql.prepare('SELECT calls,reserved_micro_usd,settled_micro_usd FROM ai_provider_test_budget_days WHERE budget_day=?').get(day);
+    assert.equal(tracked.calls,22);
+    assert.equal(tracked.reserved_micro_usd,0);
+    assert.ok(tracked.settled_micro_usd>50000);
+    // All test spending remains reserved against the *shared* daily budget.
+    f.sql.prepare("UPDATE system_settings SET value='1' WHERE key='daily_cost_limit_micro_usd'").run();
+    const denied=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+    assert.equal(denied.status,429);
+    assert.equal(denied.body.code,'MODEL_TEST_BUDGET_EXHAUSTED');
+  } finally { f.sql.close(); }
+});
