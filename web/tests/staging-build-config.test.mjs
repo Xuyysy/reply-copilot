@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { resolveStagingApiBase } from '../scripts/staging-build-config.mjs';
+import { resolveStagingApiBase, resolveStagingTurnstileSiteKey, STAGING_TURNSTILE_SITE_KEY } from '../scripts/staging-build-config.mjs';
 import { resolveProductionApiBase, resolveProductionTurnstileSiteKey } from '../scripts/production-build-config.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -64,4 +64,16 @@ test('test and deploy scripts use the guarded Staging Pages build', async () => 
   assert.match(productionBuildScript, /resolveProductionApiBase/);
   assert.match(productionBuildScript, /resolveProductionTurnstileSiteKey/);
   assert.match(productionBuildScript, /page\.includes\(turnstileSiteKey\)/);
+});
+
+test('Staging Pages builds embed the correct public Turnstile key, never the Production widget', async () => {
+  assert.equal(resolveStagingTurnstileSiteKey(undefined), STAGING_TURNSTILE_SITE_KEY);
+  assert.equal(resolveStagingTurnstileSiteKey(STAGING_TURNSTILE_SITE_KEY), STAGING_TURNSTILE_SITE_KEY);
+  for (const wrong of ['', '0x4AAAAAAFhsvhYsTlFR6LIM', '1x00000000000000000000AA', 'bogus']) {
+    assert.throws(() => resolveStagingTurnstileSiteKey(wrong), /Staging Turnstile/);
+  }
+  const script = await readFile(path.join(root, 'web/scripts/build-staging.mjs'), 'utf8');
+  assert.match(script, /resolveStagingTurnstileSiteKey/);
+  assert.match(script, /page\.includes\(turnstileSiteKey\)/);
+  assert.match(script, /turnstile\/v0\/api\.js/);
 });
