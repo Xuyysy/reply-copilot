@@ -1,5 +1,14 @@
 # x-Reply-Helper｜Production 性能 Worker 发布（2026-10-31）
 
+## 2026-10-31｜用户正式版人工验收通过（后续更新）
+
+- **验收反馈：** 用户在 Production Worker 更新后，明确表示“我用production测试了没有问题”。据此将本次 Production 后端性能优化的**用户人工使用验收**标记为通过；这是用户报告的使用结果，**不是**当前助手直接操作用户浏览器执行的独立端到端测试，也没有指定确切测试次数或逐项验证范围。
+- **部署复核：** Cloudflare Worker `reply-copilot-api-production` 仍为 Deployment `c8fe0c2a-4bda-47ee-a27e-cbd0b08214da`、Version `09d19d8a-a489-443d-991f-bbb6bc254e20`，100% 流量；未执行第二次部署。
+- **范围不变：** Chrome Web Store 插件保持原版 0.3.2，Production Pages、D1、Qwen、支付、购买、密钥及定时任务仍为原配置；此次只有 Worker 服务端更新。用户“没有问题”代表目前反馈正常，**不代表已经完成性能优化前后真实耗时 A/B 对照、长期错误率监控或所有支付/故障分支的验收**。
+- **当前状态：** 可以归档为“Production Worker 上线并经用户人工测试无异常”；下一步只需正常观察真实使用情况。旧版 `911038c0-36a9-4062-96b9-38de2b26ef55` 留作回滚。
+
+---
+
 **实际状态：Production Worker 已部署并独立确认 100% 流量；正式 Chrome 插件与 Pages 没有更新。** 用户先批准性能优化发布 Production，之后明确提出「插件那更新那就算了」，因此此次只实施后端 Worker 发布。**并非整个客户端性能优化完整发布**，不得向外宣称 Staging 中观察到的完整客户端链路已在正式版生效。
 
 ## 1. 部署身份
