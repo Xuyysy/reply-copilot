@@ -205,3 +205,22 @@ test("email verification creates a pending welcome entitlement without any spend
     assert.equal(count(f,"SELECT count(*) n FROM credit_batches WHERE source_kind='signup' AND user_id='"+user.id+"'"),0);
   } finally {f.sql.close();}
 });
+
+test("retained legacy extension session blocks a different new email from recycling that device", async()=>{
+  const f=withD1Returning(fixture());
+  try{
+    const device=randomUUID();
+    f.sql.prepare("INSERT INTO credit_grants(user_id,grant_type,amount,created_at) VALUES('test-user','signup',200,1)").run();
+    f.sql.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,device_id,created_at,expires_at) VALUES('legacy-ext-session',?,'test-user','extension',?,1,?)")
+      .run("f".repeat(64),device,Date.now()+600000);
+    // No device_free_claims row exists for historical claims yet.
+    assert.equal(count(f,"SELECT count(*) n FROM device_free_claims"),0);
+    newAccount(f,"new-b");
+    assert.equal((await link(f,"new-b",device)).status,200);
+    assert.equal(balances(f,"new-b").free_balance,0);
+    assert.equal(count(f,"SELECT count(*) n FROM device_free_claims"),0);
+    assert.equal((await link(f,"test-user",device)).status,200);
+    assert.equal(count(f,"SELECT count(*) n FROM device_free_claims"),1);
+    assert.equal(balances(f,"test-user").free_balance,200);
+  }finally{f.sql.close();}
+});
