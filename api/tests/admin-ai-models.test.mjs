@@ -193,7 +193,10 @@ test('admin can run more than ten daily model tests without a separate $0.05/day
     });
     assert.equal(total,12);
     const tracked=f.sql.prepare('SELECT calls,reserved_micro_usd,settled_micro_usd FROM ai_provider_test_budget_days WHERE budget_day=?').get(day);
-    assert.equal(tracked.calls,22);
+    // The old D1 counter has a historical CHECK(calls<=10) constraint;
+    // authoritative test totals come from the per-request test records.
+    assert.equal(tracked.calls,10);
+    assert.equal(f.sql.prepare("SELECT COUNT(*) AS total FROM ai_provider_tests").get().total,12);
     assert.equal(tracked.reserved_micro_usd,0);
     assert.ok(tracked.settled_micro_usd>50000);
     // All test spending remains reserved against the *shared* daily budget.
