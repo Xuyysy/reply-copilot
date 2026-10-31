@@ -39,9 +39,15 @@ export async function signupClaimStatements(
       SELECT ?,user_id,? FROM extension_authorizations
       WHERE id=? AND redeem_nonce=? AND status='redeemed' AND user_id=?
         AND NOT EXISTS (SELECT 1 FROM device_free_claims WHERE user_id=?)
+        -- Legacy extension sessions can prove an earlier free-grant owner
+        -- even before their next exchange backfills device_free_claims.
+        AND NOT EXISTS (
+          SELECT 1 FROM sessions s JOIN credit_grants g ON g.user_id=s.user_id AND g.grant_type='signup'
+          WHERE s.kind='extension' AND lower(s.device_id)=? AND s.user_id<>?
+        )
         AND (EXISTS(SELECT 1 FROM signup_benefit_claims WHERE user_id=? AND status='pending')
           OR EXISTS(SELECT 1 FROM credit_grants WHERE user_id=? AND grant_type='signup'))`)
-      .bind(digest,now,authorizationId,redeemNonce,userId,userId,userId,userId),
+      .bind(digest,now,authorizationId,redeemNonce,userId,userId,deviceId.toLowerCase(),userId,userId,userId),
     env.DB.prepare(`UPDATE signup_benefit_claims SET status='granted',
       device_digest=?,claim_nonce=?,granted_at=?
       WHERE user_id=? AND status='pending'
