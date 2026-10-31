@@ -8,7 +8,8 @@ import { encryptProviderApiKey, decryptProviderApiKey } from "./ai-model-crypto"
 import { validateProviderEndpoint, requestConfiguredModel, ModelProviderError } from "./ai-model-provider.js";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 
-const TEST_DAILY_LIMIT = 10;
+// Per-request safety ceiling is retained; no admin-only daily count/budget cap.
+// All model tests still reserve funds under the shared site-wide AI daily budget.
 const TEST_BUDGET_MICRO_USD = 50_000;
 const TEST_PROMPTS = {
   zh: "今天把复杂问题拆成小步骤，终于推进了一点。",
@@ -171,7 +172,8 @@ function costReservation(config: ReturnType<typeof parseConfig>, system: string,
 async function runTest(request: Request, env: Env, id: string, requestedKind: "connection" | "generation"): Promise<Response> {
   const actor = await requireAdminSession(request, env, true);
   if (!env.AI_CONFIG_ENCRYPTION_KEY) throw new ApiFailure(503, "MODEL_ENCRYPTION_NOT_CONFIGURED", "Staging 模型加密 Secret 尚未配置。");
-  if (!await import("./auth").then(module => module.takeRate(env, `admin-ai-test:${actor.user_id}`, TEST_DAILY_LIMIT, 86_400_000, nowMs()))) throw new ApiFailure(429, "MODEL_TEST_LIMIT", "模型测试今日次数已达上限。");
+  // Burst protection remains, without the previous 10-tests-per-day ceiling.
+  if (!await import("./auth").then(module => module.takeRate(env, `admin-ai-test-minute:${actor.user_id}`, 30, 60_000, nowMs()))) throw new ApiFailure(429, "MODEL_TEST_RATE_LIMIT", "测试操作过于频繁，请稍后再试。");
   const row = await latestConfig(env, id), config = parseConfig(row);
   const actorBody = await jsonBody(request, 4096);
   if (requestedKind === "generation" && actorBody.language !== "zh" && actorBody.language !== "en") throw new ApiFailure(400,"INVALID_TEST","请选择中文或英文测试语言。");
@@ -194,11 +196,12 @@ async function runTest(request: Request, env: Env, id: string, requestedKind: "c
     env.DB.prepare("INSERT INTO ai_provider_test_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(day),
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(day),
     env.DB.prepare(`INSERT INTO ai_provider_test_budget_claims(test_id,claim_token,budget_day,reserved_micro_usd,created_at)
-      SELECT ?,?,?,?,? WHERE (SELECT calls FROM ai_provider_test_budget_days WHERE budget_day=?)<?
-        AND (SELECT reserved_micro_usd+settled_micro_usd FROM ai_provider_test_budget_days WHERE budget_day=?)+?<=?
-        AND (SELECT reserved_micro_usd+settled_micro_usd FROM ai_budget_days WHERE budget_day=?)+?<=?
-      ON CONFLICT(test_id) DO NOTHING`).bind(actorBody.testId,claimToken,day,reserve,nowMs(),day,TEST_DAILY_LIMIT,day,reserve,TEST_BUDGET_MICRO_USD,day,reserve,globalLimit),
-    env.DB.prepare(`UPDATE ai_provider_test_budget_days SET calls=calls+1,reserved_micro_usd=reserved_micro_usd+?
+      SELECT ?,?,?,?,? WHERE
+        (SELECT reserved_micro_usd+settled_micro_usd FROM ai_budget_days WHERE budget_day=?)+?<=?
+      ON CONFLICT(test_id) DO NOTHING`).bind(actorBody.testId,claimToken,day,reserve,nowMs(),day,reserve,globalLimit),
+    // Legacy schema enforces CHECK(calls<=10): saturate this obsolete metric,
+    // and use ai_provider_tests rows for the authoritative test count.
+    env.DB.prepare(`UPDATE ai_provider_test_budget_days SET calls=CASE WHEN calls<10 THEN calls+1 ELSE calls END,reserved_micro_usd=reserved_micro_usd+?
       WHERE budget_day=? AND EXISTS(SELECT 1 FROM ai_provider_test_budget_claims WHERE test_id=? AND claim_token=? AND budget_day=?)`).bind(reserve,day,actorBody.testId,claimToken,day),
     env.DB.prepare(`UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd+?
       WHERE budget_day=? AND EXISTS(SELECT 1 FROM ai_provider_test_budget_claims WHERE test_id=? AND claim_token=? AND budget_day=?)`).bind(reserve,day,actorBody.testId,claimToken,day),
@@ -212,10 +215,10 @@ async function runTest(request: Request, env: Env, id: string, requestedKind: "c
       return response({ ok: concurrent.status === "passed", replayed: true, ...testResult(replay) },200,env,request);
     }
     if (concurrent) throw new ApiFailure(409,"MODEL_TEST_IN_PROGRESS","本次测试仍在执行，请稍后刷新结果。");
-    throw new ApiFailure(429, "MODEL_TEST_BUDGET_EXHAUSTED", "模型测试成本预算或每日测试次数已达上限。");
+    throw new ApiFailure(429, "MODEL_TEST_BUDGET_EXHAUSTED", "模型测试所需预算已超过全站 AI 每日预算。");
   }
   const claimed = await env.DB.prepare("SELECT status FROM ai_provider_tests WHERE id=? AND admin_user_id=?").bind(actorBody.testId,actor.user_id).first<{status:string}>();
-  if (!claimed) throw new ApiFailure(429, "MODEL_TEST_BUDGET_EXHAUSTED", "模型测试成本预算或每日测试次数已达上限。");
+  if (!claimed) throw new ApiFailure(429, "MODEL_TEST_BUDGET_EXHAUSTED", "模型测试所需预算已超过全站 AI 每日预算。");
   const started = nowMs();
   let usage: any = { model: "unknown-estimated", inputTokens: 0, outputTokens: 0, costMicroUsd: reserve, usageQuality: "estimated" };
   let result: any = null, errorCategory: string | null = null, jsonValid = false, upstreamHttpStatus: number | null = null;
