@@ -75,7 +75,7 @@ const pageTitle = `${title} · x-Reply-Helper`;
       }
       setLanguage(preference);
       document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
-      let accountState: "loading"|"guest"|"ready"|"empty"|"error"="loading";
+      let accountState: "loading"|"guest"|"pending"|"ready"|"empty"|"error"="loading";
       let lastAccountCheck=0;
       function updateAccountLinks(){
         const en=document.documentElement.lang==="en";
@@ -90,13 +90,13 @@ const pageTitle = `${title} · x-Reply-Helper`;
           link.hidden=shouldHideAccountCta(accountState,link.dataset.sitePrimaryOverride);
           link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
           const text=link.querySelector("span")||link;
-          text.textContent=accountState==="guest"?(en?"Get 200 free generations":"免费领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
+          text.textContent=accountState==="guest"?(en?"Register and link to claim 200":"注册并绑定后领取 200 次"):accountState==="pending"?(en?"Link extension to claim 200":"绑定插件领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
         });
-        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email for 200 free generations.":"验证邮箱后赠送 200 次 AI 生成。");});
+        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="pending"?(en?"Welcome credits are pending. Sign in and connect the extension to your account.":"新人额度待领取：请登录 Chrome 插件并连接账户。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email, then connect your account in the extension to receive welcome credits.":"验证邮箱后，请在插件中连接账户以领取新人额度。");});
       }
       async function loadAccountLinks(){
         lastAccountCheck=Date.now(); accountState="loading";updateAccountLinks();
-        try{const {api,ApiError}=await import("../lib/api");await api("/v1/me");const result=await api<{quota:{totalRemaining:number}}>("/v1/usage");accountState=result.quota.totalRemaining<=0?"empty":"ready";}
+        try{const {api,ApiError}=await import("../lib/api");await api("/v1/me");const result=await api<{quota:{totalRemaining:number};signupBenefit?:{status:"pending"|"granted"}|null}>("/v1/usage");accountState=result.signupBenefit?.status==="pending"?"pending":result.quota.totalRemaining<=0?"empty":"ready";}
         catch(error){const {ApiError}=await import("../lib/api");accountState=error instanceof ApiError&&error.status===401?"guest":"error";}
         updateAccountLinks();
       }
