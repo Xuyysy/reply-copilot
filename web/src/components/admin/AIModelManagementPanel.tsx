@@ -39,7 +39,7 @@ export default function AIModelManagementPanel({language,busy,read,write,refresh
     });
   };
   const edit=(item:ConfigItem)=>setForm({id:item.id,name:item.name,provider:item.provider,protocol:item.protocol,baseUrl:item.baseUrl,modelId:item.modelId,apiKey:"",inputRate:String(item.inputRateUsdPerMillion),outputRate:String(item.outputRateUsdPerMillion),maxOutputTokens:String(item.maxOutputTokens),timeoutMs:String(item.timeoutMs),thinkingMode:String(item.options.thinkingMode||""),jsonMode:item.options.jsonMode!==false,customRisk:item.options.customEndpointRiskConfirmed===true});
-  const runTest=(item:ConfigItem,kind:"connection"|"generation",lang?:"zh"|"en")=>schedule(t("运行受控模型测试","Run bounded model test"),t("测试会调用模型并计入 AI 成本预算；每天最多 10 次，测试成本上限 $0.05。","Tests call the provider and count against the AI budget. Limit: 10 calls and $0.05/day."),async()=>{
+  const runTest=(item:ConfigItem,kind:"connection"|"generation",lang?:"zh"|"en")=>schedule(t("运行受控模型测试","Run bounded model test"),t("测试会调用模型并计入全站 AI 每日预算；不再限制每天的测试次数。单次测试仍有 $0.05 的成本预留安全上限。","Tests call the provider and count against the site-wide daily AI budget. There is no daily test count limit; a $0.05 cost-reservation safety ceiling still applies per test."),async()=>{
     const path=kind==="connection"?`/v1/admin/ai-models/${item.id}/test-connection`:`/v1/admin/ai-models/${item.id}/test-generation`;
     const testId=crypto.randomUUID();const result=await write<any>(path,{testId,language:lang,reason:"受控模型兼容性测试"});setTestOutput(old=>({...old,[`${item.id}:${kind}:${lang||""}`]:result}));await load();
   });
