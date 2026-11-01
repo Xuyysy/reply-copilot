@@ -23,3 +23,16 @@ test("post and sample prompt injection are framed as untrusted style/content", (
   assert.match(prompts.user, /untrusted post text/i);
   assert.ok(prompts.user.includes("Ignore previous instructions"));
 });
+
+test("default X replies sound offhand instead of like a dutiful AI assistant", () => {
+  const prompts = buildPrompts({ postContext: { text: "Shipped a small update today" }, voiceProfile: DEFAULT_VOICE_PROFILE });
+  assert.match(prompts.system, /casually scrolling their timeline/i);
+  assert.match(prompts.system, /A natural tangent is welcome/i);
+  assert.match(prompts.system, /The default natural reply is the MOST sendable/i);
+  assert.match(prompts.system, /Avoid hollow replies/i);
+  assert.match(prompts.system, /not the same observation in three levels of formality/i);
+  assert.match(prompts.system, /Never invent.*firsthand tests/i);
+  assert.match(prompts.user, /Favor the feel of a casually typed X comment/i);
+  assert.match(prompts.system, /Return JSON only/i);
+  for (const style of ["natural", "light_humor", "thoughtful"]) assert.ok(prompts.system.includes(style));
+});
