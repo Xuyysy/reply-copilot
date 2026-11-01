@@ -267,12 +267,86 @@ function UserDetailHistory({ detail, language }: { detail: UserDetail; language:
   const quota = detail.quota && typeof detail.quota === "object" && !Array.isArray(detail.quota) ? detail.quota as Record<string, unknown> : {};
   const usage = Array.isArray(detail.usage) ? detail.usage.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
   const usageLabels: Record<string, [string, string]> = { succeeded: ["生成成功", "Succeeded"], completed: ["已完成", "Completed"], reserved: ["已预留额度", "Credits reserved"], processing: ["生成中", "Processing"], upstream_failed: ["生成失败", "Generation failed"], failed: ["失败", "Failed"], uncertain: ["结果待确认", "Awaiting confirmation"], refunded: ["已退还额度", "Credits refunded"] };
-  return <div className="space-y-6">
-    <div className="text-sm text-muted-foreground"><p>{t("注册日期", "Registered")}: {detail.user.created_at?date(detail.user.created_at,language):"—"}</p><p>{t("最近活动", "Last active")}: {detail.user.last_active_at?date(detail.user.last_active_at,language):"—"}</p></div>
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[["freeRemaining", t("可用免费额度", "Free credits available")], ["paidRemaining", t("可用付费额度", "Paid credits available")], ["totalRemaining", t("可用总额度", "Total credits available")]].map(([key, label]) => <Metric key={key} label={label} value={typeof quota[key] === "number" ? String(quota[key]) : "—"} />)}</div>
-    <section><h3 className="mb-2 font-semibold">{t("最近订单", "Recent orders")}</h3><div className="data-table-wrap"><Table><TableHeader><TableRow>{[t("套餐", "Package"), t("额度", "Credits"), t("状态", "Status"), t("时间", "Time")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{detail.orders.map(order => <TableRow key={order.id}><TableCell>{order.package_name}</TableCell><TableCell>{order.credits}</TableCell><TableCell>{statusText(order.status, language)}</TableCell><TableCell>{date(order.created_at, language)}</TableCell></TableRow>)}</TableBody></Table></div>{!detail.orders.length && <Empty text={t("暂无订单。", "No orders yet.")} />}</section>
-    <section><h3 className="mb-2 font-semibold">{t("最近额度流水", "Recent credit activity")}</h3><div className="data-table-wrap"><Table><TableHeader><TableRow>{[t("类型", "Type"), t("免费变化", "Free change"), t("付费变化", "Paid change"), t("原因", "Reason"), t("时间", "Time")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{detail.ledger.map(entry => <TableRow key={entry.id}><TableCell>{ledgerText(entry.kind, language)}</TableCell><TableCell>{entry.free_delta > 0 ? "+" : ""}{entry.free_delta}</TableCell><TableCell>{entry.paid_delta > 0 ? "+" : ""}{entry.paid_delta}</TableCell><TableCell>{entry.reason || "—"}</TableCell><TableCell>{date(entry.created_at, language)}</TableCell></TableRow>)}</TableBody></Table></div>{!detail.ledger.length && <Empty text={t("暂无额度流水。", "No credit activity yet.")} />}</section>
-    <section><h3 className="mb-2 font-semibold">{t("最近 AI 使用", "Recent AI usage")}</h3>{usage.length ? <ul className="divide-y">{usage.map((entry, index) => <li key={typeof entry.id === "string" ? entry.id : index} className="flex justify-between gap-3 py-2 text-sm"><span>{typeof entry.status === "string" ? usageLabels[entry.status] ? t(...usageLabels[entry.status]) : statusText(entry.status, language) : "—"}</span><span className="text-muted-foreground">{typeof entry.created_at === "number" ? date(entry.created_at, language) : "—"}</span></li>)}</ul> : <Empty text={t("暂无 AI 使用记录。", "No AI usage yet.")} />}</section>
+  return <div className="min-w-0 space-y-4">
+    <div className="grid grid-cols-1 gap-1 text-sm text-muted-foreground sm:grid-cols-2">
+      <p className="min-w-0 break-words">{t("注册日期", "Registered")}: {detail.user.created_at ? date(detail.user.created_at, language) : "—"}</p>
+      <p className="min-w-0 break-words">{t("最近活动", "Last active")}: {detail.user.last_active_at ? date(detail.user.last_active_at, language) : "—"}</p>
+    </div>
+    <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
+      {[
+        ["freeRemaining", t("可用免费额度", "Free credits available")],
+        ["paidRemaining", t("可用付费额度", "Paid credits available")],
+        ["totalRemaining", t("可用总额度", "Total credits available")],
+      ].map(([key, label]) => (
+        <div key={key} className="min-w-0 rounded-lg border bg-card p-3 sm:p-4">
+          <p className="text-xs text-muted-foreground sm:text-sm">{label}</p>
+          <strong className="mt-1 block text-xl font-semibold tabular-nums sm:text-2xl">
+            {typeof quota[key] === "number" ? String(quota[key]) : "—"}
+          </strong>
+        </div>
+      ))}
+    </div>
+    <section className="min-w-0 space-y-3 rounded-lg border bg-card p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 !text-base !leading-6 !tracking-normal font-semibold">{t("最近订单", "Recent orders")}</h3>
+        <span className="shrink-0 text-xs text-muted-foreground">{detail.orders.length} {t("条", "records")}</span>
+      </div>
+      {detail.orders.length ? (
+        <div data-testid="user-detail-orders-scroll" role="region" aria-label={t("最近订单记录", "Recent order records")} tabIndex={0}
+          className="max-h-56 min-w-0 overflow-auto overscroll-contain rounded-md border [&_[data-slot=table-container]]:overflow-visible">
+          <Table className="min-w-[540px]">
+            <TableHeader className="sticky top-0 z-10 bg-background">
+              <TableRow>{[t("套餐", "Package"), t("额度", "Credits"), t("状态", "Status"), t("时间", "Time")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow>
+            </TableHeader>
+            <TableBody>{detail.orders.map(order => <TableRow key={order.id}>
+              <TableCell className="max-w-52 whitespace-normal break-words">{order.package_name}</TableCell>
+              <TableCell className="tabular-nums">{order.credits}</TableCell>
+              <TableCell>{statusText(order.status, language)}</TableCell>
+              <TableCell>{date(order.created_at, language)}</TableCell>
+            </TableRow>)}</TableBody>
+          </Table>
+        </div>
+      ) : <Empty text={t("暂无订单。", "No orders yet.")} />}
+    </section>
+    <section className="min-w-0 space-y-3 rounded-lg border bg-card p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 !text-base !leading-6 !tracking-normal font-semibold">{t("最近额度流水", "Recent credit activity")}</h3>
+        <span className="shrink-0 text-xs text-muted-foreground">{detail.ledger.length} {t("条", "records")}</span>
+      </div>
+      {detail.ledger.length ? (
+        <div data-testid="user-detail-ledger-scroll" role="region" aria-label={t("最近额度流水记录", "Recent credit activity records")} tabIndex={0}
+          className="max-h-64 min-w-0 overflow-auto overscroll-contain rounded-md border [&_[data-slot=table-container]]:overflow-visible">
+          <Table className="min-w-[720px]">
+            <TableHeader className="sticky top-0 z-10 bg-background">
+              <TableRow>{[t("类型", "Type"), t("免费变化", "Free change"), t("付费变化", "Paid change"), t("原因", "Reason"), t("时间", "Time")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow>
+            </TableHeader>
+            <TableBody>{detail.ledger.map(entry => <TableRow key={entry.id}>
+              <TableCell>{ledgerText(entry.kind, language)}</TableCell>
+              <TableCell className="tabular-nums">{entry.free_delta > 0 ? "+" : ""}{entry.free_delta}</TableCell>
+              <TableCell className="tabular-nums">{entry.paid_delta > 0 ? "+" : ""}{entry.paid_delta}</TableCell>
+              <TableCell className="max-w-64 whitespace-normal break-words">{entry.reason || "—"}</TableCell>
+              <TableCell>{date(entry.created_at, language)}</TableCell>
+            </TableRow>)}</TableBody>
+          </Table>
+        </div>
+      ) : <Empty text={t("暂无额度流水。", "No credit activity yet.")} />}
+    </section>
+    <section className="min-w-0 space-y-3 rounded-lg border bg-card p-3 sm:p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="m-0 !text-base !leading-6 !tracking-normal font-semibold">{t("最近 AI 使用", "Recent AI usage")}</h3>
+        <span className="shrink-0 text-xs text-muted-foreground">{usage.length} {t("条", "records")}</span>
+      </div>
+      {usage.length ? (
+        <div data-testid="user-detail-usage-scroll" role="region" aria-label={t("最近 AI 使用记录", "Recent AI usage records")} tabIndex={0}
+          className="max-h-52 min-w-0 overflow-y-auto overscroll-contain rounded-md border px-3">
+          <ul className="divide-y">{usage.map((entry, index) => <li key={typeof entry.id === "string" ? entry.id : index}
+            className="flex min-w-0 flex-wrap items-start justify-between gap-2 py-2 text-sm">
+            <span>{typeof entry.status === "string" ? usageLabels[entry.status] ? t(...usageLabels[entry.status]) : statusText(entry.status, language) : "—"}</span>
+            <span className="text-xs text-muted-foreground">{typeof entry.created_at === "number" ? date(entry.created_at, language) : "—"}</span>
+          </li>)}</ul>
+        </div>
+      ) : <Empty text={t("暂无 AI 使用记录。", "No AI usage yet.")} />}
+    </section>
   </div>;
 }
 
