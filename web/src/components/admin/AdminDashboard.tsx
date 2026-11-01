@@ -195,7 +195,7 @@ export default function AdminDashboard() {
         className="flex h-[min(90dvh,860px)] w-[calc(100vw-2rem)] !max-w-[1040px] min-w-0 flex-col gap-0 overflow-hidden p-0"
         closeLabel={t("关闭用户详情", "Close user details")}
       >
-        <DialogHeader className="shrink-0 border-b px-4 py-4 pr-12 text-left sm:px-6">
+        <DialogHeader className="shrink-0 border-b px-4 py-4 pr-12 text-left sm:pl-6 sm:pr-14">
           <DialogTitle className="!text-lg !leading-7 !tracking-normal">{t("用户详情", "User details")}</DialogTitle>
           <DialogDescription className="min-w-0 space-y-1 text-left">
             <span className="block min-w-0 break-all font-medium text-foreground">{detail?.user.email}</span>
