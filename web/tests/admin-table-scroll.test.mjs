@@ -44,7 +44,7 @@ test('real admin tables scroll independently with sticky headers; controls, dial
       else if(p==='/v1/admin/export')return new Response('id,email\\nu0,person0@example.test',{headers:{'content-type':'text/csv'}});
       else if(p==='/v1/admin/users/bulk-status'){for(const id of body.userIds)window.__states[id]=body.status;data={ok:true};}
       else if(/^\\/v1\\/admin\\/users\\/u\\d+\\/status$/.test(p)){window.__states[p.split('/')[4]]=body.status;data={ok:true};}
-      else if(/^\\/v1\\/admin\\/users\\/u\\d+$/.test(p)){const user=users().find(u=>u.id===p.split('/')[4]);data={user,quota:{freeRemaining:200,paidRemaining:400},orders:[],ledger:[],usage:[]};}
+      else if(/^\\/v1\\/admin\\/users\\/u\\d+$/.test(p)){const user=users().find(u=>u.id===p.split('/')[4]),n=Array.from({length:40},(_,i)=>i);data={user,quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600},orders:n.slice(0,18).map(i=>({id:'order-'+i,package_name:'Starter / 标准包',credits:400,status:'paid',created_at:1793318400000})),ledger:n.map(i=>({id:'ledger-'+i,kind:'generation_debit',free_delta:0,paid_delta:-1,reason:'A recorded AI generation / 额度已经扣除',created_at:1793318400000})),usage:n.map(i=>({id:'usage-'+i,status:'succeeded',created_at:1793318400000}))};}
       else if(/^\\/v1\\/admin\\/orders\\/o\\d+$/.test(p))data={order:orders().find(o=>o.id===p.split('/')[4]),events:[],attempts:[],refunds:[]};
       else throw new Error('Unexpected mock route '+p);
       return Response.json(data);
@@ -79,6 +79,32 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   assert.equal(await evaluate(`${panel}.querySelector('tbody input[type="checkbox"]').checked`),true);
   await click(`[...${panel}.querySelectorAll('button')].find(el=>el.textContent.includes('CSV'))`);await until('window.__downloads.length===1');
   await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('person0@example.test'));
+  // The user detail itself must be viewport-bounded. Its history sections,
+  // not the document or the dialog shell, own vertical/horizontal scrolling.
+  const userLayout=await evaluate(`(async()=>{
+    const dialog=document.querySelector('[role="dialog"]'),header=dialog.querySelector('[data-slot="dialog-header"]'),body=dialog.querySelector('[data-testid="user-detail-body-scroll"]');
+    const beforeTop=header.getBoundingClientRect().top;
+    const regions=['orders','ledger','usage'].map(name=>{
+      const el=dialog.querySelector('[data-testid="user-detail-'+name+'-scroll"]');
+      const result={name,height:el.clientHeight,scrollHeight:el.scrollHeight,width:el.clientWidth,scrollWidth:el.scrollWidth};
+      el.scrollTop=120;el.scrollLeft=80;return result;
+    });
+    body.scrollTop=100;
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    return {dialogWidth:dialog.getBoundingClientRect().width,viewportWidth:innerWidth,headerDelta:Math.abs(header.getBoundingClientRect().top-beforeTop),
+      titleSize:parseFloat(getComputedStyle(dialog.querySelector('[data-slot="dialog-title"]')).fontSize),
+      bodyScrollHeight:body.scrollHeight,bodyHeight:body.clientHeight,bodyOverflow:getComputedStyle(body).overflowY,
+      documentScrollWidth:document.documentElement.scrollWidth,regions};
+  })()`);
+  assert.ok(userLayout.dialogWidth<=userLayout.viewportWidth-16,JSON.stringify(userLayout));
+  assert.ok(userLayout.documentScrollWidth<=userLayout.viewportWidth+1,'user detail must not cause page-wide horizontal scrolling');
+  assert.ok(userLayout.titleSize<=24,'user detail title must not inherit the site-wide oversized h2 rule');
+  assert.equal(userLayout.bodyOverflow,'auto');
+  assert.ok(userLayout.bodyScrollHeight>userLayout.bodyHeight,'user details must scroll within their own body');
+  assert.ok(userLayout.headerDelta<2,'dialog header should stay fixed when the body scrolls');
+  for(const r of userLayout.regions){assert.ok(r.scrollHeight>r.height,'history list should scroll vertically: '+r.name);}
+  for(const r of userLayout.regions.filter(r=>r.name!=='usage')){assert.ok(r.scrollWidth>r.width,'history table should scroll horizontally on mobile: '+r.name);}
+
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await click(`${panel}.querySelectorAll('tbody button')[1]`);await until('!!document.querySelector(\'[role="alertdialog"]\')');
   await evaluate(`(()=>{const input=document.querySelector('[role="alertdialog"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Isolated layout test reason');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
