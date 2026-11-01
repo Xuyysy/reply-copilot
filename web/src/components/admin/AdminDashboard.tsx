@@ -190,7 +190,75 @@ export default function AdminDashboard() {
     <Dialog open={Boolean(editing)} onOpenChange={open => { if (!open) setEditing(null); }}>{editing && <PackageEditor creating={creating} item={editing} language={language} pending={busy} onCancel={() => setEditing(null)} onSave={body => { const item = editing; setEditing(null); setConfirm({ title: t("确认修改套餐", "Confirm package update"), description: `${item.id} · ${t("已有订单价格不会变化。", "Existing order prices will not change.")}`, action: async () => { await write(creating ? "/v1/admin/packages" : `/v1/admin/packages/${encodeURIComponent(item.id)}`, body); await refresh(); } }); }} />}</Dialog>
     <Dialog open={reauthOpen} onOpenChange={open => { if (!open) {setReauthOpen(false); setPassword(""); setReauthError(""); reauthResolver.current?.(false); reauthResolver.current = null;} }}><DialogContent><DialogHeader><DialogTitle>{t("验证管理员密码", "Verify admin password")}</DialogTitle><DialogDescription>{t("敏感操作需要重新验证密码。", "Verify your password to continue this operation.")}</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={async e => {e.preventDefault(); if (reauthBusy.current) return; reauthBusy.current = true; const resolve = reauthResolver.current; setReauthPending(true); setReauthError(""); try {await api("/v1/admin/reauth", {method: "POST", body: JSON.stringify({password})}); if (reauthResolver.current === resolve) {setPassword(""); setReauthOpen(false); resolve?.(true); reauthResolver.current = null;}} catch (cause) {if (reauthResolver.current === resolve) setReauthError(readableError(cause, language));} finally {reauthBusy.current = false; setReauthPending(false);} }}><Input autoFocus type="password" autoComplete="current-password" aria-label={t("管理员密码", "Admin password")} value={password} onChange={e => setPassword(e.target.value)} required /><Button disabled={reauthPending}>{t("验证并继续", "Verify and continue")}</Button><Button type="button" variant="outline" onClick={() => {setReauthOpen(false); setPassword(""); reauthResolver.current?.(false); reauthResolver.current = null;}}>{t("取消", "Cancel")}</Button>{reauthError && <Alert variant="destructive"><AlertDescription>{reauthError}</AlertDescription></Alert>}</form></DialogContent></Dialog>
     <Dialog open={Boolean(orderDetail)} onOpenChange={open=>{if(!open)setOrderDetail(null);}}><DialogContent className="max-w-3xl max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>订单与支付通知</DialogTitle><DialogDescription>{orderDetail?.order?.id}</DialogDescription></DialogHeader>{orderDetail&&<div className="space-y-4"><p>{orderDetail.order.email} · {orderDetail.order.package_name}</p><p>支付状态：{statusText(orderDetail.order.payment_status||orderDetail.order.status,language)} · 额度：{orderDetail.order.credited_at?"已发放":"未发放"}</p><p>创建：{date(orderDetail.order.created_at,language)} · 到账：{orderDetail.order.credited_at?date(orderDetail.order.credited_at,language):"—"}</p><p className="text-sm text-muted-foreground">仅可信支付状态可作为补发依据。支付查证请通过平台后台与客服核实。</p><h3 className="font-semibold">支付通知及处理结果</h3>{(orderDetail.events||[]).map((event:any,index:number)=><div className="rounded border p-3 text-sm" key={event.id||index}><p>{event.event_type||event.type||"支付通知"} · {event.status||event.outcome||event.result||"已记录"}</p><p>{event.error_code||event.error||"—"}</p><p>{event.created_at?date(event.created_at,language):"—"}</p></div>)}{!orderDetail.events?.length&&<p>暂无支付通知</p>}<h3 className="font-semibold">支付尝试与错误</h3>{(orderDetail.attempts||[]).map((attempt:any,index:number)=><div className="rounded border p-3 text-sm" key={attempt.id||index}><p>{attempt.status?statusText(attempt.status,language):"已记录"} · {attempt.error_code||attempt.failure_code||"无错误码"}</p><p>{attempt.created_at?date(attempt.created_at,language):"—"}</p></div>)}{!orderDetail.attempts?.length&&<p>暂无支付尝试记录</p>}</div>}</DialogContent></Dialog>
-    <Dialog open={Boolean(detail)} onOpenChange={open => {if (!open) setDetail(null);}}><DialogContent className="max-w-3xl max-h-[85vh] overflow-auto"><DialogHeader><DialogTitle>{detail?.user.email}</DialogTitle><DialogDescription>{detail?.user.id}</DialogDescription></DialogHeader>{detail && <><div className="flex gap-2"><Button variant="outline" disabled={busy} onClick={() => {const user = detail.user; setDetail(null); setConfirm({title: t("标记测试账户", "Mark test account"), description: user.email, action: async () => {await write(`/v1/admin/users/${encodeURIComponent(user.id)}/test-account`, {isTestAccount: true}); await refresh();}});}}>{t("标记测试账户", "Mark test account")}</Button><Button variant="outline" disabled={busy} onClick={() => {const user = detail.user; setDetail(null); setConfirm({title: t("归档账户", "Archive account"), description: t("先标记测试账户。仅无订单账户可以归档；在用户列表解冻可恢复归档账户。", "Mark as test first. Only accounts without orders can be archived; unfreeze in the user list to restore."), action: async () => {await write(`/v1/admin/users/${encodeURIComponent(user.id)}/archive`, {}); await refresh();}});}}>{t("归档账户", "Archive account")}</Button></div><Field label="管理员内部备注"><textarea className="min-h-24 rounded border p-2" maxLength={2000} value={note} onChange={e=>setNote(e.target.value)}/></Field><Button disabled={busy} variant="outline" onClick={()=>setConfirm({title:"保存内部备注",description:detail.user.email,action:async()=>{await write(`/v1/admin/users/${encodeURIComponent(detail.user.id)}/note`,{note});say("备注已保存");}})}>保存备注</Button><UserDetailHistory detail={detail} language={language} /></>}</DialogContent></Dialog>
+    <Dialog open={Boolean(detail)} onOpenChange={open => { if (!open) setDetail(null); }}>
+      <DialogContent
+        className="flex h-[min(90dvh,860px)] w-[calc(100vw-2rem)] !max-w-[1040px] min-w-0 flex-col gap-0 overflow-hidden p-0"
+        closeLabel={t("关闭用户详情", "Close user details")}
+      >
+        <DialogHeader className="shrink-0 border-b px-4 py-4 pr-12 text-left sm:px-6">
+          <DialogTitle className="!text-lg !leading-7 !tracking-normal">{t("用户详情", "User details")}</DialogTitle>
+          <DialogDescription className="min-w-0 space-y-1 text-left">
+            <span className="block min-w-0 break-all font-medium text-foreground">{detail?.user.email}</span>
+            <span className="block min-w-0 break-all text-xs">{t("用户 ID", "User ID")}: {detail?.user.id}</span>
+          </DialogDescription>
+        </DialogHeader>
+        {detail && (
+          <div
+            data-testid="user-detail-body-scroll"
+            role="region"
+            aria-label={t("用户详情内容", "User detail content")}
+            tabIndex={0}
+            className="min-h-0 min-w-0 flex-1 space-y-5 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-4 sm:px-6"
+          >
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" disabled={busy} onClick={() => {
+                const user = detail.user;
+                setDetail(null);
+                setConfirm({
+                  title: t("标记测试账户", "Mark test account"),
+                  description: user.email,
+                  action: async () => {
+                    await write(`/v1/admin/users/${encodeURIComponent(user.id)}/test-account`, { isTestAccount: true });
+                    await refresh();
+                  },
+                });
+              }}>{t("标记测试账户", "Mark test account")}</Button>
+              <Button variant="outline" disabled={busy} onClick={() => {
+                const user = detail.user;
+                setDetail(null);
+                setConfirm({
+                  title: t("归档账户", "Archive account"),
+                  description: t("先标记测试账户。仅无订单账户可以归档；在用户列表解冻可恢复归档账户。", "Mark as test first. Only accounts without orders can be archived; unfreeze in the user list to restore."),
+                  action: async () => {
+                    await write(`/v1/admin/users/${encodeURIComponent(user.id)}/archive`, {});
+                    await refresh();
+                  },
+                });
+              }}>{t("归档账户", "Archive account")}</Button>
+            </div>
+            <section className="min-w-0 space-y-3 rounded-lg border bg-card p-3 sm:p-4" aria-label={t("管理员内部备注", "Internal admin note")}>
+              <Field label={t("管理员内部备注", "Internal admin note")}>
+                <textarea
+                  className="block min-h-24 w-full min-w-0 max-w-full resize-y rounded-md border p-3 text-sm"
+                  maxLength={2000}
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                />
+              </Field>
+              <Button disabled={busy} variant="outline" onClick={() => setConfirm({
+                title: "保存内部备注",
+                description: detail.user.email,
+                action: async () => {
+                  await write(`/v1/admin/users/${encodeURIComponent(detail.user.id)}/note`, { note });
+                  say("备注已保存");
+                },
+              })}>{t("保存备注", "Save note")}</Button>
+            </section>
+            <UserDetailHistory detail={detail} language={language} />
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   </div>;
 }
 
