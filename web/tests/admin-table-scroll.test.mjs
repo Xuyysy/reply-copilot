@@ -16,9 +16,9 @@ test('real admin tables scroll independently with sticky headers; controls, dial
  const call=(method,params={},sessionId)=>new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(new Error('Chrome timeout '+method));},10000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})+'\0');});
  let session;
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true},session);if(r.result.exceptionDetails)throw new Error(r.result.exceptionDetails.exception?.description||r.result.exceptionDetails.text);return r.result.result.value;};
- const until=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await wait(25);}throw new Error('UI did not settle: '+expression);};
+ const until=async expression=>{for(let i=0;i<100;i++){if(await evaluate(expression))return;await wait(25);}throw new Error('UI did not settle: '+expression+'; '+JSON.stringify(await evaluate(`({trace:window.__clickTrace,checkboxes:[...document.querySelectorAll('input[type=checkbox]')].slice(0,3).map(e=>({checked:e.checked,rect:e.getBoundingClientRect().toJSON()}))})`)));};
  const click=async expression=>{
-  await until(`(()=>{const el=${expression};if(!el)return false;el.scrollIntoView({block:'center',inline:'center'});const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.width>0&&r.height>0&&(hit===el||el.contains(hit));})()`);
+  await until(`(()=>{const el=${expression};if(!el)return false;el.scrollIntoView({behavior:'instant',block:'center',inline:'center'});const r=el.getBoundingClientRect(),hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return r.width>0&&r.height>0&&(hit===el||el.contains(hit));})()`);
   const point=await evaluate(`(()=>{const r=(${expression}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);
   await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1},session);
   await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1},session);
@@ -44,7 +44,8 @@ test('real admin tables scroll independently with sticky headers; controls, dial
       else if(p==='/v1/admin/export')return new Response('id,email\\nu0,person0@example.test',{headers:{'content-type':'text/csv'}});
       else if(p==='/v1/admin/users/bulk-status'){for(const id of body.userIds)window.__states[id]=body.status;data={ok:true};}
       else if(/^\\/v1\\/admin\\/users\\/u\\d+\\/status$/.test(p)){window.__states[p.split('/')[4]]=body.status;data={ok:true};}
-      else if(/^\\/v1\\/admin\\/users\\/u\\d+$/.test(p)){const user=users().find(u=>u.id===p.split('/')[4]),n=Array.from({length:40},(_,i)=>i);data={user,quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600},orders:n.slice(0,18).map(i=>({id:'order-'+i,package_name:'Starter / 标准包',credits:400,status:'paid',created_at:1793318400000})),ledger:n.map(i=>({id:'ledger-'+i,kind:'generation_debit',free_delta:0,paid_delta:-1,reason:'A recorded AI generation / 额度已经扣除',created_at:1793318400000})),usage:n.map(i=>({id:'usage-'+i,status:'succeeded',created_at:1793318400000}))};}
+      else if(/^\\/v1\\/admin\\/users\\/u\\d+$/.test(p)){const original=users().find(u=>u.id===p.split('/')[4]),user={...original,email:window.__longEmail?'long-email-local-part-'.repeat(12)+'@example.test':original.email},n=Array.from({length:window.__detailRows??40},(_,i)=>i);data={user,quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600},orders:n.slice(0,18).map(i=>({id:'order-'+i,package_name:'Starter / 标准包',credits:400,status:'paid',created_at:1793318400000})),ledger:n.map(i=>({id:'ledger-'+i,kind:'generation_debit',free_delta:0,paid_delta:-1,reason:'A recorded AI generation / 额度已经扣除',created_at:1793318400000})),usage:n.map(i=>({id:'usage-'+i,status:'succeeded',created_at:1793318400000}))};}
+      else if(/^\\/v1\\/admin\\/users\\/u\\d+\\/(test-account|archive|note)$/.test(p))data={ok:true};
       else if(/^\\/v1\\/admin\\/orders\\/o\\d+$/.test(p))data={order:orders().find(o=>o.id===p.split('/')[4]),events:[],attempts:[],refunds:[]};
       else throw new Error('Unexpected mock route '+p);
       return Response.json(data);
@@ -57,6 +58,7 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   chrome.stdio[4].on('data',chunk=>{buffer+=chunk.toString();let index;while((index=buffer.indexOf('\0'))>=0){const s=buffer.slice(0,index);buffer=buffer.slice(index+1);const r=JSON.parse(s);const item=pending.get(r.id);if(item){pending.delete(r.id);clearTimeout(item.timer);r.error?item.reject(new Error(r.error.message)):item.resolve(r);}}});
   const target=(await call('Target.createTarget',{url:'about:blank'})).result.targetId;session=(await call('Target.attachToTarget',{targetId:target,flatten:true})).result.sessionId;
   await call('Page.enable',{},session);await call('Runtime.enable',{},session);await call('Page.navigate',{url:pathToFileURL(path.join(dir,'test.html')).href},session);await until('typeof window.__mount === "function"');
+  await evaluate(`window.__clickTrace=[];for(const type of ['click','change'])document.addEventListener(type,e=>{window.__clickTrace.push({type,tag:e.target.tagName,inputType:e.target.type,checked:e.target.checked,x:e.clientX,y:e.clientY});window.__clickTrace=window.__clickTrace.slice(-8)},true)`);
   let scenarios=0;
   for(const [width,height] of [[1440,1000],[375,700]])for(const language of ['zh','en'])for(const count of [0,1,5,100]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);
@@ -79,6 +81,13 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   assert.equal(await evaluate(`${panel}.querySelector('tbody input[type="checkbox"]').checked`),true);
   await click(`[...${panel}.querySelectorAll('button')].find(el=>el.textContent.includes('CSV'))`);await until('window.__downloads.length===1');
   await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('person0@example.test'));
+  await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
+  let detailScenarios=0;
+  for(const [width,height] of [[1440,1000],[375,700]])for(const language of ['zh','en']) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);
+    await evaluate(`window.__longEmail=true;window.__detailRows=40;window.__mount(20,${JSON.stringify(language)})`);
+    await until('!!document.querySelector(\'[role="tablist"]\')');await tab('users');
+    await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');
   // The user detail itself must be viewport-bounded. Its history sections,
   // not the document or the dialog shell, own vertical/horizontal scrolling.
   const userLayout=await evaluate(`(async()=>{
@@ -103,9 +112,48 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   assert.ok(userLayout.bodyScrollHeight>userLayout.bodyHeight,'user details must scroll within their own body');
   assert.ok(userLayout.headerDelta<2,'dialog header should stay fixed when the body scrolls');
   for(const r of userLayout.regions){assert.ok(r.scrollHeight>r.height,'history list should scroll vertically: '+r.name);}
-  for(const r of userLayout.regions.filter(r=>r.name!=='usage')){assert.ok(r.scrollWidth>r.width,'history table should scroll horizontally on mobile: '+r.name);}
+  if(width===375)for(const r of userLayout.regions.filter(r=>r.name!=='usage')){assert.ok(r.scrollWidth>r.width,'history table should scroll horizontally on mobile: '+r.name);}
 
+
+    const longHeader=await evaluate(`(()=>{const d=document.querySelector('[role="dialog"]'),h=d.querySelector('[data-slot="dialog-header"]'),close=d.querySelector('[data-slot="dialog-close"]'),r=close.getBoundingClientRect();return {headerWidth:h.clientWidth,headerScrollWidth:h.scrollWidth,closeVisible:r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight};})()`);
+    assert.ok(longHeader.headerScrollWidth<=longHeader.headerWidth+1,'long email must wrap inside the fixed header');
+    assert.ok(longHeader.closeVisible,'close button must remain in the viewport');
+    await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
+    await until('!document.querySelector(\'[role="dialog"]\')');
+    detailScenarios++;
+    for(const rows of [0,1]) {
+      await evaluate(`window.__detailRows=${rows}`);
+      await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');
+      assert.ok(await evaluate('document.documentElement.scrollWidth<=innerWidth+1'));
+      assert.equal(await evaluate(`document.querySelectorAll('[data-testid="user-detail-orders-scroll"]').length`),rows?1:0);
+      if(rows)assert.ok(await evaluate(`document.querySelector('[data-testid="user-detail-orders-scroll"]').clientHeight<160`),'one order should shrink naturally');
+      await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
+      await until('!document.querySelector(\'[role="dialog"]\')');
+      detailScenarios++;
+    }
+  }
+  // Exercise the unchanged confirmation and mutation handlers using mock-only
+  // accounts. No network or real administrator mutation is possible here.
+  await evaluate('window.__longEmail=false;window.__detailRows=0;window.__mount(20,"en")');
+  await until('!!document.querySelector(\'[role="tablist"]\')');await tab('users');
+  const openDetails=async()=>{await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');};
+  const confirmAction=async()=>{
+    await until('!!document.querySelector(\'[role="alertdialog"]\')');
+    await evaluate(`(()=>{const input=document.querySelector('[role="alertdialog"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Isolated UI regression reason');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+    await until(`![...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm').disabled`);
+    await click(`[...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm')`);
+  };
+  await openDetails();
+  await click(`[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent==='Mark test account')`);await confirmAction();
+  await until(`window.__calls.some(c=>c.path==='/v1/admin/users/u0/test-account'&&c.body.isTestAccount===true)`);
+  await openDetails();
+  await evaluate(`(()=>{const input=document.querySelector('[role="dialog"] textarea');Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value').set.call(input,'Private mock note');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  await click(`[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent==='Save note'||el.textContent==='保存备注')`);await confirmAction();
+  await until(`window.__calls.some(c=>c.path==='/v1/admin/users/u0/note'&&c.body.note==='Private mock note')`);
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
+  await openDetails();await click(`[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent==='Archive account')`);await confirmAction();
+  await until(`window.__calls.some(c=>c.path==='/v1/admin/users/u0/archive')`);
+  await click(`${panel}.querySelector('tbody input[type="checkbox"]')`);
   await click(`${panel}.querySelectorAll('tbody button')[1]`);await until('!!document.querySelector(\'[role="alertdialog"]\')');
   await evaluate(`(()=>{const input=document.querySelector('[role="alertdialog"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Isolated layout test reason');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await until(`![...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm').disabled`);
@@ -121,6 +169,6 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await tab('orders');await click(`${panel}.querySelector('tbody a,tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await tab('packages');assert.equal(await evaluate(`${panel}.querySelectorAll('.admin-list-scroll').length`),0);
-  console.log(`PASS: ${scenarios} table/layout scenarios; user selection, CSV, freeze, bulk status, user/order details and unaffected package tab`);
+  console.log(`PASS: ${scenarios} table/layout scenarios; ${detailScenarios} user-detail viewport/language/row scenarios; mark-test, archive, notes; user selection, CSV, freeze, bulk status, user/order details and unaffected package tab`);
  }finally{if(chrome)chrome.kill();for(const item of pending.values()){clearTimeout(item.timer);}await wait(120);rmSync(dir,{recursive:true,force:true});}
 });
