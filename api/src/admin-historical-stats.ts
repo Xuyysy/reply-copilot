@@ -7,9 +7,16 @@ type History={users:number;verifiedUsers:number;todayUsers:number;newUsers7d:num
   paidCreditsSpent:number;totalIssued:number;totalUsed:number;paidUsers:number;successfulOrders:number;
   totalRevenueFen:number;revenue7dFen:number};
 const cache=new WeakMap<D1Database,{at:number;day:string;value:Promise<History>}>();
+let isolate:string|undefined;
+function diagnose(env:Env,status:'hit'|'miss'|'failed',ageMs:number){
+ if(env.ENVIRONMENT!=='staging'||env.AI_PERFORMANCE_DIAGNOSTICS!=='1')return;
+ isolate??=crypto.randomUUID();
+ console.log({event:'admin_history_cache',isolate,status,ageMs:Math.max(0,ageMs),ttlMs:TTL_MS});
+}
 export async function adminHistoricalStats(env:Env,now:number,day:string):Promise<History>{
  const old=cache.get(env.DB);
- if(old&&old.day===day&&now>=old.at&&now-old.at<TTL_MS)return old.value;
+ if(old&&old.day===day&&now>=old.at&&now-old.at<TTL_MS){diagnose(env,'hit',now-old.at);return old.value;}
+ diagnose(env,'miss',old?now-old.at:0);
  const value=(async()=>{
   const [users,grants,ledger,orders]=await Promise.all([
    env.DB.prepare(`SELECT COUNT(*) users,
@@ -28,5 +35,5 @@ export async function adminHistoricalStats(env:Env,now:number,day:string):Promis
   return {...users,...grants,...ledger,...orders} as History;
  })();
  const entry={at:now,day,value};cache.set(env.DB,entry);
- try{return await value;}catch(error){if(cache.get(env.DB)===entry)cache.delete(env.DB);throw error;}
+ try{return await value;}catch(error){if(cache.get(env.DB)===entry)cache.delete(env.DB);diagnose(env,'failed',0);throw error;}
 }

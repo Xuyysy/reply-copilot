@@ -4,6 +4,20 @@ import {fixture} from './helpers/payment-v2.mjs';
 const NOW=Date.UTC(2026,10,2,12);
 function setup(){const f=fixture();f.env.ADMIN_PORTAL_ENABLED='1';f.env.AI_MODE='production';f.sql.exec("UPDATE users SET role='admin';INSERT INTO site_administrator VALUES(1,'test-user',1)");return f;}
 const dashboard=f=>f.call('/v1/admin/dashboard',{method:'GET'});
+test('cache diagnostics expose only anonymous isolate and cache timing, and only with Staging diagnostics enabled',async()=>{
+ const clock=Date.now,log=console.log;let now=NOW;Date.now=()=>now;
+ const events=[];console.log=value=>events.push(value);const f=setup();
+ try{
+  await dashboard(f);assert.equal(events.length,0);
+  f.env.AI_PERFORMANCE_DIAGNOSTICS='1';
+  await dashboard(f);now+=30001;await dashboard(f);await dashboard(f);
+  assert.deepEqual(events.map(e=>e.status),['hit','miss','hit']);
+  assert.ok(events.every(e=>e.event==='admin_history_cache'&&e.isolate===events[0].isolate));
+  assert.deepEqual(Object.keys(events[0]).sort(),['ageMs','event','isolate','status','ttlMs']);
+  assert.equal(events[0].ttlMs,30000);
+  f.env.ENVIRONMENT='production';await dashboard(f);assert.equal(events.length,3);
+ }finally{f.sql.close();Date.now=clock;console.log=log}
+});
 test('historical dashboard counters coalesce/cache30s while cost, flags and global reservations remain current',async()=>{
  const clock=Date.now;let now=NOW;Date.now=()=>now;const f=setup(),seen=[],prepare=f.DB.prepare.bind(f.DB);f.DB.prepare=sql=>{seen.push(sql);return prepare(sql)};
  try{
