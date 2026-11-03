@@ -1,0 +1,28 @@
+[
+  {
+    "accounts": 100,
+    "first": {
+      "queries": 9,
+      "rowsRead": 742,
+      "rowsWritten": 15
+    },
+    "duplicate": {
+      "queries": 2,
+      "rowsRead": 1,
+      "rowsWritten": 0
+    }
+  },
+  {
+    "accounts": 2000,
+    "first": {
+      "queries": 9,
+      "rowsRead": 14042,
+      "rowsWritten": 15
+    },
+    "duplicate": {
+      "queries": 2,
+      "rowsRead": 1,
+      "rowsWritten": 0
+    }
+  }
+]

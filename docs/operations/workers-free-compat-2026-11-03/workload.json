@@ -1,0 +1,202 @@
+[
+  {
+    "history": 1000,
+    "dashboardCold": {
+      "queries": 17,
+      "rowsRead": 3031,
+      "rowsWritten": 0
+    },
+    "dashboardWarm": {
+      "queries": 13,
+      "rowsRead": 2028,
+      "rowsWritten": 0
+    },
+    "samples": [
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 46,
+          "rowsWritten": 31
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      }
+    ]
+  },
+  {
+    "history": 20000,
+    "dashboardCold": {
+      "queries": 17,
+      "rowsRead": 60031,
+      "rowsWritten": 0
+    },
+    "dashboardWarm": {
+      "queries": 13,
+      "rowsRead": 40028,
+      "rowsWritten": 0
+    },
+    "samples": [
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 46,
+          "rowsWritten": 31
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      },
+      {
+        "generate": {
+          "queries": 30,
+          "rowsRead": 47,
+          "rowsWritten": 26
+        },
+        "ack": {
+          "queries": 11,
+          "rowsRead": 33,
+          "rowsWritten": 16
+        },
+        "duplicate": {
+          "queries": 2,
+          "rowsRead": 3,
+          "rowsWritten": 0
+        }
+      }
+    ]
+  }
+]
