@@ -1,6 +1,6 @@
-# Paused by user — 2026-11-03
+# Investigation delivered — 2026-11-03
 
-Resume branch `codex/workers-free-compat-20261103`, base deployed1070dc79f0048ebe719055e1d8c925aed76c73f3. Linked worktree `/private/tmp/reply-copilot-workers-free`; if unavailable, recreate from remote branch. User explicitly paused; do not resume development/deployments until requested.
+Resume branch `codex/workers-free-compat-20261103`, base deployed1070dc79f0048ebe719055e1d8c925aed76c73f3. Linked worktree `/private/tmp/reply-copilot-workers-free`; if unavailable, recreate from remote branch. Resumed at the user’s request; publication of the local-only candidate is complete. No rollout is authorized.
 
 ## Completed and saved
 
@@ -17,13 +17,12 @@ Resume branch `codex/workers-free-compat-20261103`, base deployed1070dc79f0048eb
 
 Not certified safe for Workers Free. Supported210k verification sampled~14ms;100k ~8ms lacks reliable margin. Online overall CPU P95~11.8ms, no route attribution available. Password work factor unchanged (100k new /210k supported); HMAC cache rejected as immaterial. Paid remains recommended for reliable current architecture until CPU and growing statistics/expiry costs are resolved. Current100k is below OWASP SHA256600k guidance; do not treat lowering it as an equivalent optimization.
 
-## Remaining when user resumes
+## Delivery and follow-up
 
-1. Recheck current branch/worktree/remote and read README/evidence here. Do not overwrite main worktree or PR10.
-2. Finish publication of a **new Draft PR**, base `fix/d1-query-efficiency-20261102` (1070dc7) to keep diff limited; PR10 itself stays Draft/unmerged. No Draft PR has been created for this Free candidate yet.
-3. Update README with final saved SHA/PR and final verification summary if needed. No runtime changes since passing checks.
-4. Return A/B/C/D conclusions, measured limits, code/files/SHA, explicit P1 items not fixed. Do not claim reliable Free10ms from local samples.
-5. Future affected-account expiry/unique operation claims or incremental summaries require separate fully tested design; current candidate contains analysis only. No production/staging changes authorized.
+- Runtime checkpoint: `7f766881df568c3d3b18f0f429077730c6cda018`. Resume checks confirmed clean worktree, matching remote branch/base, saved 736-test result and private evidence archive checksum. No business code changed after those checks.
+- New [Draft PR #11](https://github.com/Xuyysy/reply-copilot/pull/11), targeting `fix/d1-query-efficiency-20261102`, keeps this investigation separate from PR #10. Both remain unmerged. This delivery update changes documentation only.
+- Free compatibility is not certified; retain the limits stated in README. Affected-account expiry/unique operation claims and incremental summaries remain follow-up designs, not implemented runtime changes.
+- No Production/Staging deployment or online D1 SQL was performed. Any future rollout needs separate authorization.
 
 ## Boundaries / user conversation
 
