@@ -53,6 +53,46 @@ Open the Staging admin overview; refresh three times about five seconds apart, w
 
 Use Cloudflare version deployment for **Staging** only, with strategy `percentage` and versions `[{"version_id":"0e20ea94-55ce-4c61-9da8-acfd8d7e6761","percentage":100}]`. Recheck settings/health/packages afterwards. Keep 0020 and all subsequent data; no database restore or financial repair is part of rollback.
 
+## User-triggered live acceptance — 2026-11-03, UTC+8
+
+User personally triggered dashboard refreshes and real extension generations. Codex used read-only logs, non-D1 Analytics and bounded Staging point lookups; no browser/credentials/billable generation invocation by Codex.
+
+### Real Worker cache
+
+Four events from the same anonymous isolate (no identifiers retained here):
+
+| Time | Status | Cache age |
+|---|---|---:|
+| 10:29:40.891 | miss | 0 ms |
+| 10:30:01.820 | hit | 20,929 ms |
+| 10:30:11.465 | miss | 30,574 ms |
+| 10:31:00.879 | miss | 49,414 ms |
+
+This proves cross-request reuse in a real Worker instance and expiration at 30 seconds. It does not prove a cache shared across isolates, which this implementation deliberately does not provide.
+
+### Real generation / ACK / accounting
+
+Two separate requests began at 10:31:17.884 and 10:31:32.235. The user confirmed intentionally generating twice or more; these are not evidence of a duplicate request from one click.
+
+- Both `succeeded`, `consumed=1`, original result present and delivery confirmation recorded (10:31:22.098 / 10:31:34.991).
+- Each has exactly one `generation_debit`, free_delta=0, paid_delta=-1; one consumed allocation of one credit and one usage-cost row.
+- Tokens: 1,464 input / 138 output and 1,462 / 132; estimated costs 1,544 and 1,526 micro-USD respectively (combined $0.003070).
+- The tested account matches free/paid batch balances, generation/refund reservations; all batch remaining=granted-consumed-revoked; no negative account values or invalid batches.
+- Day budget at verification: settled 51,648 micro-USD, reserved 0, versus configured 5,000,000. This includes other day activity and is not attributed entirely to this test.
+- No active ACK retry, replay, cancellation or registration was deliberately triggered here; these remain automated coverage, not live acceptance claims. Normal successful delivery was verified by persisted ACK, not inferred from UI text.
+
+### Non-D1 Analytics
+
+10:28–10:32 UTC+8 (02:28–02:32 UTC): 52 new-version Worker requests, zero platform errors; D1 238 reads, 38 writes, 18,244 rowsRead / 87 rowsWritten; average D1 query batch 0.471 ms. Mixed dashboard/auth/AI/ACK traffic and different baseline activity prevent a valid percentage read-reduction or latency-improvement claim. No old unbounded SQL executed remotely.
+
+### Newly discovered pre-existing statistics defect
+
+Successful ACKed requests have `delivery_confirmed_at` populated while `completed_at` remains NULL. `finishGeneration` and ACK paths already behaved this way in the original Staging source. Original and PR10 dashboard day/month counters both filter `status='succeeded' AND completed_at>=?`, so these real successes are omitted. This explained an initial empty verification lookup; subsequent cost-date-index lookup plus full-key request/ledger checks verified the requests correctly.
+
+This is a pre-existing reporting issue, not lost credits or a new PR10 regression. No request history or financial logic was patched. Keep Production rollout unapproved until reporting semantics and regression coverage are resolved. In particular, do not claim the status/completed index makes modern-success statistics complete; it only preserves/optimizes the existing predicate. Reassess this index after that fix. Code rollback alone would retain the same defect.
+
+Live login/new signup/new200 entitlement and deliberate ACK replay/cancellation still require separate controlled user acceptance if required for final release. Current verdict: cache + normal AI/ACK/accounting accepted; PR remains Draft, no Production release.
+
 ## Seven-index recommendation (provisional)
 
 Prioritize `ai_requests_user_created_idx`, `ai_requests_status_completed_idx`, `ai_usage_costs_created_idx`, and `credit_ledger_created_idx` for growing usage history. Date-leading order/audit/user indexes improve bounded admin lists but currently tiny tables have little measurable benefit. Each index adds write/storage cost (requests gain two). Retain all seven for authorized Staging evaluation; do not conclude Production needs all seven without workload evidence. Local workerd comparisons are in the separate performance report and are not remote measurements.
