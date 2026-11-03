@@ -1,0 +1,66 @@
+[
+  {
+    "size": 2000,
+    "old": {
+      "plan": [
+        "SEARCH u USING INDEX ai_usage_costs_created_idx (created_at>?)",
+        "SEARCH v USING INDEX sqlite_autoindex_ai_provider_config_versions_1 (config_id=? AND version=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "rowsRead": 5407,
+      "rowsWritten": 0,
+      "durationMs": 1,
+      "sizeBytes": 2777088,
+      "wallMs": 3.44
+    },
+    "candidate": {
+      "plan": [
+        "CO-ROUTINE grouped",
+        "SEARCH u USING INDEX ai_usage_costs_created_idx (created_at>?)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "SCAN u",
+        "SEARCH v USING INDEX sqlite_autoindex_ai_provider_config_versions_1 (config_id=? AND version=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "rowsRead": 4015,
+      "rowsWritten": 0,
+      "durationMs": 0,
+      "sizeBytes": 2777088,
+      "wallMs": 2.39
+    }
+  },
+  {
+    "size": 20000,
+    "old": {
+      "plan": [
+        "SEARCH u USING INDEX ai_usage_costs_created_idx (created_at>?)",
+        "SEARCH v USING INDEX sqlite_autoindex_ai_provider_config_versions_1 (config_id=? AND version=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "rowsRead": 54007,
+      "rowsWritten": 0,
+      "durationMs": 10,
+      "sizeBytes": 22065152,
+      "wallMs": 11.72
+    },
+    "candidate": {
+      "plan": [
+        "CO-ROUTINE grouped",
+        "SEARCH u USING INDEX ai_usage_costs_created_idx (created_at>?)",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "SCAN u",
+        "SEARCH v USING INDEX sqlite_autoindex_ai_provider_config_versions_1 (config_id=? AND version=?) LEFT-JOIN",
+        "USE TEMP B-TREE FOR GROUP BY",
+        "USE TEMP B-TREE FOR ORDER BY"
+      ],
+      "rowsRead": 40015,
+      "rowsWritten": 0,
+      "durationMs": 7,
+      "sizeBytes": 22065152,
+      "wallMs": 8.72
+    }
+  }
+]

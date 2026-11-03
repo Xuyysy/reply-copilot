@@ -1,0 +1,916 @@
+{
+  "kind": "synthetic isolated workerd V8 sampled CPU; NOT production billed CPU",
+  "limitations": [
+    "workerd tail cpuTime/wallTime are zero locally",
+    "100us requested sampling; actual timer cadence varies",
+    "async native WebCrypto CPU and scheduling may be unrepresented",
+    "wall includes local D1 and stub network waits; no Free certification"
+  ],
+  "routes": [
+    {
+      "route": "wait-calibration",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 53.91087500000003,
+        "v8SampledActiveMs": 1.1019999999999999
+      },
+      "wallMs": {
+        "p50": 51.2355,
+        "p95": 51.91329100000007
+      },
+      "v8SampledActiveMs": {
+        "p50": 0,
+        "p95": 1.06,
+        "sum": 2.456
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0,
+        "p95": 1.06
+      },
+      "hot": [
+        {
+          "name": "setTimeout",
+          "sampledMs": 1.1019999999999999
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 1.06
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 0.294
+        }
+      ]
+    },
+    {
+      "route": "session-me",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 4.0214169999999285,
+        "v8SampledActiveMs": 3.1420000000000003
+      },
+      "wallMs": {
+        "p50": 1.142041000000063,
+        "p95": 2.029833999999937
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.444,
+        "p95": 0.99,
+        "sum": 10.497
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.444,
+        "p95": 0.99
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 2.3249999999999997
+        },
+        {
+          "name": "addD1MetaToSpan",
+          "sampledMs": 1.488
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 1.276
+        },
+        {
+          "name": "Response",
+          "sampledMs": 1.194
+        },
+        {
+          "name": "_send",
+          "sampledMs": 1.141
+        },
+        {
+          "name": "cookie",
+          "sampledMs": 1.013
+        },
+        {
+          "name": "digest",
+          "sampledMs": 0.902
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 0.644
+        }
+      ]
+    },
+    {
+      "route": "balance-usage",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 1.6495420000001104,
+        "v8SampledActiveMs": 0.979
+      },
+      "wallMs": {
+        "p50": 1.1591659999999138,
+        "p95": 1.9237920000000486
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.5489999999999999,
+        "p95": 1.7189999999999999,
+        "sum": 14.685999999999998
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.5489999999999999,
+        "p95": 3.3970000000000002
+      },
+      "hot": [
+        {
+          "name": "toJson",
+          "sampledMs": 2.851
+        },
+        {
+          "name": "setAttributes",
+          "sampledMs": 2.182
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 1.47
+        },
+        {
+          "name": "_send",
+          "sampledMs": 0.954
+        },
+        {
+          "name": "balance",
+          "sampledMs": 0.908
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 0.769
+        },
+        {
+          "name": "set",
+          "sampledMs": 0.716
+        },
+        {
+          "name": "_sendOrThrow",
+          "sampledMs": 0.692
+        }
+      ]
+    },
+    {
+      "route": "login-password",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 9.475417000000107,
+        "v8SampledActiveMs": 8.347
+      },
+      "wallMs": {
+        "p50": 7.444833999999901,
+        "p95": 8.558958000000075
+      },
+      "v8SampledActiveMs": {
+        "p50": 7.018000000000002,
+        "p95": 8.068,
+        "sum": 139.99699999999999
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 7.018000000000002,
+        "p95": 8.068
+      },
+      "hot": [
+        {
+          "name": "deriveBits",
+          "sampledMs": 124.71500000000024
+        },
+        {
+          "name": "toArrayOfObjects",
+          "sampledMs": 1.986
+        },
+        {
+          "name": "importKey",
+          "sampledMs": 1.592
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 1.423
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 1.3570000000000002
+        },
+        {
+          "name": "_send",
+          "sampledMs": 1.113
+        },
+        {
+          "name": "withSpan",
+          "sampledMs": 1.097
+        },
+        {
+          "name": "hmac",
+          "sampledMs": 0.847
+        }
+      ]
+    },
+    {
+      "route": "login-legacy-210k",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 14.228999999999814,
+        "v8SampledActiveMs": 14.008000000000006
+      },
+      "wallMs": {
+        "p50": 13.75512499999968,
+        "p95": 14.228999999999814
+      },
+      "v8SampledActiveMs": {
+        "p50": 13.457000000000004,
+        "p95": 14.008000000000006,
+        "sum": 269.5120000000001
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 13.457000000000004,
+        "p95": 14.106000000000007
+      },
+      "hot": [
+        {
+          "name": "deriveBits",
+          "sampledMs": 252.82799999999446
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 2.87
+        },
+        {
+          "name": "_wrappedFetch",
+          "sampledMs": 2.035
+        },
+        {
+          "name": "_send",
+          "sampledMs": 1.452
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 1.3359999999999999
+        },
+        {
+          "name": "toJson",
+          "sampledMs": 1.327
+        },
+        {
+          "name": "TextEncoder",
+          "sampledMs": 1.013
+        },
+        {
+          "name": "set",
+          "sampledMs": 0.949
+        }
+      ]
+    },
+    {
+      "route": "registration-password",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 13.51675000000023,
+        "v8SampledActiveMs": 12.294000000000004
+      },
+      "wallMs": {
+        "p50": 8.344291999999768,
+        "p95": 9.18337500000007
+      },
+      "v8SampledActiveMs": {
+        "p50": 7.640000000000001,
+        "p95": 8.681000000000001,
+        "sum": 158.448
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 7.640000000000001,
+        "p95": 8.681000000000001
+      },
+      "hot": [
+        {
+          "name": "deriveBits",
+          "sampledMs": 124.5010000000002
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 6.863999999999999
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 3.717
+        },
+        {
+          "name": "json",
+          "sampledMs": 2.967
+        },
+        {
+          "name": "freshCode",
+          "sampledMs": 2.608
+        },
+        {
+          "name": "importKey",
+          "sampledMs": 2.338
+        },
+        {
+          "name": "setAttributes",
+          "sampledMs": 1.7269999999999999
+        },
+        {
+          "name": "verifyTurnstile",
+          "sampledMs": 1.6880000000000002
+        }
+      ]
+    },
+    {
+      "route": "generate-provider",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 11.384041999999681,
+        "v8SampledActiveMs": 11.154
+      },
+      "wallMs": {
+        "p50": 4.262750000000324,
+        "p95": 5.874083000000155
+      },
+      "v8SampledActiveMs": {
+        "p50": 3.508,
+        "p95": 4.897,
+        "sum": 75.01100000000001
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 3.508,
+        "p95": 4.897
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 14.663
+        },
+        {
+          "name": "_send",
+          "sampledMs": 6.755
+        },
+        {
+          "name": "toJson",
+          "sampledMs": 5.576999999999999
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 4.752
+        },
+        {
+          "name": "_wrappedFetch",
+          "sampledMs": 4.165
+        },
+        {
+          "name": "requestDeepSeek",
+          "sampledMs": 3.607
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 3.5820000000000003
+        },
+        {
+          "name": "shanghaiDay",
+          "sampledMs": 3.3549999999999995
+        }
+      ]
+    },
+    {
+      "route": "delivery-ack",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 4.049665999999888,
+        "v8SampledActiveMs": 0.8320000000000001
+      },
+      "wallMs": {
+        "p50": 1.5967499999997017,
+        "p95": 1.8929579999999078
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.931,
+        "p95": 1.448,
+        "sum": 17.525
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.934,
+        "p95": 1.573
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 3.6610000000000005
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 3.149
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 2.088
+        },
+        {
+          "name": "_wrappedFetch",
+          "sampledMs": 1.901
+        },
+        {
+          "name": "response",
+          "sampledMs": 1.653
+        },
+        {
+          "name": "acknowledgeDelivery",
+          "sampledMs": 1.3
+        },
+        {
+          "name": "uuid",
+          "sampledMs": 1.21
+        },
+        {
+          "name": "_send",
+          "sampledMs": 0.942
+        }
+      ]
+    },
+    {
+      "route": "admin-dashboard",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 4.620042000000012,
+        "v8SampledActiveMs": 4.054
+      },
+      "wallMs": {
+        "p50": 2.8473750000002838,
+        "p95": 4.452708000000257
+      },
+      "v8SampledActiveMs": {
+        "p50": 1.4680000000000002,
+        "p95": 2.75,
+        "sum": 38.233000000000004
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 1.4680000000000002,
+        "p95": 2.75
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 6.674
+        },
+        {
+          "name": "_send",
+          "sampledMs": 3.344
+        },
+        {
+          "name": "text",
+          "sampledMs": 3.237
+        },
+        {
+          "name": "toArrayOfObjects",
+          "sampledMs": 3.215
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 3.0869999999999997
+        },
+        {
+          "name": "aiCostDetails",
+          "sampledMs": 2.589
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 2.315
+        },
+        {
+          "name": "addD1MetaToSpan",
+          "sampledMs": 1.927
+        }
+      ]
+    },
+    {
+      "route": "packages",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 2.909791999999925,
+        "v8SampledActiveMs": 2.639
+      },
+      "wallMs": {
+        "p50": 1.1078330000000278,
+        "p95": 2.7135419999999613
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.9400000000000001,
+        "p95": 2.49,
+        "sum": 20.741999999999994
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.9400000000000001,
+        "p95": 2.49
+      },
+      "hot": [
+        {
+          "name": "importKey",
+          "sampledMs": 7.074
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 2.223
+        },
+        {
+          "name": "paymentControl",
+          "sampledMs": 1.331
+        },
+        {
+          "name": "pem",
+          "sampledMs": 1.286
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 1.217
+        },
+        {
+          "name": "Mk99Client",
+          "sampledMs": 1.0819999999999999
+        },
+        {
+          "name": "mk99Readiness",
+          "sampledMs": 0.95
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 0.805
+        }
+      ]
+    },
+    {
+      "route": "hmac-20",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 0.6120420000002014,
+        "v8SampledActiveMs": 0.43
+      },
+      "wallMs": {
+        "p50": 0.5557080000003225,
+        "p95": 0.716707999999926
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.427,
+        "p95": 0.565,
+        "sum": 6.432
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.427,
+        "p95": 0.579
+      },
+      "hot": [
+        {
+          "name": "hmac",
+          "sampledMs": 3.0370000000000004
+        },
+        {
+          "name": "sign",
+          "sampledMs": 1.152
+        },
+        {
+          "name": "importKey",
+          "sampledMs": 0.878
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 0.852
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 0.255
+        },
+        {
+          "name": "Response",
+          "sampledMs": 0.13
+        },
+        {
+          "name": "(garbage collector)",
+          "sampledMs": 0.128
+        }
+      ]
+    },
+    {
+      "route": "cron-cleanup",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 1.7596659999999247,
+        "v8SampledActiveMs": 0.436
+      },
+      "wallMs": {
+        "p50": 1.2827919999999722,
+        "p95": 1.7596659999999247
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.6839999999999999,
+        "p95": 1.195,
+        "sum": 14.543999999999997
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.685,
+        "p95": 1.721
+      },
+      "hot": [
+        {
+          "name": "(anonymous)",
+          "sampledMs": 2.612
+        },
+        {
+          "name": "_send",
+          "sampledMs": 2.0470000000000006
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 1.9809999999999999
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 1.587
+        },
+        {
+          "name": "enterSpan",
+          "sampledMs": 1.21
+        },
+        {
+          "name": "text",
+          "sampledMs": 1.068
+        },
+        {
+          "name": "toJson",
+          "sampledMs": 0.949
+        },
+        {
+          "name": "URL",
+          "sampledMs": 0.8899999999999999
+        }
+      ]
+    },
+    {
+      "route": "generate-managed",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 6.953083000000333,
+        "v8SampledActiveMs": 6.393
+      },
+      "wallMs": {
+        "p50": 4.896082999999635,
+        "p95": 7.223042000000532
+      },
+      "v8SampledActiveMs": {
+        "p50": 4.313,
+        "p95": 6.483,
+        "sum": 91.987
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 4.313,
+        "p95": 8.346
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 16.978999999999996
+        },
+        {
+          "name": "(anonymous)",
+          "sampledMs": 10.14
+        },
+        {
+          "name": "addD1MetaToSpan",
+          "sampledMs": 6.366999999999999
+        },
+        {
+          "name": "_send",
+          "sampledMs": 5.157
+        },
+        {
+          "name": "toJson",
+          "sampledMs": 4.414000000000001
+        },
+        {
+          "name": "_wrappedFetch",
+          "sampledMs": 4.158
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 3.7880000000000007
+        },
+        {
+          "name": "configuredReservation",
+          "sampledMs": 3.631
+        }
+      ]
+    },
+    {
+      "route": "order-read",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 1.439832999999453,
+        "v8SampledActiveMs": 1.075
+      },
+      "wallMs": {
+        "p50": 1.1924159999998665,
+        "p95": 1.4877500000002328
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.821,
+        "p95": 1.21,
+        "sum": 12.104999999999999
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.821,
+        "p95": 1.35
+      },
+      "hot": [
+        {
+          "name": "fetch",
+          "sampledMs": 3.223
+        },
+        {
+          "name": "addD1MetaToSpan",
+          "sampledMs": 2.436
+        },
+        {
+          "name": "text",
+          "sampledMs": 1.077
+        },
+        {
+          "name": "_send",
+          "sampledMs": 0.8180000000000001
+        },
+        {
+          "name": "Response",
+          "sampledMs": 0.781
+        },
+        {
+          "name": "response",
+          "sampledMs": 0.777
+        },
+        {
+          "name": "getOrder",
+          "sampledMs": 0.6950000000000001
+        },
+        {
+          "name": "toJson",
+          "sampledMs": 0.656
+        }
+      ]
+    },
+    {
+      "route": "payment-first-notify",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 5.923999999999978,
+        "v8SampledActiveMs": 5.732000000000001
+      },
+      "wallMs": {
+        "p50": 2.21887500000048,
+        "p95": 3.8916669999998703
+      },
+      "v8SampledActiveMs": {
+        "p50": 1.476,
+        "p95": 3.674,
+        "sum": 34.409
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 1.476,
+        "p95": 3.674
+      },
+      "hot": [
+        {
+          "name": "(anonymous)",
+          "sampledMs": 5.194
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 4.523
+        },
+        {
+          "name": "(program)",
+          "sampledMs": 3.114
+        },
+        {
+          "name": "_wrappedFetch",
+          "sampledMs": 3.0949999999999998
+        },
+        {
+          "name": "mk99Notify",
+          "sampledMs": 3.092
+        },
+        {
+          "name": "read",
+          "sampledMs": 2.21
+        },
+        {
+          "name": "parseMk99MultipartForm",
+          "sampledMs": 1.7029999999999998
+        },
+        {
+          "name": "Response",
+          "sampledMs": 1.1600000000000001
+        }
+      ]
+    },
+    {
+      "route": "payment-duplicate-notify",
+      "n": 20,
+      "statuses": {
+        "200": 20
+      },
+      "cold": {
+        "wallMs": 2.0287910000006377,
+        "v8SampledActiveMs": 0.564
+      },
+      "wallMs": {
+        "p50": 1.538749999999709,
+        "p95": 1.6539999999995416
+      },
+      "v8SampledActiveMs": {
+        "p50": 0.698,
+        "p95": 1.472,
+        "sum": 17.682000000000002
+      },
+      "warmV8SampledActiveMs": {
+        "p50": 0.699,
+        "p95": 1.4729999999999999
+      },
+      "hot": [
+        {
+          "name": "(anonymous)",
+          "sampledMs": 8.002
+        },
+        {
+          "name": "fetch",
+          "sampledMs": 2.252
+        },
+        {
+          "name": "mk99Notify",
+          "sampledMs": 1.259
+        },
+        {
+          "name": "canonicalMk99",
+          "sampledMs": 1.2530000000000001
+        },
+        {
+          "name": "reconcile",
+          "sampledMs": 0.911
+        },
+        {
+          "name": "importKey",
+          "sampledMs": 0.827
+        },
+        {
+          "name": "readMk99Body",
+          "sampledMs": 0.565
+        },
+        {
+          "name": "TextEncoder",
+          "sampledMs": 0.562
+        }
+      ]
+    }
+  ],
+  "syntheticModelCalls": 60
+}

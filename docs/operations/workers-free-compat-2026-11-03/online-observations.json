@@ -1,0 +1,122 @@
+{
+  "productionCPU": [
+    {
+      "dimensions": {
+        "status": "success"
+      },
+      "quantiles": {
+        "cpuTimeP50": 1828,
+        "cpuTimeP90": 4656,
+        "cpuTimeP95": 11801,
+        "cpuTimeP99": 17587,
+        "wallTimeP50": 36128,
+        "wallTimeP90": 100128
+      },
+      "sum": {
+        "errors": 0,
+        "requests": 115
+      }
+    }
+  ],
+  "availableGraphQLDimensions": [
+    "cpuTimeUs",
+    "cron",
+    "datetime",
+    "environmentName",
+    "scheduledDatetime",
+    "scriptName",
+    "status"
+  ],
+  "normalDays": {
+    "d1AnalyticsAdaptiveGroups": [
+      {
+        "dimensions": {
+          "databaseId": "cd44bb44-b525-42c4-b286-2cc84dae7fdb",
+          "date": "2026-10-31"
+        },
+        "sum": {
+          "rowsRead": 102719,
+          "rowsWritten": 2594
+        }
+      },
+      {
+        "dimensions": {
+          "databaseId": "d9df7d23-9b9c-44ac-a33a-c24474c15691",
+          "date": "2026-11-01"
+        },
+        "sum": {
+          "rowsRead": 1679630,
+          "rowsWritten": 18320
+        }
+      },
+      {
+        "dimensions": {
+          "databaseId": "cd44bb44-b525-42c4-b286-2cc84dae7fdb",
+          "date": "2026-11-01"
+        },
+        "sum": {
+          "rowsRead": 229769,
+          "rowsWritten": 11098
+        }
+      },
+      {
+        "dimensions": {
+          "databaseId": "d9df7d23-9b9c-44ac-a33a-c24474c15691",
+          "date": "2026-10-31"
+        },
+        "sum": {
+          "rowsRead": 1168040,
+          "rowsWritten": 15652
+        }
+      }
+    ],
+    "workersInvocationsAdaptive": [
+      {
+        "dimensions": {
+          "date": "2026-11-01",
+          "scriptName": "reply-copilot-api-staging"
+        },
+        "sum": {
+          "errors": 0,
+          "requests": 1973
+        }
+      },
+      {
+        "dimensions": {
+          "date": "2026-10-31",
+          "scriptName": "reply-copilot-api-production"
+        },
+        "sum": {
+          "errors": 0,
+          "requests": 4129
+        }
+      },
+      {
+        "dimensions": {
+          "date": "2026-11-01",
+          "scriptName": "reply-copilot-api-production"
+        },
+        "sum": {
+          "errors": 0,
+          "requests": 4815
+        }
+      },
+      {
+        "dimensions": {
+          "date": "2026-10-31",
+          "scriptName": "reply-copilot-api-staging"
+        },
+        "sum": {
+          "errors": 0,
+          "requests": 2125
+        }
+      }
+    ]
+  },
+  "cronSamples": [],
+  "limitations": [
+    "No URL/route dimension in existing Workers Analytics; invocation logs did not expose CPU fields.",
+    "GraphQL rate budget temporarily depleted; subsequent readonly queries succeeded.",
+    "No online D1 SQL, changes, requests to application APIs or real model calls in this task."
+  ]
+}
