@@ -30,3 +30,25 @@ test('site history restore is audited, retains versions, and is idempotent',asyn
  f.sql.exec('DELETE FROM admin_reauth_sessions');assert.equal((await f.call('/v1/admin/content/restore',{body:payload({versionId:version.id})})).status,403);
 });
 test('site history captures actual transactional prior content when another tab saves concurrently',async()=>{const f=setup(),batch=f.DB.batch.bind(f.DB);let once=false;f.DB.batch=async statements=>{if(!once&&statements.some(s=>s.query.includes('INSERT INTO site_content_versions'))){once=true;f.sql.prepare("UPDATE system_settings SET value=? WHERE key='site_content'").run(JSON.stringify({homeTitleZh:'另一窗口刚保存的标题'}));}return batch(statements);};const r=await f.call('/v1/admin/content',{body:payload({content:{homeTitleZh:'本窗口标题'}})});assert.equal(r.status,200);assert.match(f.sql.prepare('SELECT content_json FROM site_content_versions').get().content_json,/另一窗口刚保存的标题/);});
+
+test('tutorial saves, clears and restores through existing protected content/history routes',async()=>{
+ const f=setup(),old={homeTitleZh:'原有标题',guideEn:'Existing instructions',supportEmail:'help@example.test'};
+ f.sql.prepare("UPDATE system_settings SET value=? WHERE key='site_content'").run(JSON.stringify(old));
+ const content={...old,xTutorialUrl:'https://x.com/i/article/1234567890123456789'};
+ assert.equal((await f.call('/v1/admin/content',{body:payload({content}),headers:{'X-CSRF-Token':''}})).status,403);
+ assert.equal((await f.call('/v1/admin/content',{body:payload({content})})).status,200);
+ let saved=(await f.call('/v1/site',{method:'GET',headers:{Cookie:''}})).body.content;
+ assert.equal(saved.xTutorialUrl,content.xTutorialUrl);for(const key of Object.keys(old))assert.equal(saved[key],old[key]);
+ assert.equal((await f.call('/v1/admin/content',{body:payload({content:{...saved,xTutorialUrl:''}})})).status,200);
+ assert.equal((await f.call('/v1/site',{method:'GET'})).body.content.xTutorialUrl,'');
+ const withLink=f.sql.prepare('SELECT id FROM site_content_versions WHERE content_json LIKE ?').get('%'+content.xTutorialUrl+'%');
+ assert.equal((await f.call('/v1/admin/content/restore',{body:payload({versionId:withLink.id})})).status,200);
+ assert.equal((await f.call('/v1/site',{method:'GET'})).body.content.xTutorialUrl,content.xTutorialUrl);
+ const legacy=f.sql.prepare('SELECT id FROM site_content_versions WHERE content_json=?').get(JSON.stringify(old));
+ assert.equal((await f.call('/v1/admin/content/restore',{body:payload({versionId:legacy.id})})).status,200);
+ saved=(await f.call('/v1/site',{method:'GET'})).body.content;assert.equal(saved.xTutorialUrl,'');
+ for(const key of Object.keys(old))assert.equal(saved[key],old[key]);
+ assert.equal(f.sql.prepare("SELECT count(*) n FROM admin_audit_logs WHERE action='site_content_restore'").get().n,2);
+ f.sql.exec('DELETE FROM admin_reauth_sessions');
+ assert.equal((await f.call('/v1/admin/content',{body:payload({content})})).status,403);
+});
