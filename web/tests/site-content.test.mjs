@@ -78,3 +78,17 @@ test('primary CTA replaces account CTA per locale and blank restores account beh
  for(const url of ['/login','/login?mode=register','/login?mode=login','/account'])assert.equal(safeCtaLink(url),url);
  for(const url of ['/admin','/login?next=https://evil.test','javascript:alert(1)','//evil.test'])assert.equal(safeCtaLink(url),'');
 });
+
+test('tutorial links use X article/post routes and hide whenever unset or invalid',()=>{
+ const link={dataset:{siteLink:'xTutorialUrl',siteHideIfEmpty:'true'},hidden:true,attrs:{},setAttribute(k,v){this.attrs[k]=v},removeAttribute(k){delete this.attrs[k]}};
+ const doc={querySelectorAll:s=>s==='[data-site-link]'?[link]:[]};
+ for(const language of ['zh','en']){
+  applySiteContent(doc,{xTutorialUrl:'https://x.com/i/article/1234567890123456789'},language);
+  assert.equal(link.hidden,false);assert.equal(link.attrs.href,'https://x.com/i/article/1234567890123456789');
+  applySiteContent(doc,{xTutorialUrl:'https://x.com/example/article/2345678901234567890'},language);
+  assert.equal(link.attrs.href,'https://x.com/example/article/2345678901234567890');
+  for(const xTutorialUrl of ['',undefined,'https://x.com.evil.test/example/status/123','https://x.com/home']){
+   applySiteContent(doc,{xTutorialUrl},language);assert.equal(link.hidden,true);assert.equal(link.attrs.href,undefined);
+  }
+ }
+});

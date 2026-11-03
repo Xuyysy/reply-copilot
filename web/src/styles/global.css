@@ -81,6 +81,8 @@ h2 { font-size: clamp(34px, 4vw, 52px); line-height: 1.08; letter-spacing: -.06e
 h3 { font-size: 21px; letter-spacing: -.035em; }
 .lead { color: #586171; line-height: 1.75; font-size: 18px; max-width: 600px; }
 .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 30px 0 25px; }
+.guide-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.guide-actions > .button { max-width: 100%; min-width: 0; text-align: center; overflow-wrap: anywhere; }
 .fineprint { color: #747d8b; font-size: 13px; line-height: 1.6; }
 .product-frame { border: 1px solid #d8dce2; box-shadow: 0 28px 80px rgb(29 43 65 / .13); background: #fff; border-radius: 22px; padding: 20px; transform: rotate(1deg); }
 .frame-head { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eef0f2; padding-bottom: 16px; font-size: 12px; color: #727b87; }

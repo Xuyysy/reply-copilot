@@ -1,7 +1,9 @@
+import {isXTutorialUrl} from '../../../utils/x-tutorial-url.js';
 // Public configuration is plain text. External links are independently checked here.
 export function safeSiteLink(value, kind) {
   if (typeof value !== "string" || !value.trim()) return "";
   try {
+    if (kind === "xTutorialUrl") return isXTutorialUrl(value) ? new URL(value).href : "";
     const url = new URL(value);
     const hosts = kind === "xProfileUrl" ? ["x.com", "www.x.com"] : ["chromewebstore.google.com"];
     const pathAllowed = kind === "xProfileUrl" ? /^\/[A-Za-z0-9_]{1,15}\/?$/.test(url.pathname) : /^\/detail\/(?:[^/]+\/)?[a-p]{32}\/?$/.test(url.pathname);
@@ -41,6 +43,7 @@ export function applySiteContent(document, content, language) {
   });
   document.querySelectorAll("[data-site-link]").forEach(element => {
     const href = safeSiteLink(content[element.dataset.siteLink], element.dataset.siteLink);
+    if (element.dataset.siteHideIfEmpty === "true") element.hidden = !href;
     if (href) { element.setAttribute("href", href); element.removeAttribute("aria-disabled"); }
     else { element.removeAttribute("href"); element.setAttribute("aria-disabled", "true"); }
   });
