@@ -1,3 +1,4 @@
+import {LOGIN_USER_SQL,REGISTRATION_IDENTITY_SQL} from "./admin-read-queries.js";
 import {futureCampaignStatements} from "./campaigns";
 import type { Env } from "./types";
 import { ApiFailure, type RegistrationDiagnostics } from "./types";
@@ -98,7 +99,7 @@ export async function register(request: Request,env: Env,diagnostics?: Registrat
   if (diagnostics) diagnostics.stage = "turnstile";
   await verifyTurnstile(request,env,body.turnstileToken);
   if (diagnostics) diagnostics.stage = "account_lookup";
-  const taken = await env.DB.prepare("SELECT id FROM users WHERE email=? OR username=? LIMIT 1").bind(email,username).first();
+  const taken = await env.DB.prepare(REGISTRATION_IDENTITY_SQL).bind(email,username).first();
   if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:false}:{})},200,env,request);
   if (diagnostics) diagnostics.stage = "registration_code_hash";
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
@@ -153,7 +154,7 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   const password=typeof body.password==="string"?body.password:"";
   if (!identity || password.length>256) throw new ApiFailure(400,"INVALID_CREDENTIALS","账号或密码错误。");
   const now=nowMs(); await rate(request,env,"login",identity,now);
-  const user=await env.DB.prepare("SELECT id,password_hash,status FROM users WHERE email=? OR username=? LIMIT 1").bind(identity,identity).first<{id:string;password_hash:string|null;status:string}>();
+  const user=await env.DB.prepare(LOGIN_USER_SQL).bind(identity,identity).first<{id:string;password_hash:string|null;status:string}>();
   if (!user?.password_hash || !await verifyPassword(env,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();

@@ -1,0 +1,1077 @@
+{
+  "runtime": "local Miniflare/workerd D1, synthetic full0019 schema; no remote SQL",
+  "scales": [
+    {
+      "recordsPerHistoryTable": 2000,
+      "before": {
+        "login": {
+          "plan": [
+            "SCAN users"
+          ],
+          "rowsRead": 2000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2461696,
+          "wallMs": 2.07,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_user_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 6000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 2461696,
+          "wallMs": 6.22,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX sqlite_autoindex_ai_requests_2 (user_id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 4000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 2461696,
+          "wallMs": 2.55,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_new_status_idx (status=?)"
+          ],
+          "rowsRead": 2000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2461696,
+          "wallMs": 2.26,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SCAN ai_usage_costs"
+          ],
+          "rowsRead": 2000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2461696,
+          "wallMs": 3.57,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 4000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 2461696,
+          "wallMs": 3.06,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 4000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2461696,
+          "wallMs": 3.04,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 4000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2461696,
+          "wallMs": 2.67,
+          "resultRows": 10
+        }
+      },
+      "after": {
+        "login": {
+          "plan": [
+            "COMPOUND QUERY",
+            "LEFT-MOST SUBQUERY",
+            "SEARCH users USING INDEX sqlite_autoindex_users_2 (email=?)",
+            "UNION ALL",
+            "SEARCH users USING INDEX users_username_unique (username=?)"
+          ],
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 2.56,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_created_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 2.34,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_user_created_idx (user_id=?)"
+          ],
+          "rowsRead": 100,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 2.1,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING COVERING INDEX ai_requests_status_completed_idx (status=? AND completed_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 1.74,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH ai_usage_costs USING INDEX ai_usage_costs_created_idx (created_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 1.68,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users USING COVERING INDEX users_created_id_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 2.33,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders USING INDEX recharge_orders_created_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 2748416,
+          "wallMs": 2.67,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs USING INDEX admin_audit_logs_created_idx"
+          ],
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 2748416,
+          "wallMs": 1.63,
+          "resultRows": 10
+        }
+      },
+      "unsafeHistorical": {
+        "allocations": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN a"
+          ],
+          "rowsRead": 2003000,
+          "rowsWritten": 0,
+          "durationMs": 40,
+          "sizeBytes": 2461696,
+          "wallMs": 42.77,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1"
+          ],
+          "rowsRead": 2003000,
+          "rowsWritten": 0,
+          "durationMs": 40,
+          "sizeBytes": 2461696,
+          "wallMs": 42.65,
+          "resultRows": 1
+        },
+        "reconcile": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH l EXISTS USING COVERING INDEX sqlite_autoindex_credit_ledger_2 (kind=?)",
+            "SCAN a"
+          ],
+          "rowsRead": 4004000,
+          "rowsWritten": 0,
+          "durationMs": 101,
+          "sizeBytes": 2461696,
+          "wallMs": 103.58,
+          "resultRows": 1
+        }
+      },
+      "audit": {
+        "plan": [
+          "MATERIALIZE page",
+          "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN p",
+          "SEARCH a USING INDEX sqlite_autoindex_ai_credit_allocations_2 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH b USING INDEX sqlite_autoindex_credit_batches_1 (id=?) LEFT-JOIN",
+          "SEARCH c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH l USING INDEX sqlite_autoindex_credit_ledger_2 (kind=? AND reference_id=?) LEFT-JOIN"
+        ],
+        "rowsRead": 1400,
+        "rowsWritten": 0,
+        "durationMs": 1,
+        "sizeBytes": 2461696,
+        "wallMs": 4.5,
+        "resultRows": 200
+      },
+      "sameWindow": {
+        "allocations": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN a"
+          ],
+          "rowsRead": 380300,
+          "rowsWritten": 0,
+          "durationMs": 8,
+          "sizeBytes": 2461696,
+          "wallMs": 9.76,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1"
+          ],
+          "rowsRead": 200700,
+          "rowsWritten": 0,
+          "durationMs": 4,
+          "sizeBytes": 2461696,
+          "wallMs": 6.02,
+          "resultRows": 1
+        }
+      },
+      "writesBefore": {
+        "users": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 6,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        }
+      },
+      "indexBuild": [
+        {
+          "index": "users_created_id_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2514944
+        },
+        {
+          "index": "credit_ledger_created_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2547712
+        },
+        {
+          "index": "recharge_orders_created_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2580480
+        },
+        {
+          "index": "admin_audit_logs_created_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2613248
+        },
+        {
+          "index": "ai_requests_user_created_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2654208
+        },
+        {
+          "index": "ai_requests_status_completed_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2707456
+        },
+        {
+          "index": "ai_usage_costs_created_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2740224
+        }
+      ],
+      "writesAfter": {
+        "users": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 8,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        }
+      }
+    },
+    {
+      "recordsPerHistoryTable": 8000,
+      "before": {
+        "login": {
+          "plan": [
+            "SCAN users"
+          ],
+          "rowsRead": 8000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 7897088,
+          "wallMs": 2.25,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_user_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 24000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 7897088,
+          "wallMs": 4.46,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX sqlite_autoindex_ai_requests_2 (user_id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 16000,
+          "rowsWritten": 0,
+          "durationMs": 2,
+          "sizeBytes": 7897088,
+          "wallMs": 3.82,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_new_status_idx (status=?)"
+          ],
+          "rowsRead": 8000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 7897088,
+          "wallMs": 2.24,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SCAN ai_usage_costs"
+          ],
+          "rowsRead": 8000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 7897088,
+          "wallMs": 1.72,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 16000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 7897088,
+          "wallMs": 3.39,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 16000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 7897088,
+          "wallMs": 3.04,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 16000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 7897088,
+          "wallMs": 2.4,
+          "resultRows": 10
+        }
+      },
+      "after": {
+        "login": {
+          "plan": [
+            "COMPOUND QUERY",
+            "LEFT-MOST SUBQUERY",
+            "SEARCH users USING INDEX sqlite_autoindex_users_2 (email=?)",
+            "UNION ALL",
+            "SEARCH users USING INDEX users_username_unique (username=?)"
+          ],
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 2.6,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_created_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 2.21,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_user_created_idx (user_id=?)"
+          ],
+          "rowsRead": 100,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 4.36,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING COVERING INDEX ai_requests_status_completed_idx (status=? AND completed_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 1.79,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH ai_usage_costs USING INDEX ai_usage_costs_created_idx (created_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 1.66,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users USING COVERING INDEX users_created_id_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 1.95,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders USING INDEX recharge_orders_created_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 2.6,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs USING INDEX admin_audit_logs_created_idx"
+          ],
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 8884224,
+          "wallMs": 1.62,
+          "resultRows": 10
+        }
+      },
+      "unsafeHistorical": {
+        "allocations": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN a"
+          ],
+          "rowsRead": 32012000,
+          "rowsWritten": 0,
+          "durationMs": 665,
+          "sizeBytes": 7897088,
+          "wallMs": 668.56,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1"
+          ],
+          "rowsRead": 32012000,
+          "rowsWritten": 0,
+          "durationMs": 662,
+          "sizeBytes": 7897088,
+          "wallMs": 665.76,
+          "resultRows": 1
+        },
+        "reconcile": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=?)",
+            "CORRELATED SCALAR SUBQUERY 2",
+            "SEARCH l EXISTS USING COVERING INDEX sqlite_autoindex_credit_ledger_2 (kind=?)",
+            "SCAN a"
+          ],
+          "rowsRead": 64016000,
+          "rowsWritten": 0,
+          "durationMs": 1657,
+          "sizeBytes": 7897088,
+          "wallMs": 1660.04,
+          "resultRows": 1
+        }
+      },
+      "audit": {
+        "plan": [
+          "MATERIALIZE page",
+          "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN p",
+          "SEARCH a USING INDEX sqlite_autoindex_ai_credit_allocations_2 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH b USING INDEX sqlite_autoindex_credit_batches_1 (id=?) LEFT-JOIN",
+          "SEARCH c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH l USING INDEX sqlite_autoindex_credit_ledger_2 (kind=? AND reference_id=?) LEFT-JOIN"
+        ],
+        "rowsRead": 1400,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 7897088,
+        "wallMs": 4.57,
+        "resultRows": 200
+      },
+      "sameWindow": {
+        "allocations": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN a"
+          ],
+          "rowsRead": 1580300,
+          "rowsWritten": 0,
+          "durationMs": 33,
+          "sizeBytes": 7897088,
+          "wallMs": 34.86,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1"
+          ],
+          "rowsRead": 1533900,
+          "rowsWritten": 0,
+          "durationMs": 32,
+          "sizeBytes": 7897088,
+          "wallMs": 34.16,
+          "resultRows": 1
+        }
+      },
+      "writesBefore": {
+        "users": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 6,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        }
+      },
+      "indexBuild": [
+        {
+          "index": "users_created_id_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8060928
+        },
+        {
+          "index": "credit_ledger_created_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8179712
+        },
+        {
+          "index": "recharge_orders_created_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8298496
+        },
+        {
+          "index": "admin_audit_logs_created_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8417280
+        },
+        {
+          "index": "ai_requests_user_created_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8560640
+        },
+        {
+          "index": "ai_requests_status_completed_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8757248
+        },
+        {
+          "index": "ai_usage_costs_created_idx",
+          "rowsWritten": 8001,
+          "sizeBytes": 8876032
+        }
+      ],
+      "writesAfter": {
+        "users": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 8,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        }
+      }
+    },
+    {
+      "recordsPerHistoryTable": 20000,
+      "before": {
+        "login": {
+          "plan": [
+            "SCAN users"
+          ],
+          "rowsRead": 20000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 19238912,
+          "wallMs": 2.94,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_user_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 60000,
+          "rowsWritten": 0,
+          "durationMs": 2,
+          "sizeBytes": 19238912,
+          "wallMs": 5.96,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX sqlite_autoindex_ai_requests_2 (user_id=?)",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 40000,
+          "rowsWritten": 0,
+          "durationMs": 3,
+          "sizeBytes": 19238912,
+          "wallMs": 5.2,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_new_status_idx (status=?)"
+          ],
+          "rowsRead": 20000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 19238912,
+          "wallMs": 2.83,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SCAN ai_usage_costs"
+          ],
+          "rowsRead": 20000,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 19238912,
+          "wallMs": 2.25,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 40000,
+          "rowsWritten": 0,
+          "durationMs": 1,
+          "sizeBytes": 19238912,
+          "wallMs": 3.55,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 40000,
+          "rowsWritten": 0,
+          "durationMs": 3,
+          "sizeBytes": 19238912,
+          "wallMs": 4.85,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs",
+            "USE TEMP B-TREE FOR ORDER BY"
+          ],
+          "rowsRead": 40000,
+          "rowsWritten": 0,
+          "durationMs": 2,
+          "sizeBytes": 19238912,
+          "wallMs": 3.59,
+          "resultRows": 10
+        }
+      },
+      "after": {
+        "login": {
+          "plan": [
+            "COMPOUND QUERY",
+            "LEFT-MOST SUBQUERY",
+            "SEARCH users USING INDEX sqlite_autoindex_users_2 (email=?)",
+            "UNION ALL",
+            "SEARCH users USING INDEX users_username_unique (username=?)"
+          ],
+          "rowsRead": 0,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 1.75,
+          "resultRows": 0
+        },
+        "ledger": {
+          "plan": [
+            "SCAN credit_ledger USING INDEX credit_ledger_created_idx",
+            "SEARCH users USING INDEX sqlite_autoindex_users_1 (id=?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 2.36,
+          "resultRows": 100
+        },
+        "userDetail": {
+          "plan": [
+            "SEARCH ai_requests USING INDEX ai_requests_user_created_idx (user_id=?)"
+          ],
+          "rowsRead": 100,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 2.08,
+          "resultRows": 100
+        },
+        "generationTotals": {
+          "plan": [
+            "SEARCH ai_requests USING COVERING INDEX ai_requests_status_completed_idx (status=? AND completed_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 1.74,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH ai_usage_costs USING INDEX ai_usage_costs_created_idx (created_at>?)"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 1.75,
+          "resultRows": 1
+        },
+        "users": {
+          "plan": [
+            "SCAN users USING COVERING INDEX users_created_id_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 3.07,
+          "resultRows": 200
+        },
+        "orders": {
+          "plan": [
+            "SCAN recharge_orders USING INDEX recharge_orders_created_idx"
+          ],
+          "rowsRead": 200,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 1.87,
+          "resultRows": 200
+        },
+        "audits": {
+          "plan": [
+            "SCAN admin_audit_logs USING INDEX admin_audit_logs_created_idx"
+          ],
+          "rowsRead": 10,
+          "rowsWritten": 0,
+          "durationMs": 0,
+          "sizeBytes": 21635072,
+          "wallMs": 1.56,
+          "resultRows": 10
+        }
+      },
+      "unsafeHistorical": {},
+      "audit": {
+        "plan": [
+          "MATERIALIZE page",
+          "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+          "USE TEMP B-TREE FOR LAST 2 TERMS OF ORDER BY",
+          "SCAN p",
+          "SEARCH a USING INDEX sqlite_autoindex_ai_credit_allocations_2 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH b USING INDEX sqlite_autoindex_credit_batches_1 (id=?) LEFT-JOIN",
+          "SEARCH c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1 (user_id=? AND request_id=?) LEFT-JOIN",
+          "SEARCH l USING INDEX sqlite_autoindex_credit_ledger_2 (kind=? AND reference_id=?) LEFT-JOIN"
+        ],
+        "rowsRead": 1400,
+        "rowsWritten": 0,
+        "durationMs": 1,
+        "sizeBytes": 19238912,
+        "wallMs": 4.21,
+        "resultRows": 200
+      },
+      "sameWindow": {
+        "allocations": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN a"
+          ],
+          "rowsRead": 3980300,
+          "rowsWritten": 0,
+          "durationMs": 82,
+          "sizeBytes": 19238912,
+          "wallMs": 85.08,
+          "resultRows": 1
+        },
+        "costs": {
+          "plan": [
+            "SEARCH r USING INDEX ai_requests_new_status_idx (status=? AND created_at>? AND created_at<?)",
+            "CORRELATED SCALAR SUBQUERY 1",
+            "SCAN c USING COVERING INDEX sqlite_autoindex_ai_usage_costs_1"
+          ],
+          "rowsRead": 2200700,
+          "rowsWritten": 0,
+          "durationMs": 45,
+          "sizeBytes": 19238912,
+          "wallMs": 47.57,
+          "resultRows": 1
+        }
+      },
+      "writesBefore": {
+        "users": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 6,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 4,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 2,
+          "deleteRowsWritten": 1
+        }
+      },
+      "indexBuild": [
+        {
+          "index": "users_created_id_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 19652608
+        },
+        {
+          "index": "credit_ledger_created_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 19939328
+        },
+        {
+          "index": "recharge_orders_created_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 20226048
+        },
+        {
+          "index": "admin_audit_logs_created_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 20512768
+        },
+        {
+          "index": "ai_requests_user_created_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 20856832
+        },
+        {
+          "index": "ai_requests_status_completed_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 21340160
+        },
+        {
+          "index": "ai_usage_costs_created_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 21626880
+        }
+      ],
+      "writesAfter": {
+        "users": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "requests": {
+          "insertRowsWritten": 8,
+          "deleteRowsWritten": 1
+        },
+        "costs": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        },
+        "ledger": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "orders": {
+          "insertRowsWritten": 5,
+          "deleteRowsWritten": 1
+        },
+        "audits": {
+          "insertRowsWritten": 3,
+          "deleteRowsWritten": 1
+        }
+      }
+    }
+  ]
+}
