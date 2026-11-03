@@ -41,3 +41,17 @@ Replacing the index via 0021 is needed before serving the new time-range query a
 - Production remains unauthorized; no Production database or configuration mutations, no Pages or extension changes, no paid model tests. Final live verification uses existing Staging ACK rows only.
 
 Machine-readable synthetic evidence: `d1-delivery-stats-performance-2026-11-03.json`.
+
+## Executed Staging rollout and live verification
+
+- PR10 fix `1070dc79f0048ebe719055e1d8c925aed76c73f3`; Staging deployed tree `85b3b7803ef5b5f536247b03455a9d30b882ad6a`. Both remain isolated from Production.
+- Staging-specific full suite 727/727; API/Web typechecks and exact-live-config dry-run passed. PR tree full suite 732/732. No true model generation or browser interaction was initiated by Codex.
+- Fresh backup: `~/.codex/backups/reply-copilot/d1-stats-staging-20261103/staging-before.sql`, SHA256 `4ddb8e979363a52abb32667eb3b7e95f4b943d4106f79237160e161836d37705`. Private directory0700/files0600. Fifty-table isolated restore: integrity/FKs passed, every business row identical after0021; index reversal/reapplication rehearsed.
+- Only0021 was pending and applied (3 commands including migration tracking,3.20ms). 0020 unchanged. New ACK index present, old completed index absent. No history updates.
+- Version `9f0130f2-ddb7-4255-932b-3a42060f0734`, deployment `b362c3c0-98bd-44ff-8432-3a7b5f63c11b`,100%.
+- All45 deployed source files matched the exact deployment commit. All42 binding descriptors, public vars, compatibility, observability, Cron and D1/model/payment/purchase settings matched baseline; Secrets inherited without reading values. Packages JSON unchanged; health/packages200, unauthenticated dashboard401.
+- Actual remote query plan: SEARCH `ai_requests_delivered_at_idx (status=? AND delivery_confirmed_at>? AND delivery_confirmed_at<?)`. At verification, today32/month681;681 rows_read/0 rows_written,0.5623ms SQL. This is a point-in-time result, not a general latency benchmark.
+- Existing10:31 UTC+8 acceptance window contains2 ACKed successes, both completed_at=NULL; correct query counts both with2 rows_read. Request-specific ledgers still exactly one paid -1 debit each. No new billable test or account/payment operation performed.
+- Production remained version `bc36392d-cc33-4f75-9ca7-b7fb29baed02`,100%; no Production SQL/migration/deploy/config change. No Pages or extension changes.
+- Immediate code rollback target is previous Staging version `cf43598d-c470-4e66-ad06-5baa3cb633b4`,100%. Keep0021/new data; old code still executes but has the original reporting bug. Optional old-index recreation is covered by isolated rehearsal; never restore old account/financial records over newer activity.
+- This reporting defect is resolved in Staging. Whole-PR Production rollout still requires completion of remaining controlled live registration/entitlement acceptance and separate Production authorization/backup/config/deployment review. No merge or Production release performed.
