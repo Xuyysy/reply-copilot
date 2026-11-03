@@ -1,0 +1,145 @@
+{
+  "runtime": "isolated Miniflare/workerd D1; synthetic data only",
+  "scales": [
+    {
+      "history": 2000,
+      "oldIncorrect": {
+        "plan": [
+          "SEARCH ai_requests USING COVERING INDEX ai_requests_status_completed_idx (status=? AND completed_at>?)"
+        ],
+        "rowsRead": 1,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 2740224,
+        "wallMs": 2.06,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 1,
+          "todayGenerations": 1
+        }
+      },
+      "correctWithoutIndex": {
+        "plan": [
+          "SEARCH ai_requests USING INDEX ai_requests_status_completed_idx (status=?)"
+        ],
+        "rowsRead": 2001,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 2740224,
+        "wallMs": 2.47,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 200,
+          "todayGenerations": 200
+        }
+      },
+      "correctIndexed": {
+        "plan": [
+          "SEARCH ai_requests USING INDEX ai_requests_delivered_at_idx (status=? AND delivery_confirmed_at>? AND delivery_confirmed_at<?)"
+        ],
+        "rowsRead": 200,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 2740224,
+        "wallMs": 1.9,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 200,
+          "todayGenerations": 200
+        }
+      },
+      "writesBefore": {
+        "reserve": 8,
+        "ack": 4,
+        "remove": 1
+      },
+      "writesAfter": {
+        "reserve": 7,
+        "ack": 4,
+        "remove": 1
+      },
+      "ddl": [
+        {
+          "operation": "CREATE INDEX ai_requests_delivered_at_idx",
+          "rowsWritten": 2001,
+          "sizeBytes": 2793472
+        },
+        {
+          "operation": "DROP INDEX ai_requests_status_completed_idx",
+          "rowsWritten": 0,
+          "sizeBytes": 2740224
+        }
+      ]
+    },
+    {
+      "history": 20000,
+      "oldIncorrect": {
+        "plan": [
+          "SEARCH ai_requests USING COVERING INDEX ai_requests_status_completed_idx (status=? AND completed_at>?)"
+        ],
+        "rowsRead": 1,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 21630976,
+        "wallMs": 2.27,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 1,
+          "todayGenerations": 1
+        }
+      },
+      "correctWithoutIndex": {
+        "plan": [
+          "SEARCH ai_requests USING INDEX ai_requests_status_completed_idx (status=?)"
+        ],
+        "rowsRead": 20001,
+        "rowsWritten": 0,
+        "durationMs": 2,
+        "sizeBytes": 21630976,
+        "wallMs": 4.05,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 200,
+          "todayGenerations": 200
+        }
+      },
+      "correctIndexed": {
+        "plan": [
+          "SEARCH ai_requests USING INDEX ai_requests_delivered_at_idx (status=? AND delivery_confirmed_at>? AND delivery_confirmed_at<?)"
+        ],
+        "rowsRead": 200,
+        "rowsWritten": 0,
+        "durationMs": 0,
+        "sizeBytes": 21630976,
+        "wallMs": 1.95,
+        "resultRows": 1,
+        "counts": {
+          "monthGenerations": 200,
+          "todayGenerations": 200
+        }
+      },
+      "writesBefore": {
+        "reserve": 8,
+        "ack": 4,
+        "remove": 1
+      },
+      "writesAfter": {
+        "reserve": 7,
+        "ack": 4,
+        "remove": 1
+      },
+      "ddl": [
+        {
+          "operation": "CREATE INDEX ai_requests_delivered_at_idx",
+          "rowsWritten": 20001,
+          "sizeBytes": 22114304
+        },
+        {
+          "operation": "DROP INDEX ai_requests_status_completed_idx",
+          "rowsWritten": 0,
+          "sizeBytes": 21630976
+        }
+      ]
+    }
+  ]
+}

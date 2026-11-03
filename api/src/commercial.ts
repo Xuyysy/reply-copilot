@@ -17,7 +17,7 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
   const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
     adminHistoricalStats(env,now,day),
-    env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart).first<{monthGenerations:number;todayGenerations:number}>(),
+    env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart,now).first<{monthGenerations:number;todayGenerations:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(t.amount_fen-COALESCE((SELECT sum(r.amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0)),0) n FROM payment_transactions t WHERE t.provider='xiaodou' AND t.status IN ('paid','refunded') AND t.paid_at>=?").bind(monthStart).first<{n:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(amount_cents),0) n FROM recharge_orders WHERE status='paid' AND paid_at>=? AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.order_id=recharge_orders.id)").bind(monthStart).first<{n:number}>(),
     env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status IN ('upstream_failed','uncertain') AND created_at>=?").bind(dayStart).first<{n:number}>(),

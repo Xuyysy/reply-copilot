@@ -14,7 +14,7 @@ const defaultQueries={
  login:{sql:LOGIN_USER_SQL,beforeSql:'SELECT id,password_hash,status FROM users WHERE email=? OR username=? LIMIT 1',args:['absent@example.test','absent@example.test']},
  ledger:{sql:RECENT_LEDGER_SQL,args:[]},
  userDetail:{sql:USER_USAGE_SQL,args:['u0']},
- generationTotals:{sql:GENERATION_TOTALS_SQL,args:[Date.UTC(2026,10,2),Date.UTC(2026,10,1)]},
+ generationTotals:{sql:GENERATION_TOTALS_SQL,args:[Date.UTC(2026,10,2),Date.UTC(2026,10,1),NOW]},
  costs:{sql:'SELECT SUM(input_tokens) inputTokens,SUM(output_tokens) outputTokens,SUM(estimated_cost_micro_usd) cost FROM ai_usage_costs WHERE created_at>=?',args:[Date.UTC(2026,10,1)]},
  users:{sql:'SELECT id FROM users ORDER BY created_at DESC,id LIMIT 200',args:[]},
  orders:{sql:'SELECT id FROM recharge_orders ORDER BY created_at DESC LIMIT 200',args:[]},
