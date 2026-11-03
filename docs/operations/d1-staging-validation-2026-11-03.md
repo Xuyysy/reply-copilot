@@ -33,6 +33,26 @@ Rollback means redeploying the original Worker version at 100%; retain compatibl
 
 User will trigger legitimate authenticated Staging requests. Real login/signup/claim/AI/ACK, cache-hit proof and post-release Analytics remain pending until observed. No credentials will be extracted or authentication bypassed.
 
+## Executed Staging release
+
+- Deployed source `a95dcf9701567068a8d63e00790f720c110c67c0` on `staging/d1-query-efficiency-20261103`.
+- Version `cf43598d-c470-4e66-ad06-5baa3cb633b4`; deployment `941419d8-3b7c-4d18-a07c-1b3b0881cada`, confirmed 100%.
+- All 45 deployed source-map files subsequently matched the exact deployment commit. Upstream PR10 diagnostic commit `69c427474fe3d6b198f2902be7098d82d4e397eb` passed 728/728 full tests; the Staging-specific tree passed 723/723 (different existing model-test policy retained).
+- Wrangler confirmed only 0020 pending, then applied it successfully (8 commands including tracking, 8.75 ms). Migration record and all seven indexes independently re-read.
+- All 42 binding descriptors, public variables, compatibility, Cron and observability matched the original. Existing Secrets inherited without reading values. AI/purchase/admin/payment channels stay enabled; current live model preserved (no switching performed).
+- Health/packages 200; unauthenticated dashboard 401; package JSON exactly unchanged.
+- Production Worker stayed `bc36392d-cc33-4f75-9ca7-b7fb29baed02` at 100%. No Pages or extension deployment.
+- Non-D1 GraphQL after deployment, 02:17–02:20 UTC: 42 D1 reads, zero writes, two read queries; eight Worker requests, zero platform errors. This is only a smoke-test/idle window, not a comparable performance improvement claim.
+- Initial cache-log query found no matching events; authenticated dashboard requests had not yet been confirmed. Observability query `statistics.rows_read` refers to its analytics dataset, NOT D1 billing; do not confuse it with D1 GraphQL rowsRead.
+
+### Manual trigger
+
+Open the Staging admin overview; refresh three times about five seconds apart, wait 35 seconds, refresh again. Then use the existing Staging extension for one normal generation. Report completion/time or visible error, never credentials. Inspect `admin_history_cache` for same-isolate hits within TTL and fresh misses after TTL; inspect generation/ACK logs and bounded request-specific ledger records. Multi-isolate misses alone are not proof of a broken cache.
+
+### Code rollback
+
+Use Cloudflare version deployment for **Staging** only, with strategy `percentage` and versions `[{"version_id":"0e20ea94-55ce-4c61-9da8-acfd8d7e6761","percentage":100}]`. Recheck settings/health/packages afterwards. Keep 0020 and all subsequent data; no database restore or financial repair is part of rollback.
+
 ## Seven-index recommendation (provisional)
 
 Prioritize `ai_requests_user_created_idx`, `ai_requests_status_completed_idx`, `ai_usage_costs_created_idx`, and `credit_ledger_created_idx` for growing usage history. Date-leading order/audit/user indexes improve bounded admin lists but currently tiny tables have little measurable benefit. Each index adds write/storage cost (requests gain two). Retain all seven for authorized Staging evaluation; do not conclude Production needs all seven without workload evidence. Local workerd comparisons are in the separate performance report and are not remote measurements.
