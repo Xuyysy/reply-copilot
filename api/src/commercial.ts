@@ -1,3 +1,5 @@
+import {adminHistoricalStats} from "./admin-historical-stats";
+import {RECENT_LEDGER_SQL,USER_USAGE_SQL,GENERATION_TOTALS_SQL} from "./admin-read-queries.js";
 import {operation,commitOperation} from "./admin-operations";
 import {projectPackagePricing} from "./pricing";
 import type {Env,Session} from "./types";
@@ -12,30 +14,30 @@ export async function admin(request:Request,env:Env,write=false):Promise<Session
 }
 export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const now=nowMs();const day=new Date(now).toISOString().slice(0,10);const month=day.slice(0,7);
-  const [users,verified,todayUsers,todayAi,monthAi,grant,paidSpent,revenue,legacyRevenue,cost,errors,dailyCost,costSetting,budget,aiEnabled,todayCost]=await Promise.all([
-    env.DB.prepare("SELECT count(*) n FROM users").first<{n:number}>(),
-    env.DB.prepare("SELECT count(*) n FROM users WHERE email_verified_at IS NOT NULL").first<{n:number}>(),
-    env.DB.prepare("SELECT count(*) n FROM users WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status='succeeded' AND completed_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status='succeeded' AND completed_at>=?").bind(Date.parse(`${month}-01T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(sum(amount),0) n FROM credit_grants").first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(-sum(paid_delta),0) n FROM credit_ledger WHERE kind='generation_debit'").first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(sum(t.amount_fen-COALESCE((SELECT sum(r.amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0)),0) n FROM payment_transactions t WHERE t.provider='xiaodou' AND t.status IN ('paid','refunded') AND t.paid_at>=?").bind(Date.parse(`${month}-01T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(sum(amount_cents),0) n FROM recharge_orders WHERE status='paid' AND paid_at>=? AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.order_id=recharge_orders.id)").bind(Date.parse(`${month}-01T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(sum(input_tokens),0) inputTokens,COALESCE(sum(output_tokens),0) outputTokens,COALESCE(sum(estimated_cost_micro_usd),0) costMicroUsd FROM ai_usage_costs WHERE created_at>=?").bind(Date.parse(`${month}-01T00:00:00Z`)).first(),
-    env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status IN ('upstream_failed','uncertain') AND created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT COALESCE(sum(estimated_cost_micro_usd),0) n FROM ai_usage_costs WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first<{n:number}>(),
-    env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>(),
+  const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
+  const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
+    adminHistoricalStats(env,now,day),
+    env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart).first<{monthGenerations:number;todayGenerations:number}>(),
+    env.DB.prepare("SELECT COALESCE(sum(t.amount_fen-COALESCE((SELECT sum(r.amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0)),0) n FROM payment_transactions t WHERE t.provider='xiaodou' AND t.status IN ('paid','refunded') AND t.paid_at>=?").bind(monthStart).first<{n:number}>(),
+    env.DB.prepare("SELECT COALESCE(sum(amount_cents),0) n FROM recharge_orders WHERE status='paid' AND paid_at>=? AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.order_id=recharge_orders.id)").bind(monthStart).first<{n:number}>(),
+    env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status IN ('upstream_failed','uncertain') AND created_at>=?").bind(dayStart).first<{n:number}>(),
+    env.DB.prepare("SELECT key,value FROM system_settings WHERE key IN ('daily_cost_limit_micro_usd','ai_enabled')").all<{key:string;value:string}>(),
     env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
-    env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>(),
-    env.DB.prepare("SELECT COALESCE(sum(input_tokens),0) inputTokens,COALESCE(sum(output_tokens),0) outputTokens,COALESCE(sum(estimated_cost_micro_usd),0) costMicroUsd FROM ai_usage_costs WHERE created_at>=?").bind(Date.parse(`${day}T00:00:00Z`)).first(),
+    env.DB.prepare("SELECT count(DISTINCT s.user_id) n FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.expires_at>? AND s.revoked_at IS NULL AND u.status='active'").bind(now).first<{n:number}>(),
+    env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 10").all(),
+    aiCostDetails(env,env.AI_MODE || (env.AI_MOCK==="1"?"mock":"unconfigured"),dayStart,monthStart),
   ]);
-  const budgetLimitMicroUsd=Number(costSetting?.value||0),dailyCostMicroUsd=budget?.settled_micro_usd??dailyCost?.n??0,reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
-  const displayedAiMode=env.AI_MODE || (env.AI_MOCK==="1"?"mock":"unconfigured");
-  const modelCosts=await aiCostDetails(env,displayedAiMode,Date.parse(`${day}T00:00:00Z`),Date.parse(`${month}-01T00:00:00Z`));
-  const extra=await env.DB.prepare("SELECT (SELECT count(DISTINCT s.user_id) FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.expires_at>? AND s.revoked_at IS NULL AND u.status='active') activeUsers,(SELECT count(DISTINCT user_id) FROM recharge_orders WHERE credited_at IS NOT NULL) paidUsers,(SELECT count(*) FROM recharge_orders WHERE credited_at IS NOT NULL) successfulOrders,(SELECT COALESCE(sum(t.amount_fen),0) FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE o.credited_at IS NOT NULL) totalRevenueFen,(SELECT COALESCE(sum(CASE WHEN free_delta>0 THEN free_delta ELSE 0 END+CASE WHEN paid_delta>0 THEN paid_delta ELSE 0 END),0) FROM credit_ledger) totalIssued,(SELECT COALESCE(-sum(free_delta+paid_delta),0) FROM credit_ledger WHERE kind='generation_debit') totalUsed,(SELECT count(*) FROM users WHERE created_at>=?) newUsers7d,(SELECT COALESCE(sum(t.amount_fen),0) FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE o.credited_at IS NOT NULL AND o.paid_at>=?) revenue7dFen").bind(now,now-7*86400000,now-7*86400000).first();
-  const recentAudits=(await env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 10").all()).results;
-  return response({...extra,recentAudits,users:users?.n||0,verifiedUsers:verified?.n||0,todayUsers:todayUsers?.n||0,todayGenerations:todayAi?.n||0,monthGenerations:monthAi?.n||0,totalFreeGranted:grant?.n||0,paidCreditsSpent:paidSpent?.n||0,monthRevenueCents:legacyRevenue?.n||0,monthRevenueFen:revenue?.n||0,cost:cost||{inputTokens:0,outputTokens:0,costMicroUsd:0},todayCost:todayCost||{inputTokens:0,outputTokens:0,costMicroUsd:0},dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,remainingBudgetMicroUsd:Math.max(0,budgetLimitMicroUsd-committed),budgetDay:day,budgetUsedPercent:budgetLimitMicroUsd>0?Math.min(100,Math.round(committed/budgetLimitMicroUsd*100)):null,costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,abnormalRequests:errors?.n||0,costByModel:modelCosts.costByModel,aiService:{enabled:aiEnabled?.value==="1",...modelCosts.service}},200,env,request);
+  const settingsMap=new Map(settings.results.map(row=>[row.key,row.value]));
+  const costSetting={value:settingsMap.get('daily_cost_limit_micro_usd')},aiEnabled={value:settingsMap.get('ai_enabled')};
+  const {cost,todayCost}=modelCosts;
+  const budgetLimitMicroUsd=Number(costSetting?.value||0),dailyCostMicroUsd=budget?.settled_micro_usd??todayCost.costMicroUsd,reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
+  return response({...history,activeUsers:activeUsers?.n||0,recentAudits:recentAudits.results,
+    todayGenerations:generations?.todayGenerations||0,monthGenerations:generations?.monthGenerations||0,
+    monthRevenueCents:legacyRevenue?.n||0,monthRevenueFen:revenue?.n||0,cost,todayCost,
+    dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,remainingBudgetMicroUsd:Math.max(0,budgetLimitMicroUsd-committed),budgetDay:day,
+    budgetUsedPercent:budgetLimitMicroUsd>0?Math.min(100,Math.round(committed/budgetLimitMicroUsd*100)):null,
+    costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,
+    abnormalRequests:errors?.n||0,costByModel:modelCosts.costByModel,aiService:{enabled:aiEnabled?.value==="1",...modelCosts.service}},200,env,request);
 }
 export async function adminUsers(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const search=(new URL(request.url).searchParams.get("q")||"").trim().slice(0,100);
@@ -118,12 +120,12 @@ export async function adminSettingUpdate(request:Request,env:Env,key:string):Pro
   if(!before)throw new ApiFailure(404,"NOT_FOUND","设置项不存在。");
   await commitOperation(env,op,[env.DB.prepare("UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?").bind(value,nowMs(),actor.user_id,key)],before,{value});return response({ok:true},200,env,request);
 }
-export async function adminLedger(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({ledger:(await env.DB.prepare("SELECT credit_ledger.*,users.email FROM credit_ledger JOIN users ON users.id=credit_ledger.user_id ORDER BY credit_ledger.created_at DESC LIMIT 100").all()).results},200,env,request);}
+export async function adminLedger(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({ledger:(await env.DB.prepare(RECENT_LEDGER_SQL).all()).results},200,env,request);}
 
 export async function adminAudits(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({audits:(await env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 100").all()).results},200,env,request);}
 export async function adminUserDetail(request:Request,env:Env,userId:string):Promise<Response>{
  await admin(request,env);const user=await env.DB.prepare("SELECT id,email,username,status,role,created_at,is_test_account,archived_at,admin_note,(SELECT max(ts) FROM (SELECT max(s.created_at) ts FROM sessions s WHERE s.user_id=users.id UNION ALL SELECT max(r.created_at) FROM ai_requests r WHERE r.user_id=users.id UNION ALL SELECT max(o.paid_at) FROM recharge_orders o WHERE o.user_id=users.id)) last_active_at FROM users WHERE id=?").bind(userId).first();if(!user)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
- const [orders,ledger,usage]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT request_id id,status,generation_phase,created_at,completed_at FROM ai_requests WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all()]);
+ const [orders,ledger,usage]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare(USER_USAGE_SQL).bind(userId).all()]);
  return response({user,quota:await balance(env,userId),orders:orders.results,ledger:ledger.results,usage:usage.results},200,env,request);
 }
 export async function adminTestAccount(request:Request,env:Env,userId:string,archive=false):Promise<Response>{

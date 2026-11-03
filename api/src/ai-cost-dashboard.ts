@@ -51,8 +51,13 @@ export async function aiCostDetails(env: Env, mode: string, dayStart: number, mo
           keyConfigured: Boolean(active.key_present && !active.archived && env.AI_CONFIG_ENCRYPTION_KEY) }
       : { mode, provider: mode === "unconfigured" ? "—" : "DeepSeek", model: mode === "unconfigured" ? "—" : DEEPSEEK_MODEL,
           configurationSource: "legacy", configVersion: null, keyConfigured: Boolean(env.DEEPSEEK_API_KEY) };
+  const sumCosts=(period:"today"|"month")=>costs.results.reduce((sum,row)=>({
+    inputTokens:sum.inputTokens+Number(period==="today"?row.todayInput:row.monthInput),
+    outputTokens:sum.outputTokens+Number(period==="today"?row.todayOutput:row.monthOutput),
+    costMicroUsd:sum.costMicroUsd+Number(period==="today"?row.todayCost:row.monthCost),
+  }),{inputTokens:0,outputTokens:0,costMicroUsd:0});
   return {
-    service,
+    cost:sumCosts("month"),todayCost:sumCosts("today"),service,
     costByModel: costs.results.map(row => ({
       provider: providerNames[row.providerCode] || "Unknown", model: row.model, configurationSource: row.configurationSource,
       today: { requests: row.todayRequests, inputTokens: row.todayInput, outputTokens: row.todayOutput, costMicroUsd: row.todayCost },
