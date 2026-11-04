@@ -107,19 +107,19 @@ export async function saveAiModel(request: Request, env: Env): Promise<Response>
   const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim().replace(/\/$/, "") : "";
   if (!displayName || displayName.length > 80 || !["deepseek", "qwen", "gemini", "siliconflow", "openai_compatible"].includes(String(provider)) || protocol !== "openai_chat" || !modelId || modelId.length > 160) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "模型名称、厂商、协议或模型 ID 无效。");
   const suppliedOptions = body.options && typeof body.options === "object" && !Array.isArray(body.options) ? body.options as Record<string, unknown> : {};
-  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.jsonMode !== undefined && typeof suppliedOptions.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","Qwen JSON Mode 选项无效。");
+  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.jsonMode !== undefined && typeof suppliedOptions.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","JSON Mode 选项无效。");
   const options: Record<string, unknown> = (provider === "qwen" || provider === "siliconflow") ? {
     ...(suppliedOptions.thinkingMode === "enabled" || suppliedOptions.thinkingMode === "disabled" ? { thinkingMode: suppliedOptions.thinkingMode } : {}),
     jsonMode: suppliedOptions.jsonMode !== false,
   } : provider === "openai_compatible" ? { customEndpointRiskConfirmed: suppliedOptions.customEndpointRiskConfirmed === true } : {};
   const config = { provider, protocol, baseUrl, modelId, maxOutputTokens: Number(body.maxOutputTokens), timeoutMs: Number(body.timeoutMs), options, endpointAddresses: [] as string[] };
   if (!Number.isInteger(config.maxOutputTokens) || config.maxOutputTokens < 64 || config.maxOutputTokens > 8192 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 3000 || config.timeoutMs > 60000) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Token 上限或超时时间无效。");
-  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.thinkingMode !== undefined && !["enabled", "disabled"].includes(String(suppliedOptions.thinkingMode))) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Qwen Thinking 参数无效。");
+  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.thinkingMode !== undefined && !["enabled", "disabled"].includes(String(suppliedOptions.thinkingMode))) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Thinking 参数无效。");
   if (provider === "qwen" && config.options.thinkingMode === "enabled" && config.options.jsonMode === true) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "此配置不能同时启用 Qwen Thinking 与 JSON Mode；请按所选模型支持情况配置其中一项。");
   try { config.endpointAddresses = await validateProviderEndpoint(config as any); }
   catch (error) { throw new ApiFailure(400,"INVALID_MODEL_ENDPOINT",safeError(error)); }
   if (provider === "openai_compatible" && config.options.customEndpointRiskConfirmed !== true) throw new ApiFailure(400,"CUSTOM_ENDPOINT_CONFIRMATION_REQUIRED","自定义接口需确认其服务方可信，且只会收到模型请求内容与 API Key。");
-  if (["qwen", "siliconflow"].includes(String(provider)) && config.options.jsonMode !== undefined && typeof config.options.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","Qwen JSON Mode 选项无效。");
+  if (["qwen", "siliconflow"].includes(String(provider)) && config.options.jsonMode !== undefined && typeof config.options.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","JSON Mode 选项无效。");
   const inputRate = decimalRate(body.inputRateUsdPerMillion), outputRate = decimalRate(body.outputRateUsdPerMillion);
   const prior = await readConfig(env, id);
   if (!prior && typeof body.apiKey !== "string") throw new ApiFailure(400, "API_KEY_REQUIRED", "新配置需要填写 API Key。");
