@@ -70,3 +70,12 @@ test('SiliconFlow has a dedicated safe admin preset with JSON and thinking contr
   assert.match(modelPanelSource,/siliconflow:"SiliconFlow"/);
   assert.match(modelPanelSource,/modelId:"",thinkingMode:"disabled"/);
 });
+
+const aiModelPanelSource=await readFile(new URL('../src/components/admin/AIModelManagementPanel.tsx', import.meta.url),'utf8');
+test('Staging model test confirmation matches the Worker safeguards without a daily count cap',()=>{
+  assert.match(aiModelPanelSource,/没有每日测试次数上限/);
+  assert.match(aiModelPanelSource,/每分钟最多 30 次/);
+  assert.match(aiModelPanelSource,/单次成本预留上限 \$0\.05/);
+  assert.match(aiModelPanelSource,/No daily test-count limit/);
+  assert.doesNotMatch(aiModelPanelSource,/每天最多 10 次|Limit: 10 calls and \$0\.05\/day/);
+});
