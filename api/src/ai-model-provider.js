@@ -1,5 +1,16 @@
 import { parseAIOutput } from "../../utils/output-parser.js";
 
+// 0018 intentionally has a closed provider CHECK. A versioned protocol preset
+// uses the existing compatible storage type; no schema rewrite or data migration.
+export function storedProvider(provider) {
+  return provider === "siliconflow" ? "openai_compatible" : provider;
+}
+export function effectiveProvider(provider, options) {
+  return provider === "openai_compatible" && options?.providerPreset === "siliconflow" ? "siliconflow" : provider;
+}
+// Alias v is used by the existing dashboard joins; no new reads are introduced.
+export const EFFECTIVE_PROVIDER_SQL = "CASE WHEN v.provider='openai_compatible' AND json_extract(v.options_json,'$.providerPreset')='siliconflow' THEN 'siliconflow' ELSE v.provider END";
+
 const BUILTIN_HOSTS = {
   deepseek: new Set(["api.deepseek.com"]),
   gemini: new Set(["generativelanguage.googleapis.com"]),

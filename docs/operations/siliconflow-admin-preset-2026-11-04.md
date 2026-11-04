@@ -21,3 +21,35 @@ Scope: a dedicated provider choice in the existing X Reply Helper model admin. B
 - This branch is for review and sandbox tests; release requires a separate explicit authorization.
 
 Official docs: https://docs.siliconflow.cn/docs/api/chat-completions-post and https://docs.siliconflow.cn/docs/userguide/guides/json-mode
+
+## Staging validation / storage compatibility (2026-11-04)
+
+The original candidate failed its two isolated SiliconFlow save tests: migration
+0018's existing provider CHECK only allows DeepSeek/Qwen/Gemini/OpenAI-compatible.
+The fix does not alter that migration or require any remote SQL. SiliconFlow is
+stored as `provider=openai_compatible` plus the server-owned versioned
+`options.providerPreset=siliconflow`. The admin list, active/previous pointers,
+generation resolver and existing cost joins recover the logical provider.
+The dedicated HTTPS/host/path validation still runs before every upstream call;
+generic custom submissions cannot supply this reserved preset marker. Existing
+configs are not rewritten. API keys retain the existing AES-GCM/AAD versioning.
+
+Local tests use synthetic credentials and isolated SQLite/workerd only. They
+cover connection JSON, full Chinese/English reply contracts, token cost, activation
+gates, rollback, new versions retaining encrypted keys, released-client parsing,
+replay/ACK single debit, private DNS and redirect rejection. Browser tests render
+real React controls with mock callbacks; their screenshot is not evidence of an
+authenticated live admin test.
+
+Staging rollout must be a selective integration onto the live Staging source
+85b3b7803ef5b5f536247b03455a9d30b882ad6a (Worker) / 0ae9d25d81033551b832051906922bb3b6860dff
+(Pages), not the whole Production-based PR tree. In particular retain Staging's
+current admin test limits, performance diagnostics, prompt, signup claims and
+ACK statistics. No remote D1 statements, model save/activation, live upstream
+calls, payment operations or Production changes are part of this validation.
+
+Rollback to the pre-release Worker/Pages without restoring D1. No SiliconFlow
+configs are created online in this phase. If operators later activate the preset,
+switch back to an existing supported provider before rolling back to code that
+does not understand `providerPreset` (otherwise its generic adapter omits vendor
+options); existing immutable config versions and audit records remain intact.

@@ -160,7 +160,7 @@ test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini, Sil
 });
 
 test('SiliconFlow model config is encrypted, safely validated, and can activate only after verified tests',async()=>{
-  const f=setup(),id=randomUUID();
+  const f=setup(),id=randomUUID();f.env.AI_MODE='production';
   const body=modelBody({id,name:'SiliconFlow test',provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1',modelId:'deepseek-ai/DeepSeek-V4-Flash',options:{thinkingMode:'disabled',jsonMode:true}});
   try{
     const invalid=await f.call('/v1/admin/ai-models',{body:{...body,operationId:randomUUID(),baseUrl:'https://api.siliconflow.cn.evil.example/v1'}});
@@ -168,8 +168,8 @@ test('SiliconFlow model config is encrypted, safely validated, and can activate 
     const saved=await mockProvider(()=>f.call('/v1/admin/ai-models',{body}));
     assert.equal(saved.status,200,JSON.stringify(saved.body));
     const config=f.sql.prepare('SELECT provider,base_url,model_id,options_json,api_key_ciphertext FROM ai_provider_config_versions WHERE config_id=?').get(id);
-    assert.equal(config.provider,'siliconflow');assert.equal(config.base_url,'https://api.siliconflow.cn/v1');
-    assert.deepEqual(JSON.parse(config.options_json),{thinkingMode:'disabled',jsonMode:true});
+    assert.equal(config.provider,'openai_compatible');assert.equal(config.base_url,'https://api.siliconflow.cn/v1');
+    assert.deepEqual(JSON.parse(config.options_json),{thinkingMode:'disabled',jsonMode:true,providerPreset:'siliconflow'});
     assert.ok(!config.api_key_ciphertext.includes(apiKey));
     assert.equal((await f.call('/v1/admin/ai-models',{method:'GET'})).body.configs.find(c=>c.id===id).provider,'siliconflow');
     assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,409);
@@ -197,7 +197,16 @@ test('SiliconFlow model config is encrypted, safely validated, and can activate 
     assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,200);
     const dashboard=await f.call('/v1/admin/dashboard',{method:'GET'});
     assert.equal(dashboard.body.aiService.provider,'SiliconFlow');
+    const snapshot=(await f.call('/v1/admin/ai-models',{method:'GET'})).body;
+    assert.equal(snapshot.active.provider,'siliconflow');
     assert.equal((await f.call('/v1/admin/ai-models/rollback',{body:operation()})).status,200);
+    const edited=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...body,operationId:randomUUID(),apiKey:'',options:{jsonMode:false}}}));
+    assert.equal(edited.status,200,JSON.stringify(edited.body));assert.equal(edited.body.version,2);
+    const listed=(await f.call('/v1/admin/ai-models',{method:'GET'})).body;
+    assert.equal(listed.active,null);assert.equal(listed.previous.provider,'siliconflow');
+    const item=listed.configs.find(c=>c.id===id);assert.equal(item.provider,'siliconflow');assert.equal(item.options.jsonMode,false);assert.equal('thinkingMode' in item.options,false);
+    assert.equal(item.keyConfigured,true);assert.ok(!JSON.stringify(listed).includes(apiKey));
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,409);
   }finally{f.sql.close();}
 });
 

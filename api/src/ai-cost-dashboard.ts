@@ -1,3 +1,4 @@
+import { EFFECTIVE_PROVIDER_SQL } from "./ai-model-provider.js";
 import type { Env } from "./types";
 import { DEEPSEEK_MODEL } from "./ai";
 
@@ -18,13 +19,13 @@ type CostRow = {
 /** Read metadata only: never load/decrypt provider credentials for reporting. */
 export async function aiCostDetails(env: Env, mode: string, dayStart: number, monthStart: number) {
   const [active, costs] = await Promise.all([
-    env.DB.prepare(`SELECT r.active_config_id,r.active_version,c.archived,v.provider,v.model_id,
+    env.DB.prepare(`SELECT r.active_config_id,r.active_version,c.archived,${EFFECTIVE_PROVIDER_SQL} provider,v.model_id,
         CASE WHEN length(v.api_key_ciphertext)>0 THEN 1 ELSE 0 END key_present
       FROM ai_provider_runtime r LEFT JOIN ai_provider_configs c ON c.id=r.active_config_id
       LEFT JOIN ai_provider_config_versions v ON v.config_id=r.active_config_id AND v.version=r.active_version
       WHERE r.id=1`).first<ActiveModel>(),
     env.DB.prepare(`WITH attributed AS (
-      SELECT CASE WHEN u.provider_config_id IS NOT NULL THEN COALESCE(v.provider,'unknown')
+      SELECT CASE WHEN u.provider_config_id IS NOT NULL THEN COALESCE(${EFFECTIVE_PROVIDER_SQL},'unknown')
           WHEN u.model='mock' THEN 'mock' ELSE 'deepseek' END providerCode,
         COALESCE(v.model_id,u.model) model,
         CASE WHEN u.provider_config_id IS NULL THEN CASE WHEN u.model='mock' THEN 'mock' ELSE 'legacy' END

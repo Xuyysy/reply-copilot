@@ -113,3 +113,12 @@ test("successful usage is costed in integer micro-USD without trusting provider 
   assert.equal(JSON.parse(result.raw).replies.natural, "谢谢分享这个细节。");
   assert.equal(JSON.parse(result.raw).defaultStyle, "natural");
 });
+
+test('SiliconFlow rejects unsafe targets before resolving DNS or forwarding credentials',async()=>{
+ const sf={...base,provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1'};
+ for(const baseUrl of ['https://api.siliconflow.cn@evil.example/v1','https://user:pass@api.siliconflow.cn/v1','https://api.siliconflow.cn:8443/v1','https://api.siliconflow.cn/v1?redirect=evil','https://api.siliconflow.cn/v1#fragment','https://127.0.0.1/v1','https://169.254.169.254/v1']){
+  let resolved=false;await assert.rejects(validateProviderEndpoint({...sf,baseUrl},async()=>{resolved=true;return['8.8.8.8'];}));assert.equal(resolved,false);
+ }
+ await assert.rejects(validateProviderEndpoint(sf,async()=>['8.8.8.8','::1']),e=>e.code==='unsafe_endpoint');
+ let calls=0;await assert.rejects(requestConfiguredModel({config:{...sf,timeoutMs:3000},apiKey:'synthetic-key',system:'JSON',user:'JSON',inputRateMicroUsdPerMillion:300000,outputRateMicroUsdPerMillion:1000000,validateEndpoint:async()=>{},fetchImpl:async(_url,init)=>{calls++;assert.equal(init.redirect,'manual');return new Response('',{status:307,headers:{location:'https://evil.example/v1'}});}}),e=>e.code==='redirect_blocked');assert.equal(calls,1);
+});
