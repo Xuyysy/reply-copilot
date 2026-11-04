@@ -124,11 +124,12 @@ test('Chinese and English model tests send distinct real post text and preserve 
   }finally{globalThis.fetch=original;f.sql.close();}
 });
 
-test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini and custom-compatible adapters',async()=>{
+test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini, SiliconFlow and custom-compatible adapters',async()=>{
   const cases=[
     {provider:'deepseek',baseUrl:'https://api.deepseek.com/v1',modelId:'deepseek-chat',jsonMode:true},
     {provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen-plus',jsonMode:true},
     {provider:'gemini',baseUrl:'https://generativelanguage.googleapis.com/v1beta/openai',modelId:'gemini-2.5-flash',jsonMode:false},
+    {provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1',modelId:'deepseek-ai/DeepSeek-V4-Flash',jsonMode:true},
     {provider:'openai_compatible',baseUrl:'https://api.example.com/v1',modelId:'custom-chat',jsonMode:false,custom:true},
   ];
   for(const item of cases){
@@ -156,6 +157,48 @@ test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini and 
       assert.equal(captured[0].max_tokens<=32,true,item.provider);
     }finally{globalThis.fetch=original;f.sql.close();}
   }
+});
+
+test('SiliconFlow model config is encrypted, safely validated, and can activate only after verified tests',async()=>{
+  const f=setup(),id=randomUUID();
+  const body=modelBody({id,name:'SiliconFlow test',provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1',modelId:'deepseek-ai/DeepSeek-V4-Flash',options:{thinkingMode:'disabled',jsonMode:true}});
+  try{
+    const invalid=await f.call('/v1/admin/ai-models',{body:{...body,operationId:randomUUID(),baseUrl:'https://api.siliconflow.cn.evil.example/v1'}});
+    assert.equal(invalid.status,400);assert.equal(invalid.body.code,'INVALID_MODEL_ENDPOINT');
+    const saved=await mockProvider(()=>f.call('/v1/admin/ai-models',{body}));
+    assert.equal(saved.status,200,JSON.stringify(saved.body));
+    const config=f.sql.prepare('SELECT provider,base_url,model_id,options_json,api_key_ciphertext FROM ai_provider_config_versions WHERE config_id=?').get(id);
+    assert.equal(config.provider,'siliconflow');assert.equal(config.base_url,'https://api.siliconflow.cn/v1');
+    assert.deepEqual(JSON.parse(config.options_json),{thinkingMode:'disabled',jsonMode:true});
+    assert.ok(!config.api_key_ciphertext.includes(apiKey));
+    assert.equal((await f.call('/v1/admin/ai-models',{method:'GET'})).body.configs.find(c=>c.id===id).provider,'siliconflow');
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,409);
+    const seen=[];
+    const original=globalThis.fetch;
+    globalThis.fetch=async(url,init={})=>{
+      if(new URL(String(url)).hostname==='cloudflare-dns.com')return Response.json({Status:0,Answer:new URL(String(url)).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});
+      seen.push({url:String(url),body:JSON.parse(init.body)});
+      const language=init.body.includes('复杂问题')?'zh':'en';
+      return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.parse(init.body).messages[0].content.includes('{"ok":true}')?'{"ok":true}':validOutput(language)}}],usage:{prompt_tokens:20,completion_tokens:30}});
+    };
+    try{
+      for(const kind of ['test-connection','test-generation','test-generation']){
+        const language=kind==='test-generation'?(seen.some(x=>x.body.messages[1].content.includes('复杂问题'))?'en':'zh'):undefined;
+        const result=await f.call('/v1/admin/ai-models/'+id+'/'+kind,{body:operation({testId:randomUUID(),language})});
+        assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.ok,true,JSON.stringify(result.body));
+      }
+    }finally{globalThis.fetch=original;}
+    assert.equal(seen.length,3);
+    for(const item of seen){
+      assert.equal(item.url,'https://api.siliconflow.cn/v1/chat/completions');
+      assert.equal(item.body.enable_thinking,false);
+      assert.deepEqual(item.body.response_format,{type:'json_object'});
+    }
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,200);
+    const dashboard=await f.call('/v1/admin/dashboard',{method:'GET'});
+    assert.equal(dashboard.body.aiService.provider,'SiliconFlow');
+    assert.equal((await f.call('/v1/admin/ai-models/rollback',{body:operation()})).status,200);
+  }finally{f.sql.close();}
 });
 
 test('connection tests reject plain OK text, false status and extra JSON fields',async()=>{

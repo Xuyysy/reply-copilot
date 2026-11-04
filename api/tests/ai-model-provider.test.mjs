@@ -5,6 +5,7 @@ import {
   classifyProviderFailure,
   validateModelOutput,
   validateProviderEndpoint,
+  providerRequestUrl,
   requestConfiguredModel,
 } from "../src/ai-model-provider.js";
 
@@ -29,6 +30,26 @@ test("DeepSeek, Qwen, Gemini and custom adapters use only their documented compa
   const custom = buildChatCompletionRequest({ ...base, provider: "openai_compatible", baseUrl: "https://llm.example.com/v1", modelId: "model-x" }, "sys", "user");
   assert.equal("response_format" in custom, false);
   assert.equal("thinking" in custom, false);
+});
+
+test("dedicated SiliconFlow preset sends only supported chat options and fixes the API host", async () => {
+  const sf={...base,provider:"siliconflow",baseUrl:"https://api.siliconflow.cn/v1",modelId:"deepseek-ai/DeepSeek-V4-Flash",options:{thinkingMode:"disabled",jsonMode:true}};
+  const body=buildChatCompletionRequest(sf,"sys","user");
+  assert.deepEqual(body.response_format,{type:"json_object"});
+  assert.equal(body.enable_thinking,false);
+  assert.equal(body.model,"deepseek-ai/DeepSeek-V4-Flash");
+  assert.equal(body.max_tokens,1200);
+  assert.equal(providerRequestUrl(sf),"https://api.siliconflow.cn/v1/chat/completions");
+  const switched=buildChatCompletionRequest({...sf,options:{thinkingMode:"enabled",jsonMode:false}},"sys","user");
+  assert.equal(switched.enable_thinking,true);
+  assert.equal("response_format" in switched,false);
+  const modelDefault=buildChatCompletionRequest({...sf,options:{jsonMode:true}},"sys","user");
+  assert.equal("enable_thinking" in modelDefault,false);
+  assert.deepEqual(await validateProviderEndpoint(sf,async()=>["93.184.216.34"]),["93.184.216.34"]);
+  for(const baseUrl of ["https://api.siliconflow.cn.evil.test/v1","https://fake.siliconflow.cn/v1","https://api.siliconflow.cn/other","http://api.siliconflow.cn/v1"]){
+    await assert.rejects(validateProviderEndpoint({...sf,baseUrl},async()=>["93.184.216.34"]),e=>["provider_endpoint_mismatch","unsafe_endpoint"].includes(e.code),baseUrl);
+  }
+  await assert.rejects(validateProviderEndpoint(sf,async()=>["127.0.0.1"]),e=>e.code==="unsafe_endpoint");
 });
 
 test("all model output is normalized through the existing plugin response contract", () => {
