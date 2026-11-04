@@ -1,5 +1,16 @@
 import { parseAIOutput } from "../../utils/output-parser.js";
 
+// 0018 intentionally has a closed provider CHECK. A versioned protocol preset
+// uses the existing compatible storage type; no schema rewrite or data migration.
+export function storedProvider(provider) {
+  return provider === "siliconflow" ? "openai_compatible" : provider;
+}
+export function effectiveProvider(provider, options) {
+  return provider === "openai_compatible" && options?.providerPreset === "siliconflow" ? "siliconflow" : provider;
+}
+// Alias v is used by the existing dashboard joins; no new reads are introduced.
+export const EFFECTIVE_PROVIDER_SQL = "CASE WHEN v.provider='openai_compatible' AND json_extract(v.options_json,'$.providerPreset')='siliconflow' THEN CASE WHEN json_extract(v.options_json,'$.siliconflowRegion')='global' THEN 'siliconflow_global' ELSE 'siliconflow_china' END ELSE v.provider END";
+
 const BUILTIN_HOSTS = {
   deepseek: new Set(["api.deepseek.com"]),
   gemini: new Set(["generativelanguage.googleapis.com"]),
@@ -52,7 +63,9 @@ export function buildChatCompletionRequest(config, system, user, { testMode = fa
   if (config.provider === "deepseek") {
     body.response_format = { type: "json_object" };
     body.thinking = { type: "disabled" };
-  } else if (config.provider === "qwen") {
+  } else if (config.provider === "qwen" || config.provider === "siliconflow") {
+    // SiliconFlow documents JSON Mode and enable_thinking for compatible chat models.
+    // Omit enable_thinking when set to provider default: not all models support it.
     if (config.options?.jsonMode !== false) body.response_format = { type: "json_object" };
     if (config.options?.thinkingMode === "disabled") body.enable_thinking = false;
     if (config.options?.thinkingMode === "enabled") body.enable_thinking = true;
@@ -110,7 +123,7 @@ export function isPublicAddress(address) {
 }
 
 function parseBaseUrl(config) {
-  if (!config || !["deepseek", "qwen", "gemini", "openai_compatible"].includes(config.provider) || config.protocol !== "openai_chat") throw new ModelProviderError("unsupported_protocol");
+  if (!config || !["deepseek", "qwen", "gemini", "siliconflow", "openai_compatible"].includes(config.provider) || config.protocol !== "openai_chat") throw new ModelProviderError("unsupported_protocol");
   let url;
   try { url = new URL(config.baseUrl); } catch { throw new ModelProviderError("invalid_endpoint"); }
   if (url.protocol !== "https:" || url.username || url.password || url.port && url.port !== "443" || url.search || url.hash) throw new ModelProviderError("unsafe_endpoint");
@@ -124,6 +137,9 @@ function parseBaseUrl(config) {
   if (config.provider === "gemini" && (!BUILTIN_HOSTS.gemini.has(host) || !["/v1beta/openai", "/v1beta/openai/v1"].includes(path))) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "qwen" && !(host === "dashscope.aliyuncs.com" || host === "dashscope-intl.aliyuncs.com" || host.endsWith(".maas.aliyuncs.com"))) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "qwen" && !path.endsWith("/compatible-mode/v1")) throw new ModelProviderError("provider_endpoint_mismatch");
+  // The dedicated SiliconFlow provider accepts only its two official API hosts;
+  // custom endpoints must instead use the separately gated generic adapter.
+  if (config.provider === "siliconflow" && (!["api.siliconflow.cn", "api.siliconflow.com"].includes(host) || path !== "/v1")) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "openai_compatible" && !path) throw new ModelProviderError("invalid_endpoint");
   return { url, host, path };
 }

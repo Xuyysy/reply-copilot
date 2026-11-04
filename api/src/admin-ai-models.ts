@@ -5,7 +5,7 @@ import { requireAdminSession } from "./admin-auth";
 import { operation, commitOperation } from "./admin-operations";
 import { response } from "./http";
 import { encryptProviderApiKey, decryptProviderApiKey } from "./ai-model-crypto";
-import { validateProviderEndpoint, requestConfiguredModel, ModelProviderError } from "./ai-model-provider.js";
+import { validateProviderEndpoint, requestConfiguredModel, ModelProviderError, storedProvider, effectiveProvider } from "./ai-model-provider.js";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 
 // Per-request safety ceiling is retained; no admin-only daily count/budget cap.
@@ -52,7 +52,7 @@ function parseConfig(row: Config) {
   try { options = JSON.parse(row.options_json); endpointAddresses = JSON.parse(row.endpoint_addresses_json); }
   catch { throw new ApiFailure(503, "MODEL_CONFIG_INVALID", "模型配置需要重新保存。"); }
   return {
-    configId: row.id, version: row.latest_version, displayName: row.display_name, provider: row.provider,
+    configId: row.id, version: row.latest_version, displayName: row.display_name, provider: effectiveProvider(row.provider, options),
     protocol: row.protocol, baseUrl: row.base_url, modelId: row.model_id,
     inputRateMicroUsdPerMillion: row.input_rate_micro_usd_per_million,
     outputRateMicroUsdPerMillion: row.output_rate_micro_usd_per_million,
@@ -60,7 +60,7 @@ function parseConfig(row: Config) {
   };
 }
 function publicMeta(row: Config, active: boolean, previous: boolean, latestTests: unknown[]) {
-  return { id: row.id, name: row.display_name, version: row.latest_version, archived: Boolean(row.archived), provider: row.provider,
+  return { id: row.id, name: row.display_name, version: row.latest_version, archived: Boolean(row.archived), provider: effectiveProvider(row.provider, JSON.parse(row.options_json)),
     protocol: row.protocol, baseUrl: row.base_url, modelId: row.model_id,
     inputRateUsdPerMillion: row.input_rate_micro_usd_per_million / 1_000_000,
     outputRateUsdPerMillion: row.output_rate_micro_usd_per_million / 1_000_000,
@@ -89,8 +89,8 @@ export async function listAiModels(request: Request, env: Env): Promise<Response
     runtime?.active_config_id?readConfig(env,runtime.active_config_id,runtime.active_version):null,
     runtime?.previous_config_id?readConfig(env,runtime.previous_config_id,runtime.previous_version):null,
   ]);
-  const active=activeConfig?{id:activeConfig.id,version:runtime.active_version,name:activeConfig.display_name,modelId:activeConfig.model_id,provider:activeConfig.provider}:null;
-  const previous=previousConfig?{id:previousConfig.id,version:runtime.previous_version,name:previousConfig.display_name,modelId:previousConfig.model_id,provider:previousConfig.provider}:runtime?.previous_is_legacy?{id:null,version:null,name:"DeepSeek legacy",modelId:"deepseek-flash",provider:"deepseek"}:null;
+  const active=activeConfig?{id:activeConfig.id,version:runtime.active_version,name:activeConfig.display_name,modelId:activeConfig.model_id,baseUrl:activeConfig.base_url,provider:effectiveProvider(activeConfig.provider,JSON.parse(activeConfig.options_json))}:null;
+  const previous=previousConfig?{id:previousConfig.id,version:runtime.previous_version,name:previousConfig.display_name,modelId:previousConfig.model_id,baseUrl:previousConfig.base_url,provider:effectiveProvider(previousConfig.provider,JSON.parse(previousConfig.options_json))}:runtime?.previous_is_legacy?{id:null,version:null,name:"DeepSeek legacy",modelId:"deepseek-flash",provider:"deepseek"}:null;
   return response({ active, previous, previousAvailable:Boolean(previous), legacyFallback: !runtime?.active_config_id, configs: items }, 200, env, request);
 }
 
@@ -105,23 +105,29 @@ export async function saveAiModel(request: Request, env: Env): Promise<Response>
   const protocol = body.protocol ?? "openai_chat";
   const modelId = typeof body.modelId === "string" ? body.modelId.trim() : "";
   const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim().replace(/\/$/, "") : "";
-  if (!displayName || displayName.length > 80 || !["deepseek", "qwen", "gemini", "openai_compatible"].includes(String(provider)) || protocol !== "openai_chat" || !modelId || modelId.length > 160) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "模型名称、厂商、协议或模型 ID 无效。");
+  if (!displayName || displayName.length > 80 || !["deepseek", "qwen", "gemini", "siliconflow", "openai_compatible"].includes(String(provider)) || protocol !== "openai_chat" || !modelId || modelId.length > 160) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "模型名称、厂商、协议或模型 ID 无效。");
   const suppliedOptions = body.options && typeof body.options === "object" && !Array.isArray(body.options) ? body.options as Record<string, unknown> : {};
-  if (provider === "qwen" && suppliedOptions.jsonMode !== undefined && typeof suppliedOptions.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","Qwen JSON Mode 选项无效。");
-  const options: Record<string, unknown> = provider === "qwen" ? {
+  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.jsonMode !== undefined && typeof suppliedOptions.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","JSON Mode 选项无效。");
+  const options: Record<string, unknown> = (provider === "qwen" || provider === "siliconflow") ? {
     ...(suppliedOptions.thinkingMode === "enabled" || suppliedOptions.thinkingMode === "disabled" ? { thinkingMode: suppliedOptions.thinkingMode } : {}),
     jsonMode: suppliedOptions.jsonMode !== false,
+    ...(provider === "siliconflow" ? { providerPreset: "siliconflow", rateCurrency: "USD", ...(suppliedOptions.chinaRatesConvertedToUsd === true ? { chinaRatesConvertedToUsd: true } : {}) } : {}),
   } : provider === "openai_compatible" ? { customEndpointRiskConfirmed: suppliedOptions.customEndpointRiskConfirmed === true } : {};
   const config = { provider, protocol, baseUrl, modelId, maxOutputTokens: Number(body.maxOutputTokens), timeoutMs: Number(body.timeoutMs), options, endpointAddresses: [] as string[] };
   if (!Number.isInteger(config.maxOutputTokens) || config.maxOutputTokens < 64 || config.maxOutputTokens > 8192 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 3000 || config.timeoutMs > 60000) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Token 上限或超时时间无效。");
-  if (provider === "qwen" && suppliedOptions.thinkingMode !== undefined && !["enabled", "disabled"].includes(String(suppliedOptions.thinkingMode))) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Qwen Thinking 参数无效。");
+  if (["qwen", "siliconflow"].includes(String(provider)) && suppliedOptions.thinkingMode !== undefined && !["enabled", "disabled"].includes(String(suppliedOptions.thinkingMode))) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Thinking 参数无效。");
   if (provider === "qwen" && config.options.thinkingMode === "enabled" && config.options.jsonMode === true) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "此配置不能同时启用 Qwen Thinking 与 JSON Mode；请按所选模型支持情况配置其中一项。");
   try { config.endpointAddresses = await validateProviderEndpoint(config as any); }
   catch (error) { throw new ApiFailure(400,"INVALID_MODEL_ENDPOINT",safeError(error)); }
   if (provider === "openai_compatible" && config.options.customEndpointRiskConfirmed !== true) throw new ApiFailure(400,"CUSTOM_ENDPOINT_CONFIRMATION_REQUIRED","自定义接口需确认其服务方可信，且只会收到模型请求内容与 API Key。");
-  if (provider === "qwen" && config.options.jsonMode !== undefined && typeof config.options.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","Qwen JSON Mode 选项无效。");
+  if (["qwen", "siliconflow"].includes(String(provider)) && config.options.jsonMode !== undefined && typeof config.options.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","JSON Mode 选项无效。");
+  if (provider === "siliconflow") config.options.siliconflowRegion = new URL(baseUrl).hostname === "api.siliconflow.com" ? "global" : "china";
+  if (provider === "siliconflow" && suppliedOptions.rateCurrency !== "USD") throw new ApiFailure(400,"MODEL_RATE_CURRENCY_INVALID","内部预算只接受 USD / 百万 Token；请勿直接填写人民币报价。");
+  if (provider === "siliconflow" && config.options.siliconflowRegion === "china" && suppliedOptions.chinaRatesConvertedToUsd !== true) throw new ApiFailure(400,"MODEL_RATE_CONVERSION_REQUIRED","请先将国内站人民币报价换算为 USD，并确认已换算。");
   const inputRate = decimalRate(body.inputRateUsdPerMillion), outputRate = decimalRate(body.outputRateUsdPerMillion);
   const prior = await readConfig(env, id);
+  if (prior && provider === "siliconflow" && effectiveProvider(prior.provider,JSON.parse(prior.options_json)) === "siliconflow" && new URL(prior.base_url).hostname !== new URL(baseUrl).hostname) throw new ApiFailure(409,"MODEL_REGION_CHANGE_REQUIRES_NEW_CONFIG","更换硅基流动区域请新建独立配置，并填写该区域的 API Key。");
+  if (prior && provider === "siliconflow" && new URL(prior.base_url).origin !== new URL(baseUrl).origin && !body.apiKey) throw new ApiFailure(400,"API_KEY_REQUIRED","新接口必须填写对应的 API Key。");
   if (!prior && typeof body.apiKey !== "string") throw new ApiFailure(400, "API_KEY_REQUIRED", "新配置需要填写 API Key。");
   if (prior?.archived) throw new ApiFailure(409, "MODEL_ARCHIVED", "此配置已停用，请先恢复后再编辑。");
   const version = prior ? prior.latest_version + 1 : 1;
@@ -144,14 +150,14 @@ export async function saveAiModel(request: Request, env: Env): Promise<Response>
   }
   const ciphertext = await encryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY, id, version, apiKey);
   const meta = { provider, protocol, base_url: baseUrl, model_id: modelId, input_rate_micro_usd_per_million: inputRate, output_rate_micro_usd_per_million: outputRate, max_output_tokens: config.maxOutputTokens, timeout_ms: config.timeoutMs, options_json: JSON.stringify(config.options), endpoint_addresses_json: JSON.stringify(config.endpointAddresses) };
-  const before = prior ? { id, version: prior.latest_version, provider: prior.provider, modelId: prior.model_id, keyConfigured: true } : null;
+  const before = prior ? { id, version: prior.latest_version, provider: effectiveProvider(prior.provider, JSON.parse(prior.options_json)), modelId: prior.model_id, keyConfigured: true } : null;
   const after = { id, version, name: displayName, ...meta, apiKeyUpdated: Boolean(body.apiKey), keyConfigured: true };
   const statements: D1PreparedStatement[] = prior ? [
-    env.DB.prepare("INSERT INTO ai_provider_config_versions(config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,version,provider,protocol,baseUrl,modelId,ciphertext,inputRate,outputRate,config.maxOutputTokens,config.timeoutMs,JSON.stringify(config.options),JSON.stringify(config.endpointAddresses),now,actor.user_id),
+    env.DB.prepare("INSERT INTO ai_provider_config_versions(config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,version,storedProvider(provider),protocol,baseUrl,modelId,ciphertext,inputRate,outputRate,config.maxOutputTokens,config.timeoutMs,JSON.stringify(config.options),JSON.stringify(config.endpointAddresses),now,actor.user_id),
     env.DB.prepare("UPDATE ai_provider_configs SET display_name=?,latest_version=?,updated_at=?,updated_by=? WHERE id=? AND latest_version=? AND archived=0").bind(displayName,version,now,actor.user_id,id,prior.latest_version),
   ] : [
     env.DB.prepare("INSERT INTO ai_provider_configs(id,display_name,latest_version,created_at,updated_at,updated_by) VALUES(?,?,1,?,?,?)").bind(id,displayName,now,now,actor.user_id),
-    env.DB.prepare("INSERT INTO ai_provider_config_versions(config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by) VALUES(?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,provider,protocol,baseUrl,modelId,ciphertext,inputRate,outputRate,config.maxOutputTokens,config.timeoutMs,JSON.stringify(config.options),JSON.stringify(config.endpointAddresses),now,actor.user_id),
+    env.DB.prepare("INSERT INTO ai_provider_config_versions(config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by) VALUES(?,1,?,?,?,?,?,?,?,?,?,?,?,?,?)").bind(id,storedProvider(provider),protocol,baseUrl,modelId,ciphertext,inputRate,outputRate,config.maxOutputTokens,config.timeoutMs,JSON.stringify(config.options),JSON.stringify(config.endpointAddresses),now,actor.user_id),
   ];
   await commitOperation(env, op, statements, before, after);
   return response({ ok: true, id, version, keyConfigured: true, replayed: op.replayed }, 200, env, request);

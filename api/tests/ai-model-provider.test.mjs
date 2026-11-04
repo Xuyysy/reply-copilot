@@ -5,6 +5,7 @@ import {
   classifyProviderFailure,
   validateModelOutput,
   validateProviderEndpoint,
+  providerRequestUrl,
   requestConfiguredModel,
 } from "../src/ai-model-provider.js";
 
@@ -29,6 +30,26 @@ test("DeepSeek, Qwen, Gemini and custom adapters use only their documented compa
   const custom = buildChatCompletionRequest({ ...base, provider: "openai_compatible", baseUrl: "https://llm.example.com/v1", modelId: "model-x" }, "sys", "user");
   assert.equal("response_format" in custom, false);
   assert.equal("thinking" in custom, false);
+});
+
+test("dedicated SiliconFlow preset sends only supported chat options and fixes the API host", async () => {
+  const sf={...base,provider:"siliconflow",baseUrl:"https://api.siliconflow.cn/v1",modelId:"deepseek-ai/DeepSeek-V4-Flash",options:{thinkingMode:"disabled",jsonMode:true}};
+  const body=buildChatCompletionRequest(sf,"sys","user");
+  assert.deepEqual(body.response_format,{type:"json_object"});
+  assert.equal(body.enable_thinking,false);
+  assert.equal(body.model,"deepseek-ai/DeepSeek-V4-Flash");
+  assert.equal(body.max_tokens,1200);
+  assert.equal(providerRequestUrl(sf),"https://api.siliconflow.cn/v1/chat/completions");
+  const switched=buildChatCompletionRequest({...sf,options:{thinkingMode:"enabled",jsonMode:false}},"sys","user");
+  assert.equal(switched.enable_thinking,true);
+  assert.equal("response_format" in switched,false);
+  const modelDefault=buildChatCompletionRequest({...sf,options:{jsonMode:true}},"sys","user");
+  assert.equal("enable_thinking" in modelDefault,false);
+  assert.deepEqual(await validateProviderEndpoint(sf,async()=>["93.184.216.34"]),["93.184.216.34"]);
+  for(const baseUrl of ["https://api.siliconflow.cn.evil.test/v1","https://fake.siliconflow.cn/v1","https://api.siliconflow.cn/other","http://api.siliconflow.cn/v1"]){
+    await assert.rejects(validateProviderEndpoint({...sf,baseUrl},async()=>["93.184.216.34"]),e=>["provider_endpoint_mismatch","unsafe_endpoint"].includes(e.code),baseUrl);
+  }
+  await assert.rejects(validateProviderEndpoint(sf,async()=>["127.0.0.1"]),e=>e.code==="unsafe_endpoint");
 });
 
 test("all model output is normalized through the existing plugin response contract", () => {
@@ -91,4 +112,25 @@ test("successful usage is costed in integer micro-USD without trusting provider 
   assert.equal(result.usage.costMicroUsd, 7);
   assert.equal(JSON.parse(result.raw).replies.natural, "谢谢分享这个细节。");
   assert.equal(JSON.parse(result.raw).defaultStyle, "natural");
+});
+
+test('SiliconFlow rejects unsafe targets before resolving DNS or forwarding credentials',async()=>{
+ const sf={...base,provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1'};
+ for(const baseUrl of ['https://api.siliconflow.cn@evil.example/v1','https://user:pass@api.siliconflow.cn/v1','https://api.siliconflow.cn:8443/v1','https://api.siliconflow.cn/v1?redirect=evil','https://api.siliconflow.cn/v1#fragment','https://127.0.0.1/v1','https://169.254.169.254/v1']){
+  let resolved=false;await assert.rejects(validateProviderEndpoint({...sf,baseUrl},async()=>{resolved=true;return['8.8.8.8'];}));assert.equal(resolved,false);
+ }
+ await assert.rejects(validateProviderEndpoint(sf,async()=>['8.8.8.8','::1']),e=>e.code==='unsafe_endpoint');
+ let calls=0;await assert.rejects(requestConfiguredModel({config:{...sf,timeoutMs:3000},apiKey:'synthetic-key',system:'JSON',user:'JSON',inputRateMicroUsdPerMillion:300000,outputRateMicroUsdPerMillion:1000000,validateEndpoint:async()=>{},fetchImpl:async(_url,init)=>{calls++;assert.equal(init.redirect,'manual');return new Response('',{status:307,headers:{location:'https://evil.example/v1'}});}}),e=>e.code==='redirect_blocked');assert.equal(calls,1);
+});
+
+for(const host of ['api.siliconflow.cn','api.siliconflow.com']) for(const jsonMode of [true,false]) for(const thinkingMode of [undefined,'enabled','disabled']) test(`SiliconFlow ${host} JSON=${jsonMode} thinking=${thinkingMode} parameter matrix`,async()=>{
+ const config={...base,provider:'siliconflow',baseUrl:`https://${host}/v1`,modelId:'Qwen/Any-Model',options:{jsonMode,...(thinkingMode?{thinkingMode}:{})}};
+ const body=buildChatCompletionRequest(config,'JSON','中文 English');
+ assert.equal(providerRequestUrl(config),`https://${host}/v1/chat/completions`);
+ assert.equal('response_format' in body,jsonMode);
+ assert.equal('enable_thinking' in body,thinkingMode!==undefined);
+ if(thinkingMode)assert.equal(body.enable_thinking,thinkingMode==='enabled');
+ assert.equal('thinking' in body,false);
+ await validateProviderEndpoint(config,async()=>['8.8.8.8']);
+ for(const baseUrl of [`https://${host}.evil.test/v1`,`https://${host}/v1/extra`,`https://user:secret@${host}/v1`,`https://${host}:8443/v1`])await assert.rejects(validateProviderEndpoint({...config,baseUrl},async()=>['8.8.8.8']));
 });

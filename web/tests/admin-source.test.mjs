@@ -60,3 +60,13 @@ test('operations UI offers selected exports and server filters without unverifie
   assert.match(source,/revenue7dFen/);
   assert.doesNotMatch(source,/\/orders\/.*manual-grant/);
 });
+
+const modelPanelSource=await readFile(new URL('../src/components/admin/AIModelManagementPanel.tsx',import.meta.url),'utf8');
+test('SiliconFlow has a dedicated safe admin preset with JSON and thinking controls',()=>{
+  assert.match(modelPanelSource,/value="siliconflow">硅基流动 SiliconFlow/);
+  assert.match(modelPanelSource,/https:\/\/api\.siliconflow\.cn\/v1/);
+  assert.match(modelPanelSource,/\["qwen","siliconflow"\]\.includes\(form\.provider\)/);
+  assert.match(modelPanelSource,/form\.provider==="siliconflow"\?/);
+  assert.match(modelPanelSource,/siliconflow:"SiliconFlow"/);
+  assert.match(modelPanelSource,/modelId:"",thinkingMode:"disabled"/);
+});

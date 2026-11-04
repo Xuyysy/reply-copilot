@@ -124,16 +124,17 @@ test('Chinese and English model tests send distinct real post text and preserve 
   }finally{globalThis.fetch=original;f.sql.close();}
 });
 
-test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini and custom-compatible adapters',async()=>{
+test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini, SiliconFlow and custom-compatible adapters',async()=>{
   const cases=[
     {provider:'deepseek',baseUrl:'https://api.deepseek.com/v1',modelId:'deepseek-chat',jsonMode:true},
     {provider:'qwen',baseUrl:'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',modelId:'qwen-plus',jsonMode:true},
     {provider:'gemini',baseUrl:'https://generativelanguage.googleapis.com/v1beta/openai',modelId:'gemini-2.5-flash',jsonMode:false},
+    {provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1',modelId:'deepseek-ai/DeepSeek-V4-Flash',jsonMode:true},
     {provider:'openai_compatible',baseUrl:'https://api.example.com/v1',modelId:'custom-chat',jsonMode:false,custom:true},
   ];
   for(const item of cases){
     const f=setup(),id=randomUUID(),captured=[];
-    const body=modelBody({id,name:`${item.provider} connection`,provider:item.provider,baseUrl:item.baseUrl,modelId:item.modelId,options:item.custom?{customEndpointRiskConfirmed:true}:{}});
+    const body=modelBody({id,name:`${item.provider} connection`,provider:item.provider,baseUrl:item.baseUrl,modelId:item.modelId,options:item.custom?{customEndpointRiskConfirmed:true}:item.provider==='siliconflow'?{rateCurrency:'USD',chinaRatesConvertedToUsd:true}:{}});
     const original=globalThis.fetch;
     globalThis.fetch=async(url,init={})=>{
       const parsed=new URL(String(url));
@@ -156,6 +157,58 @@ test('connection tests request and parse JSON across DeepSeek, Qwen, Gemini and 
       assert.equal(captured[0].max_tokens<=32,true,item.provider);
     }finally{globalThis.fetch=original;f.sql.close();}
   }
+});
+
+for (const region of ['china','global']) test(`SiliconFlow ${region} config is encrypted and activates only after connection and bilingual tests`,async()=>{
+  const host=region==='global'?'api.siliconflow.com':'api.siliconflow.cn';
+  const f=setup(),id=randomUUID();f.env.AI_MODE='production';
+  const body=modelBody({id,name:'SiliconFlow test',provider:'siliconflow',baseUrl:`https://${host}/v1`,modelId:'deepseek-ai/DeepSeek-V4-Flash',options:{thinkingMode:'disabled',jsonMode:true,rateCurrency:'USD',chinaRatesConvertedToUsd:true}});
+  try{
+    const invalid=await f.call('/v1/admin/ai-models',{body:{...body,operationId:randomUUID(),baseUrl:'https://api.siliconflow.cn.evil.example/v1'}});
+    assert.equal(invalid.status,400);assert.equal(invalid.body.code,'INVALID_MODEL_ENDPOINT');
+    const saved=await mockProvider(()=>f.call('/v1/admin/ai-models',{body}));
+    assert.equal(saved.status,200,JSON.stringify(saved.body));
+    const config=f.sql.prepare('SELECT provider,base_url,model_id,options_json,api_key_ciphertext FROM ai_provider_config_versions WHERE config_id=?').get(id);
+    assert.equal(config.provider,'openai_compatible');assert.equal(config.base_url,`https://${host}/v1`);
+    assert.deepEqual(JSON.parse(config.options_json),{thinkingMode:'disabled',jsonMode:true,providerPreset:'siliconflow',rateCurrency:'USD',chinaRatesConvertedToUsd:true,siliconflowRegion:region});
+    assert.ok(!config.api_key_ciphertext.includes(apiKey));
+    assert.equal((await f.call('/v1/admin/ai-models',{method:'GET'})).body.configs.find(c=>c.id===id).provider,'siliconflow');
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,409);
+    const seen=[];
+    const original=globalThis.fetch;
+    globalThis.fetch=async(url,init={})=>{
+      if(new URL(String(url)).hostname==='cloudflare-dns.com')return Response.json({Status:0,Answer:new URL(String(url)).searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});
+      seen.push({url:String(url),body:JSON.parse(init.body)});
+      const language=init.body.includes('复杂问题')?'zh':'en';
+      return Response.json({choices:[{finish_reason:'stop',message:{content:JSON.parse(init.body).messages[0].content.includes('{"ok":true}')?'{"ok":true}':validOutput(language)}}],usage:{prompt_tokens:20,completion_tokens:30}});
+    };
+    try{
+      for(const kind of ['test-connection','test-generation','test-generation']){
+        const language=kind==='test-generation'?(seen.some(x=>x.body.messages[1].content.includes('复杂问题'))?'en':'zh'):undefined;
+        const result=await f.call('/v1/admin/ai-models/'+id+'/'+kind,{body:operation({testId:randomUUID(),language})});
+        assert.equal(result.status,200,JSON.stringify(result.body));assert.equal(result.body.ok,true,JSON.stringify(result.body));
+      }
+    }finally{globalThis.fetch=original;}
+    assert.equal(seen.length,3);
+    for(const item of seen){
+      assert.equal(item.url,`https://${host}/v1/chat/completions`);
+      assert.equal(item.body.enable_thinking,false);
+      assert.deepEqual(item.body.response_format,{type:'json_object'});
+    }
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,200);
+    const dashboard=await f.call('/v1/admin/dashboard',{method:'GET'});
+    assert.equal(dashboard.body.aiService.provider,region==='global'?'SiliconFlow Global':'SiliconFlow China');
+    const snapshot=(await f.call('/v1/admin/ai-models',{method:'GET'})).body;
+    assert.equal(snapshot.active.provider,'siliconflow');
+    assert.equal((await f.call('/v1/admin/ai-models/rollback',{body:operation()})).status,200);
+    const edited=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...body,operationId:randomUUID(),apiKey:'',options:{jsonMode:false,rateCurrency:'USD',chinaRatesConvertedToUsd:true}}}));
+    assert.equal(edited.status,200,JSON.stringify(edited.body));assert.equal(edited.body.version,2);
+    const listed=(await f.call('/v1/admin/ai-models',{method:'GET'})).body;
+    assert.equal(listed.active,null);assert.equal(listed.previous.provider,'siliconflow');
+    const item=listed.configs.find(c=>c.id===id);assert.equal(item.provider,'siliconflow');assert.equal(item.options.jsonMode,false);assert.equal('thinkingMode' in item.options,false);
+    assert.equal(item.keyConfigured,true);assert.ok(!JSON.stringify(listed).includes(apiKey));
+    assert.equal((await f.call('/v1/admin/ai-models/'+id+'/activate',{body:operation()})).status,409);
+  }finally{f.sql.close();}
 });
 
 test('connection tests reject plain OK text, false status and extra JSON fields',async()=>{
@@ -249,4 +302,21 @@ test('Production concurrent tests share the remaining global reservation and rep
     assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts').get().free_balance,200);
     assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,0);
   }finally{f.sql.close();}
+});
+
+test('SiliconFlow China and Global keep separate records/keys; region changes never reuse ciphertext',async()=>{
+ const f=setup();f.env.AI_MODE='production';const ids=[randomUUID(),randomUUID()];
+ const cn=modelBody({id:ids[0],provider:'siliconflow',baseUrl:'https://api.siliconflow.cn/v1',apiKey:'synthetic-china-only',options:{jsonMode:true,thinkingMode:'disabled',rateCurrency:'USD',chinaRatesConvertedToUsd:true}});
+ const global=modelBody({id:ids[1],provider:'siliconflow',baseUrl:'https://api.siliconflow.com/v1',apiKey:'synthetic-global-only',options:{jsonMode:false,rateCurrency:'USD'}});
+ try{
+  for(const body of [cn,global]){const r=await mockProvider(()=>f.call('/v1/admin/ai-models',{body}));assert.equal(r.status,200,JSON.stringify(r.body));}
+  const list=(await f.call('/v1/admin/ai-models',{method:'GET'})).body;assert.equal(list.configs.length,2);assert.equal(list.configs.find(c=>c.id===ids[0]).options.siliconflowRegion,'china');assert.equal(list.configs.find(c=>c.id===ids[1]).options.siliconflowRegion,'global');
+  const changed=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...cn,operationId:randomUUID(),baseUrl:global.baseUrl,apiKey:'',options:global.options}}));assert.equal(changed.status,409);assert.equal(changed.body.code,'MODEL_REGION_CHANGE_REQUIRES_NEW_CONFIG');
+  const seen=[],original=globalThis.fetch;
+  globalThis.fetch=async(url,init={})=>{const u=new URL(String(url));if(u.hostname==='cloudflare-dns.com')return Response.json({Status:0,Answer:u.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});seen.push({url:String(url),authorization:init.headers.authorization});return new Response('Unauthorized',{status:401});};
+  try{for(const id of ids){const r=await f.call('/v1/admin/ai-models/'+id+'/test-connection',{body:operation({testId:randomUUID()})});assert.equal(r.status,200);assert.equal(r.body.ok,false);assert.equal(r.body.errorCategory,'authentication_error');}}finally{globalThis.fetch=original;}
+  assert.deepEqual(seen,[{url:'https://api.siliconflow.cn/v1/chat/completions',authorization:'Bearer synthetic-china-only'},{url:'https://api.siliconflow.com/v1/chat/completions',authorization:'Bearer synthetic-global-only'}]);
+  const badCurrency=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...cn,id:randomUUID(),operationId:randomUUID(),options:{rateCurrency:'CNY'}}}));assert.equal(badCurrency.status,400);assert.equal(badCurrency.body.code,'MODEL_RATE_CURRENCY_INVALID');
+  const unconverted=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...cn,id:randomUUID(),operationId:randomUUID(),options:{rateCurrency:'USD'}}}));assert.equal(unconverted.status,400);assert.equal(unconverted.body.code,'MODEL_RATE_CONVERSION_REQUIRED');
+ }finally{f.sql.close();}
 });
