@@ -244,3 +244,80 @@ test('SiliconFlow China and Global keep separate records/keys; region changes ne
   const unconverted=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:{...cn,id:randomUUID(),operationId:randomUUID(),options:{rateCurrency:'USD'}}}));assert.equal(unconverted.status,400);assert.equal(unconverted.body.code,'MODEL_RATE_CONVERSION_REQUIRED');
  }finally{f.sql.close();}
 });
+
+
+// Ported from Production and run only with isolated synthetic fixtures.
+test('admin can run more than ten daily model tests without a separate $0.05/day ceiling, while global AI budget still applies', async()=>{
+  const f=setup();
+  f.env.ENVIRONMENT='production';f.env.AI_MODE='production';
+  try {
+    const created=await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));
+    assert.equal(created.status,200,JSON.stringify(created.body));
+    const day=new Date().toISOString().slice(0,10);
+    f.sql.prepare('INSERT INTO ai_provider_test_budget_days(budget_day,calls,reserved_micro_usd,settled_micro_usd) VALUES(?,10,0,50000)').run(day);
+    const total=await mockProvider(async upstreamCount=>{
+      for(let i=0;i<12;i++){
+        const result=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+        assert.equal(result.status,200,`iteration ${i+1}: ${JSON.stringify(result.body)}`);
+        assert.equal(result.body.ok,true);
+      }
+      return upstreamCount();
+    });
+    assert.equal(total,12);
+    const tracked=f.sql.prepare('SELECT calls,reserved_micro_usd,settled_micro_usd FROM ai_provider_test_budget_days WHERE budget_day=?').get(day);
+    // The old D1 counter has a historical CHECK(calls<=10) constraint;
+    // authoritative test totals come from the per-request test records.
+    assert.equal(tracked.calls,10);
+    assert.equal(f.sql.prepare("SELECT COUNT(*) AS total FROM ai_provider_tests").get().total,12);
+    assert.equal(tracked.reserved_micro_usd,0);
+    assert.ok(tracked.settled_micro_usd>50000);
+    // All test spending remains reserved against the *shared* daily budget.
+    f.sql.prepare("UPDATE system_settings SET value='1' WHERE key='daily_cost_limit_micro_usd'").run();
+    const denied=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+    assert.equal(denied.status,429);
+    assert.equal(denied.body.code,'MODEL_TEST_BUDGET_EXHAUSTED');
+  } finally { f.sql.close(); }
+});
+
+test('Production model tests retain the per-test ceiling and 30-per-minute protection before spending',async()=>{
+  const f=setup();f.env.ENVIRONMENT='production';f.env.AI_MODE='production';
+  try{
+    await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody({inputRateUsdPerMillion:10000,outputRateUsdPerMillion:10000})}));
+    await mockProvider(async count=>{
+      const tooExpensive=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+      assert.equal(tooExpensive.body.code,'TEST_COST_LIMIT');assert.equal(tooExpensive.status,400);
+      const period=Math.floor(Date.now()/60000)*60000;
+      f.sql.prepare("INSERT INTO rate_limits(bucket,period_start,used) VALUES('admin-ai-test-minute:test-user',?,30) ON CONFLICT(bucket,period_start) DO UPDATE SET used=30").run(period);
+      const limited=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:randomUUID()})});
+      assert.equal(limited.status,429);assert.equal(limited.body.code,'MODEL_TEST_RATE_LIMIT');assert.equal(count(),0);
+    });
+    assert.equal(f.sql.prepare('SELECT count(*) n FROM ai_provider_test_budget_claims').get().n,0);
+    assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts').get().free_balance,200);
+  }finally{f.sql.close();}
+});
+
+test('Production concurrent tests share the remaining global reservation and replay does not spend twice',async()=>{
+  const f=setup();f.env.ENVIRONMENT='production';f.env.AI_MODE='production';
+  try{
+    await mockProvider(()=>f.call('/v1/admin/ai-models',{body:modelBody()}));
+    const initialId=randomUUID();
+    await mockProvider(()=>f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:initialId})}));
+    const reserve=f.sql.prepare('SELECT reserved_micro_usd n FROM ai_provider_test_budget_claims WHERE test_id=?').get(initialId).n;
+    const settled=f.sql.prepare('SELECT settled_micro_usd n FROM ai_budget_days').get().n;
+    f.sql.prepare("UPDATE system_settings SET value=? WHERE key='daily_cost_limit_micro_usd'").run(String(settled+reserve));
+    await mockProvider(async count=>{
+      const ids=[randomUUID(),randomUUID()];
+      const results=await Promise.all(ids.map(testId=>f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId})})));
+      assert.deepEqual(results.map(r=>r.status).sort(),[200,429]);assert.equal(count(),1);
+      const winner=results.findIndex(r=>r.status===200);
+      const before={...f.sql.prepare('SELECT * FROM ai_budget_days').get()};
+      const replay=await f.call(`/v1/admin/ai-models/${modelId}/test-connection`,{body:operation({testId:ids[winner]})});
+      assert.equal(replay.body.replayed,true);assert.equal(replay.body.ok,true);assert.equal(count(),1);
+      assert.deepEqual({...f.sql.prepare('SELECT * FROM ai_budget_days').get()},before);
+      assert.equal(before.reserved_micro_usd,0);
+    });
+    assert.equal(f.sql.prepare('SELECT count(*) n FROM ai_provider_tests').get().n,2);
+    assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts').get().free_balance,200);
+    assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,0);
+  }finally{f.sql.close();}
+});
