@@ -78,3 +78,50 @@ options); existing immutable config versions and audit records remain intact.
   unsafe hosts/DNS/redirects, existing providers and released-client ACK/replay.
   Screenshots render the real React panel in an isolated mock harness; they do
   not represent authenticated live saves or real paid upstream calls.
+
+## Authorized Staging release result
+
+- Feature implementation commit: `038ec7e2cc4dac1776fd5f2c47c01b66ce1233de`.
+- Selective live-baseline integration: branch `codex/staging-siliconflow-20261104`,
+  source `903a1f1f2a4913650d407a4298ab31122ee72b3b`. PR #13 remains Draft.
+- Feature full regression: **763 passed, 0 failed**. Exact Staging integration:
+  **752 passed, 0 failed**. API and Web TypeScript checks, Staging Pages build and
+  Worker versions-upload dry-run passed. The counts differ because Staging
+  intentionally retains its own test limits and existing source baseline.
+- Worker version `fc0b802e-03ee-4887-9722-0eefbd13b784`; deployment
+  `7232e98e-970c-4ce0-b30c-77c8d13ee7ba`, 100% traffic.
+- Pages deployment `7df05405-7eae-4804-8602-1cd5eade5f57`, canonical Staging site.
+  Pages' own `production` environment slot means this Staging project's main
+  branch deployment, not the separate Production project.
+- Before/after comparison: 42 bindings unchanged (16 plaintext, 25 secret names,
+  one fixed Staging D1 binding); only release annotations changed. Cron,
+  compatibility/runtime configuration, subdomain settings, Pages domain and
+  both build-environment configurations unchanged. AI_MODE=production,
+  PAYMENTS_ENABLED=1, ADMIN_PORTAL_ENABLED=1 remain intact. No SQL, migration,
+  model configuration writes, active-model switches or real upstream calls.
+- Public health HTTP 200; unauthenticated model admin HTTP 401. Homepage, admin
+  and login HTTP 200. Login HTML retains real Staging Turnstile site key
+  `0x4AAAAAAFYdcIBnXxLTGrT4`; registration is a tab on `/login/`, not `/register/`.
+  Live admin asset contains both region presets. Initial Python default-UA
+  probes received Cloudflare edge 1010; ordinary browser-UA checks succeeded.
+- No Production resource, shop package, installed extension or user data changed.
+
+### Operator review (no real model call in this phase)
+
+Open https://staging.x-reply-helper.top/admin/ and AI Models. Choose SiliconFlow;
+check China/Global URLs, rates warning and thinking/JSON controls. Enter only
+non-sensitive draft form values when checking region clearing; changing region
+must clear key and rates and start a new record. Do not save real credentials,
+run paid tests or activate a model until separately authorized. Separate config
+records and their encrypted keys, test gates, cost attribution and rollback were
+verified only with isolated fixtures and mock providers in this phase.
+
+### Rollback
+
+Staging Worker Versions: deploy prior version
+`9f0130f2-ddb7-4255-932b-3a42060f0734` at 100%. Staging Pages Deployments: rollback
+to `b28cd497-d010-4a79-8072-c45b88358a77`. Keep current D1 untouched; no schema
+change occurred. Before using old code after any future SiliconFlow activation,
+first switch back to a provider that the old code understands. Do not restore an
+old database over new business records. Existing Qwen remains unchanged in this
+phase; no authenticated read of the active D1 pointer was authorized/performed.
