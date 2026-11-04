@@ -122,3 +122,15 @@ test('SiliconFlow rejects unsafe targets before resolving DNS or forwarding cred
  await assert.rejects(validateProviderEndpoint(sf,async()=>['8.8.8.8','::1']),e=>e.code==='unsafe_endpoint');
  let calls=0;await assert.rejects(requestConfiguredModel({config:{...sf,timeoutMs:3000},apiKey:'synthetic-key',system:'JSON',user:'JSON',inputRateMicroUsdPerMillion:300000,outputRateMicroUsdPerMillion:1000000,validateEndpoint:async()=>{},fetchImpl:async(_url,init)=>{calls++;assert.equal(init.redirect,'manual');return new Response('',{status:307,headers:{location:'https://evil.example/v1'}});}}),e=>e.code==='redirect_blocked');assert.equal(calls,1);
 });
+
+for(const host of ['api.siliconflow.cn','api.siliconflow.com']) for(const jsonMode of [true,false]) for(const thinkingMode of [undefined,'enabled','disabled']) test(`SiliconFlow ${host} JSON=${jsonMode} thinking=${thinkingMode} parameter matrix`,async()=>{
+ const config={...base,provider:'siliconflow',baseUrl:`https://${host}/v1`,modelId:'Qwen/Any-Model',options:{jsonMode,...(thinkingMode?{thinkingMode}:{})}};
+ const body=buildChatCompletionRequest(config,'JSON','中文 English');
+ assert.equal(providerRequestUrl(config),`https://${host}/v1/chat/completions`);
+ assert.equal('response_format' in body,jsonMode);
+ assert.equal('enable_thinking' in body,thinkingMode!==undefined);
+ if(thinkingMode)assert.equal(body.enable_thinking,thinkingMode==='enabled');
+ assert.equal('thinking' in body,false);
+ await validateProviderEndpoint(config,async()=>['8.8.8.8']);
+ for(const baseUrl of [`https://${host}.evil.test/v1`,`https://${host}/v1/extra`,`https://user:secret@${host}/v1`,`https://${host}:8443/v1`])await assert.rejects(validateProviderEndpoint({...config,baseUrl},async()=>['8.8.8.8']));
+});

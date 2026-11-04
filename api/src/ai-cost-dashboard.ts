@@ -3,7 +3,7 @@ import type { Env } from "./types";
 import { DEEPSEEK_MODEL } from "./ai";
 
 const providerNames: Record<string, string> = {
-  deepseek: "DeepSeek", qwen: "Qwen", gemini: "Gemini", siliconflow: "SiliconFlow",
+  deepseek: "DeepSeek", qwen: "Qwen", gemini: "Gemini", siliconflow: "SiliconFlow China", siliconflow_china: "SiliconFlow China", siliconflow_global: "SiliconFlow Global",
   openai_compatible: "OpenAI-compatible", mock: "Mock AI", unknown: "Unknown",
 };
 type ActiveModel = {

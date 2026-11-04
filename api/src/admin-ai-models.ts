@@ -89,8 +89,8 @@ export async function listAiModels(request: Request, env: Env): Promise<Response
     runtime?.active_config_id?readConfig(env,runtime.active_config_id,runtime.active_version):null,
     runtime?.previous_config_id?readConfig(env,runtime.previous_config_id,runtime.previous_version):null,
   ]);
-  const active=activeConfig?{id:activeConfig.id,version:runtime.active_version,name:activeConfig.display_name,modelId:activeConfig.model_id,provider:effectiveProvider(activeConfig.provider,JSON.parse(activeConfig.options_json))}:null;
-  const previous=previousConfig?{id:previousConfig.id,version:runtime.previous_version,name:previousConfig.display_name,modelId:previousConfig.model_id,provider:effectiveProvider(previousConfig.provider,JSON.parse(previousConfig.options_json))}:runtime?.previous_is_legacy?{id:null,version:null,name:"DeepSeek legacy",modelId:"deepseek-flash",provider:"deepseek"}:null;
+  const active=activeConfig?{id:activeConfig.id,version:runtime.active_version,name:activeConfig.display_name,modelId:activeConfig.model_id,baseUrl:activeConfig.base_url,provider:effectiveProvider(activeConfig.provider,JSON.parse(activeConfig.options_json))}:null;
+  const previous=previousConfig?{id:previousConfig.id,version:runtime.previous_version,name:previousConfig.display_name,modelId:previousConfig.model_id,baseUrl:previousConfig.base_url,provider:effectiveProvider(previousConfig.provider,JSON.parse(previousConfig.options_json))}:runtime?.previous_is_legacy?{id:null,version:null,name:"DeepSeek legacy",modelId:"deepseek-flash",provider:"deepseek"}:null;
   return response({ active, previous, previousAvailable:Boolean(previous), legacyFallback: !runtime?.active_config_id, configs: items }, 200, env, request);
 }
 
@@ -111,7 +111,7 @@ export async function saveAiModel(request: Request, env: Env): Promise<Response>
   const options: Record<string, unknown> = (provider === "qwen" || provider === "siliconflow") ? {
     ...(suppliedOptions.thinkingMode === "enabled" || suppliedOptions.thinkingMode === "disabled" ? { thinkingMode: suppliedOptions.thinkingMode } : {}),
     jsonMode: suppliedOptions.jsonMode !== false,
-    ...(provider === "siliconflow" ? { providerPreset: "siliconflow" } : {}),
+    ...(provider === "siliconflow" ? { providerPreset: "siliconflow", rateCurrency: "USD", ...(suppliedOptions.chinaRatesConvertedToUsd === true ? { chinaRatesConvertedToUsd: true } : {}) } : {}),
   } : provider === "openai_compatible" ? { customEndpointRiskConfirmed: suppliedOptions.customEndpointRiskConfirmed === true } : {};
   const config = { provider, protocol, baseUrl, modelId, maxOutputTokens: Number(body.maxOutputTokens), timeoutMs: Number(body.timeoutMs), options, endpointAddresses: [] as string[] };
   if (!Number.isInteger(config.maxOutputTokens) || config.maxOutputTokens < 64 || config.maxOutputTokens > 8192 || !Number.isInteger(config.timeoutMs) || config.timeoutMs < 3000 || config.timeoutMs > 60000) throw new ApiFailure(400, "INVALID_MODEL_CONFIG", "Token 上限或超时时间无效。");
@@ -121,8 +121,13 @@ export async function saveAiModel(request: Request, env: Env): Promise<Response>
   catch (error) { throw new ApiFailure(400,"INVALID_MODEL_ENDPOINT",safeError(error)); }
   if (provider === "openai_compatible" && config.options.customEndpointRiskConfirmed !== true) throw new ApiFailure(400,"CUSTOM_ENDPOINT_CONFIRMATION_REQUIRED","自定义接口需确认其服务方可信，且只会收到模型请求内容与 API Key。");
   if (["qwen", "siliconflow"].includes(String(provider)) && config.options.jsonMode !== undefined && typeof config.options.jsonMode !== "boolean") throw new ApiFailure(400,"INVALID_MODEL_CONFIG","JSON Mode 选项无效。");
+  if (provider === "siliconflow") config.options.siliconflowRegion = new URL(baseUrl).hostname === "api.siliconflow.com" ? "global" : "china";
+  if (provider === "siliconflow" && suppliedOptions.rateCurrency !== "USD") throw new ApiFailure(400,"MODEL_RATE_CURRENCY_INVALID","内部预算只接受 USD / 百万 Token；请勿直接填写人民币报价。");
+  if (provider === "siliconflow" && config.options.siliconflowRegion === "china" && suppliedOptions.chinaRatesConvertedToUsd !== true) throw new ApiFailure(400,"MODEL_RATE_CONVERSION_REQUIRED","请先将国内站人民币报价换算为 USD，并确认已换算。");
   const inputRate = decimalRate(body.inputRateUsdPerMillion), outputRate = decimalRate(body.outputRateUsdPerMillion);
   const prior = await readConfig(env, id);
+  if (prior && provider === "siliconflow" && effectiveProvider(prior.provider,JSON.parse(prior.options_json)) === "siliconflow" && new URL(prior.base_url).hostname !== new URL(baseUrl).hostname) throw new ApiFailure(409,"MODEL_REGION_CHANGE_REQUIRES_NEW_CONFIG","更换硅基流动区域请新建独立配置，并填写该区域的 API Key。");
+  if (prior && provider === "siliconflow" && new URL(prior.base_url).origin !== new URL(baseUrl).origin && !body.apiKey) throw new ApiFailure(400,"API_KEY_REQUIRED","新接口必须填写对应的 API Key。");
   if (!prior && typeof body.apiKey !== "string") throw new ApiFailure(400, "API_KEY_REQUIRED", "新配置需要填写 API Key。");
   if (prior?.archived) throw new ApiFailure(409, "MODEL_ARCHIVED", "此配置已停用，请先恢复后再编辑。");
   const version = prior ? prior.latest_version + 1 : 1;

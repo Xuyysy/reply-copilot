@@ -9,7 +9,7 @@ export function effectiveProvider(provider, options) {
   return provider === "openai_compatible" && options?.providerPreset === "siliconflow" ? "siliconflow" : provider;
 }
 // Alias v is used by the existing dashboard joins; no new reads are introduced.
-export const EFFECTIVE_PROVIDER_SQL = "CASE WHEN v.provider='openai_compatible' AND json_extract(v.options_json,'$.providerPreset')='siliconflow' THEN 'siliconflow' ELSE v.provider END";
+export const EFFECTIVE_PROVIDER_SQL = "CASE WHEN v.provider='openai_compatible' AND json_extract(v.options_json,'$.providerPreset')='siliconflow' THEN CASE WHEN json_extract(v.options_json,'$.siliconflowRegion')='global' THEN 'siliconflow_global' ELSE 'siliconflow_china' END ELSE v.provider END";
 
 const BUILTIN_HOSTS = {
   deepseek: new Set(["api.deepseek.com"]),
@@ -137,9 +137,9 @@ function parseBaseUrl(config) {
   if (config.provider === "gemini" && (!BUILTIN_HOSTS.gemini.has(host) || !["/v1beta/openai", "/v1beta/openai/v1"].includes(path))) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "qwen" && !(host === "dashscope.aliyuncs.com" || host === "dashscope-intl.aliyuncs.com" || host.endsWith(".maas.aliyuncs.com"))) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "qwen" && !path.endsWith("/compatible-mode/v1")) throw new ModelProviderError("provider_endpoint_mismatch");
-  // The dedicated SiliconFlow provider is pinned to the official China API;
+  // The dedicated SiliconFlow provider accepts only its two official API hosts;
   // custom endpoints must instead use the separately gated generic adapter.
-  if (config.provider === "siliconflow" && (host !== "api.siliconflow.cn" || path !== "/v1")) throw new ModelProviderError("provider_endpoint_mismatch");
+  if (config.provider === "siliconflow" && (!["api.siliconflow.cn", "api.siliconflow.com"].includes(host) || path !== "/v1")) throw new ModelProviderError("provider_endpoint_mismatch");
   if (config.provider === "openai_compatible" && !path) throw new ModelProviderError("invalid_endpoint");
   return { url, host, path };
 }

@@ -76,3 +76,19 @@ test('unresolved managed history is not relabeled as legacy or the active provid
  assert.equal(data.costByModel[0].configurationSource,'unresolved');assert.equal(data.costByModel[0].provider,'Unknown');assert.equal(data.costByModel[0].model,'old-model');
  assert.equal(data.cost.costMicroUsd,6);
 }));
+
+test('SiliconFlow immutable regional history remains separate even with identical model IDs and after rollback',()=>withFixture(async f=>{
+ for(const [version,region]of [[1,'china'],[2,'global'],[3,null]]){
+  const options={providerPreset:'siliconflow',...(region?{siliconflowRegion:region}:{}),rateCurrency:'USD'};
+  f.sql.prepare("UPDATE ai_provider_config_versions SET provider='openai_compatible',model_id='Qwen/Same-Model',options_json=? WHERE config_id=? AND version=?").run(JSON.stringify(options),configId,version);
+ }
+ usage(f,'china','Qwen/Same-Model',today,10,20,100,1);
+ usage(f,'global','Qwen/Same-Model',today,30,40,200,2);
+ usage(f,'old-china','Qwen/Same-Model',earlier,5,6,50,3);
+ for(const [version,label]of [[2,'SiliconFlow Global'],[1,'SiliconFlow China']]){
+  f.sql.prepare('UPDATE ai_provider_runtime SET active_config_id=?,active_version=? WHERE id=1').run(configId,version);
+  const data=await dashboard(f);assert.equal(data.aiService.provider,label);assert.equal(data.costByModel.length,2);
+  const cn=data.costByModel.find(x=>x.provider==='SiliconFlow China'),global=data.costByModel.find(x=>x.provider==='SiliconFlow Global');
+  assert.equal(cn.month.requests,2);assert.equal(cn.month.costMicroUsd,150);assert.equal(global.month.requests,1);assert.equal(global.month.costMicroUsd,200);assert.equal(data.cost.costMicroUsd,350);
+ }
+}));
