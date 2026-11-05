@@ -11,7 +11,7 @@ const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_
     <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>
     <button id="auth-reload" class="button secondary" type="button" style="margin-left:12px"><span data-zh="刷新页面">Reload page</span></button>
   </div>
-  {sitekey && <script is:inline src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
+  {sitekey && <script is:inline data-xrh-turnstile src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>}
   <script>
     const island = document.querySelector<HTMLElement>('astro-island[component-url*="AuthPanel"]');
     const message = document.getElementById("auth-load-error");

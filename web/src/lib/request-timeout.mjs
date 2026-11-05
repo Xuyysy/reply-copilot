@@ -26,7 +26,10 @@ export function withRequestTimeout(operation, timeoutMs, callerSignal) {
   });
 
   return Promise.race([
-    Promise.resolve().then(() => operation(controller.signal)),
+    Promise.resolve().then(() => {
+      if(controller.signal.aborted)throw callerSignal?.reason || new DOMException("The request was aborted.", "AbortError");
+      return operation(controller.signal);
+    }),
     aborted,
     timedOut,
   ]).finally(() => {
