@@ -1,42 +1,49 @@
+import {withLocalRecordWrite} from "./local-record-write.js";
 // Delivery coordination. No token, raw request or result is logged. Pending
-// inputs live in trusted extension session storage, so worker suspension does
+// inputs live in trusted extension local storage, so worker suspension does
 // not erase the exact payload required by the server's idempotency contract.
 const PENDING='pendingAiDelivery';
 const COMPLETED='completedAiDeliveries';
-const UNCERTAIN=new Set(['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN']);
-const RELEASED=new Set(['GENERATION_FAILED','IDEMPOTENCY_RESULT_EXPIRED']);
+const UNCERTAIN=new Set(['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN','GENERATION_RECOVERY_REQUIRED']);
+const RELEASED=new Set(['GENERATION_FAILED','IDEMPOTENCY_RESULT_EXPIRED','GENERATION_ABANDONED','DELIVERY_NOT_AVAILABLE']);
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const sameSource=(a,b)=>a.requestId===b.requestId&&a.sourceText===b.sourceText&&a.sourceUrl===b.sourceUrl;
 function envelope(input){
   return JSON.parse(JSON.stringify(Object.fromEntries(['requestId','sourceText','sourceUrl','voiceProfile','recentHistory','styleStats','replyStyle'].map(key=>[key,input[key]]))));
 }
 export class DeliveryCoordinator {
-  constructor({storage,createClient,getAccountId,clock=Date.now}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;
+  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
     const frozen=envelope(input),signal=input.signal;
-    const run=this.tail.catch(()=>{}).then(()=>this.run(frozen,signal,input.performanceTrace));
-    this.tail=run.catch(()=>{});return run;
+    const deadline={expired:false};
+    const run=this.tail.catch(()=>{}).then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
+    let timer;
+    const bounded=Promise.race([run,new Promise((_,reject)=>{timer=setTimeout(()=>{deadline.expired=true;reject(fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。可以恢复上一条，或放弃并重新生成。'));},this.waitTimeoutMs);})]).finally(()=>clearTimeout(timer));
+    this.tail=bounded.catch(()=>{});return bounded;
   }
-  async run(input,signal,performanceTrace){
+  async run(input,signal,performanceTrace,canStart=()=>true){
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
-    const ownerId=await (performanceTrace ? performanceTrace.measure("owner_check",()=>this.getAccountId()) : this.getAccountId());
+    const [ownerId,stored]=await Promise.all([
+      performanceTrace ? performanceTrace.measure("owner_check",()=>this.getAccountId()) : this.getAccountId(),
+      performanceTrace ? performanceTrace.measure("delivery_storage",()=>this.storage.get([PENDING,COMPLETED])) : this.storage.get([PENDING,COMPLETED]),
+    ]);
     if(typeof ownerId!=='string'||!ownerId)throw fail('AUTH_REQUIRED','请重新连接账户。');
-    const stored=await (performanceTrace ? performanceTrace.measure("delivery_storage",()=>this.storage.get([PENDING,COMPLETED])) : this.storage.get([PENDING,COMPLETED]));
-    let pending=stored[PENDING];
-    let completed=(stored[COMPLETED]||[]).filter(row=>row.ownerId===ownerId&&this.clock()-row.completedAt<600000);
+    let pending=stored[PENDING]||this.pendingMemory;
+    let completed=[...(stored[COMPLETED]||[]),...this.memory].filter(row=>row.ownerId===ownerId&&this.clock()-row.completedAt<600000);
     const same=completed.find(row=>row.input.requestId===input.requestId);
     if(same){
       if(!sameSource(same.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
+      if(this.completion&&!same.localRecordsCommitted)await this.remember(same,completed);
       this.lastQuota=same.quota;return same.raw;
     }
-    if(pending?.ownerId!==ownerId)pending=null;
+    if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
     if(pending){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
-        const recovered=await this.deliver(pending,completed,performanceTrace);
+        const recovered=await this.deliver(pending,completed,performanceTrace,canStart);
         completed=recovered.completed;
         if(pending.input.requestId===input.requestId)return recovered.raw;
       }catch(error){
@@ -46,23 +53,102 @@ export class DeliveryCoordinator {
       }
     }
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
+    // Fast path: let the atomic generate reservation detect a server orphan.
+    // No active/history scan is needed for a fresh request with no local pending.
+    if(!canStart())throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');
     const record={ownerId,input,createdAt:this.clock()};
-    await this.storage.set({[PENDING]:record});
-    return (await this.deliver(record,completed,performanceTrace)).raw;
+    this.pendingMemory=record;
+    // If local storage is unavailable, the server active-request lookup remains
+    // authoritative after restart. Do not discard an otherwise usable draft.
+    await this.writeLocked(()=>this.storage.set({[PENDING]:record})).catch(()=>{});
+    return (await this.deliver(record,completed,performanceTrace,canStart,false)).raw;
   }
-  async deliver(record,completed,performanceTrace){
+  async deliver(record,completed,performanceTrace,canStart=()=>true,recover=true){
     const client=this.createClient();
     try{
       // Once accepted, UI cancellation detaches the composer only. Let the
       // bounded hosted request finish its original delivery handshake.
-      const raw=await client.generateReplies({...record.input,...(performanceTrace ? {performanceTrace} : {})});
+      let raw;
+      if(recover&&client.recoverGeneration){
+        const state=await client.recoverGeneration(record.input.requestId);
+        if(['ready','delivered'].includes(state.state))raw=await client.receiveDelivery(state);
+        else if(['released','expired'].includes(state.state))throw fail('GENERATION_FAILED','上一次生成已结束，可以重新生成。');
+        else if(state.state==='running')throw fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。可以恢复上一条，或放弃并重新生成。');
+      }
+      if(raw===undefined&&!canStart())throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');
+      if(raw===undefined)raw=await client.generateReplies({...record.input,...(performanceTrace ? {performanceTrace} : {})});
+      if(this.fenced.has(record.ownerId+':'+record.input.requestId))throw fail('GENERATION_ABANDONED','本次生成已结束。');
       this.lastQuota=client.lastQuota||null;
       const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
-      await this.storage.set({[PENDING]:null,[COMPLETED]:retained});
+      await (performanceTrace?performanceTrace.measure("delivery_persist",()=>this.remember(record,retained)):this.remember(record,retained));
       return {raw,completed:retained};
     }catch(error){
-      if(error?.code&&!UNCERTAIN.has(error.code))await this.storage.set({[PENDING]:null});
+      if(RELEASED.has(error?.code))await this.clearResolved(record);
+      // Unknown transport/parser/storage errors retain the recovery envelope.
+      else if(error?.code&&!UNCERTAIN.has(error.code)&&!['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING'].includes(error.code))await this.clearResolved(record);
       throw error;
     }
   }
+  writeLocked(action){const run=this.storageTail.catch(()=>{}).then(action);this.storageTail=run.catch(()=>{});return run;}
+  async clearResolved(record){
+    this.fenced.add(record.ownerId+':'+record.input.requestId);
+    if(this.pendingMemory?.input.requestId===record.input.requestId)this.pendingMemory=null;
+    await this.writeLocked(async()=>{const data=await this.storage.get(PENDING);if(data[PENDING]?.ownerId===record.ownerId&&data[PENDING]?.input.requestId===record.input.requestId)await this.storage.set({[PENDING]:null});}).catch(()=>{});
+  }
+  async remember(record,retained){
+    this.memory=retained;
+    if(this.pendingMemory?.input.requestId===record.input.requestId)this.pendingMemory=null;
+    try{
+      await this.writeLocked(()=>withLocalRecordWrite(this.storage,async()=>{
+        const data=await this.storage.get([PENDING,COMPLETED,...(this.completion?.keys||[])]);
+        const rows=[...(data[COMPLETED]||[]),...retained];
+        const unique=[...new Map(rows.map(r=>[r.ownerId+':'+r.input.requestId,r])).values()].slice(-4);
+        const receipt=unique.find(r=>r.ownerId===record.ownerId&&r.input.requestId===record.input.requestId);
+        const extra=this.completion?this.completion.patch(data,receipt):{};
+        if(this.completion)receipt.localRecordsCommitted=true;
+        const match=data[PENDING]?.ownerId===record.ownerId&&data[PENDING]?.input.requestId===record.input.requestId;
+        await this.storage.set({...(match?{[PENDING]:null}:{}),[COMPLETED]:unique,...extra});
+        this.memory=unique;
+      }));
+    }catch{
+      // Storage failure keeps the previous awaited best-effort path, never a
+      // fire-and-forget task. A later replay can retry the merged durable commit.
+      for(const row of this.memory)if(row.input.requestId===record.input.requestId)row.localRecordsCommitted=false;
+      await this.completion?.fallback?.(record,retained.find(r=>r.input.requestId===record.input.requestId)?.raw).catch(()=>{});
+    }
+  }
+  recoverPending({abandon=false}={}){
+    if(this.recovery)return this.recovery;
+    this.recovery=this.doRecover(abandon).finally(()=>{this.recovery=null;});return this.recovery;
+  }
+  async doRecover(abandon){
+    const ownerId=await this.getAccountId();if(!ownerId)throw fail('AUTH_REQUIRED','请重新连接账户。');
+    const data=await this.storage.get([PENDING,COMPLETED]);const saved=data[PENDING]||this.pendingMemory;const record=saved?.ownerId===ownerId?saved:null;
+    const client=this.createClient();let state=await client.recoverGeneration(record?.input.requestId);
+    // A fresh POST can conflict with another server request after local state
+    // was lost. Resolve the actual blocker only on this explicit recovery path.
+    if(record&&['missing','released'].includes(state.state)){
+      const active=await client.recoverGeneration();
+      if(active.requestId&&active.requestId!==record.input.requestId)state=active;
+    }
+    if(abandon&&record&&state.requestId!==record.input.requestId){
+      // Fence the possibly delayed new envelope as well as the foreign blocker.
+      // Both operations are server-confirmed/idempotent and remain rate-limited.
+      const primary=await client.recoverGeneration(record.input.requestId,true);
+      if(!['released','delivered'].includes(primary.state))state=primary;
+    }
+    if(abandon&&((state.state==='missing'&&record)||['running','expired'].includes(state.state)))state=await client.recoverGeneration(state.requestId||record.input.requestId,true);
+    if(['ready','delivered'].includes(state.state)&&state.raw){
+      const raw=await client.receiveDelivery(state);this.lastQuota=client.lastQuota||null;
+      if(record&&record.input.requestId===state.requestId)await this.remember(record,[...(data[COMPLETED]||[]),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4));
+      if(record&&record.input.requestId!==state.requestId&&abandon)await this.clearResolved(record);
+      this.tail=Promise.resolve();return {state:'ready',requestId:state.requestId,raw};
+    }
+    if(['released','delivered'].includes(state.state)||(state.state==='missing'&&!record)){
+      if(record)await this.clearResolved(record);
+      this.tail=Promise.resolve();return {...state,state:'released'};
+    }
+    throw fail('GENERATION_RECOVERY_REQUIRED','上一条仍在生成。可以稍后恢复，或选择放弃并重新生成。');
+  }
+
 }

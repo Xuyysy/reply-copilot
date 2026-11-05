@@ -1,0 +1,23 @@
+{
+  "parameters": {
+    "trialsPerVersion": 8,
+    "firstProvider": "permanently unresolved",
+    "localStorage": "4 kept and 4 lost",
+    "backend": "isolated actual D1 schema, same current backend for both clients; backend source unchanged",
+    "realModelCalls": 0
+  },
+  "versions": {
+    "baseline": {
+      "trials": 8,
+      "passed": 8,
+      "successRate": 1,
+      "errors": []
+    },
+    "candidate": {
+      "trials": 8,
+      "passed": 8,
+      "successRate": 1,
+      "errors": []
+    }
+  }
+}

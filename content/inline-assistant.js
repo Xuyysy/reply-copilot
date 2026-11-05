@@ -15,7 +15,7 @@
       // Keep mount failures from surfacing as uncaught errors; refreshing the tab loads the new context.
     }
     const root = document.createElement("section"); root.className = "panel"; root.setAttribute("aria-label", "x-Reply-Helper 回复助手");
-    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿 · 由你决定是否发送</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议<small>打开回复框时自动生成</small></label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="sidepanel" class="text">无法准确匹配时，打开侧栏</button></div>';
+    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿 · 由你决定是否发送</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议<small>打开回复框时自动生成</small></label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">无法准确匹配时，打开侧栏</button></div>';
     shadow.append(root);
     (document.documentElement || document.body).append(host);
     if (preferences.rememberFloatingPosition && preferences.floatingPosition) setPosition(preferences.floatingPosition.left, preferences.floatingPosition.top);
@@ -47,14 +47,14 @@
       if (group.classList.contains('hidden')) return;
       root.querySelector('[data-action="generate"]').classList.add('hidden');
     }
-    function showLoading(message = "正在生成回复建议…") { setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
+    function showLoading(message = "正在生成回复建议…") { clearRecovery(); setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
     function showApplied() {
       appliedValue = candidates[index]?.[1] || null;
       reply.textContent = ""; reply.classList.add("hidden");
       root.querySelector('[data-action="generate"]').classList.add("hidden");
       setStatus("已填入 X 回复框，可直接编辑。切换风格只会更新这里的建议。");
     }
-    function showResult(replies, selectedStyle = "natural") {
+    function showResult(replies, selectedStyle = "natural") { clearRecovery();
       appliedValue = null;
       candidates = STYLES.map(([key]) => [key, replies[key]]).filter(([, value]) => typeof value === "string" && value.trim());
       cycled = false; index = Math.max(0, candidates.findIndex(([key]) => key === selectedStyle));
@@ -71,6 +71,8 @@
       if (appliedValue && value !== appliedValue) setStatus("这是另一种表达；原回复框不会被覆盖。可复制后自行替换。");
       onAction("selected", { style, reply: value, userGesture: true });
     }
+    function showRecovery(){showRetry();root.querySelector('[data-action="retry"]').textContent='恢复上一条';root.querySelector('[data-action="retry"]').dataset.recovery='true';root.querySelector('[data-action="abandon-generation"]').classList.remove('hidden');}
+    function clearRecovery(){root.querySelector('[data-action="abandon-generation"]').classList.add('hidden');const retry=root.querySelector('[data-action="retry"]');retry.textContent='重试';delete retry.dataset.recovery;}
     function showRetry() { root.querySelector('[data-action="retry"]').classList.remove("hidden"); }
     const header = root.querySelector(".top");
     header.addEventListener("pointerdown", (event) => {
@@ -92,6 +94,7 @@
     root.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]"); if (!button) return;
       const action = button.dataset.action;
+      if((action==='abandon-generation'||(action==='retry'&&button.dataset.recovery))&&!event.isTrusted)return;
       if (action === "settings") { onAction("settings", {}); return; }
       if (["register", "login", "pricing", "check-account"].includes(action)) { onAction(action, {}); return; }
       if (action === "minimize") { root.classList.toggle("collapsed"); button.textContent = root.classList.contains("collapsed") ? "+" : "−"; button.title = root.classList.contains("collapsed") ? "展开悬浮框" : "收起悬浮框"; button.setAttribute("aria-label", button.title); return; }
@@ -104,12 +107,13 @@
         if (appliedValue && value !== appliedValue) setStatus("这是另一种表达；原回复框不会被覆盖。可复制后自行替换。");
         button.textContent = cycled ? "再生成" : "换一个 ↻";
       } else if (action === "copy" && candidates.length) { const [style, value] = candidates[index]; try { await navigator.clipboard.writeText(value.trim()); setStatus("已复制，请检查后再发送。"); onAction("copied", { style, reply: value }); } catch { setStatus("复制失败，请手动选择文字。"); } }
-      else if (action === "retry") onAction("regenerate", { userGesture: true });
+      else if(action === "abandon-generation") onAction("abandon-generation",{userGesture:true});
+      else if (action === "retry") onAction(button.dataset.recovery?"recover-generation":"regenerate", { userGesture: true });
       else if (action === "feedback-good") { onAction("feedback", { feedback: "good", style: candidates[index]?.[0] }); button.disabled = true; button.textContent = "已记录 ✓"; }
       else if (action === "feedback-bad") { onAction("feedback", { feedback: "not_my_style", style: candidates[index]?.[0] }); button.disabled = true; button.textContent = "已记录 ✓"; }
       else if (action === "sidepanel") onAction("sidepanel", { userGesture: true });
     });
-    return { host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };

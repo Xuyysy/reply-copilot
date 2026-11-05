@@ -1,0 +1,38 @@
+{
+  "parameters": {
+    "samples": 20,
+    "syntheticD1RoundTripMs": 8,
+    "scope": "preflight + reservation only; no authentication/provider/ACK/network included",
+    "realProviderCalls": 0
+  },
+  "versions": {
+    "baseline": {
+      "elapsedMs": {
+        "n": 20,
+        "mean": 100.41149360000001,
+        "p50": 100.333125,
+        "p90": 101.33362499999976
+      },
+      "d1RoundTrips": {
+        "n": 20,
+        "mean": 11,
+        "p50": 11,
+        "p90": 11
+      }
+    },
+    "candidate": {
+      "elapsedMs": {
+        "n": 20,
+        "mean": 54.33828755000006,
+        "p50": 54.583665999999994,
+        "p90": 55.19579199999998
+      },
+      "d1RoundTrips": {
+        "n": 20,
+        "mean": 6,
+        "p50": 6,
+        "p90": 6
+      }
+    }
+  }
+}

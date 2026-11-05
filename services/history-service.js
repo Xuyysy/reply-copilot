@@ -1,3 +1,5 @@
+import {withLocalRecordWrite} from "./local-record-write.js";
+import {generatedHistory} from "./generation-records.js";
 import { HISTORY_KEY } from "./storage-service.js";
 
 export class HistoryService {
@@ -13,14 +15,16 @@ export class HistoryService {
       styleStats: Object.fromEntries(["natural", "light_humor", "thoughtful", "sharp", "funny", "quote"].map((style) => [style, history.filter((item) => item.style === style && item.reply).length])),
     };
   }
-  async recordGeneration({ requestId, sourceText, sourceUrl = "", result }) {
-    const history = await this.getAll();
-    history.push({ id: crypto.randomUUID(), requestId, status: "generated", events: ["generated"], recommendation: result.recommendation, createdAt: this.clock(), generatedAt: this.clock() });
-    await this.storage.set({ [HISTORY_KEY]: history.slice(-100) });
+  async recordGeneration({ requestId, result }) {
+    return withLocalRecordWrite(this.storage,async()=>{
+      const history=generatedHistory(await this.getAll(),{requestId,recommendation:result.recommendation,createdAt:this.clock()});
+      await this.storage.set({[HISTORY_KEY]:history});
+    });
   }
   async recordEvent(requestId, event, { style, reply, sourceText, sourceUrl = "" } = {}) {
     const allowed = ["selected", "copied", "applied", "manually_confirmed"];
     if (!allowed.includes(event)) return false;
+    return withLocalRecordWrite(this.storage,async()=>{
     const history = await this.getAll();
     let entry = history.findLast?.((item) => item.requestId === requestId) || [...history].reverse().find((item) => item.requestId === requestId);
     if (!entry) {
@@ -36,12 +40,15 @@ export class HistoryService {
     if (reply !== undefined) entry.reply = reply;
     await this.storage.set({ [HISTORY_KEY]: history.slice(-100) });
     return true;
+    });
   }
   async addSelectedReply(entry) {
+    return withLocalRecordWrite(this.storage,async()=>{
     const history = await this.getAll();
     history.push({ id: crypto.randomUUID(), requestId: entry.requestId, reply: entry.reply, style: entry.style, recommendation: entry.recommendation, status: "copied", events: ["generated", "selected", "copied"], createdAt: this.clock() });
     await this.storage.set({ [HISTORY_KEY]: history.slice(-100) });
+    });
   }
-  async clearHistory() { await this.storage.remove(HISTORY_KEY); }
+  async clearHistory() { return withLocalRecordWrite(this.storage,()=>this.storage.remove(HISTORY_KEY)); }
   async getStats() { const history = await this.getAll(); return Object.fromEntries(["natural", "light_humor", "thoughtful", "sharp", "funny", "quote"].map((style) => [style, history.filter((item) => item.style === style && item.reply).length])); }
 }

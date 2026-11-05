@@ -29,12 +29,17 @@ export class AccountClient {
     if (authenticate && !token) throw Object.assign(new Error("请先登录。"), { code: "AUTH_REQUIRED" });
     const url = new URL(path, this.config.hostedApiUrl);
     if (url.origin !== new URL(this.config.hostedApiUrl).origin) throw new Error("云端服务地址无效。");
+    const controller=signal?null:new AbortController();
+    const timer=controller?setTimeout(()=>controller.abort(),10000):null;
+    const requestSignal=signal||controller.signal;
+    try {
     let response;
-    try { response = await Reflect.apply(this.fetchImpl, globalThis, [url.href, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json", ...(body?.requestId ? { "Idempotency-Key": body.requestId } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), ...(signal ? { signal } : {}) }]); }
-    catch (error) { if (signal?.aborted || error?.name === "AbortError") throw Object.assign(new Error("云端请求已超时或取消。"), { code: "NETWORK_ERROR" }); throw Object.assign(new Error("云端服务暂时无法连接，请稍后重试。"), { code: "NETWORK_ERROR" }); }
+    try { response = await Reflect.apply(this.fetchImpl, globalThis, [url.href, { method, headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), "Content-Type": "application/json", ...(body?.requestId ? { "Idempotency-Key": body.requestId } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }), signal:requestSignal }]); }
+    catch (error) { if (requestSignal.aborted || error?.name === "AbortError") throw Object.assign(new Error("云端请求已超时或取消。"), { code: "NETWORK_ERROR" }); throw Object.assign(new Error("云端服务暂时无法连接，请稍后重试。"), { code: "NETWORK_ERROR" }); }
     let data; try { data = await response.json(); } catch { throw new Error("云端服务返回内容无效。"); }
     if (!response.ok) throw Object.assign(new Error(data?.message || "云端服务暂时不可用。"), { code: data?.code || "SERVER_UNAVAILABLE", status: response.status });
     return data;
+    } finally {if(timer)clearTimeout(timer);}
   }
   fetchCurrentUser() { return this.request("/v1/me"); }
   fetchEntitlement() { return this.request("/v1/entitlements"); }

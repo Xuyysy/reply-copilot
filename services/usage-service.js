@@ -1,3 +1,5 @@
+import {withLocalRecordWrite} from "./local-record-write.js";
+import {generatedUsage} from "./generation-records.js";
 export const USAGE_KEY = "localUsageEvents";
 export const USAGE_ACTIONS = Object.freeze(["generated", "selected", "copied", "applied", "feedback_good", "feedback_bad", "api_failure"]);
 
@@ -6,10 +8,13 @@ export class UsageService {
   async getEvents() { return (await this.storage.get(USAGE_KEY))[USAGE_KEY] || []; }
   async track(action, { requestId = "", style = "" } = {}) {
     if (!USAGE_ACTIONS.includes(action)) return false;
+    return withLocalRecordWrite(this.storage,async()=>{
     const events = await this.getEvents();
+    if(action==='generated') {await this.storage.set({[USAGE_KEY]:generatedUsage(events,{requestId,createdAt:this.clock()})});return true;}
     events.push({ requestId: String(requestId).slice(0, 100), style: String(style).slice(0, 40), action, feedback: action === "feedback_good" ? "good" : action === "feedback_bad" ? "not_my_style" : null, createdAt: this.clock() });
     await this.storage.set({ [USAGE_KEY]: events.slice(-1000) });
     return true;
+    });
   }
   async getSummary(now = Date.now()) {
     const events = await this.getEvents();
@@ -27,5 +32,5 @@ export class UsageService {
       events: events.slice(-50).reverse(),
     };
   }
-  async clear() { await this.storage.remove(USAGE_KEY); }
+  async clear() { return withLocalRecordWrite(this.storage,()=>this.storage.remove(USAGE_KEY)); }
 }

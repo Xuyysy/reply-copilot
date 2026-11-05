@@ -1,0 +1,219 @@
+{
+  "parameters": {
+    "samplesPerVersion": 20,
+    "warmupsPerVersion": 2,
+    "fixedHttpDelayMs": 80,
+    "provider": "same synthetic Qwen-compatible fixture; 35ms fixed model delay",
+    "database": "synthetic reservation boundary, NOT live D1 latency",
+    "measurement": "native reply click -> verified editable mock composer; fresh content/background VM each sample",
+    "realX": false
+  },
+  "versions": {
+    "baseline": {
+      "endToEndMs": {
+        "n": 20,
+        "mean": 474.1503812500003,
+        "p50": 473.7541660000006,
+        "p90": 476.05974999999944
+      },
+      "successRate": 1,
+      "recoveryGets": {
+        "n": 20,
+        "mean": 0,
+        "p50": 0,
+        "p90": 0
+      },
+      "preGenerateHttp": {
+        "n": 20,
+        "mean": 3,
+        "p50": 3,
+        "p90": 3
+      },
+      "httpTotal": {
+        "n": 20,
+        "mean": 5,
+        "p50": 5,
+        "p90": 5
+      },
+      "routePattern": [
+        "/v1/me",
+        "/v1/entitlements",
+        "/v1/usage",
+        "/v1/ai/generate",
+        "/v1/ai/requests/:requestId/delivered"
+      ],
+      "stagesMs": {
+        "editorBinding": {
+          "n": 20,
+          "mean": 0.17049999999999998,
+          "p50": 0.19,
+          "p90": 0.21
+        },
+        "localPrecheck": {
+          "n": 20,
+          "mean": 104.61599999999999,
+          "p50": 104.65,
+          "p90": 105.59
+        },
+        "preferencesAndContext": {
+          "n": 20,
+          "mean": 6.427,
+          "p50": 6.05,
+          "p90": 7.09
+        },
+        "historyContext": {
+          "n": 20,
+          "mean": 0.016000000000000004,
+          "p50": 0.02,
+          "p90": 0.02
+        },
+        "ownerIdentity": {
+          "n": 20,
+          "mean": 4.407000000000001,
+          "p50": 4.6,
+          "p90": 4.63
+        },
+        "recoveryQueries": {
+          "n": 20,
+          "mean": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "syntheticD1Reservation": {
+          "n": 20,
+          "mean": 4.590500000000111,
+          "p50": 4.606332999999722,
+          "p90": 4.630625000001601
+        },
+        "modelOnly": {
+          "n": 20,
+          "mean": 36.01310010000022,
+          "p50": 36.12937500000044,
+          "p90": 36.212499999999636
+        },
+        "generateHttpIncludingModel": {
+          "n": 20,
+          "mean": 145.66799999999998,
+          "p50": 145.39,
+          "p90": 146.98
+        },
+        "ackHttp": {
+          "n": 20,
+          "mean": 99.11450000000002,
+          "p50": 99.17,
+          "p90": 99.59
+        },
+        "afterAckToEditor": {
+          "n": 20,
+          "mean": 106.49486865000031,
+          "p50": 105.83637500000077,
+          "p90": 108.56829199999993
+        }
+      }
+    },
+    "candidate": {
+      "endToEndMs": {
+        "n": 20,
+        "mean": 462.0561144500001,
+        "p50": 461.85150000000067,
+        "p90": 463.29570800000147
+      },
+      "successRate": 1,
+      "recoveryGets": {
+        "n": 20,
+        "mean": 0,
+        "p50": 0,
+        "p90": 0
+      },
+      "preGenerateHttp": {
+        "n": 20,
+        "mean": 3,
+        "p50": 3,
+        "p90": 3
+      },
+      "httpTotal": {
+        "n": 20,
+        "mean": 5,
+        "p50": 5,
+        "p90": 5
+      },
+      "routePattern": [
+        "/v1/me",
+        "/v1/entitlements",
+        "/v1/usage",
+        "/v1/ai/generate",
+        "/v1/ai/requests/:requestId/delivered"
+      ],
+      "stagesMs": {
+        "editorBinding": {
+          "n": 20,
+          "mean": 0.18150000000000005,
+          "p50": 0.2,
+          "p90": 0.24
+        },
+        "localPrecheck": {
+          "n": 20,
+          "mean": 104.21950000000001,
+          "p50": 104.29,
+          "p90": 105.46
+        },
+        "preferencesAndContext": {
+          "n": 20,
+          "mean": 6.295500000000001,
+          "p50": 6,
+          "p90": 7.09
+        },
+        "historyContext": {
+          "n": 20,
+          "mean": 0.020000000000000007,
+          "p50": 0.02,
+          "p90": 0.03
+        },
+        "ownerIdentity": {
+          "n": 20,
+          "mean": 4.5280000000000005,
+          "p50": 4.61,
+          "p90": 4.65
+        },
+        "recoveryQueries": {
+          "n": 20,
+          "mean": 0,
+          "p50": 0,
+          "p90": 0
+        },
+        "syntheticD1Reservation": {
+          "n": 20,
+          "mean": 4.552308250000078,
+          "p50": 4.607916999999361,
+          "p90": 4.669165999999677
+        },
+        "modelOnly": {
+          "n": 20,
+          "mean": 36.08863739999997,
+          "p50": 36.162749999999505,
+          "p90": 36.20462499999849
+        },
+        "generateHttpIncludingModel": {
+          "n": 20,
+          "mean": 145.8445,
+          "p50": 145.65,
+          "p90": 146.72
+        },
+        "ackHttp": {
+          "n": 20,
+          "mean": 99.2705,
+          "p50": 99.32,
+          "p90": 99.51
+        },
+        "afterAckToEditor": {
+          "n": 20,
+          "mean": 94.34939365,
+          "p50": 94.18954100000019,
+          "p90": 95.0018340000006
+        }
+      }
+    }
+  },
+  "identicalPromptHashes": true,
+  "phaseWarning": "modelOnly is contained in generateHttpIncludingModel; phases overlap (parallel local reads). Do not add all columns. Total is measured directly."
+}
