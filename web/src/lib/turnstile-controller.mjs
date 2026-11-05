@@ -34,5 +34,5 @@ export function createTurnstileController({node,sitekey,onState,win=window,load=
    if(win.MutationObserver){observer=new win.MutationObserver(()=>{if(!current())return;const present=!!node.querySelector('iframe');if(seenFrame&&!present)fail('widget_removed');seenFrame||=present;});seenFrame=!!node.querySelector('iframe');observer.observe(node,{childList:true,subtree:true});}
   }catch(e){if(!disposed&&run===epoch)invalidate(['script_timeout','script_load_failed','script_api_missing'].includes(e?.code)?e.code:'render_failed');}
  }
- return{start:()=>start(false),retry:()=>start(true),consume(){const value=token;if(value){epoch++;clear();emit('submitted');}return value;},dispose(){disposed=true;epoch++;clear();}};
+ return{start:()=>start(false),retry:()=>start(true),consume(){if(disposed||!node.isConnected){epoch++;clear();return '';}const value=token;if(value){epoch++;clear();emit('submitted');}return value;},dispose(){disposed=true;epoch++;clear();}};
 }
