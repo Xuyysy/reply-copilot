@@ -39,7 +39,10 @@ test('real hosted delivery handshake with a lost ACK consumes each original requ
  const raw=JSON.stringify({recommendation:'reply',defaultStyle:'natural',language:'en',reason:'Relevant.',quoteCandidate:null,replies:{natural:'One.',light_humor:'Two.',thoughtful:'Three.'}});
  const rows=new Map(),debited=new Set();let generations=0,loseAck=true;
  const data={},storage={get:async()=>structuredClone(data),set:async x=>Object.assign(data,structuredClone(x))};
- const accountClient={request:async(path,{body})=>{
+ const accountClient={request:async(path,{body}={})=>{
+  if(path==='/v1/ai/requests/active')return {state:[...rows.keys()].some(x=>!debited.has(x))?'running':'missing'};
+  const match=path.match(/^\/v1\/ai\/requests\/([^/]+)$/);
+  if(match)return rows.has(match[1])?{state:debited.has(match[1])?'delivered':'ready',requestId:match[1],raw:rows.get(match[1])}:{state:'missing',requestId:match[1]};
   const id=body.requestId;
   if(path==='/v1/ai/generate'){
    if(!rows.has(id)){if([...rows.keys()].some(x=>!debited.has(x)))throw Object.assign(new Error('busy'),{code:'GENERATION_IN_PROGRESS'});rows.set(id,raw);generations++;}
@@ -65,4 +68,9 @@ test('performance instrumentation is transient and never enters persisted replay
  assert.equal(received,trace);
  assert.equal(JSON.stringify(f.data).includes('performanceTrace'),false);
  assert.equal(await f.restart().generateReplies(makeInput()),'ok');
+});
+
+test('a timed-out queued operation never starts an unseen provider request later',async()=>{
+ let finish,enter,phase='missing';const started=new Promise(r=>enter=r),calls=[];const data={};const c=new DeliveryCoordinator({waitTimeoutMs:15,storage:{get:async()=>structuredClone(data),set:async x=>Object.assign(data,structuredClone(x))},getAccountId:async()=> 'a',createClient:()=>({recoverGeneration:async id=>({state:id?phase:'missing',requestId:id||null}),generateReplies:async input=>{phase='running';calls.push(input.requestId);enter();await new Promise(r=>finish=r);return 'raw';}})});
+ const first=c.generateReplies(makeInput('one'));await started;const second=c.generateReplies(makeInput('two'));await Promise.allSettled([first,second]);finish();await new Promise(r=>setTimeout(r,5));assert.deepEqual(calls,['one']);
 });

@@ -7,9 +7,11 @@ import { accountStatusLabel } from "../domain/account-state.js";
 import { ReplyEngine } from "../services/reply-engine.js";
 import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
-import { UsageService } from "../services/usage-service.js";
+import {generatedHistory,generatedUsage} from "../services/generation-records.js";
+import { UsageService, USAGE_KEY } from "../services/usage-service.js";
 import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
 import { HostedAIClient } from "../services/hosted-ai-client.js";
+import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
 
 let performanceEnabled = false;
@@ -25,9 +27,13 @@ const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
 const deliveryCoordinator = new DeliveryCoordinator({
-  storage: chrome.storage.session,
-  getAccountId: async () => (await accountClient.fetchCurrentUser()).user?.userId,
+  storage: chrome.storage.local,
+  getAccountId: () => accountStates.getOwnerId(),
   createClient: () => new HostedAIClient({ accountClient }),
+  completion:{keys:[HISTORY_KEY,USAGE_KEY],patch:(data,receipt)=>{
+    const meta={requestId:receipt.input.requestId,recommendation:JSON.parse(receipt.raw).recommendation,createdAt:new Date().toISOString()};
+    return {[HISTORY_KEY]:generatedHistory(data[HISTORY_KEY]||[],meta),[USAGE_KEY]:generatedUsage(data[USAGE_KEY]||[],meta)};
+  },fallback:async(record,raw)=>{if(raw)await Promise.allSettled([history.recordGeneration({requestId:record.input.requestId,result:JSON.parse(raw)}),usage.track('generated',{requestId:record.input.requestId})]);}},
 });
 const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
 const activeRequests = new Map();
@@ -119,7 +125,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try { if (await accountClient.pollDeviceAuthorization()) accountStates.invalidate(); } catch (error) { if (!/已过期/.test(error?.message || "")) throw error; }
       }
       const state = await accountStates.getState({ force: pending });
-      sendResponse({ ok: true, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
+      const recoveryRequired=state.status==='credits_exhausted' && ['running','ready','expired'].includes((await new HostedAIClient({accountClient}).recoverGeneration().catch(()=>({state:'unknown'}))).state);
+      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
     })().catch(() => sendResponse({ ok: false, status: "auth_unavailable" }));
     return true;
   }
@@ -165,23 +172,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void broadcastSettingsChanged();
     sendResponse({ ok: true }); return false;
   }
+  if(message?.type === "REPLY_COPILOT_RECOVER_GENERATION"){
+    if((!fromXPage&&!fromExtensionPage)||typeof message.abandon!=='boolean'){sendResponse({ok:false});return false;}
+    void deliveryCoordinator.recoverPending({abandon:message.abandon}).then(state=>{accountStates.invalidate();return sendResponse({ok:true,...state,...(state.raw?{result:parseAIOutput(state.raw),raw:undefined}:{})});},error=>sendResponse({ok:false,error:error?.message||'恢复失败，请重试。',code:error?.code||'NETWORK_ERROR'}));
+    return true;
+  }
   if (message?.type === "REPLY_COPILOT_GENERATE") {
     if (!fromXPage || typeof message.requestId !== "string" || typeof message.sourceText !== "string" || message.sourceText.length > 12000 || !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) { sendResponse({ ok: false, error: "无法验证当前帖子。请打开侧边栏重试。" }); return false; }
     void (async () => {
       const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
       const controller = new AbortController(); activeRequests.get(message.requestId)?.abort(); activeRequests.set(message.requestId, controller);
       try {
-        const [voiceProfile, replyStyle] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle()]));
+        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
-        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, requestId: message.requestId }, { replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
+        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
-        // Local history is best effort: a storage failure must not discard a usable AI draft.
-        // Keep writes awaited for MV3 suspension safety; overlap the independent
-        // account label lookup instead of dropping persistence after sendResponse.
-        const [,accountLabel] = await Promise.all([
-          trace.measure("local_bookkeeping",()=>Promise.allSettled([history.recordGeneration({ requestId: message.requestId, result }), usage.track("generated", { requestId: message.requestId })])),
-          trace.measure("account_label",()=>accountStates.getState().then(accountStatusLabel, () => "授权状态暂时无法确认")),
-        ]);
+        // ACK + receipt/history/usage have already been durably awaited together.
+        // Labels are display-only: never start a refresh before returning a draft.
+        const labelStarted=performance.now();
+        const accountLabel=accountStatusLabel(accountStates.peekState()||{});
+        trace.addDurations({account_label:performance.now()-labelStarted});
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         if (Number.isInteger(sender.tab?.id)) {
           generatedInputs.set(message.requestId, { tabId: sender.tab.id, replies: result.replies });

@@ -230,6 +230,7 @@
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
     current.assistant.showAccount(current.accountStatus, response?.quota, response?.pending);
+    if(response?.recoveryRequired){current.assistant?.setStatus('上一条生成未完成，额度仍在预占。可以恢复或放弃后继续。');current.assistant?.showRecovery?.();}
     if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
     if (response?.pending && !bindingTimer) bindingTimer = setInterval(() => void refreshAccount(current), 3500);
     if (!response?.pending && bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
@@ -320,8 +321,8 @@
     } catch (error) {
       completeTrace(current,"failed");
       current.generating = false;
-      current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN"].includes(error?.code);
-      if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); }
+      current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN","GENERATION_RECOVERY_REQUIRED"].includes(error?.code);
+      if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); if(current.retrySameRequestId)current.assistant?.showRecovery?.(); }
     }
   }
   function handleAction(action, data) {
@@ -351,6 +352,26 @@
     if (action === "check-account") { void refreshAccount(current); return; }
     if (action === "position_changed") { void safeSend({ type: "REPLY_COPILOT_SET_FLOATING_POSITION", left: data.left, top: data.top }); return; }
     if (action === "generate") { void generateActive(current.requestId); return; }
+    if(action==='recover-generation'||action==='abandon-generation'){
+      if(current.recovering)return;
+      current.recovering=true;current.assistant?.showLoading('正在检查上一条生成…');
+      void safeSend({type:'REPLY_COPILOT_RECOVER_GENERATION',abandon:action==='abandon-generation'}).then(async response=>{
+        if(active!==current||current.cancelled)return;
+        if(!response?.ok)throw Error(response?.error||'恢复未完成，请稍后再试。');
+        await refreshAccount(current);
+        if(active!==current||current.cancelled)return;
+        current.generating=false;current.generated=false;current.retrySameRequestId=false;
+        if(response.state==='ready'&&response.requestId!==current.requestId){
+          // A recovered result for a different post is copy-only. Never insert it
+          // into the currently associated editor or mistake it for this request.
+          current.assistant?.showResult(response.result.replies,response.result.defaultStyle||'natural');
+          current.assistant?.setStatus('上一条回复已恢复，仅供复制；当前帖子可点击重试生成。');current.assistant?.showRetry();return;
+        }
+        if(response.state!=='ready')current.requestId=crypto.randomUUID();
+        void generateActive(current.requestId);
+      }).catch(error=>{if(active===current){current.assistant?.setStatus(error.message||'暂时无法恢复，请重试。');current.assistant?.showRecovery?.();}}).finally(()=>{current.recovering=false;});
+      return;
+    }
     if (action === "regenerate") {
       const retryPending = current.retrySameRequestId;
       if (!retryPending) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: current.requestId });

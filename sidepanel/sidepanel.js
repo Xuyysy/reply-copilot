@@ -4,6 +4,7 @@ import { ReplyEngine } from "../services/reply-engine.js";
 import { StorageService, PENDING_REQUEST_KEY, BEHAVIOR_PREFERENCES_KEY } from "../services/storage-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
+import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { AccountClient } from "../services/account-client.js";
 
 const storage = new StorageService();
@@ -121,6 +122,7 @@ async function generate(request) {
   $("dashboard").classList.add("hidden"); $("back-dashboard").classList.remove("hidden");
   if (request.error) { showError(request.error); return; }
   const requestId = request.requestId;
+  for(const id of ["recover-generation","abandon-generation"])$(id).classList.add("hidden");
   $("status").textContent = "正在按你的风格生成回复…"; $("status").className = "status loading"; $("status").classList.remove("hidden"); $("result").classList.add("hidden"); $("open-settings").classList.add("hidden"); setBusy(true);
   try {
     if (currentRequest?.requestId !== requestId) return;
@@ -130,7 +132,9 @@ async function generate(request) {
     await Promise.allSettled([history.recordGeneration({ requestId, result }), usage.track("generated", { requestId })]);
     if (currentRequest?.requestId === requestId) renderResult(result, preferences.defaultReplyMode);
   } catch (error) {
-    if (currentRequest?.requestId === requestId) { await usage.track("api_failure", { requestId }).catch(() => {}); showError(error.message || "Something went wrong. Try again.", error.needsSettings || error.message?.includes("API key is not configured")); }
+    if (currentRequest?.requestId === requestId) { await usage.track("api_failure", { requestId }).catch(() => {}); showError(error.message || "Something went wrong. Try again.", error.needsSettings || error.message?.includes("API key is not configured"));
+      const state=await new HostedAIClient({accountClient}).recoverGeneration().catch(()=>null);
+      if(currentRequest?.requestId===requestId && (['running','ready','expired'].includes(state?.state)||['NETWORK_ERROR','GENERATION_IN_PROGRESS','DELIVERY_CONFIRMATION_PENDING'].includes(error.code)))for(const id of ['recover-generation','abandon-generation'])$(id).classList.remove('hidden'); }
   } finally {
     if (queuedRequest) { const next = queuedRequest; queuedRequest = null; void generate(next); }
   }
@@ -149,6 +153,18 @@ document.addEventListener("click", async (event) => {
   const destinations = { "nav-website": "/", "nav-account": "/account", "nav-pricing": "/pricing", "nav-guide": "/guide" };
   if (destinations[button.id]) { try { await accountClient.openWebsite(destinations[button.id]); } catch { $("account-summary").textContent = "官网地址暂不可用。"; } return; }
   if (["settings", "footer-settings", "open-settings"].includes(button.id)) { chrome.runtime.openOptionsPage(); return; }
+  if(['recover-generation','abandon-generation'].includes(button.id)&&currentRequest&&!busy){
+    setBusy(true);button.disabled=true;
+    try{
+      const response=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_RECOVER_GENERATION',abandon:button.id==='abandon-generation'});
+      if(!response?.ok)throw Error(response?.error||'恢复未完成，请重试。');
+      for(const id of ['recover-generation','abandon-generation'])$(id).classList.add('hidden');
+      if(response.result){renderResult(response.result);if(response.requestId!==currentRequest.requestId)$('source-text').textContent='已恢复上一条回复；请核对原帖后再复制使用。';setBusy(false);}
+      else{setBusy(false);aiProvider.accountStates.invalidate();processed.delete(currentRequest.requestId);void generate({...currentRequest,requestId:crypto.randomUUID()});}
+    }catch(error){showError(error.message||'恢复失败，请重试。');}
+    finally{button.disabled=false;}
+    return;
+  }
   if (button.id === "regenerate" && currentRequest && !busy) { generate({ ...currentRequest, requestId: crypto.randomUUID() }); return; }
   if (button.classList.contains("copy-button") && currentResult && currentRequest && !busy) {
     const style = button.dataset.style; const reply = formatReplyForClipboard(style === "quote" ? currentResult.quote_candidate : currentResult.replies[style]);

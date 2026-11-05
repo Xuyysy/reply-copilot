@@ -2,7 +2,7 @@
 // Disabled by default. No identifier, text or arbitrary error is accepted.
 (() => {
   const marks = new Set(['reply_click','editor_bound','precheck_complete','background_dispatch','background_return','candidates_shown','insert_started','editor_verified']);
-  const durations = new Set(['precheck','background_prepare','history_context','router_account','owner_check','delivery_storage','cloud_generate','ack','local_bookkeeping','account_label','background_total','worker_prepare','worker_reserve','dns','model','worker_finish','worker_total']);
+  const durations = new Set(['precheck','background_prepare','history_context','router_account','owner_check','delivery_storage','delivery_persist','cloud_generate','ack','local_bookkeeping','account_label','background_total','worker_auth','worker_replay','worker_config','worker_prepare','worker_reserve','dns','model','worker_finish','worker_total']);
   const outcomes = new Set(['success','failed','cancelled','incomplete']);
   const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 3_600_000;
   const clean = (values, allowed) => Object.fromEntries(Object.entries(values || {}).filter(([key,value]) => allowed.has(key) && valid(value)).map(([key,value])=>[key,Math.round(value*100)/100]));
