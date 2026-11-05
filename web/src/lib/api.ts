@@ -2,6 +2,7 @@ import { RequestTimeoutError, withRequestTimeout } from "./request-timeout.mjs";
 
 export const API_BASE = (import.meta.env.PUBLIC_API_BASE_URL || (import.meta.env.DEV ? "http://127.0.0.1:8787" : "")).replace(/\/$/, "");
 const API_REQUEST_TIMEOUT_MS = 15_000;
+const REGISTER_REQUEST_TIMEOUT_MS = 30_000;
 const MODEL_TEST_TIMEOUT_MS = 75_000;
 
 export type ApiDiagnostic = { stage: string; upstreamHttpStatus: number | null };
@@ -39,12 +40,14 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
         headers: { "Content-Type": "application/json", ...csrfHeader, ...(options.headers || {}) },
       });
       let body: any;
-      try { body = await response.json(); } catch { throw new ApiError("服务返回的数据无效。", "INVALID_RESPONSE", response.status); }
+      try { body = await response.json(); } catch { if(!response.ok)throw new ApiError(`服务请求失败（HTTP ${response.status}）。`, "HTTP_ERROR", response.status);throw new ApiError("服务返回的数据无效。", "INVALID_RESPONSE", response.status); }
       if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), path === "/v1/orders" ? body?.order : undefined);
       return body as T;
-    }, path.includes("/v1/admin/ai-models/") && path.includes("/test-") ? MODEL_TEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS, options.signal || undefined);
+    }, path.includes("/v1/admin/ai-models/") && path.includes("/test-") ? MODEL_TEST_TIMEOUT_MS : path === "/v1/auth/register" ? REGISTER_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS, options.signal || undefined);
   } catch (error) {
-    if (error instanceof RequestTimeoutError) throw new ApiError("请求超时，请检查网络后重试。", "API_TIMEOUT", 504);
+    if (error instanceof RequestTimeoutError) throw new ApiError("请求超时，处理结果尚未确认，请检查状态后再试。", "API_TIMEOUT", 504);
+    if(options.signal?.aborted)throw new ApiError("本次请求已取消。", "API_CANCELLED", 0);
+    if(error instanceof TypeError)throw new ApiError("未能连接云端服务，可能与网络或浏览器访问限制有关，请检查连接后重试。", "API_NETWORK_ERROR", 0);
     throw error;
   }
 }
