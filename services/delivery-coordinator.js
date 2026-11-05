@@ -1,5 +1,5 @@
 // Delivery coordination. No token, raw request or result is logged. Pending
-// inputs live in trusted extension session storage, so worker suspension does
+// inputs live in trusted extension local storage, so worker suspension does
 // not erase the exact payload required by the server's idempotency contract.
 const PENDING='pendingAiDelivery';
 const COMPLETED='completedAiDeliveries';
@@ -25,9 +25,11 @@ export class DeliveryCoordinator {
   }
   async run(input,signal,performanceTrace,canStart=()=>true){
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
-    const ownerId=await (performanceTrace ? performanceTrace.measure("owner_check",()=>this.getAccountId()) : this.getAccountId());
+    const [ownerId,stored]=await Promise.all([
+      performanceTrace ? performanceTrace.measure("owner_check",()=>this.getAccountId()) : this.getAccountId(),
+      performanceTrace ? performanceTrace.measure("delivery_storage",()=>this.storage.get([PENDING,COMPLETED])) : this.storage.get([PENDING,COMPLETED]),
+    ]);
     if(typeof ownerId!=='string'||!ownerId)throw fail('AUTH_REQUIRED','请重新连接账户。');
-    const stored=await (performanceTrace ? performanceTrace.measure("delivery_storage",()=>this.storage.get([PENDING,COMPLETED])) : this.storage.get([PENDING,COMPLETED]));
     let pending=stored[PENDING]||this.pendingMemory;
     let completed=[...(stored[COMPLETED]||[]),...this.memory].filter(row=>row.ownerId===ownerId&&this.clock()-row.completedAt<600000);
     const same=completed.find(row=>row.input.requestId===input.requestId);
@@ -49,28 +51,23 @@ export class DeliveryCoordinator {
       }
     }
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
-    // Recover orphaned state even after browser/session storage loss. This GET
-    // never creates an upstream generation or assumes that a 30s timeout ended it.
-    const probe=this.createClient();
-    if(probe.recoverGeneration){
-      const active=await probe.recoverGeneration();
-      if(active.requestId&&['running','expired','ready'].includes(active.state))throw fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。请恢复上一条，或放弃并重新生成。');
-    }
+    // Fast path: let the atomic generate reservation detect a server orphan.
+    // No active/history scan is needed for a fresh request with no local pending.
     if(!canStart())throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');
     const record={ownerId,input,createdAt:this.clock()};
     this.pendingMemory=record;
     // If local storage is unavailable, the server active-request lookup remains
     // authoritative after restart. Do not discard an otherwise usable draft.
     await this.writeLocked(()=>this.storage.set({[PENDING]:record})).catch(()=>{});
-    return (await this.deliver(record,completed,performanceTrace,canStart)).raw;
+    return (await this.deliver(record,completed,performanceTrace,canStart,false)).raw;
   }
-  async deliver(record,completed,performanceTrace,canStart=()=>true){
+  async deliver(record,completed,performanceTrace,canStart=()=>true,recover=true){
     const client=this.createClient();
     try{
       // Once accepted, UI cancellation detaches the composer only. Let the
       // bounded hosted request finish its original delivery handshake.
       let raw;
-      if(client.recoverGeneration){
+      if(recover&&client.recoverGeneration){
         const state=await client.recoverGeneration(record.input.requestId);
         if(['ready','delivered'].includes(state.state))raw=await client.receiveDelivery(state);
         else if(['released','expired'].includes(state.state))throw fail('GENERATION_FAILED','上一次生成已结束，可以重新生成。');
@@ -109,11 +106,23 @@ export class DeliveryCoordinator {
     const ownerId=await this.getAccountId();if(!ownerId)throw fail('AUTH_REQUIRED','请重新连接账户。');
     const data=await this.storage.get([PENDING,COMPLETED]);const saved=data[PENDING]||this.pendingMemory;const record=saved?.ownerId===ownerId?saved:null;
     const client=this.createClient();let state=await client.recoverGeneration(record?.input.requestId);
-    if(abandon&&state.state==='missing'&&record)state=await client.recoverGeneration(record.input.requestId,true);
-    else if(abandon&&['running','expired'].includes(state.state))state=await client.recoverGeneration(state.requestId,true);
+    // A fresh POST can conflict with another server request after local state
+    // was lost. Resolve the actual blocker only on this explicit recovery path.
+    if(record&&['missing','released'].includes(state.state)){
+      const active=await client.recoverGeneration();
+      if(active.requestId&&active.requestId!==record.input.requestId)state=active;
+    }
+    if(abandon&&record&&state.requestId!==record.input.requestId){
+      // Fence the possibly delayed new envelope as well as the foreign blocker.
+      // Both operations are server-confirmed/idempotent and remain rate-limited.
+      const primary=await client.recoverGeneration(record.input.requestId,true);
+      if(!['released','delivered'].includes(primary.state))state=primary;
+    }
+    if(abandon&&((state.state==='missing'&&record)||['running','expired'].includes(state.state)))state=await client.recoverGeneration(state.requestId||record.input.requestId,true);
     if(['ready','delivered'].includes(state.state)&&state.raw){
       const raw=await client.receiveDelivery(state);this.lastQuota=client.lastQuota||null;
-      if(record)await this.remember(record,[...(data[COMPLETED]||[]),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4));
+      if(record&&record.input.requestId===state.requestId)await this.remember(record,[...(data[COMPLETED]||[]),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4));
+      if(record&&record.input.requestId!==state.requestId&&abandon)await this.clearResolved(record);
       this.tail=Promise.resolve();return {state:'ready',requestId:state.requestId,raw};
     }
     if(['released','delivered'].includes(state.state)||(state.state==='missing'&&!record)){

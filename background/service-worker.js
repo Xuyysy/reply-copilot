@@ -27,7 +27,7 @@ const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
 const deliveryCoordinator = new DeliveryCoordinator({
   storage: chrome.storage.local,
-  getAccountId: async () => (await accountClient.fetchCurrentUser()).user?.userId,
+  getAccountId: () => accountStates.getOwnerId(),
   createClient: () => new HostedAIClient({ accountClient }),
 });
 const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
@@ -178,9 +178,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
       const controller = new AbortController(); activeRequests.get(message.requestId)?.abort(); activeRequests.set(message.requestId, controller);
       try {
-        const [voiceProfile, replyStyle] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle()]));
+        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
-        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, requestId: message.requestId }, { replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
+        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         // Local history is best effort: a storage failure must not discard a usable AI draft.
         // Keep writes awaited for MV3 suspension safety; overlap the independent

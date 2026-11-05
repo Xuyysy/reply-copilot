@@ -122,3 +122,7 @@ comparison still matched all 42 bindings and the previous live version.
 The independent Staging bundle is 0.3.2 with no debugger permission/API call;
 its origin/identity audit and upload receipts are recorded in the PR release
 comment. The installed Staging extension is not overwritten automatically.
+
+## Follow-up: normal reply performance
+
+Recovery checks are now exceptional-path only; see [Fast Path evidence](pr16-fast-path-2026-11-05.md) and [latency principles](../engineering/reply-latency-principles.md). The original release results above remain historical. The new candidate changes only the client and local test tooling, without another Worker deployment.

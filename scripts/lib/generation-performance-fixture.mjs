@@ -15,7 +15,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
  const {executeAiGeneration}=await import(pathToFileURL(path.join(sourceRoot,'api/src/ai-generation-flow.js')).href);
  const {buildPrompts}=await import(pathToFileURL(path.join(sourceRoot,'prompts/prompt-builder.js')).href);
  const timers=new Set(),listeners={},observerCallbacks=[],calls={generations:0,acks:0,debits:0,insertions:0},saved={},sessionValues={generationPerformanceEnabled:options.diagnostics!==false};
- const paths=[],marks={},times={},outputs=[],providerBodies=[];let nowEditor=null,closed=false;
+ const apiTimings=[],paths=[],marks={},times={},outputs=[],providerBodies=[];let nowEditor=null,closed=false;
  const start=performance.now(),at=()=>performance.now()-start;
  const timed=fn=>(callback,ms,...args)=>{const id=fn(callback,ms,...args);timers.add(id);id.unref?.();return id;};
  const event=()=>({addListener(fn){this.listener=fn;},removeListener(){}});
@@ -40,9 +40,9 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   return Response.json({Status:0,Answer:type==='A'?[{type:1,data:options.dnsPrivate?'127.0.0.1':'93.184.216.34'}]:[]});
  };
  globalThis.fetch=dnsFetch;
- const fetchApi=async(url,init)=>{
+ const routeApi=async(url,init)=>{
   const parsed=new URL(url);if(parsed.origin!=='http://127.0.0.1:8787')throw Error('Unexpected API');
-  const p=parsed.pathname;paths.push(p);await sleep(6);
+  const p=parsed.pathname;paths.push(p);await sleep(options.networkRoundTripMs??6);
   if(options.offline)throw Error('fixture offline');
   if(p==='/v1/me')return Response.json({user:{userId:'fixture-owner',username:'fixture'}});
   if(p==='/v1/entitlements')return Response.json({status:options.quotaExhausted?'credits_exhausted':'credits_available',entitlement:{}});
@@ -51,13 +51,14 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   const body=JSON.parse(init.body||'{}');
   if(p==='/v1/ai/generate'){
    const prompts=buildPrompts({postContext:body.post,voiceProfile:body.voiceProfile,recentHistory:body.recentHistory,styleStats:body.styleStats,replyStyle:body.replyStyle});
-   const generated=await executeAiGeneration({reserve:async()=>{await sleep(4);marks.reserved=at();return {kind:'reserved'};},provider:()=>requestConfiguredModel({config:{provider:'qwen',protocol:'openai_chat',baseUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1',modelId:'fixture-model',timeoutMs:5000,maxOutputTokens:1200,options:{}},apiKey:'fixture-only-key',system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:100000,outputRateMicroUsdPerMillion:100000,reservedCostMicroUsd:5000,fetchImpl:async(_url,providerInit)=>{calls.generations++;marks.model_start=at();providerBodies.push(JSON.parse(providerInit.body));if(options.onGenerating)options.onGenerating();if(options.closeDuringGeneration)closeComposer();if(options.draftDuringGeneration){nowEditor.text='User draft';nowEditor.inputListener?.();}await sleep(35);marks.model_end=at();return Response.json({choices:[{finish_reason:'stop',message:{content:options.invalidOutput?'{}':output}}],usage:{prompt_tokens:979,completion_tokens:149}});}}),validate:()=>{},finish:async()=>{await sleep(4);marks.stored=at();}});
+   const generated=await executeAiGeneration({reserve:async()=>{marks.reserve_start=at();await sleep(4);marks.reserved=at();return {kind:'reserved'};},provider:()=>requestConfiguredModel({config:{provider:'qwen',protocol:'openai_chat',baseUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1',modelId:'fixture-model',timeoutMs:5000,maxOutputTokens:1200,options:{}},apiKey:'fixture-only-key',system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:100000,outputRateMicroUsdPerMillion:100000,reservedCostMicroUsd:5000,fetchImpl:async(_url,providerInit)=>{calls.generations++;marks.model_start=at();providerBodies.push(JSON.parse(providerInit.body));if(options.onGenerating)options.onGenerating();if(options.closeDuringGeneration)closeComposer();if(options.draftDuringGeneration){nowEditor.text='User draft';nowEditor.inputListener?.();}await sleep(35);marks.model_end=at();return Response.json({choices:[{finish_reason:'stop',message:{content:options.invalidOutput?'{}':output}}],usage:{prompt_tokens:979,completion_tokens:149}});}}),validate:()=>{},finish:async()=>{await sleep(4);marks.stored=at();}});
    if(generated.kind==='failed')return Response.json({code:'AI_PROVIDER_UNAVAILABLE',message:'Fixture provider failure'},{status:503});
    return Response.json({raw:generated.raw,quota:{totalRemaining:200-calls.debits}});
   }
   if(p.endsWith('/delivered')){calls.acks++;marks.ack_start=at();await sleep(12);if(options.ackLost)return Response.json({code:'DELIVERY_CONFIRMATION_PENDING',message:'Fixture ACK unavailable'},{status:503});if(!calls.debits)calls.debits=1;marks.ack_end=at();return Response.json({ok:true,quota:{totalRemaining:199}});}
   throw Error('Unmocked API path');
  };
+ const fetchApi=async(url,init)=>{const begin=at(),path=new URL(url).pathname;try{return await routeApi(url,init);}finally{apiTimings.push({path,durationMs:at()-begin});}};
  const chrome={runtime:{id:'fixture-extension',onInstalled:event(),onMessage:event(),getURL:p=>p},contextMenus:{onClicked:event()},storage:{local,session,onChanged:event()},tabs:{query:async()=>[],sendMessage:async()=>{}},sidePanel:{}};
  const common={console,URL,Response,AbortController,TextEncoder,structuredClone,crypto:{randomUUID},setTimeout:timed(setTimeout),clearTimeout,setInterval:timed(setInterval),clearInterval,performance,fetch:fetchApi,chrome};
  const background=vm.createContext({...common});vm.runInContext(bundles.get(sourceRoot),background);
@@ -78,7 +79,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   await sleep(10);
   const clickAt=at();marks.click=clickAt;
   listeners.pointerdown({isTrusted:true,type:'pointerdown',target:control});listeners.click({isTrusted:true,type:'click',target:control});
-  if(options.waitForFailure){await sleep(250);}else await Promise.race([applied,sleep(1000).then(()=>{throw Error('Fixture did not apply: '+outputs.join(';'));})]);
-  return {scenario,calls,elapsedMs:marks.verified==null?null:marks.verified-clickAt,marks:Object.fromEntries(Object.entries(marks).map(([k,v])=>[k,v-clickAt])),dns:times.dns_A+times.dns_AAAA,report:content.replyCopilotPerformanceReport?.(),messages:outputs,promptHashes:providerBodies.map(body=>createHash('sha256').update(JSON.stringify(body)).digest('hex'))};
+  if(options.waitForFailure){await sleep(250);}else await Promise.race([applied,sleep(options.deadlineMs||1000).then(()=>{throw Error('Fixture did not apply: '+outputs.join(';'));})]);
+  return {scenario,calls,requestPaths:paths,apiTimings,elapsedMs:marks.verified==null?null:marks.verified-clickAt,marks:Object.fromEntries(Object.entries(marks).map(([k,v])=>[k,v-clickAt])),dns:times.dns_A+times.dns_AAAA,report:content.replyCopilotPerformanceReport?.(),messages:outputs,promptHashes:providerBodies.map(body=>createHash('sha256').update(JSON.stringify(body)).digest('hex'))};
  }finally{for(const timer of timers){clearTimeout(timer);clearInterval(timer);}globalThis.fetch=originalFetch;}
 }
