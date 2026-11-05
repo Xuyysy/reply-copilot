@@ -58,3 +58,52 @@ test('late failure racing cleanup cannot release a different reservation in the 
  assert.equal(f.sql.prepare("SELECT state FROM ai_credit_allocations WHERE request_id='fresh'").get().state,'reserved');assert.equal(f.sql.prepare('SELECT generation_reserved_credits FROM credit_batches').get().generation_reserved_credits,1);assert.equal(f.sql.prepare('SELECT free_generation_reserved FROM credit_accounts').get().free_generation_reserved,1);assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts').get().free_balance,200);
  }finally{Date.now=realNow;f.sql.close();}
 });
+
+test('Staging releases abandoned generation reservations after 10 minutes without spending credits',async()=>{
+ const f=fixture();try{
+  prepare(f,{age:11*60000});f.env.ENVIRONMENT='staging';
+  await cleanup(f);await cleanup(f);
+  assert.deepEqual({...f.sql.prepare('SELECT free_balance,paid_balance,free_generation_reserved FROM credit_accounts').get()},{free_balance:200,paid_balance:0,free_generation_reserved:0});
+  assert.equal(f.sql.prepare('SELECT status FROM ai_requests').get().status,'upstream_failed');
+  assert.equal(f.sql.prepare('SELECT state FROM ai_credit_allocations').get().state,'released');
+  assert.deepEqual({...f.sql.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days').get()},{reserved_micro_usd:0,settled_micro_usd:100});
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_release'").get().n,1);
+ }finally{f.sql.close();}
+});
+test('Staging does not prematurely release an in-flight or already delivered generation',async()=>{
+ for(const options of [{age:60_000},{age:11*60000,raw:'model response'},{age:11*60000,consumed:1},{age:11*60000,confirmed:1},{age:11*60000,phase:'awaiting_delivery',raw:'model response'}]){
+  const f=fixture();try{
+   prepare(f,options);f.env.ENVIRONMENT='staging';
+   await cleanup(f);
+   assert.equal(f.sql.prepare('SELECT state FROM ai_credit_allocations').get().state,'reserved');
+  }finally{f.sql.close();}
+ }
+});
+test('Development continues to skip the deployed-environment abandoned generation sweep',async()=>{
+ const f=fixture();try{
+  prepare(f,{age:11*60000});f.env.ENVIRONMENT='development';
+  await cleanup(f);
+  assert.equal(f.sql.prepare('SELECT status FROM ai_requests').get().status,'reserved');
+  assert.equal(f.sql.prepare('SELECT state FROM ai_credit_allocations').get().state,'reserved');
+ }finally{f.sql.close();}
+});
+test('Staging recovery rolls back atomically when budget accounting is inconsistent',async()=>{
+ const f=fixture();try{
+  prepare(f,{age:11*60000});f.env.ENVIRONMENT='staging';
+  f.sql.exec('UPDATE ai_budget_days SET reserved_micro_usd=0');
+  await assert.rejects(cleanup(f));
+  assert.equal(f.sql.prepare('SELECT status FROM ai_requests').get().status,'reserved');
+  assert.equal(f.sql.prepare('SELECT state FROM ai_credit_allocations').get().state,'reserved');
+  assert.equal(f.sql.prepare('SELECT free_generation_reserved FROM credit_accounts').get().free_generation_reserved,1);
+ }finally{f.sql.close();}
+});
+test('Staging recovery cannot debit a generation that completes after its abandonment claim',async()=>{
+ const f=fixture();try{
+  prepare(f,{age:11*60000});f.env.ENVIRONMENT='staging';
+  await cleanup(f);
+  await finishGeneration(f.env,'test-user','stuck','late model response',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:2});
+  const r=f.sql.prepare('SELECT status,raw_response,consumed FROM ai_requests').get();
+  assert.equal(r.status,'upstream_failed');assert.equal(r.raw_response,null);assert.equal(r.consumed,0);
+  assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts').get().free_balance,200);
+ }finally{f.sql.close();}
+});

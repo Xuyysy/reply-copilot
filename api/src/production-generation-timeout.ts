@@ -1,12 +1,13 @@
 import type { Env } from './types';
 import { uuid } from './security';
 
-/** Production only. Provider timeout is 25s; 10min without a result is abandoned.
+/** Staging and Production: a provider request with no result after 10min is abandoned.
  * Release user reservations, never grant credits or erase possible provider cost.
  * A per-batch claim gates every mutation against late completion / repeated reads.
  */
 export async function releaseStaleProductionGenerations(env: Env, now: number, userId?: string): Promise<void> {
-  if (env.ENVIRONMENT !== 'production') return;
+  // Staging must recover orphaned reservations too; never run against local dev.
+  if (env.ENVIRONMENT !== 'production' && env.ENVIRONMENT !== 'staging') return;
   const cutoff = now - 10 * 60_000;
   const eligible = `status IN ('reserved','uncertain') AND consumed=0 AND generation_phase='generating'
     AND raw_response IS NULL AND response_expires_at IS NULL AND created_at<?
