@@ -60,7 +60,7 @@ available. Browser/network/VPN/Cloudflare challenge failure remains unconfirmed.
 
 ## Evidence
 
-- Full suite 761/761, zero failures/skips; API/Web types pass after Astro build.
+- Full suite 762/762, zero failures/skips; API/Web types pass after Astro build.
 - Isolated real Chrome + actual React: production baseline fe7ac405 fails the
   pre-verification disabled-submit assertion; candidate passes. Mock response
   processed-but-lost sends exactly once; fields retained, code-entry recovery
@@ -105,3 +105,7 @@ No production account/financial data restoration is part of this workflow.
 
 References: https://developers.cloudflare.com/turnstile/get-started/client-side-rendering/widget-configurations/
 and https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/.
+
+Detached-widget follow-up: a regression failed before the consume-time node
+connection guard and passes after it. This closes the DOM removal / React effect
+cleanup gap without changing server verification.
