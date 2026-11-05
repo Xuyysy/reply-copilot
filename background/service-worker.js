@@ -10,6 +10,7 @@ import { VoiceProfileService } from "../services/voice-profile-service.js";
 import { UsageService } from "../services/usage-service.js";
 import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
 import { HostedAIClient } from "../services/hosted-ai-client.js";
+import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
 
 let performanceEnabled = false;
@@ -25,7 +26,7 @@ const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
 const deliveryCoordinator = new DeliveryCoordinator({
-  storage: chrome.storage.session,
+  storage: chrome.storage.local,
   getAccountId: async () => (await accountClient.fetchCurrentUser()).user?.userId,
   createClient: () => new HostedAIClient({ accountClient }),
 });
@@ -119,7 +120,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try { if (await accountClient.pollDeviceAuthorization()) accountStates.invalidate(); } catch (error) { if (!/已过期/.test(error?.message || "")) throw error; }
       }
       const state = await accountStates.getState({ force: pending });
-      sendResponse({ ok: true, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
+      const recoveryRequired=state.status==='credits_exhausted' && ['running','ready','expired'].includes((await new HostedAIClient({accountClient}).recoverGeneration().catch(()=>({state:'unknown'}))).state);
+      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
     })().catch(() => sendResponse({ ok: false, status: "auth_unavailable" }));
     return true;
   }
@@ -164,6 +166,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!fromExtensionPage) { sendResponse({ ok: false }); return false; }
     void broadcastSettingsChanged();
     sendResponse({ ok: true }); return false;
+  }
+  if(message?.type === "REPLY_COPILOT_RECOVER_GENERATION"){
+    if((!fromXPage&&!fromExtensionPage)||typeof message.abandon!=='boolean'){sendResponse({ok:false});return false;}
+    void deliveryCoordinator.recoverPending({abandon:message.abandon}).then(state=>{accountStates.invalidate();return sendResponse({ok:true,...state,...(state.raw?{result:parseAIOutput(state.raw),raw:undefined}:{})});},error=>sendResponse({ok:false,error:error?.message||'恢复失败，请重试。',code:error?.code||'NETWORK_ERROR'}));
+    return true;
   }
   if (message?.type === "REPLY_COPILOT_GENERATE") {
     if (!fromXPage || typeof message.requestId !== "string" || typeof message.sourceText !== "string" || message.sourceText.length > 12000 || !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) { sendResponse({ ok: false, error: "无法验证当前帖子。请打开侧边栏重试。" }); return false; }

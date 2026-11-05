@@ -12,7 +12,7 @@ import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTest
 import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
-import { acknowledgeDelivery } from "./quota";
+import { acknowledgeDelivery, recoverGeneration } from "./quota";
 import { jsonBody, nowMs, uuid } from "./security";
 import { cleanup } from "./cleanup";
 import { xiaodouConnectivityDiagnostic } from "./xiaodou-connectivity-diagnostic";
@@ -98,6 +98,9 @@ export default {
       if (request.method === "POST" && path === "/v1/extension/approve") return await approveDevice(request, env);
       if (request.method === "POST" && path === "/v1/extension/exchange") return await exchangeDevice(request, env);
       if (request.method === "POST" && path === "/v1/ai/generate") return await generate(request, env);
+      const recovery=path.match(/^\/v1\/ai\/requests\/([0-9a-f-]{36})(\/abandon)?$/i);
+      if(request.method==='GET'&&path==='/v1/ai/requests/active')return await recoverGeneration(request,env);
+      if(recovery&&((request.method==='GET'&&!recovery[2])||(request.method==='POST'&&recovery[2])))return await recoverGeneration(request,env,recovery[1],Boolean(recovery[2]));
       const deliveryAck=path.match(/^\/v1\/ai\/requests\/([0-9a-f-]{36})\/delivered$/i);
       if(request.method==="POST"&&deliveryAck)return await acknowledgeDelivery(request,env,deliveryAck[1]);
       if (request.method === "POST" && path === "/v1/feedback") return await feedback(request, env);

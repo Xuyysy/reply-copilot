@@ -2,7 +2,7 @@ import { releaseStaleProductionGenerations } from "./production-generation-timeo
 import type { Env, Session } from "./types";
 import { ApiFailure } from "./types";
 import { nowMs, shanghaiDay, uuid } from "./security";
-import { sessionFor } from "./auth";
+import { sessionFor, takeRate } from "./auth";
 import { response } from "./http";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
@@ -77,6 +77,7 @@ async function existing(env: Env, userId: string, requestId: string): Promise<St
   return env.DB.prepare("SELECT status,generation_phase,request_hash,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId, requestId).first<StoredRequest>();
 }
 async function replay(env: Env, userId: string, requestId: string, hash: string, row: StoredRequest, now: number): Promise<Reservation> {
+  if(row.status === "upstream_failed" && row.request_hash === "") throw new ApiFailure(409,"GENERATION_FAILED","原生成已结束，请重新生成。 ");
   if (row.request_hash !== hash) throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同内容。");
   if ((row.status === "succeeded" || row.generation_phase === "awaiting_delivery") && row.raw_response && row.response_expires_at && row.response_expires_at > now) return { kind: "replay", raw: row.raw_response, quota: await balance(env, userId) };
   if (row.status === "reserved") throw new ApiFailure(409, "GENERATION_IN_PROGRESS", "这条回复仍在生成或确认交付，请稍后再试。", 3);
@@ -158,17 +159,17 @@ export async function checkGenerationReplay(env: Env, session: Session, requestI
 }
 
 
-export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number;usageQuality?:"verified"|"estimated"}): Promise<void> {
+export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number;usageQuality?:"verified"|"estimated"}): Promise<boolean | void> {
   const now=nowMs(), ref=uuid();
-  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd,provider_config_id,provider_config_version FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved'").bind(userId,requestId).first<{budget_reserved_micro_usd:number;provider_config_id:string|null;provider_config_version:number|null}>();
-  if(!row)return;
+  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd,provider_config_id,provider_config_version FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(userId,requestId).first<{budget_reserved_micro_usd:number;provider_config_id:string|null;provider_config_version:number|null}>();
+  if(!row)return false;
   const actual=usage&&Number.isSafeInteger(usage.costMicroUsd)&&usage.costMicroUsd>=0?usage.costMicroUsd:row.budget_reserved_micro_usd;
   if(raw){
-    await env.DB.batch([
+    const settled=await env.DB.batch([
       env.DB.prepare("UPDATE ai_requests SET raw_response=?,generation_phase='awaiting_delivery',response_expires_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(raw,now+10*60_000,ref,userId,requestId),
       env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=MAX(0,reserved_micro_usd-(SELECT budget_reserved_micro_usd FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)),settled_micro_usd=settled_micro_usd+? WHERE budget_day=(SELECT budget_day FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=?)").bind(userId,requestId,ref,actual,userId,requestId,ref),
       env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version,usage_quality) SELECT ?,?,?,?,?,?,?,provider_config_id,provider_config_version,? FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=? ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,usage?.usageQuality||"verified",userId,requestId,ref),
-    ]);return;
+    ]);return settled[0].meta.changes===1;
   }
   const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
   if(!allocation)return;
@@ -223,4 +224,36 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
   }
   if(batch[5].meta.changes!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId)},200,env,request);
+}
+
+
+/** Read-only recovery: ownership comes only from the authenticated extension session. */
+async function recoveryState(env:Env,userId:string,requestId?:string):Promise<any>{
+  const row= requestId
+    ? await env.DB.prepare("SELECT request_id,status,generation_phase,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<any>()
+    : await env.DB.prepare("SELECT request_id,status,generation_phase,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND status IN ('reserved','uncertain') ORDER BY CASE generation_phase WHEN 'generating' THEN 0 ELSE 1 END,created_at LIMIT 1").bind(userId).first<any>();
+  if(!row)return {state:'missing',requestId:requestId||null};
+  if(row.status==='upstream_failed')return {state:'released',requestId:row.request_id};
+  if(row.status==='succeeded')return {state:'delivered',requestId:row.request_id,...(row.raw_response&&row.response_expires_at>nowMs()?{raw:row.raw_response}:{})};
+  if(row.raw_response && row.response_expires_at>nowMs() && (row.status==='succeeded'||(row.status==='reserved'&&row.generation_phase==='awaiting_delivery')))return {state:'ready',requestId:row.request_id,raw:row.raw_response};
+  if(row.status==='succeeded')return {state:'delivered',requestId:row.request_id};
+  return {state:row.raw_response?'expired':'running',requestId:row.request_id};
+}
+export async function recoverGeneration(request:Request,env:Env,requestId?:string,abandon=false):Promise<Response>{
+  const {session}=await sessionFor(request,env);
+  if(session.kind!=='extension')throw new ApiFailure(403,'FORBIDDEN','仅绑定插件可恢复生成。');
+  if(!await takeRate(env,`ai-recovery:${session.user_id}`,60,60_000,nowMs()))throw new ApiFailure(429,'RATE_LIMITED','恢复操作过于频繁，请稍后再试。');
+  let state=await recoveryState(env,session.user_id,requestId);
+  if(!abandon||['released','ready','delivered'].includes(state.state))return response(state,200,env,request);
+  if(!requestId)throw new ApiFailure(400,'INVALID_REQUEST','请指定旧生成请求。');
+  if(!await takeRate(env,`ai-abandon-minute:${session.user_id}`,2,60_000,nowMs())||!await takeRate(env,`ai-abandon-hour:${session.user_id}`,6,3600_000,nowMs()))throw new ApiFailure(429,'RECOVERY_RATE_LIMIT','放弃操作过于频繁，请稍后恢复上一条。');
+  // A delayed HTTP request might not have reserved yet: keep a terminal tombstone,
+  // never merely clear client storage and permit that envelope to execute later.
+  await env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,completed_at,generation_phase)
+    VALUES(?,?,?,?,'upstream_failed',0,'',?,?,'unknown') ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,shanghaiDay(nowMs()),uuid(),nowMs(),nowMs()).run();
+  if(state.state==='expired')await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
+  else await releaseStaleProductionGenerations(env,nowMs(),session.user_id,requestId);
+  state=await recoveryState(env,session.user_id,requestId);
+  if(state.state==='running')throw new ApiFailure(409,'RECOVERY_NOT_SAFE','暂时无法安全结束此任务，请恢复上一条或稍后再试。');
+  return response(state,200,env,request);
 }

@@ -47,6 +47,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   if(p==='/v1/me')return Response.json({user:{userId:'fixture-owner',username:'fixture'}});
   if(p==='/v1/entitlements')return Response.json({status:options.quotaExhausted?'credits_exhausted':'credits_available',entitlement:{}});
   if(p==='/v1/usage')return Response.json({quota:{totalRemaining:options.quotaExhausted?0:200-calls.debits}});
+  if(p==='/v1/ai/requests/active'||/^\/v1\/ai\/requests\/[^/]+$/.test(p))return Response.json({state:'missing'});
   const body=JSON.parse(init.body||'{}');
   if(p==='/v1/ai/generate'){
    const prompts=buildPrompts({postContext:body.post,voiceProfile:body.voiceProfile,recentHistory:body.recentHistory,styleStats:body.styleStats,replyStyle:body.replyStyle});
