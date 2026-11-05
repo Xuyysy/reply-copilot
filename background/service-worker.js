@@ -1,4 +1,5 @@
 import "../utils/generation-performance.js";
+import { RUNTIME_CONFIG } from "../config/runtime.js";
 import { createReplyRequest } from "../domain/reply-request.js";
 import { StorageService, API_KEY_KEY, HISTORY_KEY, ONBOARDING_COMPLETE_KEY } from "../services/storage-service.js";
 import { AIProviderRouter } from "../services/ai-provider-router.js";
@@ -7,7 +8,8 @@ import { accountStatusLabel } from "../domain/account-state.js";
 import { ReplyEngine } from "../services/reply-engine.js";
 import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
-import { UsageService } from "../services/usage-service.js";
+import {generatedHistory,generatedUsage} from "../services/generation-records.js";
+import { UsageService, USAGE_KEY } from "../services/usage-service.js";
 import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
 import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { parseAIOutput } from "../utils/output-parser.js";
@@ -29,6 +31,10 @@ const deliveryCoordinator = new DeliveryCoordinator({
   storage: chrome.storage.local,
   getAccountId: () => accountStates.getOwnerId(),
   createClient: () => new HostedAIClient({ accountClient }),
+  completion:{keys:[HISTORY_KEY,USAGE_KEY],patch:(data,receipt)=>{
+    const meta={requestId:receipt.input.requestId,recommendation:JSON.parse(receipt.raw).recommendation,createdAt:new Date().toISOString()};
+    return {[HISTORY_KEY]:generatedHistory(data[HISTORY_KEY]||[],meta),[USAGE_KEY]:generatedUsage(data[USAGE_KEY]||[],meta)};
+  },fallback:async(record,raw)=>{if(raw)await Promise.allSettled([history.recordGeneration({requestId:record.input.requestId,result:JSON.parse(raw)}),usage.track('generated',{requestId:record.input.requestId})]);}},
 });
 const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
 const activeRequests = new Map();
@@ -86,6 +92,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return false;
   const fromXPage = X_PAGE.test(sender.url || sender.tab?.url || "");
   const fromExtensionPage = EXTENSION_PAGE.test(sender.url || "");
+  if (message?.type === "REPLY_COPILOT_PERFORMANCE_CONTROL") {
+    if (!fromExtensionPage || RUNTIME_CONFIG.channel !== "staging") { sendResponse({ok:false});return false; }
+    void (async()=>{
+      await performanceReady;
+      if(typeof message.enabled === "boolean"){
+        await chrome.storage.session.set({generationPerformanceEnabled:message.enabled});
+        performanceEnabled=message.enabled;
+      }
+      if(message.clear===true)performanceSamples.clear();
+      sendResponse({ok:true,enabled:performanceEnabled,report:performanceSamples.report()});
+    })().catch(()=>sendResponse({ok:false}));return true;
+  }
   if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
     void performanceReady.then(()=>sendResponse({enabled:performanceEnabled}));return true;
@@ -182,13 +200,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
         const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
-        // Local history is best effort: a storage failure must not discard a usable AI draft.
-        // Keep writes awaited for MV3 suspension safety; overlap the independent
-        // account label lookup instead of dropping persistence after sendResponse.
-        const [,accountLabel] = await Promise.all([
-          trace.measure("local_bookkeeping",()=>Promise.allSettled([history.recordGeneration({ requestId: message.requestId, result }), usage.track("generated", { requestId: message.requestId })])),
-          trace.measure("account_label",()=>accountStates.getState().then(accountStatusLabel, () => "授权状态暂时无法确认")),
-        ]);
+        // ACK + receipt/history/usage have already been durably awaited together.
+        // Labels are display-only: never start a refresh before returning a draft.
+        const labelStarted=performance.now();
+        const accountLabel=accountStatusLabel(accountStates.peekState()||{});
+        trace.addDurations({account_label:performance.now()-labelStarted});
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         if (Number.isInteger(sender.tab?.id)) {
           generatedInputs.set(message.requestId, { tabId: sender.tab.id, replies: result.replies });

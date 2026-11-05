@@ -1,3 +1,4 @@
+import {withLocalRecordWrite} from "./local-record-write.js";
 // Delivery coordination. No token, raw request or result is logged. Pending
 // inputs live in trusted extension local storage, so worker suspension does
 // not erase the exact payload required by the server's idempotency contract.
@@ -11,8 +12,8 @@ function envelope(input){
   return JSON.parse(JSON.stringify(Object.fromEntries(['requestId','sourceText','sourceUrl','voiceProfile','recentHistory','styleStats','replyStyle'].map(key=>[key,input[key]]))));
 }
 export class DeliveryCoordinator {
-  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;
+  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
@@ -35,6 +36,7 @@ export class DeliveryCoordinator {
     const same=completed.find(row=>row.input.requestId===input.requestId);
     if(same){
       if(!sameSource(same.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
+      if(this.completion&&!same.localRecordsCommitted)await this.remember(same,completed);
       this.lastQuota=same.quota;return same.raw;
     }
     if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
@@ -78,7 +80,7 @@ export class DeliveryCoordinator {
       if(this.fenced.has(record.ownerId+':'+record.input.requestId))throw fail('GENERATION_ABANDONED','本次生成已结束。');
       this.lastQuota=client.lastQuota||null;
       const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
-      await this.remember(record,retained);
+      await (performanceTrace?performanceTrace.measure("delivery_persist",()=>this.remember(record,retained)):this.remember(record,retained));
       return {raw,completed:retained};
     }catch(error){
       if(RELEASED.has(error?.code))await this.clearResolved(record);
@@ -96,7 +98,24 @@ export class DeliveryCoordinator {
   async remember(record,retained){
     this.memory=retained;
     if(this.pendingMemory?.input.requestId===record.input.requestId)this.pendingMemory=null;
-    await this.writeLocked(async()=>{const data=await this.storage.get([PENDING,COMPLETED]);const rows=[...(data[COMPLETED]||[]),...retained];const unique=[...new Map(rows.map(r=>[r.ownerId+':'+r.input.requestId,r])).values()].slice(-4);const match=data[PENDING]?.ownerId===record.ownerId&&data[PENDING]?.input.requestId===record.input.requestId;await this.storage.set({...(match?{[PENDING]:null}:{}),[COMPLETED]:unique});}).catch(()=>{});
+    try{
+      await this.writeLocked(()=>withLocalRecordWrite(this.storage,async()=>{
+        const data=await this.storage.get([PENDING,COMPLETED,...(this.completion?.keys||[])]);
+        const rows=[...(data[COMPLETED]||[]),...retained];
+        const unique=[...new Map(rows.map(r=>[r.ownerId+':'+r.input.requestId,r])).values()].slice(-4);
+        const receipt=unique.find(r=>r.ownerId===record.ownerId&&r.input.requestId===record.input.requestId);
+        const extra=this.completion?this.completion.patch(data,receipt):{};
+        if(this.completion)receipt.localRecordsCommitted=true;
+        const match=data[PENDING]?.ownerId===record.ownerId&&data[PENDING]?.input.requestId===record.input.requestId;
+        await this.storage.set({...(match?{[PENDING]:null}:{}),[COMPLETED]:unique,...extra});
+        this.memory=unique;
+      }));
+    }catch{
+      // Storage failure keeps the previous awaited best-effort path, never a
+      // fire-and-forget task. A later replay can retry the merged durable commit.
+      for(const row of this.memory)if(row.input.requestId===record.input.requestId)row.localRecordsCommitted=false;
+      await this.completion?.fallback?.(record,retained.find(r=>r.input.requestId===record.input.requestId)?.raw).catch(()=>{});
+    }
   }
   recoverPending({abandon=false}={}){
     if(this.recovery)return this.recovery;

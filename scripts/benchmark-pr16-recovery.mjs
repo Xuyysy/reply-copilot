@@ -2,7 +2,7 @@
 import {fixture,temp} from '../api/tests/helpers/payment-v2.mjs';import {randomUUID,createHash} from 'node:crypto';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {writeFileSync} from 'node:fs';import path from 'node:path';import {executeAiGeneration} from '../api/src/ai-generation-flow.js';
 const require=createRequire(new URL('../api/package.json',import.meta.url));require('esbuild').buildSync({entryPoints:[new URL('../api/src/quota.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',outfile:temp+'/benchmark-quota.cjs'});const q=require(temp+'/benchmark-quota.cjs');
 const raw=JSON.stringify({recommendation:'reply',defaultStyle:'natural',language:'en',replies:{natural:'One detail.',light_humor:'A small joke.',thoughtful:'A different perspective.'},reason:'Relevant.',quoteCandidate:null});
-const roots={baseline:'/private/tmp/reply-copilot-pr16-before-fast',candidate:new URL('..',import.meta.url).pathname},report={parameters:{trialsPerVersion:8,firstProvider:'permanently unresolved',localStorage:'4 kept and 4 lost',backend:'isolated actual D1 schema, same current backend for both clients; backend source unchanged',realModelCalls:0},versions:{}};
+const roots={baseline:process.env.PR16_BENCHMARK_BASELINE||'/private/tmp/reply-copilot-pr16-before-fast',candidate:new URL('..',import.meta.url).pathname},report={parameters:{trialsPerVersion:8,firstProvider:'permanently unresolved',localStorage:'4 kept and 4 lost',backend:'isolated actual D1 schema, same current backend for both clients; same candidate backend; not a backend speed comparison',realModelCalls:0},versions:{}};
 for(const [version,root]of Object.entries(roots)){
  const {DeliveryCoordinator}=await import(pathToFileURL(path.join(root,'services/delivery-coordinator.js'))),{HostedAIClient}=await import(pathToFileURL(path.join(root,'services/hosted-ai-client.js')));let passed=0;const errors=[];
  for(let i=0;i<8;i++){
@@ -22,4 +22,4 @@ for(const [version,root]of Object.entries(roots)){
  }
  report.versions[version]={trials:8,passed,successRate:passed/8,errors};
 }
-writeFileSync('/private/tmp/pr16-fast-recovery-benchmark.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));if(Object.values(report.versions).some(v=>v.successRate!==1))process.exitCode=1;
+writeFileSync(process.env.PR16_BENCHMARK_OUTPUT||'/private/tmp/pr16-fast-recovery-benchmark.json',JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report,null,2));if(Object.values(report.versions).some(v=>v.successRate!==1))process.exitCode=1;

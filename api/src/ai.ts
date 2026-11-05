@@ -90,7 +90,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     trace.addDurations({worker_total:performance.now()-started});
     return {...value,performance:trace.snapshot("success")};
   };
-  const { session } = await sessionFor(request, env);
+  const { session } = await trace.measure("worker_auth",()=>sessionFor(request, env));
   if (session.kind !== "extension") throw new ApiFailure(403, "FORBIDDEN", "请在已绑定的插件中生成回复。");
   const body = await jsonBody(request, 24_000);
   let input: ReturnType<typeof normalizeAiInput>;
@@ -102,14 +102,14 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
   const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
-  const prior=await checkGenerationReplay(env,session,input.requestId,hash);
+  const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
   if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),quota:prior.quota}),200,env,request);
-  const configuredModel=mode==="real"?await activeProvider(env):null;
+  const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
   trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
-    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null)),
+    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true})),
     provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
     if(mode==="real"&&!configuredModel) {

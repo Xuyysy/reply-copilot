@@ -1,0 +1,6 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {buildSync} from 'esbuild';import {createRequire} from 'node:module';import {localPerformanceDb,measure,NOW} from './helpers/d1-performance.mjs';import {temp} from './helpers/payment-v2.mjs';
+buildSync({entryPoints:[new URL('../src/quota.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',outfile:temp+'/preflight-performance.cjs'});
+const {GENERATION_PREFLIGHT_SQL}=createRequire(import.meta.url)(temp+'/preflight-performance.cjs');
+for(const size of [1000,10000])test(`account-scoped preflight reads stay bounded with ${size} historical requests in real workerd`,async()=>{
+ const f=await localPerformanceDb(size);try{await f.applyIndexes();const result=await measure(f.db,GENERATION_PREFLIGHT_SQL,['u0',NOW-600000,NOW,'u0','new']);assert.equal(result.results[0].needs_cleanup,0);assert.ok(result.rowsRead<=10,JSON.stringify(result));assert.ok(result.plan.some(p=>p.includes('SEARCH s USING INDEX')),JSON.stringify(result.plan));assert.ok(!result.plan.some(p=>/SCAN (s|r)\b/.test(p)));console.log(JSON.stringify({fixture:size,rowsRead:result.rowsRead,rowsWritten:result.rowsWritten,plan:result.plan}));}finally{await f.close();}
+});

@@ -1,3 +1,5 @@
+import { RUNTIME_CONFIG } from "../config/runtime.js";
+import { mountPerformancePanel } from "./performance-panel.js";
 import { AIProviderRouter } from "../services/ai-provider-router.js";
 import { HistoryService } from "../services/history-service.js";
 import { ReplyEngine } from "../services/reply-engine.js";
@@ -197,3 +199,5 @@ for (const id of ["quick-style", "quick-language", "quick-length", "quick-humor"
   } catch { $("quick-save-status").textContent = "保存失败，请重试。"; }
 });
 showIdle(); void claimPending();
+
+if(RUNTIME_CONFIG.channel === "staging")mountPerformancePanel(document,chrome.runtime);

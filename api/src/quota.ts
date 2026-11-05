@@ -86,11 +86,22 @@ async function replay(env: Env, userId: string, requestId: string, hash: string,
   throw new ApiFailure(503, "GENERATION_STATUS_UNKNOWN", "这次生成的结果尚未确认，请稍后重试或联系支持。");
 }
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null): Promise<Reservation> {
+// Same request lookup plus one indexed, account-scoped eligibility probe. The
+// expensive cleanup procedure runs only when a real expired candidate exists.
+export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generation_phase,r.request_hash,r.raw_response,r.response_expires_at,
+  EXISTS(SELECT 1 FROM ai_requests s WHERE s.user_id=? AND s.status IN ('reserved','uncertain') AND (
+    (s.generation_phase='generating' AND s.raw_response IS NULL AND s.response_expires_at IS NULL AND s.created_at<?) OR
+    (s.status='reserved' AND s.generation_phase='awaiting_delivery' AND s.response_expires_at IS NOT NULL AND s.response_expires_at<?)
+  )) needs_cleanup
+  FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
+
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
-  await releaseExpiredDeliveryReservations(env, now, session.user_id);
-  const prior = await existing(env, session.user_id, requestId);
-  if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
+  if(!options.prechecked){
+    await releaseExpiredDeliveryReservations(env, now, session.user_id);
+    const prior = await existing(env, session.user_id, requestId);
+    if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
+  }
   const date = shanghaiDay(now);
   const budgetDay = new Date(now).toISOString().slice(0, 10);
   if (!Number.isSafeInteger(budgetReserve) || budgetReserve < 0) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预留无效。");
@@ -104,7 +115,17 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
       CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
       COALESCE(paid_at,granted_at),granted_at,id LIMIT 1`).bind(session.user_id).first<CreditBatch>();
-  if (!lot) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+  if (!lot) {
+    // A replay window can expire between preflight and allocation. Retry only
+    // the reservation after bounded cleanup, never repeat an upstream call.
+    if(options.prechecked&&!options.cleanupRetried){
+      await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
+      const concurrent=await existing(env,session.user_id,requestId);
+      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs());
+      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{prechecked:true,cleanupRetried:true});
+    }
+    throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+  }
   // Provider execution is serialized; completed results keep their own quota
   // reservation and replay/ACK contract without locking unrelated new replies.
   const nonce = uuid(), allocationId = uuid();
@@ -153,9 +174,13 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
 
 export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string): Promise<Reservation | null> {
   const now = nowMs();
-  await releaseExpiredDeliveryReservations(env, now, session.user_id);
-  const prior = await existing(env, session.user_id, requestId);
-  return prior ? replay(env, session.user_id, requestId, requestHash, prior, now) : null;
+  const inspection=await env.DB.prepare(GENERATION_PREFLIGHT_SQL).bind(session.user_id,now-600000,now,session.user_id,requestId).first<StoredRequest & {request_id:string|null;needs_cleanup:number}>();
+  if(inspection?.needs_cleanup){
+    await releaseExpiredDeliveryReservations(env,now,session.user_id);
+    const prior=await existing(env,session.user_id,requestId);
+    return prior?replay(env,session.user_id,requestId,requestHash,prior,now):null;
+  }
+  return inspection?.request_id?replay(env,session.user_id,requestId,requestHash,inspection,now):null;
 }
 
 

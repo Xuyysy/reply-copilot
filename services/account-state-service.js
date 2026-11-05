@@ -18,6 +18,7 @@ export class AccountStateService {
     const state=await this.getState({force:true});
     return this.cachedToken===token ? state.user?.userId||null : null;
   }
+  peekState() { return this.cached; }
   updateServerQuota(quota) {
     if (this.cached?.source !== "server" || !Number.isInteger(quota?.totalRemaining)) return;
     this.cached = createAccountState({ ...this.cached, status: quota.totalRemaining <= 0 ? "credits_exhausted" : "credits_available", quota }, "server");
