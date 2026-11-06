@@ -27,3 +27,21 @@ Authenticated cashier expiration and actual account scenarios remain user accept
 ## Rollback and future Production
 Staging Worker rollback: `4e8f58d3-8d15-4bf1-a55a-ba1ae9fd0747`; Pages rollback: `db63ae14-9f9d-485f-858e-dba4af12e658`. Roll back Pages first, then Worker if required. No database restore or data rollback. Preserve the current live settings, secrets, D1, cron and routes.
 Future Production requires separate authorization and fresh source/settings checks. Apply the tiny API read-side patch to the actual Production Worker source (not this Pages baseline); deploy Worker before its matching Pages. Current old clients remain compatible with additive fields. If reverting only the Worker while retaining the new UI, continuation fails closed until UI rollback; no new order can be created.
+
+## Published Staging record (2026-11-06)
+- Feature source (Production Pages baseline, not deployed to Production): `584e3c50ee5959546fd9e0b0a4ef31ab05704e84`, branch `codex/issue18-payment-ux-20261106`; full suite 770/770.
+- Staging Pages source: `bd253d8dbcb27619c93d0ee42c4378b0b948172a`, branch `codex/issue18-staging-pages-20261106`; full suite 784/784; API/Web types and explicit Staging build pass.
+- Staging Pages deployment: `46b8d400-7293-4fdb-a38a-f92b9fce2578`.
+- Staging Worker source: `da779958b1fb5809aaeb8d0ffed1da520901f6ba`, branch `codex/issue18-staging-worker-20261106`; full suite 803/803, API types and dry-run pass.
+- Staging Worker version: `e6c967d3-1f47-46f3-98bc-9e56c9ca4c9f`; deployment `4822556d-052f-4217-88bf-9808dcf92a57`, 100%.
+- Candidate versus prior version: all 42 binding definitions equal; live post-deployment bindings, compatibility settings, usage model, placement, observability, tail consumers, logpush, cron and routes equal.
+- Staging health/packages HTTP 200; payments available with existing Alipay/WeChat channels; unauthenticated /me and order detail remain HTTP 401. No real payment, model generation, new order, account balance modification or remote D1 SQL was performed.
+- Production unchanged: Pages `4c13744f-070e-4c59-aa5d-27b20650f74f`; Worker `ed4402fa-a80a-42d8-adec-8066cd914b95`, deployment `b4f9b9fb-a2b7-41ff-a641-2471d925f5bf`.
+- Authenticated Staging acceptance is pending the user's manual checks; public checks and synthetic browser tests do not imply a real cashier payment or expiration-lifetime verification.
+
+Executable rollback commands (only if rollback is needed):
+```sh
+wrangler pages deployment rollback db63ae14-9f9d-485f-858e-dba4af12e658 --project-name x-reply-helper-staging
+wrangler versions deploy 4e8f58d3-8d15-4bf1-a55a-ba1ae9fd0747@100 --config /private/tmp/issue18-staging-live.json --yes
+```
+Recheck live settings/version before running; no database restore. The local temporary config targets Staging only and contains no Secret values. If unavailable, use Cloudflare's existing project deployment history for the same IDs.
