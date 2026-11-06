@@ -24,3 +24,5 @@ test("request timeout helper preserves successful results and caller cancellatio
   controller.abort();
   await assert.rejects(pending, (error) => error?.name === "AbortError");
 });
+
+test('an already cancelled operation is never invoked',async()=>{const c=new AbortController();c.abort();let invoked=0;await assert.rejects(withRequestTimeout(()=>{invoked++;},100,c.signal));assert.equal(invoked,0);});
