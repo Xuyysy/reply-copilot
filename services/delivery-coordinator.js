@@ -100,7 +100,7 @@ export class DeliveryCoordinator {
     if(this.pendingMemory?.input.requestId===record.input.requestId)this.pendingMemory=null;
     try{
       await this.writeLocked(()=>withLocalRecordWrite(this.storage,async()=>{
-        const data=await this.storage.get([PENDING,COMPLETED,...(this.completion?.keys||[])]);
+        const data=await this.storage.get([PENDING,COMPLETED,...(typeof this.completion?.keys==='function'?this.completion.keys(record):(this.completion?.keys||[]))]);
         const rows=[...(data[COMPLETED]||[]),...retained];
         const unique=[...new Map(rows.map(r=>[r.ownerId+':'+r.input.requestId,r])).values()].slice(-4);
         const receipt=unique.find(r=>r.ownerId===record.ownerId&&r.input.requestId===record.input.requestId);
@@ -114,7 +114,7 @@ export class DeliveryCoordinator {
       // Storage failure keeps the previous awaited best-effort path, never a
       // fire-and-forget task. A later replay can retry the merged durable commit.
       for(const row of this.memory)if(row.input.requestId===record.input.requestId)row.localRecordsCommitted=false;
-      await this.completion?.fallback?.(record,retained.find(r=>r.input.requestId===record.input.requestId)?.raw).catch(()=>{});
+      await this.completion?.fallback?.(record,retained.find(r=>r.input.requestId===record.input.requestId)?.raw,retained.find(r=>r.input.requestId===record.input.requestId)).catch(()=>{});
     }
   }
   recoverPending({abandon=false}={}){
@@ -141,6 +141,7 @@ export class DeliveryCoordinator {
     if(['ready','delivered'].includes(state.state)&&state.raw){
       const raw=await client.receiveDelivery(state);this.lastQuota=client.lastQuota||null;
       if(record&&record.input.requestId===state.requestId)await this.remember(record,[...(data[COMPLETED]||[]),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4));
+      if(!record||record.input.requestId!==state.requestId)await this.completion?.recovered?.({ownerId,input:{requestId:state.requestId},raw,completedAt:this.clock()}).catch(()=>{});
       if(record&&record.input.requestId!==state.requestId&&abandon)await this.clearResolved(record);
       this.tail=Promise.resolve();return {state:'ready',requestId:state.requestId,raw};
     }

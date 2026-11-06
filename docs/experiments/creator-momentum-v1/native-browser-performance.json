@@ -1,0 +1,230 @@
+{
+  "environment": "Isolated headless Chrome, synthetic post/editor and fixed mock AI. Not real X/vendor timings.",
+  "baseline": "3cebe3ecbee552ef5b0e68afc7882a2dfb3869fa",
+  "samples": {
+    "paid_off": {
+      "before": {
+        "samples": 12,
+        "display": {
+          "mean": 88.42499999205272,
+          "p50": 86.90000009536743,
+          "p90": 87.90000009536743
+        },
+        "fill": {
+          "mean": 89.00833336512248,
+          "p50": 87.40000009536743,
+          "p90": 88.5
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.100000143051147
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "display": {
+          "mean": 87.33333339293797,
+          "p50": 86.60000014305115,
+          "p90": 89.20000004768372
+        },
+        "fill": {
+          "mean": 87.93333339691162,
+          "p50": 87.40000009536743,
+          "p90": 89.79999995231628
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.200000047683716
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      }
+    },
+    "paid_on_below": {
+      "before": {
+        "samples": 12,
+        "display": {
+          "mean": 86.50833332538605,
+          "p50": 86.20000004768372,
+          "p90": 87.79999995231628
+        },
+        "fill": {
+          "mean": 87.08333333333333,
+          "p50": 86.70000004768372,
+          "p90": 88.5
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.100000143051147
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "display": {
+          "mean": 86.67499995231628,
+          "p50": 86.39999985694885,
+          "p90": 87.39999985694885
+        },
+        "fill": {
+          "mean": 87.2666666507721,
+          "p50": 87.29999995231628,
+          "p90": 88.09999990463257
+        },
+        "ack": {
+          "p50": 13.099999904632568,
+          "p90": 13.199999809265137
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      }
+    },
+    "paid_on_trigger": {
+      "before": {
+        "samples": 12,
+        "display": {
+          "mean": 86.28333330154419,
+          "p50": 85.90000009536743,
+          "p90": 87.39999985694885
+        },
+        "fill": {
+          "mean": 86.86666665474574,
+          "p50": 86.69999980926514,
+          "p90": 88
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.100000143051147
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "display": {
+          "mean": 87.17500003178914,
+          "p50": 86.90000009536743,
+          "p90": 88.40000009536743
+        },
+        "fill": {
+          "mean": 87.81666664282481,
+          "p50": 87.59999990463257,
+          "p90": 89
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.200000047683716
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      }
+    },
+    "free_locked": {
+      "before": {
+        "samples": 12,
+        "display": {
+          "mean": 86.58333335320155,
+          "p50": 86.5,
+          "p90": 87.40000009536743
+        },
+        "fill": {
+          "mean": 87.15833334128062,
+          "p50": 87,
+          "p90": 87.90000009536743
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.100000143051147
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      },
+      "after": {
+        "samples": 12,
+        "display": {
+          "mean": 87.29166664679845,
+          "p50": 87.09999990463257,
+          "p90": 88.09999990463257
+        },
+        "fill": {
+          "mean": 87.94999996821086,
+          "p50": 87.79999995231628,
+          "p90": 88.89999985694885
+        },
+        "ack": {
+          "p50": 13,
+          "p90": 13.099999904632568
+        },
+        "normalHTTP": [
+          2
+        ],
+        "preGenerateRecoveryHTTP": 0,
+        "blockingStorageReads": [
+          2
+        ],
+        "blockingStorageWrites": [
+          2
+        ]
+      }
+    }
+  }
+}

@@ -31,7 +31,7 @@ export class AccountStateService {
       const [account, entitlement, usage] = await Promise.all([this.client.fetchCurrentUser(), this.client.fetchEntitlement(), this.client.fetchUsage()]);
       if(await this.client.token()!==token){this.cachedToken=null;return createAccountState({status:'auth_unavailable'},'server');}
       this.cachedToken=token;
-      return createAccountState({ status: entitlement.status, user: account.user, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, license: entitlement.license }, "server");
+      return createAccountState({ status: entitlement.status, user: account.user, features: entitlement.features ? {...entitlement.features,verifiedAt:Date.now()} : null, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, license: entitlement.license }, "server");
     } catch (error) { return error?.code === "AUTH_REQUIRED" ? createAccountState({ status: "auth_expired" }, "server") : createAccountState({ status: "auth_unavailable" }, "server"); }
   }
 }

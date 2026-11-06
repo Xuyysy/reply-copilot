@@ -1,0 +1,67 @@
+{
+  "environment": "Synthetic DOM/transport/D1 latency; actual fixed source content/background/hosted/provider/ACK paths; no real vendor or X requests.",
+  "before": {
+    "samples": 12,
+    "http": [
+      5
+    ],
+    "normalExtraRecoveryHTTP": 0,
+    "display": {
+      "mean": 156.92000358333323,
+      "p50": 156.98383300000023,
+      "p90": 158.59316699999977
+    },
+    "editor": {
+      "mean": 238.3124792499998,
+      "p50": 238.71312499999976,
+      "p90": 239.48545899999954
+    },
+    "ack": {
+      "mean": 24.528333333333336,
+      "p50": 24.71,
+      "p90": 24.82
+    },
+    "editorBinding": {
+      "mean": 0.16499999999999998,
+      "p50": 0.16,
+      "p90": 0.19
+    },
+    "preflight": {
+      "mean": 30.485833333333336,
+      "p50": 30.48,
+      "p90": 31.42
+    }
+  },
+  "after": {
+    "samples": 12,
+    "http": [
+      5
+    ],
+    "normalExtraRecoveryHTTP": 0,
+    "display": {
+      "mean": 156.44493391666666,
+      "p50": 155.92391599999974,
+      "p90": 159.2985000000001
+    },
+    "editor": {
+      "mean": 237.45966316666667,
+      "p50": 237.39029200000004,
+      "p90": 239.26600000000008
+    },
+    "ack": {
+      "mean": 24.509166666666662,
+      "p50": 24.76,
+      "p90": 24.88
+    },
+    "editorBinding": {
+      "mean": 0.17416666666666666,
+      "p50": 0.17,
+      "p90": 0.2
+    },
+    "preflight": {
+      "mean": 30.299166666666665,
+      "p50": 30.38,
+      "p90": 31.16
+    }
+  }
+}

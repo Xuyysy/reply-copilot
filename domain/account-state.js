@@ -14,7 +14,7 @@ export function createAccountState(value, source = "server") {
     dailyRemaining: value.quota.dailyRemaining,
     resetAt: value.quota.resetAt || null,
   } : null;
-  return Object.freeze({ status: value.status, user: value.user || null, entitlement: value.entitlement || null, trial: value.trial || null, quota, license: value.license || null, lastVerifiedAt: source === "server" ? new Date().toISOString() : null, source });
+  return Object.freeze({ ...(value.features ? {features:value.features} : {}), status: value.status, user: value.user || null, entitlement: value.entitlement || null, trial: value.trial || null, quota, license: value.license || null, lastVerifiedAt: source === "server" ? new Date().toISOString() : null, source });
 }
 
 export function accountStatusLabel(state) {

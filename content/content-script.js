@@ -229,6 +229,7 @@
     if (active !== current || !current.assistant) return response;
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
+    refreshMomentum(current);
     current.assistant.showAccount(current.accountStatus, response?.quota, response?.pending);
     if(response?.recoveryRequired){current.assistant?.setStatus('上一条生成未完成，额度仍在预占。可以恢复或放弃后继续。');current.assistant?.showRecovery?.();}
     if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
@@ -292,6 +293,10 @@
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
   }
+  function refreshMomentum(current,options={}) {
+    const revision=(current.momentumRevision||0)+1;current.momentumRevision=revision;
+    void safeSend({type:'REPLY_COPILOT_MOMENTUM',...options}).then(value=>{if(current.momentumRevision===revision&&contextAlive&&active===current&&!current.cancelled)current.assistant?.setMomentum?.(value);}).catch(()=>{});
+  }
   async function generateActive(requestId) {
     const current = active;
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated) return;
@@ -318,6 +323,7 @@
       // A protected draft, skip recommendation or unsafe focus is not a
       // successful automatic insertion. Count it separately, without text.
       completeTrace(current,"incomplete");
+      refreshMomentum(current,{claim:true});
     } catch (error) {
       completeTrace(current,"failed");
       current.generating = false;
@@ -340,6 +346,10 @@
     if (!hasRuntimeContext()) return;
     if (action === "sidepanel") { void safeSend({ type: "REPLY_COPILOT_OPEN_SIDEPANEL", sourceText: current.post?.sourceText, sourceUrl: current.post?.sourceUrl }); return; }
     if (action === "settings") { void safeSend({ type: "REPLY_COPILOT_OPEN_SETTINGS" }); return; }
+    if(action==='momentum_refresh'){refreshMomentum(current,{refresh:true});return;}
+    if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled});return;}
+    if(action==='momentum_dnd'){refreshMomentum(current,{dnd:true});return;}
+    if(action==='momentum_original'){void safeSend({type:'REPLY_COPILOT_OPEN_ORIGINAL'});return;}
     if (action === "toggle_auto_generate") {
       if (typeof data.enabled !== "boolean") return;
       current.preferences = { ...current.preferences, autoGenerateOnReply: data.enabled };
@@ -365,6 +375,7 @@
           // A recovered result for a different post is copy-only. Never insert it
           // into the currently associated editor or mistake it for this request.
           current.assistant?.showResult(response.result.replies,response.result.defaultStyle||'natural');
+          refreshMomentum(current,{claim:true});
           current.assistant?.setStatus('上一条回复已恢复，仅供复制；当前帖子可点击重试生成。');current.assistant?.showRetry();return;
         }
         if(response.state!=='ready')current.requestId=crypto.randomUUID();
@@ -390,6 +401,7 @@
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;
     if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") { performanceEnabled=message.enabled===true; return false; }
+    if(message?.type === "REPLY_COPILOT_MOMENTUM_CHANGED"){if(active)refreshMomentum(active);return false;}
     if (message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
     const current = active, requestId = current.requestId, revision = ++settingsRevision;
     void safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }).then((response) => {

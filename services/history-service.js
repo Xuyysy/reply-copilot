@@ -1,3 +1,4 @@
+import {momentumReceiptPatch,momentumReceiptKey} from './creator-momentum.js';
 import {withLocalRecordWrite} from "./local-record-write.js";
 import {generatedHistory} from "./generation-records.js";
 import { HISTORY_KEY } from "./storage-service.js";
@@ -15,10 +16,12 @@ export class HistoryService {
       styleStats: Object.fromEntries(["natural", "light_humor", "thoughtful", "sharp", "funny", "quote"].map((style) => [style, history.filter((item) => item.style === style && item.reply).length])),
     };
   }
-  async recordGeneration({ requestId, result }) {
+  async recordGeneration({ requestId, result, acknowledgedOwner, acknowledgedAt, momentumPolicy }) {
     return withLocalRecordWrite(this.storage,async()=>{
-      const history=generatedHistory(await this.getAll(),{requestId,recommendation:result.recommendation,createdAt:this.clock()});
-      await this.storage.set({[HISTORY_KEY]:history});
+      const key=acknowledgedOwner?momentumReceiptKey(acknowledgedOwner,requestId):null;
+      const data=await this.storage.get(key?[HISTORY_KEY,key]:HISTORY_KEY);
+      const history=generatedHistory(data[HISTORY_KEY]||[],{requestId,recommendation:result.recommendation,createdAt:this.clock()});
+      await this.storage.set({[HISTORY_KEY]:history,...momentumReceiptPatch(acknowledgedOwner?{ownerId:acknowledgedOwner,input:{requestId},raw:"ack-confirmed",completedAt:acknowledgedAt}:null,momentumPolicy,key?data[key]:null)});
     });
   }
   async recordEvent(requestId, event, { style, reply, sourceText, sourceUrl = "" } = {}) {

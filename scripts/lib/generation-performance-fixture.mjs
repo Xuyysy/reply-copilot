@@ -24,7 +24,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
  const sourceText=text+(scenario.endsWith('long')?('\n'+text).repeat(18):'');
  const output=JSON.stringify({recommendation:'reply',defaultStyle:'natural',language:scenario.startsWith('chinese')?'zh':'en',replies:{natural:'That small detail is worth noticing.',light_humor:'My to-do list could use that kind of patience.',thoughtful:'Consistent attention often makes progress visible.'},reason:'Reflects the post.',quoteCandidate:null});
  const local={
-  async get(keys){await sleep(keys==='replyHistory'?6:4);if(typeof keys==='string')return {[keys]:saved[keys]};return Object.fromEntries(keys.map(k=>[k,saved[k]]));},
+  async get(keys){await sleep(keys==='replyHistory'?6:4);if(keys===null)return structuredClone(saved);if(typeof keys==='string')return {[keys]:saved[keys]};return Object.fromEntries(keys.map(k=>[k,saved[k]]));},
   async set(value){await sleep(6);Object.assign(saved,structuredClone(value));},async remove(keys){for(const key of [].concat(keys))delete saved[key];},
  };
  saved.replyCopilotAccountToken='fixture-account-token';
@@ -45,7 +45,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   const p=parsed.pathname;paths.push(p);await sleep(options.networkRoundTripMs??6);
   if(options.offline)throw Error('fixture offline');
   if(p==='/v1/me')return Response.json({user:{userId:'fixture-owner',username:'fixture'}});
-  if(p==='/v1/entitlements')return Response.json({status:options.quotaExhausted?'credits_exhausted':'credits_available',entitlement:{}});
+  if(p==='/v1/entitlements')return Response.json({status:options.quotaExhausted?'credits_exhausted':'credits_available',entitlement:{},...(options.momentumFeature?{features:{interactionMomentum:options.momentumFeature}}:{})});
   if(p==='/v1/usage')return Response.json({quota:{totalRemaining:options.quotaExhausted?0:200-calls.debits}});
   if(p==='/v1/ai/requests/active'||/^\/v1\/ai\/requests\/[^/]+$/.test(p))return Response.json({state:'missing'});
   const body=JSON.parse(init.body||'{}');
@@ -80,6 +80,6 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
   const clickAt=at();marks.click=clickAt;
   listeners.pointerdown({isTrusted:true,type:'pointerdown',target:control});listeners.click({isTrusted:true,type:'click',target:control});
   if(options.waitForFailure){await sleep(250);}else await Promise.race([applied,sleep(options.deadlineMs||1000).then(()=>{throw Error('Fixture did not apply: '+outputs.join(';'));})]);
-  return {scenario,calls,requestPaths:paths,apiTimings,elapsedMs:marks.verified==null?null:marks.verified-clickAt,marks:Object.fromEntries(Object.entries(marks).map(([k,v])=>[k,v-clickAt])),dns:times.dns_A+times.dns_AAAA,report:content.replyCopilotPerformanceReport?.(),messages:outputs,promptHashes:providerBodies.map(body=>createHash('sha256').update(JSON.stringify(body)).digest('hex'))};
+  return {scenario,calls,momentumOutboxCount:Object.keys(saved).filter(k=>k.startsWith("creatorMomentumDelivery:")).length,requestPaths:paths,apiTimings,elapsedMs:marks.verified==null?null:marks.verified-clickAt,marks:Object.fromEntries(Object.entries(marks).map(([k,v])=>[k,v-clickAt])),dns:times.dns_A+times.dns_AAAA,report:content.replyCopilotPerformanceReport?.(),messages:outputs,promptHashes:providerBodies.map(body=>createHash('sha256').update(JSON.stringify(body)).digest('hex'))};
  }finally{for(const timer of timers){clearTimeout(timer);clearInterval(timer);}globalThis.fetch=originalFetch;}
 }
