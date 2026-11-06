@@ -40,8 +40,12 @@ Future Production requires separate authorization and fresh source/settings chec
 - Authenticated Staging acceptance is pending the user's manual checks; public checks and synthetic browser tests do not imply a real cashier payment or expiration-lifetime verification.
 
 Executable rollback commands (only if rollback is needed):
+Wrangler 4.151 does not provide a Pages rollback subcommand. Use the authenticated Cloudflare connector/API (or the project's deployment history → Rollback):
+```js
+await cloudflare.request({method: "POST", path: "/accounts/cb5fc919a9f05dcf39b3ca29c9538a1f/pages/projects/x-reply-helper-staging/deployments/db63ae14-9f9d-485f-858e-dba4af12e658/rollback"});
+```
+Then, only if the Worker must also be reverted:
 ```sh
-wrangler pages deployment rollback db63ae14-9f9d-485f-858e-dba4af12e658 --project-name x-reply-helper-staging
 wrangler versions deploy 4e8f58d3-8d15-4bf1-a55a-ba1ae9fd0747@100 --config /private/tmp/issue18-staging-live.json --yes
 ```
 Recheck live settings/version before running; no database restore. The local temporary config targets Staging only and contains no Secret values. If unavailable, use Cloudflare's existing project deployment history for the same IDs.
