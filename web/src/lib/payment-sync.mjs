@@ -1,7 +1,7 @@
 // Poll only the authenticated local order API. A browser return is never proof of payment.
 const registries=new WeakMap();let serial=0;
 const validId=id=>typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-export function shouldMonitorPayment(order){const protocol=order?.paymentProtocol??order?.payment_protocol,status=order?.status??order?.payment_status;return ['rsa2','epay','mk99'].includes(protocol)&&['pending','unknown'].includes(status);}
+export function shouldMonitorPayment(order){const protocol=order?.paymentProtocol??order?.payment_protocol,status=order?.payment_status??order?.status;return ['rsa2','epay','mk99'].includes(protocol)&&['pending','unknown'].includes(status);}
 export function pendingPaymentOrder(orders,now=Date.now()){return (Array.isArray(orders)?orders:[]).find(order=>shouldMonitorPayment(order)&&Number.isFinite(order.created_at)&&now-order.created_at<86400000)?.id??null;}
 export function paymentReturnOrder(href){try{const id=new URL(href).searchParams.get('payment_order');return validId(id)?id:null;}catch{return null;}}
 export function rememberPayment(orderId,env=globalThis){if(validId(orderId))try{env.localStorage?.setItem('reply-copilot:pending-payment',JSON.stringify({orderId,at:Date.now()}));}catch{}}
@@ -79,4 +79,24 @@ export function cleanPaymentReturn(href){
  const url=new URL(href);
  for(const key of ['pid','type','out_trade_no','trade_no','money','name','notify_url','return_url','trade_status','sign','sign_type','param'])url.searchParams.delete(key);
  return url.href;
+}
+
+// UI-only notice identity. No order state or payment tracking is changed on dismissal.
+export function createPaymentNotices(){
+ let owner=null,value=null;const dismissed=new Map();
+ const key=e=>JSON.stringify([e.orderId,e.kind]);
+ return {
+  setOwner(next){if(owner!==next){owner=next;value=null;}},
+  publish(event,expectedOwner=owner){
+   if(!owner||expectedOwner!==owner||dismissed.get(owner)?.has(key(event)))return null;
+   if(event.kind==='confirming'){
+    if([...dismissed.get(owner)||[]].some(k=>{const [id,kind]=JSON.parse(k);return id===event.orderId&&kind!=='confirming';}))return null;
+    if(value?.orderId===event.orderId&&value.kind!=='confirming')return value;
+   }
+   value=event;return event;
+  },
+  dismiss(event){if(!owner||!event)return;let keys=dismissed.get(owner);if(!keys){keys=new Set();dismissed.set(owner,keys);}keys.add(key(event));if(value&&key(value)===key(event))value=null;},
+  current(){return value;},
+  isOwner(expected){return owner===expected;}
+ };
 }
