@@ -1,0 +1,29 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import * as resume from '../src/lib/checkout-resume.mjs';
+const id='11111111-1111-4111-8111-111111111111';
+const order={id,packageId:'starter',status:'pending',riskState:'clear',paidAt:null,creditedAt:null,paymentProvider:'mk99',paymentProtocol:'mk99',paymentUrl:'https://mk99.cn/pay/example',paymentCashierOrigin:'https://mk99.cn',amountFen:1043,credits:400};
+test('pending MK99 is checked via original order query without create and validated fresh snapshots',async()=>{
+ const calls=[];const r=await resume.loadOrderCheckout(id,async(path,opts)=>{calls.push([path,opts.method]);return opts.method==='GET'?{order}:{ok:true,orderStatus:'pending',verificationSource:'authenticated_https_query'};});
+ assert.equal(r.verified,true);assert.equal(r.order.amountFen,1043);assert.deepEqual(calls.map(x=>x[1]),['GET','POST','GET']);assert.ok(calls.every(([p])=>p.startsWith('/v1/orders/'+id)));
+});
+test('terminal, unknown and risk states never start a payment or offer old cashier',async()=>{
+ for(const status of ['paid','closed','failed','refunded','unknown','manual_review']){let calls=0;const r=await resume.loadOrderCheckout(id,async()=>{calls++;return {order:{...order,status}}});assert.equal(calls,1);assert.equal(r.verified,false);}
+ const r=await resume.loadOrderCheckout(id,async()=>({order:{...order,riskState:'manual_review'}}));assert.equal(r.verified,false);
+});
+test('query errors, conflicting snapshots and bad URLs fail closed while preserving original amount',async()=>{
+ for(const mode of ['error','paid','risk','url','mismatch']){
+ let n=0;const r=await resume.loadOrderCheckout(id,async(p,o)=>{n++;if(o.method==='POST'){if(mode==='error')throw Error('network');return {ok:true,orderStatus:mode==='mismatch'?'closed':'pending',verificationSource:'authenticated_https_query'};}return {order:n===1?order:{...order,...(mode==='paid'?{status:'paid',creditedAt:1}:mode==='risk'?{riskState:'manual_review'}:mode==='url'?{paymentUrl:'https://evil.test/'}:{})}};});assert.equal(r.verified,false);assert.equal(r.order.amountFen,1043);
+ }
+});
+test('replacement uses only existing available package for clear terminal orders; unresolved never restarts',()=>{
+ const packages=[{id:'starter',total_payment_fen:1043}];
+ for(const status of ['closed','failed','refunded'])assert.equal(resume.replacementPurchaseUrl({...order,status},packages,true),'/checkout/?package=starter');
+ for(const status of ['pending','unknown','paid','manual_review'])assert.equal(resume.replacementPurchaseUrl({...order,status},packages,true),null);
+ assert.equal(resume.replacementPurchaseUrl({...order,status:'closed',riskState:'manual_review'},packages,true),null);
+ assert.equal(resume.replacementPurchaseUrl({...order,status:'closed'},[],true),null);assert.equal(resume.replacementPurchaseUrl({...order,status:'closed'},packages,false),null);
+});
+test('explicit new package selection is not redirected back to a remembered old order',()=>{
+ assert.equal(resume.checkoutResumeId('https://site.test/checkout/?package=starter',id),null);
+ assert.equal(resume.checkoutResumeId('https://site.test/checkout/?order='+id,id),id);
+ assert.throws(()=>resume.checkoutResumeId('https://site.test/checkout/?order=../bad',id));
+});

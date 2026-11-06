@@ -58,3 +58,10 @@ test('Epay pending text describes a prepared form, and a local read preserves on
 
 test('MK99 hold revokes prior cashier and survives stale pending reads without affecting other orders',()=>{const prior={id:'mk',paymentProtocol:'mk99',status:'pending',riskState:'clear',paymentUrl:'https://cashier.example.test/pay'};const held=mergeCheckoutRead(prior,{...prior,riskState:'manual_review',paymentUrl:null});assert.equal(held.paymentUrl,null);assert.equal(mergeCheckoutRead(held,prior).paymentUrl,null);assert.match(checkoutOrderMessage(held,'zh'),/正在人工核对，请勿继续付款/);assert.match(checkoutOrderMessage(held,'en'),/manual review/);assert.equal(mergeCheckoutRead(prior,{...prior,paymentUrl:null}).paymentUrl,null);assert.equal(mergeCheckoutRead(prior,{...prior,id:'other'}).paymentUrl,prior.paymentUrl);});
 test('MK99 error order accepts only a fully balanced merchant-cost snapshot',()=>{const order={id:'11111111-1111-4111-8111-111111111111',status:'unknown',paymentProtocol:'mk99',amountFen:1059,baseAmountFen:990,serviceFeeFen:16,credits:400,currency:'CNY',merchantPricing:{costCoverageFen:53}};assert.equal(checkoutOrderFromError({order}),order);assert.equal(checkoutOrderFromError({order:{...order,amountFen:1060}}),null);assert.equal(checkoutOrderFromError({order:{...order,merchantPricing:{costCoverageFen:-1}}}),null);});
+
+test('confirmed MK99 terminal state cannot be downgraded by a late pending read',()=>{
+ for(const status of ['paid','closed','failed','refunded']){
+ const current={id:'original',paymentProtocol:'mk99',status,riskState:'clear',creditedAt:status==='paid'?1:null,paymentUrl:null};
+ for(const later of ['pending','unknown'])assert.deepEqual(mergeCheckoutRead(current,{...current,status:later,paymentUrl:'https://mk99.cn/old'}),current);
+ }
+});

@@ -2,6 +2,7 @@
 export function checkoutOrderMessage(order, language) {
   const en = language === "en";
   if(order.paymentProtocol==='mk99'&&order.riskState==='manual_review')return en ? "Payment is under manual review. Do not continue paying." : "正在人工核对，请勿继续付款。";
+  if(order.paymentProtocol==='mk99'&&order.status==='refunded')return en?"This order was refunded. The original transaction cannot continue.":"该订单已退款，不能继续原交易。";
   if(order.paymentProtocol==='epay'&&order.status==='pending')return en
     ? "Checkout form prepared. Continue to the Alipay cashier; payment is confirmed only after a verified notification."
     : "付款表单已准备，请前往支付宝收银台。只有经验证的异步通知才能确认到账。";
@@ -51,6 +52,7 @@ export function canUseCashierLink(order) {
 
 export function mergeCheckoutRead(current, next) {
   if(next.paymentProtocol==='mk99') {
+    if(current?.id===next.id&&current.paymentProtocol==='mk99'&&['paid','refunded','closed','failed'].includes(current.status)&&['pending','unknown'].includes(next.status))return current;
     // Risk holds never auto-clear; an older in-flight read cannot restore a link.
     const held=current?.id===next.id&&current.paymentProtocol==='mk99'&&current.riskState==='manual_review';
     const result=held?{...next,riskState:'manual_review'}:next;

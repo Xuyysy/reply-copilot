@@ -3,19 +3,22 @@ import assert from 'node:assert/strict';
 import * as payment from '../src/lib/payment-resume.mjs';
 const id='11111111-1111-4111-8111-111111111111';
 const order={id,paymentProvider:'mk99',paymentProtocol:'mk99',status:'pending',riskState:'clear',creditedAt:null,paidAt:null,paymentUrl:'https://mk99.cn/pay/example',paymentCashierOrigin:'https://mk99.cn'};
-test('resume uses owner GET, trusted refresh, fresh GET, original URL and tracking only once',async()=>{
- let release;const held=new Promise(r=>release=r),calls=[],saved=[],jumps=[],lock=new Set();
- const options={inFlight:lock,request:async(path,opts)=>{calls.push([path,opts.method]);await held;return opts.method==='GET'?{order}:{ok:true,orderStatus:'pending',verificationSource:'authenticated_https_query'};},remember:x=>saved.push(x),navigate:x=>jumps.push(x)};
+test('account continuation reads owned order once and navigates only to official checkout without provider or create calls',async()=>{
+ let release;const held=new Promise(r=>release=r),calls=[],saved=[],jumps=[],inFlight=new Set();
+ const options={inFlight,request:async(path,opts)=>{calls.push([path,opts.method]);await held;return {order};},remember:x=>saved.push(x),navigate:x=>jumps.push(x)};
  const first=payment.resumeMk99Payment(id,options);assert.equal(await payment.resumeMk99Payment(id,options),false);release();await first;
- assert.deepEqual(calls.map(x=>x[1]),['GET','POST','GET']);assert.deepEqual(saved,[id]);assert.deepEqual(jumps,[order.paymentUrl]);assert.equal(lock.size,0);assert.ok(calls.every(([p])=>p.startsWith('/v1/orders/'+id)));
+ assert.deepEqual(calls,[['/v1/orders/'+id,'GET']]);assert.deepEqual(jumps,['/checkout/?order='+id]);assert.deepEqual(saved,[id]);assert.equal(inFlight.size,0);
 });
-test('all unsafe states, settled, wrong order, risk, bad URLs fail closed without navigation',async()=>{
- for(const changed of [{status:'paid'},{status:'closed'},{status:'failed'},{status:'refunded'},{status:'unknown'},{status:'manual_review'},{riskState:'manual_review'},{creditedAt:1},{paidAt:1},{id:'wrong'},{paymentProvider:'xiaodou'},{paymentUrl:null},...['http://mk99.cn/pay','https://mk99.cn.evil.test/pay','https://user:pass@mk99.cn/pay','javascript:alert(1)','https://mk99.cn:8443/pay'].map(paymentUrl=>({paymentUrl}))]){
- let navigated=false;await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async()=>({order:{...order,...changed}}),remember:()=>{},navigate:()=>navigated=true}));assert.equal(navigated,false);
- }
+test('changed owned states still go to order review, never directly to a cashier',async()=>{
+ for(const status of ['pending','unknown','paid','closed','failed','refunded','manual_review']){let destination;await payment.resumeMk99Payment(id,{inFlight:new Set(),request:async()=>({order:{...order,status,paymentUrl:'javascript:alert(1)'}}),remember:()=>{},navigate:x=>destination=x});assert.equal(destination,'/checkout/?order='+id);}
 });
-test('refresh failure or latest status change never redirects or creates an order',async()=>{
- for(const mode of ['paid','closed','unknown','query_failed','risk']){let n=0;await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async(path,opts)=>{n++;if(opts.method==='POST'){if(mode==='query_failed')throw Error('failed');return {ok:true,orderStatus:mode==='risk'?'pending':mode,verificationSource:'authenticated_https_query'};}return {order:n===1?order:{...order,riskState:'manual_review'}};},remember:()=>assert.fail('must not remember'),navigate:()=>assert.fail('must not navigate')}));}
+test('invalid locator, wrong order or other account response cannot navigate',async()=>{
+ for(const request of [async()=>({order:{...order,id:'different'}}),async()=>{throw Object.assign(Error('not found'),{status:404});}])await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request,remember:()=>assert.fail(),navigate:()=>assert.fail()}));
+ await assert.rejects(payment.resumeMk99Payment('../other',{inFlight:new Set(),request:()=>assert.fail(),remember:()=>assert.fail(),navigate:()=>assert.fail()}));
+});
+test('cashier origin and pending settlement validation remains strict separately from local navigation',()=>{
+ assert.equal(payment.safeMk99Cashier(order,id),order.paymentUrl);
+ for(const patch of [{status:'paid'},{status:'closed'},{riskState:'manual_review'},{paidAt:1},{creditedAt:1},{paymentUrl:'https://mk99.cn.evil.test/pay'},{paymentUrl:'http://mk99.cn/pay'},{paymentUrl:'https://user:pass@mk99.cn/pay'}])assert.equal(payment.safeMk99Cashier({...order,...patch},id),null);
 });
 
 test('list gating and customer messages preserve closed, risk and paid protections in both languages',()=>{
