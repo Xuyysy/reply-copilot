@@ -27,3 +27,8 @@ test('explicit new package selection is not redirected back to a remembered old 
  assert.equal(resume.checkoutResumeId('https://site.test/checkout/?order='+id,id),id);
  assert.throws(()=>resume.checkoutResumeId('https://site.test/checkout/?order=../bad',id));
 });
+
+test('explicit unknown-state refresh preserves trusted provider reconciliation without a new order',async()=>{
+ const calls=[];let reads=0;const r=await resume.loadOrderCheckout(id,async(path,opts)=>{calls.push([path,opts.method]);if(opts.method==='POST')return {ok:true,orderStatus:'paid',verificationSource:'authenticated_https_query'};reads++;return {order:{...order,status:reads===1?'unknown':'paid',creditedAt:reads===1?null:123}};},{queryUnknown:true});
+ assert.deepEqual(calls.map(c=>c[1]),['GET','POST','GET']);assert.equal(r.order.status,'paid');assert.equal(r.verified,false);
+});

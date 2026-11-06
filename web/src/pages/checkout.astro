@@ -284,7 +284,7 @@ import Base from "../layouts/Base.astro";
       let failure=false;
       try{
         if(order.paymentProtocol==="mk99"){
-          const result=await loadOrderCheckout(order.id,api);confirmedMk99OrderId=result.verified?order.id:null;
+          const result=await loadOrderCheckout(order.id,api,{queryUnknown:true});confirmedMk99OrderId=result.verified?order.id:null;
           showOrder(mergeCheckoutRead(order,result.order) as Order);
           if(result.order.status==="paid"&&result.order.creditedAt)await syncConfirmedPayment(result.order as Order);
         }else{

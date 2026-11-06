@@ -44,6 +44,7 @@ test('existing checkout: MK99 verification, snapshot review, safe replacement, n
   assert.equal(await evaluate('!document.querySelector("#replacement-purchase").hidden'),replace);
   if(replace)assert.equal(await evaluate('document.querySelector("#replacement-purchase").getAttribute("href")'),'/checkout/?package=starter');
   if(['unknown','risk','queryerror','badurl'].includes(mode))assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
+  if(mode==='unknown'){await evaluate('document.querySelector("#refresh-order").click()');await until('window.__calls.some(c=>c[0].endsWith("/refresh"))');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);}
   if(mode==='epay'){assert.equal(await evaluate('document.querySelector("#epay-submit").hidden'),false);await evaluate('document.querySelector("#epay-submit").click()');await until('!document.querySelector("#epay-pay-label").hidden');assert.equal(await evaluate('window.__calls.filter(c=>c[0].endsWith("/attempts")).length'),1);}
   await evaluate('document.documentElement.lang="en";window.dispatchEvent(new Event("reply-copilot-language"))');assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   if(mode==='pending'){await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);}
