@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Loader2, RefreshCw } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
-import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder } from "../../lib/payment-sync.mjs";
+import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder, rememberPayment, createPaymentNotices } from "../../lib/payment-sync.mjs";
 import { canRefreshPaymentOrder, refreshPaymentOrder } from "../../lib/payment-refresh.mjs";
+import { canResumeMk99Order, resumeMk99Payment, paymentResumeMessage } from "../../lib/payment-resume.mjs";
 import { orderPriceSummary } from "../../lib/order-price-summary.mjs";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Badge } from "../ui/badge";
@@ -13,9 +14,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Skeleton } from "../ui/skeleton";
 
-type Account = { user: { username: string | null; email: string; role: string; emailVerified: boolean } };
+type Account = { user: { userId: string; username: string | null; email: string; role: string; emailVerified: boolean } };
 type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null };
-type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_status?: string; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
+type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_status?: string; risk_state?:string; credited_at?:number|null; paid_at?:number|null; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
 type OrderRefreshFeedback = { orderId: string; message: string; code?: string; requestId?: string; diagnostic?: { stage: string; upstreamHttpStatus: number | null } };
@@ -34,33 +35,82 @@ export default function AccountDashboard() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const submitting = useRef(false);
   const refreshInFlight = useRef(new Set<string>());
+  const accountOwner=useRef<string|null>(null);
   const accountRefresh = useRef<ReturnType<typeof createRefreshGate>|null>(null);
   if(!accountRefresh.current)accountRefresh.current=createRefreshGate();
   const [paymentHint, setPaymentHint] = useState<string|null>(() => typeof location !== "undefined" ? paymentReturnOrder(location.href)||rememberedPayment() : null);
-  const [paymentNotice, setPaymentNotice] = useState("");
+  type PaymentNotice = {orderId:string;kind:string;credits?:number};
+  const [paymentNotice, setPaymentNotice] = useState<PaymentNotice|null>(null);
+  const notices=useRef<ReturnType<typeof createPaymentNotices>|null>(null);
+  if(!notices.current)notices.current=createPaymentNotices();
+  const [continuingOrderId,setContinuingOrderId]=useState<string|null>(null);
   const validCode = code && /^[A-F0-9]{8}$/.test(code) ? code : null;
 
   const load = useCallback((silent=false,fresh=false):Promise<boolean> => accountRefresh.current!(async()=>{
     if(!silent){setState("loading");setMessage("");}
       try {
         const [account, usage, activity] = await Promise.all([api<Account>("/v1/me"), api<Usage>("/v1/usage"), api<Activity>("/v1/activity").catch(error => { if (error instanceof ApiError && error.status === 401) throw error; return null; })]);
+        const sameAccount=accountOwner.current===null||accountOwner.current===account.user.userId;
+        accountOwner.current=account.user.userId;
+        notices.current!.setOwner(account.user.userId);setPaymentNotice(notices.current!.current());
+        // Retain the monitored order until its watcher confirms a terminal result.
+        // A concurrent account refresh must not cancel the paid notification.
+        setPaymentHint(previous=>(sameAccount?previous:null)||pendingPaymentOrder(activity?.orders)||null);
         setData({ account, usage, activity }); setState("ready");return true;
-      } catch(error){if(error instanceof ApiError&&error.status===401){setData(null);setState("signed-out");}else if(!silent)setState("error");setMessage(readableError(error,language));return false;}
+      } catch(error){if(error instanceof ApiError&&error.status===401){notices.current!.setOwner(null);setPaymentNotice(null);setData(null);setState("signed-out");}else if(!silent)setState("error");setMessage(readableError(error,language));return false;}
   },{fresh}), [language]);
   useEffect(()=>{const clean=cleanPaymentReturn(location.href);if(clean!==location.href)history.replaceState(history.state,"",clean);},[]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?30000:0}), [load,state]);
   const pendingPaymentId=paymentHint||pendingPaymentOrder(data?.activity?.orders)||null;
+  const paymentOwner=data?.account.user.userId??null;
   useEffect(()=>{
-    if(state!=="ready"||!pendingPaymentId)return;
-    setPaymentNotice(phrase(language,"正在确认支付结果…","Confirming payment…"));
-    return watchPayment({orderId:pendingPaymentId,request:api,
-      onPaid:async(result:any)=>{const synced=await load(true,true);setPaymentHint(null);const u=new URL(location.href);u.searchParams.delete("payment_order");history.replaceState(history.state,"",u);setPaymentNotice(synced?phrase(language,`支付成功，${result.order.credits} 次额度已到账。`,`Payment successful. ${result.order.credits} credits added.`):phrase(language,"支付已确认，账户信息暂时无法刷新，请稍后查看。","Payment confirmed; account refresh is temporarily unavailable."));},
-      onTimeout:()=>setPaymentNotice(phrase(language,"支付结果仍在确认，请稍后查看或手动刷新；不要重复付款。","Payment is still unconfirmed. Check later or refresh manually; do not pay again.")),
-      onTerminal:()=>{setPaymentHint(null);setPaymentNotice(phrase(language,"该订单未完成付款或已退款，请查看订单状态。","This order did not complete or was refunded. Check its status."));void load(true);},
-      onError:(error:any)=>{if([401,403,404].includes(error?.status)){setPaymentHint(null);setPaymentNotice(phrase(language,"无法读取该订单，请确认当前登录账户。","Cannot read this order. Check the signed-in account."));}}
+    if(state!=="ready"||!pendingPaymentId||!paymentOwner)return;
+    let alive=true;
+    const show=(kind:string,credits?:number)=>{if(!alive)return;const next=notices.current!.publish({orderId:pendingPaymentId,kind,credits},paymentOwner);if(next)setPaymentNotice(next);};
+    show("confirming");
+    const stop=watchPayment({orderId:pendingPaymentId,request:api,
+      onPaid:async(result:any)=>{
+        if(!alive)return;
+        const synced=await load(true,true);
+        // A successful refresh can end this watcher by removing the pending order.
+        // Preserve the result, but never overwrite another account/order's notice.
+        if(!notices.current!.isOwner(paymentOwner))return;
+        const current=notices.current!.current();if(current&&current.orderId!==pendingPaymentId)return;
+        const next=notices.current!.publish({orderId:pendingPaymentId,kind:synced?"paid":"paid_refresh_failed",credits:result.order.credits},paymentOwner);if(next)setPaymentNotice(next);
+        setPaymentHint(previous=>previous===pendingPaymentId?null:previous);
+        const u=new URL(location.href);if(u.searchParams.get("payment_order")===pendingPaymentId){u.searchParams.delete("payment_order");history.replaceState(history.state,"",u);}
+      },
+      onTimeout:()=>show("timeout"),
+      onTerminal:(result:any)=>{if(!alive||!notices.current!.isOwner(paymentOwner))return;setPaymentHint(null);show(result.order.status);void load(true);},
+      onError:(error:any)=>{if([401,403,404].includes(error?.status)&&alive&&notices.current!.isOwner(paymentOwner)){setPaymentHint(null);show("unavailable");}}
     });
-  },[pendingPaymentId,state,load,language]);
+    return()=>{alive=false;stop();};
+  },[pendingPaymentId,state,load,language,paymentOwner]);
+  function dismissPaymentNotice(){notices.current!.dismiss(paymentNotice);setPaymentNotice(null);}
+  function paymentNoticeText(notice:PaymentNotice){
+    if(notice.kind==="paid")return t(`支付成功，${notice.credits} 次额度已到账。`,`Payment successful. ${notice.credits} credits added.`);
+    const texts:Record<string,[string,string]>={
+      confirming:["正在确认支付结果…","Confirming payment…"],
+      paid_refresh_failed:["支付已确认，账户信息暂时无法刷新，请稍后查看。","Payment confirmed; account refresh is temporarily unavailable."],
+      timeout:["支付结果仍在确认，请稍后查看或手动刷新；不要重复付款。","Payment is still unconfirmed. Check later or refresh manually; do not pay again."],
+      unavailable:["无法读取该订单，请确认当前登录账户。","Cannot read this order. Check the signed-in account."],
+      closed:["该订单已关闭，无法继续付款。","This order is closed and cannot be paid."],
+      failed:["该订单未完成付款，请查看订单状态。","Payment did not complete. Check the order status."],
+      refunded:["该订单已退款，请查看订单状态。","This order was refunded. Check the order status."]
+    };
+    return phrase(language,...(texts[notice.kind]||texts.unavailable));
+  }
+  async function continuePayment(orderId:string){
+    if(refreshInFlight.current.has(orderId))return;
+    const owner=paymentOwner;setContinuingOrderId(orderId);setOrderRefreshFeedback(null);
+    try {
+      await resumeMk99Payment(orderId,{inFlight:refreshInFlight.current,
+        request:async(path:string,options:RequestInit)=>{if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");const result=await api(path,options);if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");return result;},
+        remember:rememberPayment,navigate:(url:string)=>location.assign(url)});
+    }catch(error){if(notices.current!.isOwner(owner)){setOrderRefreshFeedback({orderId,message:error instanceof ApiError?readableError(error,language):paymentResumeMessage(error,language)});void load(true);}}
+    finally{setContinuingOrderId(null);}
+  }
   const checkAuthorization = useCallback(async () => {
     if (!validCode) { setAuthorization(code ? "invalid" : "none"); return; }
     setAuthorization("checking");
@@ -93,7 +143,7 @@ export default function AccountDashboard() {
     finally { submitting.current = false; setBusy(false); }
   }
   async function logout() {
-    setBusy(true); setData(null);
+    setBusy(true); notices.current!.setOwner(null);setPaymentNotice(null);setData(null);
     try { await api("/v1/auth/logout", { method: "POST", body: "{}" }); location.href = signInHref; }
     catch (error) { setMessage(readableError(error, language)); setState("signed-out"); setBusy(false); }
   }
@@ -152,7 +202,7 @@ export default function AccountDashboard() {
   const date = (value: number) => new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US");
   const labels: Record<string, [string, string]> = { signup_grant: ["注册赠送", "Welcome credits"], generation_debit: ["AI 生成", "AI generation"], generation_refund: ["失败返还", "Refund"], purchase_grant: ["充值到账", "Top-up"], admin_adjustment: ["人工调整", "Manual adjustment"] };
   return <div className="space-y-5">
-    {paymentNotice&&<Alert role="status"><AlertDescription>{paymentNotice}</AlertDescription></Alert>}
+    {paymentNotice&&<Alert role="status" data-payment-notice className="pr-12"><AlertDescription>{paymentNoticeText(paymentNotice)}</AlertDescription><Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1" aria-label={t("关闭支付提示","Dismiss payment notice")} onClick={dismissPaymentNotice}><X size={16} aria-hidden="true" /></Button></Alert>}
     <div className="flex flex-wrap items-center justify-between gap-5"><div className="min-w-0"><p className="section-kicker">{t("账户概览", "Overview")}</p><h2 className="mb-1 break-words text-3xl font-semibold tracking-tight">{account.user.username || t("我的账户", "My account")}</h2><p className="app-muted break-all">{account.user.email}</p></div><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div>
     {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
@@ -170,7 +220,7 @@ export default function AccountDashboard() {
       </Card>
       <Card data-orders-card className="min-w-0 self-start">
         <CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader>
-        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="epay"&&order.payment_status==="pending"&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue this order")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" className="mt-2" disabled={busy||refreshingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
+        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="epay"&&order.payment_status==="pending"&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue this order")}</a>}{order.payment_protocol==="mk99"&&["closed","failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
       </Card>
     </div>
     <Card><CardContent className="flex items-center justify-between gap-5 p-6"><div><h3 className="mb-1 text-lg font-semibold">{t("按需充值", "Top up when needed")}</h3><p className="text-sm text-muted-foreground">{t("待付款订单不会增加额度，到账以服务端确认的支付记录为准。", "Pending orders do not grant credits. Credits are added only after server-confirmed payment.")}</p></div><Button variant="outline" asChild><a href="/pricing">{t("查看套餐", "View plans")}<ArrowRight /></a></Button></CardContent></Card>

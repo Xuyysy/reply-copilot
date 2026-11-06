@@ -89,7 +89,7 @@ test("account orders expose provider refresh for unresolved supported merchant p
   assert.match(refresh, /order\.status === "awaiting_payment"/);
   assert.match(source, /data-order-refresh/);
   assert.match(source, /refreshingOrderId===order\.id/);
-  assert.match(source, /disabled=\{busy\|\|refreshingOrderId===order\.id\}/);
+  assert.match(source, /disabled=\{busy\|\|refreshingOrderId===order\.id\|\|continuingOrderId===order\.id\}/);
   assert.match(source, /diagnostic\.stage/);
   assert.match(api, /diagnostic\?:/);
   assert.match(api, /requestId\?:/);
