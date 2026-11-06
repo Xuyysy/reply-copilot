@@ -8,7 +8,7 @@ export function safeMk99Cashier(order, orderId) {
   if(url.protocol!=='https:' || url.username || url.password || url.port || url.hash
    || origin.protocol!=='https:' || origin.origin!==order.paymentCashierOrigin || origin.port || origin.username || origin.password
    || url.origin!==origin.origin)return null;
-  return url.href;
+  return order.paymentUrl;
  } catch{return null;}
 }
 export function canResumeMk99Order(order) {
@@ -20,23 +20,22 @@ function resumeFailure(order){
  return Object.assign(new Error('PAYMENT_RESUME_UNAVAILABLE'),{paymentState:state});
 }
 export function paymentResumeMessage(error,language){
- if(error?.code==='PACKAGE_UNAVAILABLE')return language==='en'?'This package is unavailable. Please choose another package.':'套餐不存在或已下架，请重新选择。';
  const messages={paid:['该订单已付款，请刷新账户查看到账记录，不要再次付款。','This order is already paid. Refresh your account to check credits; do not pay again.'],closed:['该订单已关闭，不能继续支付。请联系客服。','This order is closed and cannot be paid. Contact support.'],failed:['该订单支付失败，无法继续支付。请刷新状态或联系客服。','Payment failed for this order. Refresh its status or contact support.'],refunded:['该订单已退款，不能继续支付。','This order was refunded and cannot be paid.'],unknown:['支付结果尚未确认，请刷新订单状态或联系客服，不要重复付款。','Payment is unconfirmed. Refresh its status or contact support; do not pay again.'],manual_review:['该订单需要人工核对，请联系客服，不要继续付款。','This order needs manual review. Contact support; do not continue paying.']};
- return (messages[error?.paymentState]||['暂时无法打开购买页，请稍后重试。','Unable to open checkout. Please try again later.'])[language==='en'?1:0];
+ return (messages[error?.paymentState]||['暂时无法继续付款，请刷新订单状态或联系客服。','Unable to continue payment. Refresh the order status or contact support.'])[language==='en'?1:0];
 }
 export function validPaymentOrderId(id){return typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);}
-export async function resumeMk99Payment(orderId,{inFlight,request,navigate}) {
+export async function resumeMk99Payment(orderId,{inFlight,request,remember,navigate}) {
  if(!validPaymentOrderId(orderId))throw new Error('INVALID_ORDER_ID');
  if(inFlight.has(orderId))return false;
  inFlight.add(orderId);
  try {
-  const result=await request('/v1/orders/'+encodeURIComponent(orderId),{method:'GET'});
-  if(result?.order?.id!==orderId||result.order.paymentProtocol!=='mk99'||result.order.paymentProvider!=='mk99')throw resumeFailure(result?.order);
-  const packageId=result.order.packageId;
-  if(typeof packageId!=='string'||!/^[a-z0-9_-]{1,64}$/i.test(packageId))throw Object.assign(new Error('PACKAGE_UNAVAILABLE'),{code:'PACKAGE_UNAVAILABLE'});
-  const list=await request('/v1/packages',{method:'GET'});
-  const pkg=Array.isArray(list?.packages)?list.packages.find(p=>p.id===packageId):null;
-  if(!pkg||!Number.isSafeInteger(pkg.total_payment_fen)||pkg.total_payment_fen<1)throw Object.assign(new Error('PACKAGE_UNAVAILABLE'),{code:'PACKAGE_UNAVAILABLE'});
-  navigate('/checkout/?package='+encodeURIComponent(packageId));return true;
- } finally {inFlight.delete(orderId);}
+  const path='/v1/orders/'+encodeURIComponent(orderId);
+  const initial=await request(path,{method:'GET'});
+  if(!safeMk99Cashier(initial?.order,orderId))throw resumeFailure(initial?.order);
+  const checked=await request(path+'/refresh',{method:'POST',body:'{}'});
+  if(checked?.ok!==true||checked.orderStatus!=='pending'||checked.verificationSource!=='authenticated_https_query')throw resumeFailure({status:checked?.orderStatus,riskState:'clear'});
+  const latest=await request(path,{method:'GET'}),url=safeMk99Cashier(latest?.order,orderId);
+  if(!url||url!==safeMk99Cashier(initial.order,orderId))throw resumeFailure(latest?.order);
+  remember(orderId);navigate(url,latest.order.paymentCashierOrigin);return true;
+ }finally{inFlight.delete(orderId);}
 }

@@ -54,6 +54,7 @@ import Base from "../layouts/Base.astro";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
     import {checkoutResumeId,loadOrderCheckout} from "../lib/checkout-resume.mjs";
     import {safeMk99Cashier} from "../lib/payment-resume.mjs";
+    import {navigateVerifiedCashier} from "../lib/cashier-navigation.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
     type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{feeBearer:string;rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
@@ -238,7 +239,7 @@ import Base from "../layouts/Base.astro";
     byId("cashier-link").addEventListener("click",async(event)=>{
       if(order?.paymentProtocol!=="mk99"){if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending")rememberPayment(order.id);return;}
       event.preventDefault();if(busy)return;busy=true;confirmedMk99OrderId=null;show("cashier-link",false);
-      try{const result=await loadOrderCheckout(order.id,api);confirmedMk99OrderId=result.verified?result.order.id:null;showOrder(mergeCheckoutRead(order,result.order) as Order);const url=result.verified?safeMk99Cashier(order,order!.id):null;if(url){rememberPayment(order!.id);location.assign(url);}}
+      try{const result=await loadOrderCheckout(order.id,api);confirmedMk99OrderId=result.verified?result.order.id:null;showOrder(mergeCheckoutRead(order,result.order) as Order);const url=result.verified?safeMk99Cashier(order,order!.id):null;if(url){rememberPayment(order!.id);navigateVerifiedCashier(url,{allowedOrigin:order!.paymentCashierOrigin});}}
       catch{setStatus("支付平台暂时无法打开收银台，请稍后重试或联系客服。未确认付款前，请勿重复创建订单。","The payment cashier is temporarily unavailable. Retry later or contact support. Do not create another order while payment is unconfirmed.");}
       finally{busy=false;}
     });

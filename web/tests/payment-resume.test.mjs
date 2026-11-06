@@ -3,18 +3,21 @@ import assert from 'node:assert/strict';
 import * as payment from '../src/lib/payment-resume.mjs';
 const id='11111111-1111-4111-8111-111111111111';
 const order={id,packageId:'starter',paymentProvider:'mk99',paymentProtocol:'mk99',status:'pending',riskState:'clear',creditedAt:null,paidAt:null,paymentUrl:'https://mk99.cn/pay/example',paymentCashierOrigin:'https://mk99.cn'};
-test('account continuation validates the original package and only opens normal checkout without payment operations',async()=>{
- let release;const held=new Promise(r=>release=r),calls=[],saved=[],jumps=[],inFlight=new Set();
- const options={inFlight,request:async(path,opts)=>{calls.push([path,opts.method]);await held;return path==='/v1/packages'?{packages:[{id:'starter',total_payment_fen:1043}]}:{order};},remember:x=>saved.push(x),navigate:x=>jumps.push(x)};
+test('pending original order is ownership-checked, queried once and resumed with unchanged trusted URL, without creating an order',async()=>{
+ let release;const hold=new Promise(r=>release=r),calls=[],remembered=[],destinations=[],inFlight=new Set();
+ const options={inFlight,request:async(path,opts)=>{calls.push([path,opts.method]);await hold;return opts.method==='GET'?{order}:{ok:true,orderStatus:'pending',verificationSource:'authenticated_https_query'};},remember:id=>remembered.push(id),navigate:(url,origin)=>destinations.push({url,origin})};
  const first=payment.resumeMk99Payment(id,options);assert.equal(await payment.resumeMk99Payment(id,options),false);release();await first;
- assert.deepEqual(calls,[['/v1/orders/'+id,'GET'],['/v1/packages','GET']]);assert.deepEqual(jumps,['/checkout/?package=starter']);assert.deepEqual(saved,[]);assert.equal(inFlight.size,0);
+ assert.deepEqual(calls.map(c=>c[1]),['GET','POST','GET']);assert.ok(calls.every(([p])=>p.startsWith('/v1/orders/'+id)));assert.deepEqual(remembered,[id]);assert.deepEqual(destinations,[{url:order.paymentUrl,origin:order.paymentCashierOrigin}]);
 });
-test('owned order links are never reused; only their actual package selects the normal purchase page',async()=>{
- for(const status of ['pending','unknown','paid','closed','failed','refunded','manual_review']){let destination;await payment.resumeMk99Payment(id,{inFlight:new Set(),request:async path=>path==='/v1/packages'?{packages:[{id:'starter',total_payment_fen:1043}]}:{order:{...order,status,paymentUrl:'javascript:alert(1)'}},remember:()=>{},navigate:x=>destination=x});assert.equal(destination,'/checkout/?package=starter');}
+test('all non-payable or ambiguous original orders fail closed without checkout or another transaction',async()=>{
+ for(const patch of [{status:'paid'},{status:'closed'},{status:'failed'},{status:'refunded'},{status:'unknown'},{riskState:'manual_review'},{creditedAt:1},{paidAt:1},{id:'other'},{paymentProvider:'other'},{paymentUrl:null},{paymentUrl:'https://evil.invalid/pay'}]){
+ await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async()=>({order:{...order,...patch}}),remember:()=>assert.fail(),navigate:()=>assert.fail()}));
+ }
+ await assert.rejects(payment.resumeMk99Payment('invalid',{inFlight:new Set(),request:()=>assert.fail(),remember:()=>assert.fail(),navigate:()=>assert.fail()}));
+ await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async()=>{throw Object.assign(Error('not owned'),{status:404});},remember:()=>assert.fail(),navigate:()=>assert.fail()}));
 });
-test('invalid locator, wrong order or other account response cannot navigate',async()=>{
- for(const request of [async()=>({order:{...order,id:'different'}}),async()=>{throw Object.assign(Error('not found'),{status:404});}])await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request,remember:()=>assert.fail(),navigate:()=>assert.fail()}));
- await assert.rejects(payment.resumeMk99Payment('../other',{inFlight:new Set(),request:()=>assert.fail(),remember:()=>assert.fail(),navigate:()=>assert.fail()}));
+test('paid, closed, unknown, changed URL or risk after query cannot enter the cashier',async()=>{
+ for(const mode of ['paid','closed','unknown','risk','changed']){let count=0;await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async(p,o)=>{count++;if(o.method==='POST')return {ok:true,orderStatus:['risk','changed'].includes(mode)?'pending':mode,verificationSource:'authenticated_https_query'};return {order:count===1?order:{...order,...(mode==='risk'?{riskState:'manual_review'}:{paymentUrl:order.paymentUrl+'?changed=1'})}};},remember:()=>assert.fail(),navigate:()=>assert.fail()}));}
 });
 test('cashier origin and pending settlement validation remains strict separately from local navigation',()=>{
  assert.equal(payment.safeMk99Cashier(order,id),order.paymentUrl);
@@ -26,8 +29,4 @@ test('list gating and customer messages preserve closed, risk and paid protectio
  assert.equal(payment.canResumeMk99Order(row),true);
  for(const patch of [{payment_status:'closed'},{status:'expired'},{risk_state:'manual_review'},{credited_at:1},{paid_at:1}])assert.equal(payment.canResumeMk99Order({...row,...patch}),false);
  assert.match(payment.paymentResumeMessage({paymentState:'paid'},'zh'),/已付款/);assert.match(payment.paymentResumeMessage({paymentState:'closed'},'en'),/closed/);
-});
-
-test('missing or inactive package and invalid price cannot navigate or create a payment',async()=>{
- for(const packages of [[],[{id:'different',total_payment_fen:1043}],[{id:'starter',total_payment_fen:null}]])await assert.rejects(payment.resumeMk99Payment(id,{inFlight:new Set(),request:async path=>path==='/v1/packages'?{packages}:{order},navigate:()=>assert.fail()}));
 });

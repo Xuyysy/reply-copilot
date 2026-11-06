@@ -3,8 +3,9 @@ import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
-import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder, createPaymentNotices } from "../../lib/payment-sync.mjs";
+import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder, rememberPayment, createPaymentNotices } from "../../lib/payment-sync.mjs";
 import { canRefreshPaymentOrder, refreshPaymentOrder } from "../../lib/payment-refresh.mjs";
+import { navigateVerifiedCashier } from "../../lib/cashier-navigation.mjs";
 import { canResumeMk99Order, resumeMk99Payment, paymentResumeMessage } from "../../lib/payment-resume.mjs";
 import { orderPriceSummary } from "../../lib/order-price-summary.mjs";
 import { Alert, AlertDescription } from "../ui/alert";
@@ -107,7 +108,7 @@ export default function AccountDashboard() {
     try {
       await resumeMk99Payment(orderId,{inFlight:refreshInFlight.current,
         request:async(path:string,options:RequestInit)=>{if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");const result=await api(path,options);if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");return result;},
-        navigate:(url:string)=>location.assign(url)});
+        remember:rememberPayment,navigate:(url:string,origin:string)=>navigateVerifiedCashier(url,{allowedOrigin:origin})});
     }catch(error){if(notices.current!.isOwner(owner)){setOrderRefreshFeedback({orderId,message:error instanceof ApiError?readableError(error,language):paymentResumeMessage(error,language)});void load(true);}}
     finally{setContinuingOrderId(null);}
   }
