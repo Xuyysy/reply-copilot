@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {spawn,execFileSync}from 'node:child_process';import {mkdtempSync,writeFileSync,rmSync}from 'node:fs';import {tmpdir}from 'node:os';import path from 'node:path';import {pathToFileURL}from 'node:url';import {createRequire}from 'node:module';
 const {build}=createRequire(new URL('../../api/package.json',import.meta.url))('esbuild'),web=new URL('..',import.meta.url).pathname;
-test('existing checkout: MK99 verification, snapshot review, safe replacement, no duplicate creation',{timeout:30000},async()=>{
+test('ordinary checkout: current package selection, no recovery UI, explicit creation and payment safety',{timeout:30000},async()=>{
  const dir=mkdtempSync(path.join(tmpdir(),'xrh-checkout-ui-')),pending=new Map();let chrome,buffer='',serial=0,session;
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
@@ -35,14 +35,12 @@ test('existing checkout: MK99 verification, snapshot review, safe replacement, n
  for(const mode of ['pending','unknown','paid','closed','failed','refunded','risk','badurl','queryerror','unavailable','otheruser','epay']){
   await call('Page.navigate',{url:base+'?order='+id+'&fixture='+mode});await until('window.__calls?.some(c=>c[0].startsWith("/v1/orders/"))');
   if(mode==='otheruser'){await until('document.querySelector("#checkout-status").textContent.includes("无法读取原订单")');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);continue;}
-  await until('document.querySelector("#order-reference").textContent.includes("11111111")');
+  await until('document.querySelector("#package-cny").textContent.includes("10.43")');
   if(mode==='pending')await until('!document.querySelector("#cashier-link").hidden');
   assert.equal(await evaluate('window.__creates'),0,'review never creates an order');
   assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   assert.equal(await evaluate('!document.querySelector("#cashier-link").hidden'),mode==='pending');
-  const replace=['closed','failed','refunded'].includes(mode);
-  assert.equal(await evaluate('!document.querySelector("#replacement-purchase").hidden'),replace);
-  if(replace)assert.equal(await evaluate('document.querySelector("#replacement-purchase").getAttribute("href")'),'/checkout/?package=starter');
+  assert.equal(await evaluate('document.querySelector("#order-reference,#replacement-purchase,#replacement-help,#cashier-help,#payment-support")===null'),true,'no extra recovery UI');
   if(['unknown','risk','queryerror','badurl'].includes(mode))assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
   if(mode==='unknown'){await evaluate('document.querySelector("#refresh-order").click()');await until('window.__calls.some(c=>c[0].endsWith("/refresh"))');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);}
   if(mode==='epay'){assert.equal(await evaluate('document.querySelector("#epay-submit").hidden'),false);await evaluate('document.querySelector("#epay-submit").click()');await until('!document.querySelector("#epay-pay-label").hidden');assert.equal(await evaluate('window.__calls.filter(c=>c[0].endsWith("/attempts")).length'),1);}
@@ -50,9 +48,9 @@ test('existing checkout: MK99 verification, snapshot review, safe replacement, n
   if(mode==='pending'){await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);}
  }
  await call('Page.navigate',{url:base+'?package=starter'});await until('!document.querySelector("#create-order").disabled');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
- assert.equal(await evaluate('document.querySelectorAll("input[name=payment-channel]").length'),3);
- await evaluate('document.querySelector("#create-order").click();document.querySelector("#create-order").click()');await until('document.querySelector("#checkout-status").textContent.includes("不能重复创建")');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
- await call('Page.navigate',{url:base+'?package=starter&fixture=newsuccess'});await until('!document.querySelector("#create-order").disabled');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');await until('!document.querySelector("#cashier-link").hidden');assert.equal(await evaluate('window.__creates'),1);assert.match(await evaluate('document.querySelector("#order-reference").textContent'),/22222222/);const created=await evaluate('window.__calls.filter(c=>c[0]==="/v1/orders")');assert.equal(created.length,1);
+ assert.equal(await evaluate('document.querySelectorAll("input[name=payment-channel]").length'),3);assert.equal(await evaluate('document.querySelector("#order-reference,#cashier-help,#replacement-purchase")===null'),true);
+ await evaluate('document.querySelector("#create-order").click();document.querySelector("#create-order").click()');await until('document.querySelector("#checkout-status").textContent.includes("该套餐已有待付款")');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
+ await call('Page.navigate',{url:base+'?package=starter&fixture=newsuccess'});await until('!document.querySelector("#create-order").disabled');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');await until('!document.querySelector("#cashier-link").hidden');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#order-reference")===null'),true);const created=await evaluate('window.__calls.filter(c=>c[0]==="/v1/orders")');assert.equal(created.length,1);
  await call('Page.navigate',{url:base+'?order=bad'});await until('document.querySelector("#checkout-status").textContent.includes("订单编号无效")');assert.equal(await evaluate('window.__calls.length'),0);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });

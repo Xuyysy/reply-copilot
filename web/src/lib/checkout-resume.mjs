@@ -18,9 +18,3 @@ export async function loadOrderCheckout(id,request,{queryUnknown=false}={}){
   return {order,verified};
  }catch{return {order,verified:false};}
 }
-export function replacementPurchaseUrl(order,packages,available){
- if(!available||order?.paymentProtocol!=='mk99'||order.riskState!=='clear'||!['closed','failed','refunded'].includes(order.status))return null;
- const pkg=(Array.isArray(packages)?packages:[]).find(p=>p.id===order.packageId);
- if(!pkg||typeof pkg.id!=='string'||! /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(pkg.id)||!Number.isSafeInteger(pkg.total_payment_fen)||pkg.total_payment_fen<1)return null;
- return '/checkout/?package='+encodeURIComponent(pkg.id);
-}

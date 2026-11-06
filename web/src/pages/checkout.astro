@@ -11,7 +11,7 @@ import Base from "../layouts/Base.astro";
     <div class="content-card" style="max-width:680px">
       <h2 id="package-name">正在读取套餐…</h2>
       <p id="package-credits"></p>
-      <p id="order-reference" class="break-all" hidden></p>
+
       <p id="package-usd"></p>
       <p id="package-description"></p>
       <p id="package-fee"></p>
@@ -23,14 +23,11 @@ import Base from "../layouts/Base.astro";
       </section>
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
-      <p id="cashier-help" class="notice" hidden></p>
-      <p id="replacement-help" hidden></p>
+
       <p id="restart-notice" class="notice" hidden data-zh="重新发起会创建新的独立订单，旧订单不会取消。请勿同时支付多笔订单。">Restarting creates a separate order and does not cancel earlier orders. Do not pay multiple orders unintentionally.</p>
       <div class="button-row">
         <button id="create-order" class="button checkout-pay-button" type="button" disabled><span id="create-order-label" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></button>
         <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
-        <a id="replacement-purchase" class="button secondary" href="/pricing" hidden data-zh="重新选择支付方式">Choose a payment method again</a>
-        <a id="payment-support" class="button secondary" href="/feedback" hidden data-zh="联系客服">Contact support</a>
         <a id="cashier-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
         <section id="wechat-qr-panel" class="checkout-wechat-qr" hidden aria-labelledby="wechat-qr-title">
           <h3 id="wechat-qr-title" data-zh="用微信扫码完成支付">Scan with WeChat to continue</h3>
@@ -55,7 +52,7 @@ import Base from "../layouts/Base.astro";
     import {paymentActionLabel} from "../lib/payment-presentation.mjs";
     import { api, ApiError } from "../lib/api";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
-    import {checkoutResumeId,loadOrderCheckout,replacementPurchaseUrl} from "../lib/checkout-resume.mjs";
+    import {checkoutResumeId,loadOrderCheckout} from "../lib/checkout-resume.mjs";
     import {safeMk99Cashier} from "../lib/payment-resume.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
@@ -154,9 +151,6 @@ import Base from "../layouts/Base.astro";
     }
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
-      const statusLabels:Record<string,[string,string]>={pending:["待付款","Pending"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],closed:["已关闭","Closed"],failed:["支付失败","Failed"],refunded:["已退款","Refunded"],manual_review:["人工审核","Manual review"]};
-      const status=next.riskState==="manual_review"?"manual_review":next.status;
-      show("order-reference",true);byId("order-reference").textContent=label("原订单：","Original order: ")+next.id+" · "+(statusLabels[status]?.[document.documentElement.lang==="en"?1:0]||label("处理中","Processing"));
       void renderWechatQr(next);
       byId("checkout-status").textContent=checkoutOrderMessage(next,document.documentElement.lang);
       byId("package-fee").textContent=packageSummary({fee_rate_bps:next.feeRateBps,merchant_pricing:next.merchantPricing},document.documentElement.lang==="en"?"en":"zh").fee;
@@ -166,15 +160,6 @@ import Base from "../layouts/Base.astro";
       const mk99=next.paymentProtocol==="mk99";
       const cashierAllowed=canUseCashierLink(next)&&(!mk99||(confirmedMk99OrderId===next.id&&Boolean(safeMk99Cashier(next,next.id))));
       show("cashier-link",cashierAllowed);byId<HTMLAnchorElement>("cashier-link").href=cashierAllowed?next.paymentUrl!:"";
-      const replacement=replacementPurchaseUrl(next,availablePackages,paymentAvailable&&uniquePaymentMethods(paymentMethods).length>0);
-      show("replacement-purchase",Boolean(replacement));byId<HTMLAnchorElement>("replacement-purchase").href=replacement||"/pricing";
-      show("payment-support",mk99);
-      show("replacement-help",mk99&&["closed","failed","refunded"].includes(next.status));
-      byId("replacement-help").textContent=replacement?label("原交易不能继续。你可以重新选择当前可用支付方式，核对新报价后主动创建新订单；原订单仍保留。","The original transaction cannot continue. Choose an available method, review the current price and explicitly create a new order. The original order is retained."):label("当前无法重新购买：套餐已下架、支付未开放或订单仍有风险限制。请联系客服。","A new purchase is unavailable: the package is unavailable, checkout is closed or the order is restricted. Contact support.");
-      show("cashier-help",mk99&&["pending","unknown"].includes(next.status));
-      byId("cashier-help").textContent=label("若支付平台暂时无法打开收银台，请稍后重试或联系客服。未确认付款前，请勿重复创建订单。","If the payment platform cannot open the cashier, try later or contact support. Do not create duplicate orders while payment is unconfirmed. ");
-      if(mk99&&next.status==="pending"&&cashierAllowed)setStatus("订单仍待付款。请核对原订单金额，再打开原收银台；如收银台无法打开，请联系客服，不要重复下单。","This order is still pending. Review its original amount before opening the original cashier. If it cannot open, contact support; do not create another order.");
-      if(mk99&&next.status==="pending"&&!cashierAllowed)setStatus("尚未确认该订单可以安全继续付款。请刷新支付状态或联系客服；不要重复创建订单。","This order has not been confirmed as safe to pay. Refresh its payment status or contact support; do not create another order.");
       if(mk99&&next.status==="paid"&&!next.creditedAt)setStatus("付款已确认，额度到账仍待核对，请勿再次付款。","Payment is confirmed; credit settlement is still being checked. Do not pay again.");
       show("epay-submit",next.paymentProtocol==="epay"&&next.status==="pending"&&paymentAvailable);
       byId<HTMLButtonElement>("epay-submit").disabled=busy;
@@ -226,7 +211,7 @@ import Base from "../layouts/Base.astro";
       }catch{
         paymentAvailable=false;
         if(!order)render();
-        show("restart-payment",false);show("restart-notice",false);show("epay-submit",false);show("replacement-purchase",false);
+        show("restart-payment",false);show("restart-notice",false);show("epay-submit",false);
       }finally{availabilityInFlight=false;}
     }
     function scheduleAvailabilityRefresh(){
@@ -246,7 +231,7 @@ import Base from "../layouts/Base.astro";
           if(saved.order.id!==result.order.id)throw new Error("ORDER_MISMATCH");confirmedMk99OrderId=result.order.id;showOrder(saved.order);
         }else showOrder(result.order);}
       catch(error){const saved=checkoutOrderFromError(error);if(saved)showOrder(saved as Order);else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else{if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";failureMessage=error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"?"UNRESOLVED_ORDER_EXISTS":error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");}}
-      finally{busy=false;render();if(order)showOrder(order);if(failureMessage&&failureMessage.includes("UNRESOLVED_ORDER_EXISTS"))failureMessage=label("仍有待支付或待确认订单，不能重复创建。请到账户查看原订单、刷新支付状态或联系客服。","An unpaid or unconfirmed order is still open. Do not create another order. Review your account orders, refresh the status or contact support.");if(failureMessage)byId("checkout-status").textContent=failureMessage;}
+      finally{busy=false;render();if(order)showOrder(order);if(failureMessage&&failureMessage.includes("UNRESOLVED_ORDER_EXISTS"))failureMessage=label("该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。","This package has an unpaid or unconfirmed order. Check the original order first. Other packages can still be purchased.");if(failureMessage)byId("checkout-status").textContent=failureMessage;}
     }
     byId("create-order").addEventListener("click",()=>{void startOrder();});
     byId("restart-payment").addEventListener("click",()=>{void startOrder(true);});
