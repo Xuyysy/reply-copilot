@@ -36,7 +36,7 @@ export async function activity(request: Request,env: Env): Promise<Response> {
   const [ledger,orders]=await Promise.all([
     env.DB.prepare("SELECT kind,free_delta,paid_delta,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC, rowid DESC LIMIT 20").bind(session.user_id).all(),
     env.DB.prepare(`SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,
-      CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.provider END provider,CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.payment_protocol END payment_protocol,t.payment_channel,t.status payment_status,
+      CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.provider END provider,CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.payment_protocol END payment_protocol,t.payment_channel,t.status payment_status,t.risk_state,o.credited_at,o.paid_at,
       (SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker,
       t.base_amount_fen,t.service_fee_fen,t.amount_fen total_amount_fen,
       CASE WHEN t.status<>'paid' OR o.credited_at IS NULL THEN 'not_paid'
