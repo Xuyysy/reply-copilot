@@ -54,7 +54,6 @@ import Base from "../layouts/Base.astro";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
     import {checkoutResumeId,loadOrderCheckout} from "../lib/checkout-resume.mjs";
     import {safeMk99Cashier} from "../lib/payment-resume.mjs";
-    import {navigateVerifiedCashier} from "../lib/cashier-navigation.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
     type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{feeBearer:string;rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
@@ -229,19 +228,31 @@ import Base from "../layouts/Base.astro";
       try{const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
         if(result.order.paymentProtocol==="mk99"&&result.order.status==="pending"){
           const saved=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(result.order.id));
-          if(saved.order.id!==result.order.id)throw new Error("ORDER_MISMATCH");confirmedMk99OrderId=result.order.id;showOrder(saved.order);
+          if(saved.order.id!==result.order.id)throw new Error("ORDER_MISMATCH");
+          const latest=mergeCheckoutRead(order,saved.order) as Order;
+          confirmedMk99OrderId=safeMk99Cashier(latest,result.order.id)?latest.id:null;showOrder(latest);
         }else showOrder(result.order);}
       catch(error){const saved=checkoutOrderFromError(error);if(saved)showOrder(saved as Order);else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else{if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";failureMessage=error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"?"UNRESOLVED_ORDER_EXISTS":error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");}}
       finally{busy=false;render();if(order)showOrder(order);if(failureMessage&&failureMessage.includes("UNRESOLVED_ORDER_EXISTS"))failureMessage=label("该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。","This package has an unpaid or unconfirmed order. Check the original order first. Other packages can still be purchased.");if(failureMessage)byId("checkout-status").textContent=failureMessage;}
     }
     byId("create-order").addEventListener("click",()=>{void startOrder();});
     byId("restart-payment").addEventListener("click",()=>{void startOrder(true);});
-    byId("cashier-link").addEventListener("click",async(event)=>{
-      if(order?.paymentProtocol!=="mk99"){if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending")rememberPayment(order.id);return;}
-      event.preventDefault();if(busy)return;busy=true;confirmedMk99OrderId=null;show("cashier-link",false);
-      try{const result=await loadOrderCheckout(order.id,api);confirmedMk99OrderId=result.verified?result.order.id:null;showOrder(mergeCheckoutRead(order,result.order) as Order);const url=result.verified?safeMk99Cashier(order,order!.id):null;if(url){rememberPayment(order!.id);navigateVerifiedCashier(url,{allowedOrigin:order!.paymentCashierOrigin});}}
-      catch{setStatus("支付平台暂时无法打开收银台，请稍后重试或联系客服。未确认付款前，请勿重复创建订单。","The payment cashier is temporarily unavailable. Retry later or contact support. Do not create another order while payment is unconfirmed.");}
-      finally{busy=false;}
+    // Ordinary checkout keeps the original user-initiated native new-tab link.
+    // Existing-order recovery has its own async reconciliation path; never replace
+    // this navigation with location.assign after awaiting a query.
+    byId("cashier-link").addEventListener("click",(event)=>{
+      if(order?.paymentProtocol==="mk99"){
+        const latest=order;
+        const url=confirmedMk99OrderId===latest.id?safeMk99Cashier(latest,latest.id):null;
+        const anchor=event.currentTarget as HTMLAnchorElement;
+        if(busy||!url||anchor.getAttribute("href")!==url){
+          event.preventDefault();show("cashier-link",false);
+          setStatus("付款状态已变化，请刷新订单状态后再试。","Payment state has changed. Refresh the order status before trying again.");return;
+        }
+        try{rememberPayment(latest.id);}catch{event.preventDefault();setStatus("无法保存付款跟踪状态，请稍后重试。","Unable to save payment tracking. Please retry.");}
+        return;
+      }
+      if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending")rememberPayment(order.id);
     });
     byId("epay-submit").addEventListener("click",async()=>{
       if(busy||!order||order.paymentProtocol!=="epay"||order.status!=="pending"||!paymentAvailable)return;
