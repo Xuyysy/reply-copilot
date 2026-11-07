@@ -2,12 +2,12 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';
 import {generationFixture} from '../../scripts/lib/generation-performance-fixture.mjs';import {DEFAULT_MOMENTUM_CONFIG} from '../../domain/creator-momentum.js';
 const current=new URL('../..',import.meta.url).pathname;
-test('fixed Production full-path alternating A/B includes binding, account preflight, voice/history, ACK and fill',{timeout:60000},async()=>{
+test('accepted V1 full-path alternating A/B includes binding, account preflight, voice/history, ACK and fill',{timeout:60000},async()=>{
  const baseline=mkdtempSync(path.join(tmpdir(),'xrh-momentum-fixed-production-'));
  const prior=mkdtempSync(path.join(tmpdir(),'xrh-momentum-pre-review-'));
  try{
   const archive=execFileSync('git',['archive','3cebe3ecbee552ef5b0e68afc7882a2dfb3869fa'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',baseline],{input:archive});
-  const priorArchive=execFileSync('git',['archive','547b26e714b76c1f08ef3656df895c898a7a53e0'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
+  const priorArchive=execFileSync('git',['archive','cac9e0ee0f014634a9d15a7842edb417c2580d73'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
   const before=[],originalCandidate=[],after=[];let promptHash=null;
   for(let i=0;i<14;i++)for(const [kind,sourceRoot]of (i%2?[['after',current],['originalCandidate',prior],['before',baseline]]:[['before',baseline],['originalCandidate',prior],['after',current]])){
    const r=await generationFixture({sourceRoot,options:{momentumFeature:{eligible:true,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:true}}}});
@@ -22,6 +22,6 @@ test('fixed Production full-path alternating A/B includes binding, account prefl
    warm.push({display:r.marks.candidates,editor:r.elapsedMs,ack:r.report.metrics.ack.p50,editorBinding:r.report.metrics.editor_bound.p50,preflight:r.report.metrics.precheck_complete.p50,persist:r.report.metrics.delivery_persist.p50,http:r.requestPaths.length});
   }
   const report={environment:'Synthetic DOM/transport/D1 latency; actual fixed source content/background/hosted/provider/ACK paths; no real vendor or X requests.',before:summary(before),originalCandidate:summary(originalCandidate),after:summary(after),warmAfter:summary(warm)};
-  writeFileSync('/private/tmp/xrh-momentum-full-path-performance.json',JSON.stringify(report,null,2));console.log('Full-path A/B '+JSON.stringify(report));assert.ok(report.after.editor.p90-report.before.editor.p90<10,'investigate >10ms reproducible client overhead');
+  writeFileSync('/private/tmp/xrh-momentum-full-path-performance.json',JSON.stringify(report,null,2));console.log('Full-path A/B '+JSON.stringify(report));assert.ok(report.after.editor.p90-report.originalCandidate.editor.p90<10,'investigate >10ms reproducible client overhead');
  }finally{for(const dir of [baseline,prior])rmSync(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });

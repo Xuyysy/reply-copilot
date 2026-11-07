@@ -42,3 +42,17 @@ test('concurrent config update rolls back operation and audit rather than overwr
  const batch=f.DB.batch.bind(f.DB);let raced=false;f.DB.batch=async statements=>{if(!raced&&statements.some(s=>s.query.includes('INSERT INTO system_settings'))){raced=true;const row=JSON.parse(f.sql.prepare("SELECT value FROM system_settings WHERE key='creator_momentum_v1'").get().value);row.version='concurrent-other';f.sql.prepare("UPDATE system_settings SET value=? WHERE key='creator_momentum_v1'").run(JSON.stringify(row));}return batch(statements);};
  const r=await f.call('/v1/admin/creator-momentum',{body:body({config:{...DEFAULT_MOMENTUM_CONFIG,enabled:true},expectedVersion:a.operationId})});assert.equal(r.status,409);assert.equal(f.sql.prepare('SELECT count(*) n FROM admin_operations').get().n,1);assert.equal(f.sql.prepare('SELECT count(*) n FROM admin_audit_logs').get().n,1);assert.equal(JSON.parse(f.sql.prepare("SELECT value FROM system_settings WHERE key='creator_momentum_v1'").get().value).version,'concurrent-other');
  }finally{f.sql.close();}});
+
+test('historical verified XiaoDou, EasyPay and MK99 purchases unlock independently of purchase date or remaining balance',async()=>{
+ for(const [merchant,protocol] of [['xiaodou','rsa2'],['xiaodou','epay'],['mk99','rsa2']]){
+  const f=fixture();
+  try{
+   paid(f);
+   f.sql.prepare("UPDATE payment_transactions SET merchant_provider=?,payment_protocol=?,epay_trade_no=?").run(merchant,protocol,protocol==='epay'?'gateway-receipt':null);
+   f.sql.exec('UPDATE credit_accounts SET paid_balance=0');
+   assert.equal((await f.call(feature,{method:'GET'})).body.features.interactionMomentum.eligible,true);
+   f.sql.exec("DELETE FROM credit_ledger WHERE kind='purchase_grant'");
+   assert.equal((await f.call(feature,{method:'GET'})).body.features.interactionMomentum.eligible,false);
+  }finally{f.sql.close();}
+ }
+});

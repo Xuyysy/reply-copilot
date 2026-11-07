@@ -1,31 +1,72 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {withMomentumBrowser} from '../helpers/momentum-browser.js';
-const script=readFileSync(new URL('../../content/momentum-presenter.js',import.meta.url),'utf8')+'\n'+readFileSync(new URL('../../content/inline-assistant.js',import.meta.url),'utf8');const css=readFileSync(new URL('../../content/inline-assistant.css',import.meta.url),'utf8');
-test('real floating UI: free lock, professional intro, paid switch, reminder dismissal/DND, keyboard, dark/narrow',{timeout:30000},async()=>{
- await withMomentumBrowser(`<html lang="zh"><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${script};window.momentumReady=true;</script></html>`,async({evaluate,call})=>{
-  await evaluate(`window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.body,(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(css)};shadow.append(style);assistant.setMomentum({available:true,eligible:false,enabled:false,policy:{enabled:true,overviewZh:'当前：只统计确认生成，不是发送评论',researchZh:'未来规划：X推荐机制、互动建模、中文榜单与曝光研究'}});`);
-  await evaluate('assistant.setMomentum({status:"guest"});');assert.equal(await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("查看套餐")).hidden'),false);
-  await evaluate('assistant.setMomentum({status:"unverified"});');assert.equal(await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("查看套餐")).hidden'),true);
-  await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("验证购买权益")).click()');assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/正在验证/);
-  await evaluate('assistant.setMomentum({status:"free",policy:{enabled:true,overviewZh:"当前：不是发送评论",researchZh:"未来规划：互动研究"}});');
-  assert.equal(await evaluate('shadow.querySelector(".momentum input").disabled'),true);assert.equal(await evaluate('shadow.querySelector("#auto-generate-toggle").checked'),true);
-  await evaluate('shadow.querySelector(".momentum button").click()');assert.match(await evaluate('shadow.querySelector(".momentum-intro").textContent'),/未来规划/);
-  assert.equal(await evaluate('shadow.querySelector(".momentum button").getAttribute("aria-expanded")'),'true');assert.match(await evaluate('shadow.querySelector(".momentum-intro").textContent'),/不是发送评论/);
-  await evaluate('window.actions=[];shadow.querySelector(".momentum input").click()');assert.equal(await evaluate('actions.length'),0,'disabled free switch cannot enable');
-  await evaluate('assistant.setMomentum({available:true,eligible:true,enabled:false,policy:{enabled:true,titleZh:"活动信号",bodyZh:"整理原创想法"}});shadow.querySelector(".momentum input").click()');assert.equal(await evaluate('actions.at(-1).a'),'momentum_toggle');
-  await evaluate('assistant.setMomentum({available:true,eligible:true,enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'),true);
-  const text=await evaluate('shadow.querySelector(".momentum").textContent');assert.ok(!/500|650|1350|1700/.test(text),'no internal thresholds in user UI');
-  await evaluate('shadow.querySelector(".momentum-close").click()');assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'),false);
-  await evaluate('assistant.setMomentum({available:true,eligible:true,enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'),false,'dismissed event cannot reappear from a stale update');
-  await evaluate('assistant.setMomentum({available:true,eligible:true,enabled:true,policy:{enabled:true},reminder:{id:"today:2",stage:2}});[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');assert.equal(await evaluate('actions.at(-1).a'),'momentum_dnd');
-  await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
-  await evaluate('shadow.querySelector(".momentum button").focus()');assert.equal(await evaluate('shadow.activeElement.textContent'),'查看功能原理与分析体系');
-  await evaluate('assistant.host.dataset.theme="dark";shadow.querySelector(".momentum button").focus()');
-  await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
-  await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
-  assert.equal(await evaluate('shadow.querySelector(".momentum button").getAttribute("aria-expanded")'),'false');
-  await evaluate('shadow.querySelector(".momentum button").click()');
-  assert.equal(await evaluate('shadow.querySelector(".momentum-intro").scrollWidth<=shadow.querySelector(".momentum-intro").clientWidth'),true);
-  const shot=await call('Page.captureScreenshot',{format:'png'});(await import('node:fs')).writeFileSync('/private/tmp/xrh-momentum-v1/floating-ui.png',Buffer.from(shot.result.data,'base64'));
-  await evaluate('document.documentElement.lang="en";assistant.close();window.english=ZaneReplyCopilotContent.inlineAssistant.mount(document.body,()=>{});');assert.match(await evaluate('english.host.shadowRoot.textContent'),/View principles and analysis framework/);
- });
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {withMomentumBrowser} from '../helpers/momentum-browser.js';
+
+const files = ['content/momentum-presenter.js', 'content/inline-assistant.js'];
+const source = paths => paths.map(path => readFileSync(path, 'utf8')).join('\n');
+const css = source(['content/inline-assistant.css', 'content/momentum.css']);
+const before = path => execFileSync('git', ['show', 'cac9e0e:' + path], {encoding: 'utf8'});
+const fixture = scripts => `<html lang="en"><body><textarea id="editor" aria-label="Editor"></textarea><div id="side"></div><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${scripts};window.momentumReady=true;</script></body></html>`;
+const setup = styles => `window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.querySelector("#editor"),(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};shadow.append(style);assistant.showResult({natural:'这个例子一下就说明白了。',light_humor:'终于有人把这个坑填了。',thoughtful:'这个区别在实际使用时很重要。'});assistant.setMomentum({status:"free",available:true,eligible:false,policy:{enabled:true}});`;
+const screenshots = '/private/tmp/xrh-momentum-acceptance';
+async function capture(call, file) {
+  mkdirSync(screenshots, {recursive: true});
+  const shot = await call('Page.captureScreenshot', {format: 'png'});
+  writeFileSync(screenshots + '/' + file, Buffer.from(shot.result.data, 'base64'));
+}
+
+test('floating UI defaults to Chinese on English X and keeps only compact controls', {timeout: 30000}, async () => {
+  await withMomentumBrowser(fixture(files.map(before).join('\n')), async ({evaluate, call}) => {
+    await evaluate(setup(before('content/inline-assistant.css')));
+    await capture(call, 'before-light.png');
+  });
+  await withMomentumBrowser(fixture(source(files)), async ({evaluate, call}) => {
+    await evaluate(setup(css));
+    assert.equal(await evaluate('shadow.querySelector(".momentum-pro").textContent'), 'PRO');
+    assert.match(await evaluate('shadow.querySelector(".momentum").textContent'), /互动势能临界值/);
+    assert.equal(await evaluate('shadow.querySelector(".momentum input").disabled'), true);
+    assert.equal(await evaluate('shadow.querySelector("#auto-generate-toggle").checked'), true);
+    assert.equal(await evaluate('shadow.querySelector(".momentum details").open'), false);
+    await capture(call, 'after-light.png');
+    await call('Emulation.setDeviceMetricsOverride', {width: 375, height: 850, deviceScaleFactor: 1, mobile: true});
+    await evaluate('assistant.host.dataset.theme="dark";shadow.querySelector(".momentum summary").focus()');
+    await call('Input.dispatchKeyEvent', {type: 'keyDown', key: ' ', code: 'Space', windowsVirtualKeyCode: 32});
+    await call('Input.dispatchKeyEvent', {type: 'keyUp', key: ' ', code: 'Space', windowsVirtualKeyCode: 32});
+    assert.equal(await evaluate('shadow.querySelector(".momentum details").open'), true);
+    await evaluate('new Promise(resolve=>setTimeout(resolve,50))');
+    assert.match(await evaluate('shadow.querySelector(".momentum-intro").textContent'), /查看完整介绍/);
+    assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth && assistant.host.getBoundingClientRect().right<=innerWidth'), true);
+    await capture(call, 'after-dark-375.png');
+    await evaluate('assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');
+    assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'), true);
+    await evaluate('shadow.querySelector(".momentum-close").click();assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');
+    assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'), false);
+    await evaluate('assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:2",stage:2}});[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');
+    assert.equal(await evaluate('actions.at(-1).a'), 'momentum_dnd');
+  });
+});
+
+test('side panel and lazy X entry share controls without an initial network request or focus change', {timeout: 30000}, async () => {
+  await withMomentumBrowser(fixture(source(files)), async ({evaluate, call}) => {
+    await evaluate(`window.sent=[];window.state={status:"free",count:7,policy:{enabled:true,researchZh:"中文榜单研究"}};window.send=async m=>{sent.push(m);if(m.enabled!==undefined) state={...state,enabled:m.enabled};return state;};document.querySelector("#editor").focus();window.entry=ReplyCopilotMomentumPresenter.mountEntry(send);window.root=document.querySelector("[data-zane-reply-copilot]").shadowRoot;`);
+    assert.equal(await evaluate('sent.length'), 0);
+    assert.equal(await evaluate('document.activeElement.id'), 'editor');
+    await evaluate('root.querySelector("summary").click()');
+    await evaluate('new Promise(resolve=>setTimeout(resolve,50))');
+    assert.equal(await evaluate('sent.length'), 1);
+    assert.equal(await evaluate('root.querySelector("input").disabled'), true);
+    await evaluate('window.full=ReplyCopilotMomentumPresenter.connect(document.querySelector("#side"),send,()=>{},{mode:"full"});full.refresh()');
+    await evaluate('full.expand()');
+    assert.match(await evaluate('document.querySelector("#side").textContent'), /本机今日确认生成 · 7.*查看套餐.*中文榜单研究/);
+    await evaluate('state={...state,status:"paid",enabled:false};Promise.all([full.refresh(),entry.sync()])');
+    await evaluate('document.querySelector("#side input").click()');
+    await evaluate('entry.sync();new Promise(resolve=>setTimeout(resolve,30))');
+    assert.equal(await evaluate('root.querySelector("input").checked'), true);
+    const init = await evaluate(`(() => {const elapsed=[];for(let i=0;i<30;i++){const start=performance.now();for(let n=0;n<25;n++){const chip=ReplyCopilotMomentumPresenter.mountEntry(send);chip.remove();}elapsed.push((performance.now()-start)/25);}return elapsed.sort((a,b)=>a-b);})()`);
+    console.log('Collapsed independent entry init P50/P90 (ms):', init[14], init[26]);
+    await call('Emulation.setDeviceMetricsOverride', {width: 375, height: 850, deviceScaleFactor: 1, mobile: true});
+    assert.equal(await evaluate('root.querySelector(".momentum-entry").getBoundingClientRect().right<=innerWidth'), true);
+  });
 });

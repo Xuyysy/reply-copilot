@@ -1,3 +1,4 @@
+import { RUNTIME_CONFIG } from "../config/runtime.js";
 import {createMomentumView} from '../services/momentum-view.js';
 import {MomentumStore,momentumReceiptPatch,momentumReceiptKey} from '../services/creator-momentum.js';
 import "../utils/generation-performance.js";
@@ -29,7 +30,14 @@ const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
 const momentumView=createMomentumView({accountStates,client:accountClient,momentum:new MomentumStore(),storage:chrome.storage.local,broadcast:broadcastMomentum});
-async function broadcastMomentum(){const tabs=await chrome.tabs.query({url:['https://x.com/*','https://twitter.com/*']});await Promise.allSettled(tabs.filter(t=>Number.isInteger(t.id)).map(t=>chrome.tabs.sendMessage(t.id,{type:'REPLY_COPILOT_MOMENTUM_CHANGED'})));}
+async function broadcastMomentum() {
+  const message = {type: 'REPLY_COPILOT_MOMENTUM_CHANGED'};
+  await Promise.allSettled([
+    chrome.runtime.sendMessage?.(message),
+    chrome.tabs.query({url: ['https://x.com/*', 'https://twitter.com/*']}).then(tabs =>
+      Promise.allSettled(tabs.filter(tab => Number.isInteger(tab.id)).map(tab => chrome.tabs.sendMessage(tab.id, message))))
+  ]);
+}
 
 const deliveryCoordinator = new DeliveryCoordinator({
   storage: chrome.storage.local,
@@ -60,7 +68,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     void chrome.tabs.query({url:["https://x.com/*","https://twitter.com/*"]}).then(tabs=>Promise.allSettled(tabs.filter(tab=>Number.isInteger(tab.id)).map(tab=>chrome.tabs.sendMessage(tab.id,{type:"REPLY_COPILOT_PERFORMANCE_STATE",enabled:performanceEnabled})))).catch(()=>{});
   }
   if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
-  if (area === "local" && changes.replyCopilotAccountToken) { momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); }
+  if (area === "local" && changes.replyCopilotAccountToken) { momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); void broadcastMomentum(); }
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -102,8 +110,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void momentumView(message).then(value=>sendResponse({ok:true,...value}),()=>sendResponse({ok:false,status:'unverified',available:false,eligible:false,enabled:false}));return true;
   }
   if (message?.type === 'REPLY_COPILOT_OPEN_ORIGINAL') {
-    if(!fromXPage||sender.frameId!==0)return false;
+    if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
     void chrome.tabs.create({url:'https://x.com/compose/post'}).then(()=>sendResponse({ok:true}),()=>sendResponse({ok:false}));return true;
+  }
+  if (message?.type === "REPLY_COPILOT_PERFORMANCE_CONTROL") {
+    if (!fromExtensionPage || RUNTIME_CONFIG.channel !== "staging") { sendResponse({ok:false});return false; }
+    void (async()=>{
+      await performanceReady;
+      if(typeof message.enabled === "boolean"){
+        await chrome.storage.session.set({generationPerformanceEnabled:message.enabled});
+        performanceEnabled=message.enabled;
+      }
+      if(message.clear===true)performanceSamples.clear();
+      sendResponse({ok:true,enabled:performanceEnabled,report:performanceSamples.report()});
+    })().catch(()=>sendResponse({ok:false}));return true;
   }
   if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
@@ -240,7 +260,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (typeof message.sourceText === "string" && message.sourceText.length > 0 && message.sourceText.length <= 12000 && /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) {
         try { await storage.savePendingRequest(createReplyRequest({ sourceText: message.sourceText, sourceUrl: message.sourceUrl })); } catch { /* open panel without unverified context */ }
       }
-      try { await chrome.sidePanel.open({ windowId: sender.tab.windowId }); sendResponse({ ok: true }); } catch { sendResponse({ ok: false }); }
+      try { await chrome.sidePanel.open({ windowId: sender.tab.windowId }); if (message.momentumDetails === true) void chrome.storage.session.set({openMomentumDetails: true}).catch(() => {}); sendResponse({ ok: true }); } catch { sendResponse({ ok: false }); }
     })();
     return true;
   }

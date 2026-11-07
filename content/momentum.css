@@ -1,0 +1,47 @@
+.momentum {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 8px;
+  padding: 6px 0;
+  border-block-start: 1px solid #8792a340;
+  font: 12px/1.45 system-ui, sans-serif;
+}
+.momentum label { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-weight: 620; }
+.momentum-pro {
+  display: inline-block; margin-inline-start: 6px; padding: 0 4px;
+  border: 1px solid #8792a366; border-radius: 4px; font: 650 9px/1.5 system-ui;
+  letter-spacing: .05em; vertical-align: 1px;
+}
+.momentum small { font-size: 11px; color: inherit; opacity: .76; align-self: center; white-space: nowrap; }
+.momentum input[type="checkbox"] {
+  appearance: none; flex: none; position: relative; width: 30px; height: 17px; margin: 0;
+  background: #718096; border-radius: 12px; cursor: pointer;
+}
+.momentum input::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 11px; height: 11px;
+  border-radius: 50%; background: white;
+}
+.momentum input:checked { background: #3858c7; }
+.momentum input:checked::after { transform: translateX(13px); }
+.momentum input:disabled { opacity: .55; cursor: not-allowed; }
+.momentum-details, .momentum-intro, .momentum-reminder, .momentum-tools { min-width: 0; grid-column: 1 / -1; }
+.momentum summary, .momentum-entry summary { cursor: pointer; }
+.momentum-details summary { width: fit-content; opacity: .85; }
+.momentum-intro, .momentum-reminder { overflow-wrap: anywhere; }
+.momentum-intro p, .momentum-reminder p { margin: 4px 0 8px; white-space: pre-wrap; }
+.momentum button { font: inherit; cursor: pointer; color: inherit; background: transparent; border: 1px solid #8792a366; border-radius: 6px; padding: 3px 6px; }
+.momentum button:hover { background: #8792a320; }
+.momentum :is(summary, button, input):focus-visible, .momentum-entry > summary:focus-visible { outline: 2px solid #6680f3; outline-offset: 2px; }
+.momentum [hidden] { display: none !important; }
+.momentum-reminder { position: relative; border: 1px solid #8792a366; padding: 8px; border-radius: 8px; }
+.momentum-reminder strong { display: block; padding-right: 28px; }
+.momentum-reminder button + button, .momentum-tools button + button { margin-inline-start: 6px; }
+.momentum .momentum-close { position: absolute; top: 3px; right: 3px; }
+.momentum-full { border: 0; }
+.momentum-full > p { margin: 4px 0; grid-column: 1 / -1; }
+.momentum-entry {
+  color-scheme: light dark; color: CanvasText; background: Canvas;
+  border: 1px solid #8792a366; border-radius: 8px; padding: 4px 8px;
+  font: 12px/1.5 system-ui; width: fit-content; margin-inline-start: auto;
+}
+.momentum-entry-panel { width: min(240px, calc(100vw - 44px)); margin-top: 4px; }

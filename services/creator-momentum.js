@@ -21,7 +21,7 @@ export class MomentumStore {
    r.onsuccess=()=>{r.result.onversionchange=()=>{r.result.close();this.opening=null;};resolve(r.result);};r.onerror=()=>{this.opening=null;reject(Error('LOCAL_STATS_UNAVAILABLE'));};r.onblocked=()=>{this.opening=null;reject(Error('LOCAL_STATS_BLOCKED'));};
   });return this.opening;
  }
- async transaction(names,action){const db=await this.open(),tx=db.transaction(names,'readwrite');const done=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('LOCAL_STATS_WRITE_FAILED'));});try{const result=await action(tx);await done;return result;}catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}}
+ async transaction(names,action,mode='readwrite'){const db=await this.open(),tx=db.transaction(names,mode);const done=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('LOCAL_STATS_WRITE_FAILED'));});try{const result=await action(tx);await done;return result;}catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}}
  async ingest(event){
   if(!event||!/^[A-Za-z0-9_-]{1,128}$/.test(event.ownerId)||typeof event.ownerId!=='string'||event.ownerId.length>128||typeof event.requestId!=='string'||!/^[-A-Za-z0-9_]{1,100}$/.test(event.requestId)||!Number.isFinite(event.at)||!/^\d{4}-\d{2}-\d{2}$/.test(event.day))throw Error('INVALID_LOCAL_RECEIPT');
   // Only recent local aggregates are supported. Old upgrade history is never invented.
@@ -33,21 +33,29 @@ export class MomentumStore {
    day.count+=1;seen.put({at:event.at},id);days.put(day,key);return true;
   });
  }
- async view(ownerId,policy,{eligible=false,enabled,claim=false,dnd=false,available=true}={}){
+ async snapshot(ownerId){
+  const key=JSON.stringify([ownerId,localDayKey(this.clock())]);
+  return this.transaction(['days','prefs'],async tx=>{
+   const day=await request(tx.objectStore('days').get(key));
+   const pref=await request(tx.objectStore('prefs').get(ownerId));
+   return {count:day?.count??0,dnd:day?.dnd===true,enabled:pref?.enabled===true};
+  },'readonly');
+ }
+ async view(ownerId,policy,{eligible=false,enabled,claim=false,dnd=false,available=true,assignPolicy=true}={}){
   if(!ownerId)return {eligible:false,enabled:false,available:false,policy};
   const now=this.clock(),today=localDayKey(now);
   return this.transaction(['days','prefs'],async tx=>{
    const days=tx.objectStore('days'),prefs=tx.objectStore('prefs'),key=JSON.stringify([ownerId,today]);
    const p=await request(prefs.get(ownerId))||{enabled:false,latestDay:today};
    const saved=await request(days.get(key));
-   const day=saved?.thresholds?saved:{...createMomentumDay(now,policy,this.random),count:saved?.count??0};
+   const day=saved?.thresholds?saved:assignPolicy?{...createMomentumDay(now,policy,this.random),...saved}:{day:today,count:saved?.count??0,createdAt:saved?.createdAt??now,...saved};
    if(enabled===false||eligible&&enabled===true)p.enabled=enabled;
    if(dnd)day.dnd=true;
    let stage=null;
    if(claim&&today>=p.latestDay)stage=selectMomentumReminder(day,{eligible,enabled:p.enabled,globalEnabled:policy.enabled},now);
    const next=stage?recordMomentumReminder(day,stage,now):day;
    p.latestDay=p.latestDay>today?p.latestDay:today;prefs.put(p,ownerId);days.put(next,key);
-   return {eligible,enabled:p.enabled,available,policy,day:today,count:next.count,reminder:stage?{id:today+':'+stage,stage}:null};
+   return {eligible,enabled:p.enabled,available,policy,day:today,count:next.count,dnd:next.dnd===true,reminder:stage?{id:today+':'+stage,stage}:null};
   });
  }
  async prune(){

@@ -1,3 +1,4 @@
+import { RUNTIME_CONFIG } from "../config/runtime.js";
 import { AIProviderRouter } from "../services/ai-provider-router.js";
 import { HistoryService } from "../services/history-service.js";
 import { ReplyEngine } from "../services/reply-engine.js";
@@ -22,6 +23,29 @@ let busy = false;
 let queuedRequest = null;
 const processed = new Set();
 let accountPoll = null;
+
+const momentumControl = globalThis.ReplyCopilotMomentumPresenter.connect(
+  $("momentum-control"), message => chrome.runtime.sendMessage(message), action => {
+    if (action === "pricing") void accountClient.openWebsite("/pricing/").catch(() => {});
+    if (action === "momentum_original") void chrome.runtime.sendMessage({type: "REPLY_COPILOT_OPEN_ORIGINAL"});
+  }, {mode: "full"}
+);
+chrome.runtime.onMessage.addListener((message, sender) => {
+  if (sender.id !== chrome.runtime.id) return;
+  if (message?.type === "REPLY_COPILOT_MOMENTUM_CHANGED") void momentumControl.refresh();
+});
+
+// Session intent bridges the delay between opening the side panel and mounting its UI.
+function openMomentumDetails() {
+  momentumControl.expand();
+  void chrome.storage.session.remove("openMomentumDetails").catch(() => {});
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "session" && changes.openMomentumDetails?.newValue === true) openMomentumDetails();
+});
+void chrome.storage.session.get("openMomentumDetails").then(state => {
+  if (state.openMomentumDetails === true) openMomentumDetails();
+}).catch(() => {});
 
 async function refreshDashboard() {
   const [account, summary, behavior, profile] = await Promise.all([
@@ -112,7 +136,7 @@ function renderResult(result, preferredStyle = result.defaultStyle || result.def
   $("quote-section").classList.toggle("hidden", result.recommendation !== "quote");
   $("quote-text").textContent = result.quote_candidate || "";
   $("status").classList.add("hidden"); $("open-settings").classList.add("hidden"); $("result").classList.remove("hidden"); setBusy(false);
-  void chrome.runtime.sendMessage({type:"REPLY_COPILOT_MOMENTUM",refresh:true}).catch(()=>{});
+  void momentumControl.refresh({claim: true});
   void refreshDashboard();
 }
 async function generate(request) {
@@ -198,3 +222,11 @@ for (const id of ["quick-style", "quick-language", "quick-length", "quick-humor"
   } catch { $("quick-save-status").textContent = "保存失败，请重试。"; }
 });
 showIdle(); void claimPending();
+void momentumControl.refresh({ensure: true});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") void momentumControl.refresh({ensure: true});
+});
+
+if (RUNTIME_CONFIG.channel === "staging") {
+  void import("./performance-panel.js").then(({mountPerformancePanel}) => mountPerformancePanel(document, chrome.runtime)).catch(() => {});
+}

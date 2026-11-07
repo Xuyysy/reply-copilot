@@ -27,9 +27,11 @@
   const installKey = Symbol.for("zane-reply-copilot.content-script-installed");
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
+  let momentumEntry;
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     try { active?.assistant?.host?.remove(); } catch {}
@@ -45,6 +47,7 @@
       window.removeEventListener("popstate",refreshAssociation);
     } catch {}
     try { chrome.runtime.onMessage.removeListener(onRuntimeMessage); } catch {}
+    try { chrome.storage.onChanged.removeListener(onMomentumPreference); } catch {}
   }
   function hasRuntimeContext() {
     try {
@@ -293,15 +296,30 @@
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
   }
-  function refreshMomentum(current,options={}) {
-    const explicit=typeof options.enabled==='boolean';
-    if(current.momentumTogglePending)return;
-    if(explicit)current.momentumTogglePending=true;
-    const revision=(current.momentumRevision||0)+1;current.momentumRevision=revision;
-    const render=value=>{if(current.momentumRevision===revision&&contextAlive&&active===current&&!current.cancelled)current.assistant?.setMomentum?.(value);};
-    void safeSend({type:'REPLY_COPILOT_MOMENTUM',...options})
-      .then(render,()=>render({status:'unverified'}))
-      .finally(()=>{if(explicit)current.momentumTogglePending=false;});
+  function refreshMomentum(current, options = {}) {
+    const explicit = typeof options.enabled === 'boolean' || options.dnd;
+    if (current.momentumTogglePending) {
+      current.momentumQueued = {...current.momentumQueued, ...options};
+      return;
+    }
+    if (explicit) current.momentumTogglePending = true;
+    const revision = (current.momentumRevision || 0) + 1;
+    current.momentumRevision = revision;
+    function render(value) {
+      if (current.momentumRevision === revision && contextAlive && active === current && !current.cancelled) {
+        current.assistant?.setMomentum?.(value);
+      }
+    }
+    void safeSend({type: 'REPLY_COPILOT_MOMENTUM', ...options})
+      .then(render, () => render({status: 'unverified'}))
+      .catch(() => {})
+      .finally(() => {
+        if (!explicit) return;
+        current.momentumTogglePending = false;
+        const next = current.momentumQueued;
+        current.momentumQueued = null;
+        if (next && contextAlive && active === current && !current.cancelled) refreshMomentum(current, next);
+      });
   }
   async function generateActive(requestId) {
     const current = active;
@@ -352,6 +370,7 @@
     if (!hasRuntimeContext()) return;
     if (action === "sidepanel") { void safeSend({ type: "REPLY_COPILOT_OPEN_SIDEPANEL", sourceText: current.post?.sourceText, sourceUrl: current.post?.sourceUrl }); return; }
     if (action === "settings") { void safeSend({ type: "REPLY_COPILOT_OPEN_SETTINGS" }); return; }
+    if(action==='momentum_details'){void safeSend({type:'REPLY_COPILOT_OPEN_SIDEPANEL',momentumDetails:true});return;}
     if(action==='momentum_refresh'){refreshMomentum(current,{refresh:true});return;}
     if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled});return;}
     if(action==='momentum_dnd'){refreshMomentum(current,{dnd:true});return;}
@@ -407,7 +426,7 @@
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;
     if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") { performanceEnabled=message.enabled===true; return false; }
-    if(message?.type === "REPLY_COPILOT_MOMENTUM_CHANGED"){if(active)refreshMomentum(active);return false;}
+    if(message?.type === "REPLY_COPILOT_MOMENTUM_CHANGED"){if(active)refreshMomentum(active);momentumEntry?.sync();return false;}
     if (message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
     const current = active, requestId = current.requestId, revision = ++settingsRevision;
     void safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }).then((response) => {
@@ -475,6 +494,30 @@
   function onBeforeInput(event) {
     if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
   }
+  function setMomentumEntry(show) {
+    if (!contextAlive) return;
+    if (show && !momentumEntry) {
+      try { momentumEntry = globalThis.ReplyCopilotMomentumPresenter.mountEntry(safeSend); } catch {}
+    } else if (!show) {
+      momentumEntry?.remove();
+      momentumEntry = null;
+    }
+  }
+  let momentumPreferenceRevision = 0;
+  function onMomentumPreference(changes, area) {
+    if (area !== 'local' || !changes.behaviorPreferences) return;
+    const {oldValue, newValue} = changes.behaviorPreferences;
+    if ((oldValue?.showMomentumEntry !== false) === (newValue?.showMomentumEntry !== false)) return;
+    momentumPreferenceRevision++;
+    setMomentumEntry(newValue?.showMomentumEntry !== false);
+  }
+  if (globalThis.ReplyCopilotMomentumPresenter && window.top === window) try {
+    chrome.storage.onChanged.addListener(onMomentumPreference);
+    const initialRevision = momentumPreferenceRevision;
+    void chrome.storage.local.get('behaviorPreferences').then(({behaviorPreferences}) => {
+      if (initialRevision === momentumPreferenceRevision) setMomentumEntry(behaviorPreferences?.showMomentumEntry !== false);
+    }).catch(() => {});
+  } catch {}
   void safeSend({type:"REPLY_COPILOT_PERFORMANCE_STATE"}).then(response=>{performanceEnabled=response?.enabled===true;});
   document.addEventListener('pointerdown',captureActivation,true);
   document.addEventListener('keydown',captureActivation,true);

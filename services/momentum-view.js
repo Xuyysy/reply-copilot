@@ -1,49 +1,112 @@
-import {DEFAULT_MOMENTUM_CONFIG,validateMomentumConfig} from '../domain/creator-momentum.js';
+import {DEFAULT_MOMENTUM_CONFIG, validateMomentumConfig} from '../domain/creator-momentum.js';
 
-const publicPolicy=({ranges,maxReminders,cooldownMinutes,...policy})=>policy;
-const locked=status=>({status,available:false,eligible:false,enabled:false,policy:publicPolicy(DEFAULT_MOMENTUM_CONFIG)});
-export function createMomentumView({accountStates,client,momentum,storage,broadcast,clock=Date.now}){
- let cached=null,pending=null,epoch=0,backlog=null;
- const invalidate=()=>{epoch++;cached=null;pending=null;};
- const fresh=(token,owner)=>cached?.token===token&&cached.owner===owner&&clock()>=cached.at&&clock()-cached.at<60000;
- function refresh(token,owner){
-  if(pending?.token===token&&pending.owner===owner)return pending.promise;
-  const entry={token,owner};const revision=epoch;
-  entry.promise=(async()=>{
-   const data=await client.request('/v1/entitlements?feature=interactionMomentum',{expectedToken:token});
-   const f=data.features?.interactionMomentum;
-   if(epoch!==revision||await client.token()!==token||epoch!==revision||f?.ownerId!==owner||typeof f.eligible!=='boolean')throw Error('FEATURE_UNVERIFIED');
-   const value={token,owner,eligible:f.eligible,policy:validateMomentumConfig(f.policy),at:clock()};
-   cached=value;return value;
-  })().finally(()=>{if(pending===entry)pending=null;});
-  pending=entry;return entry.promise;
- }
- async function view(message){
-  const revision=epoch,token=await client.token();
-  if(!token)return locked('guest');
-  const owner=accountStates.peekState()?.user?.userId;
-  if(['frozen','auth_expired','auth_unavailable'].includes(accountStates.peekState()?.status))return locked('unverified');
-  if(!owner||accountStates.cachedToken!==token||epoch!==revision)return locked('unverified');
-  const sameAccount=async()=>epoch===revision&&accountStates.cachedToken===token&&accountStates.peekState()?.user?.userId===owner&&await client.token()===token&&epoch===revision;
-  const actionable=message.claim===true||message.refresh===true||message.dnd===true||typeof message.enabled==='boolean';
-  if(message.enabled===true||!fresh(token,owner)&&actionable){try{await refresh(token,owner);}catch{return locked('unverified');}}
-  if(!await sameAccount())return locked('unverified');
-  const proof=fresh(token,owner)?cached:null;
-  if(!proof)return locked('unverified');
-  const eligible=proof.eligible;
-  const settled=await momentum.drain(storage);
-  if(!settled){
-   if(!backlog)backlog=(async()=>{for(let i=0;i<32;i++)if(await momentum.drain(storage))break;await broadcast();})().catch(()=>{}).finally(()=>{backlog=null;});
-   // Backlog blocks claiming a reminder, not saving a verified preference.
+const PAID_TTL = 60_000;
+const FREE_TTL = 15_000;
+const RETRY_INTERVAL = 5_000;
+const publicPolicy = ({ranges, maxReminders, cooldownMinutes, ...policy}) => policy;
+const blocked = state => ['frozen', 'auth_expired', 'auth_unavailable'].includes(state?.status);
+
+export function createMomentumView({accountStates, client, momentum, storage, broadcast, clock = Date.now}) {
+  let cached, pending, lastAttempt, backlog;
+  let epoch = 0;
+
+  function invalidate() {
+    epoch++;
+    cached = pending = lastAttempt = undefined;
   }
-  if(!await sameAccount())return locked('unverified');
-  if(!fresh(token,owner)||cached!==proof)return locked('unverified');
-  const policy=proof.policy;
-  const result=await momentum.view(owner,policy,{eligible,available:true,enabled:message.enabled===false?false:eligible&&message.enabled===true?true:undefined,claim:settled&&(message.claim===true||message.enabled===true),dnd:message.dnd===true});
-  if(!await sameAccount())return locked('unverified');
-  return {status:eligible?'paid':'free',available:true,eligible,enabled:eligible&&result.enabled===true,policy:publicPolicy(policy),reminder:result.reminder};
- }
- view.invalidate=invalidate;
- view.policyFor=owner=>cached?.owner===owner?cached.policy:null;
- return view;
+
+  function refresh(token, owner, revision) {
+    if (pending?.token === token && pending.owner === owner) return pending.promise;
+    if (lastAttempt?.token === token && lastAttempt.owner === owner &&
+        clock() - lastAttempt.at >= 0 && clock() - lastAttempt.at < RETRY_INTERVAL) {
+      return Promise.reject(Error('FEATURE_RETRY_LATER'));
+    }
+
+    const entry = {token, owner, at: clock()};
+    lastAttempt = entry;
+    entry.promise = (async () => {
+      const data = await client.request('/v1/entitlements?feature=interactionMomentum', {expectedToken: token});
+      const feature = data.features?.interactionMomentum;
+      if (await client.token() !== token || epoch !== revision || feature?.ownerId !== owner ||
+          typeof feature.eligible !== 'boolean') throw Error('FEATURE_UNVERIFIED');
+      cached = {token, owner, eligible: feature.eligible, policy: validateMomentumConfig(feature.policy), at: clock()};
+      return cached;
+    })().finally(() => { if (pending === entry) pending = undefined; });
+    pending = entry;
+    return entry.promise;
+  }
+
+  function proofFor(token, owner) {
+    if (cached?.token !== token || cached.owner !== owner) return null;
+    const age = clock() - cached.at;
+    return age >= 0 && age < (cached.eligible ? PAID_TTL : FREE_TTL) ? cached : null;
+  }
+
+  function locked(status, stats) {
+    return {
+      status, scope: epoch, available: false, eligible: false, enabled: false,
+      count: stats?.count ?? null, dnd: stats?.dnd === true,
+      policy: publicPolicy(DEFAULT_MOMENTUM_CONFIG)
+    };
+  }
+
+  async function view(message) {
+    const revision = epoch;
+    const token = await client.token();
+    if (!token) return locked('guest');
+    if ((message.refresh || message.ensure) && (!accountStates.peekState()?.user?.userId || blocked(accountStates.peekState()))) {
+      await accountStates.getState?.({force: true});
+    }
+    const owner = accountStates.peekState()?.user?.userId;
+    const sameAccount = async () => await client.token() === token && epoch === revision &&
+      accountStates.cachedToken === token && accountStates.peekState()?.user?.userId === owner;
+    if (!owner || !await sameAccount()) return locked('unverified');
+    if (blocked(accountStates.peekState())) {
+      if (cached?.token === token) cached = undefined;
+      return locked('unverified');
+    }
+
+    const before = proofFor(token, owner);
+    let proof = before;
+    if ((!proof && (message.claim || message.refresh || message.ensure || message.enabled === true)) ||
+        (message.refresh && clock() - proof.at >= RETRY_INTERVAL)) {
+      try { proof = await refresh(token, owner, revision); }
+      catch { proof = null; if (await sameAccount()) cached = undefined; }
+    }
+    if (!await sameAccount()) return locked('unverified');
+
+    // Passive UI refreshes read IndexedDB only. ACK claims and manual refreshes drain the existing outbox.
+    let settled = true;
+    if (message.claim || message.refresh || message.ensure || message.enabled === true) settled = await momentum.drain(storage);
+    if (!settled && !backlog) {
+      backlog = (async () => {
+        for (let i = 0; i < 32; i++) if (await momentum.drain(storage)) break;
+        await broadcast();
+      })().catch(() => {}).finally(() => { backlog = null; });
+    }
+
+    if (!await sameAccount()) return locked('unverified');
+    proof = proofFor(token, owner);
+    const eligible = proof?.eligible === true;
+    const mutation = message.enabled === false || (eligible && message.enabled === true) || message.dnd === true;
+    const claim = Boolean(settled && eligible && (message.claim || message.enabled === true));
+    const policy = proof?.policy ?? DEFAULT_MOMENTUM_CONFIG;
+    const result = mutation || claim
+      ? await momentum.view(owner, policy, {eligible, enabled: mutation ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
+      : await momentum.snapshot?.(owner);
+    if (!await sameAccount()) return locked('unverified');
+
+    if (mutation || message.claim || ((message.refresh || message.ensure) && before !== proof)) await broadcast();
+    if (!await sameAccount()) return locked('unverified');
+    if (!proof || proof !== proofFor(token, owner)) return locked('unverified', result);
+    return {
+      status: eligible ? 'paid' : 'free', scope: epoch, available: true, eligible,
+      enabled: eligible && result?.enabled === true, count: result?.count ?? 0,
+      dnd: result?.dnd === true, policy: publicPolicy(policy), reminder: result?.reminder
+    };
+  }
+
+  view.invalidate = invalidate;
+  view.policyFor = owner => cached?.owner === owner ? proofFor(cached.token, owner)?.policy ?? null : null;
+  return view;
 }
