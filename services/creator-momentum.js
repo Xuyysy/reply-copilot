@@ -5,7 +5,7 @@ export const momentumReceiptKey=(ownerId,requestId)=>MOMENTUM_OUTBOX_PREFIX+enco
 export function momentumReceiptPatch(receipt,policy=DEFAULT_MOMENTUM_CONFIG,previous=null){
  try{
   if(!receipt?.ownerId||!receipt.input?.requestId||!Number.isFinite(receipt.completedAt)||typeof receipt.raw!=='string')return {};
-  const event={ownerId:receipt.ownerId,requestId:receipt.input.requestId,at:receipt.completedAt,day:localDayKey(receipt.completedAt),policy:dailyPolicy(policy)};
+  const event={ownerId:receipt.ownerId,requestId:receipt.input.requestId,at:receipt.completedAt,day:localDayKey(receipt.completedAt),policy:policy?dailyPolicy(policy):null};
   const first=previous?.ownerId===event.ownerId&&previous?.requestId===event.requestId&&Number.isFinite(previous?.at)?previous:event;
   return {[momentumReceiptKey(event.ownerId,event.requestId)]:first};
  }catch{return {};}
@@ -29,7 +29,7 @@ export class MomentumStore {
   return this.transaction(['seen','days'],async tx=>{
    const seen=tx.objectStore('seen'),days=tx.objectStore('days'),id=JSON.stringify([event.ownerId,event.requestId]),key=JSON.stringify([event.ownerId,event.day]);
    if(await request(seen.get(id)))return false;
-   const day=await request(days.get(key))||createMomentumDay(event.at,event.policy||DEFAULT_MOMENTUM_CONFIG,this.random,event.day);
+   const day=await request(days.get(key))||(event.policy?createMomentumDay(event.at,event.policy,this.random,event.day):{day:event.day,count:0,createdAt:event.at});
    day.count+=1;seen.put({at:event.at},id);days.put(day,key);return true;
   });
  }
@@ -39,8 +39,9 @@ export class MomentumStore {
   return this.transaction(['days','prefs'],async tx=>{
    const days=tx.objectStore('days'),prefs=tx.objectStore('prefs'),key=JSON.stringify([ownerId,today]);
    const p=await request(prefs.get(ownerId))||{enabled:false,latestDay:today};
-   const day=await request(days.get(key))||createMomentumDay(now,policy,this.random);
-   if(typeof enabled==='boolean')p.enabled=eligible&&enabled;
+   const saved=await request(days.get(key));
+   const day=saved?.thresholds?saved:{...createMomentumDay(now,policy,this.random),count:saved?.count??0};
+   if(enabled===false||eligible&&enabled===true)p.enabled=enabled;
    if(dnd)day.dnd=true;
    let stage=null;
    if(claim&&today>=p.latestDay)stage=selectMomentumReminder(day,{eligible,enabled:p.enabled,globalEnabled:policy.enabled},now);

@@ -3,6 +3,10 @@ const script=readFileSync(new URL('../../content/momentum-presenter.js',import.m
 test('real floating UI: free lock, professional intro, paid switch, reminder dismissal/DND, keyboard, dark/narrow',{timeout:30000},async()=>{
  await withMomentumBrowser(`<html lang="zh"><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${script};window.momentumReady=true;</script></html>`,async({evaluate,call})=>{
   await evaluate(`window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.body,(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(css)};shadow.append(style);assistant.setMomentum({available:true,eligible:false,enabled:false,policy:{enabled:true,overviewZh:'当前：只统计确认生成，不是发送评论',researchZh:'未来规划：X推荐机制、互动建模、中文榜单与曝光研究'}});`);
+  await evaluate('assistant.setMomentum({status:"guest"});');assert.equal(await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("查看套餐")).hidden'),false);
+  await evaluate('assistant.setMomentum({status:"unverified"});');assert.equal(await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("查看套餐")).hidden'),true);
+  await evaluate('[...shadow.querySelectorAll(".momentum > button")].find(b=>b.textContent.includes("验证购买权益")).click()');assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/正在验证/);
+  await evaluate('assistant.setMomentum({status:"free",policy:{enabled:true,overviewZh:"当前：不是发送评论",researchZh:"未来规划：互动研究"}});');
   assert.equal(await evaluate('shadow.querySelector(".momentum input").disabled'),true);assert.equal(await evaluate('shadow.querySelector("#auto-generate-toggle").checked'),true);
   await evaluate('shadow.querySelector(".momentum button").click()');assert.match(await evaluate('shadow.querySelector(".momentum-intro").textContent'),/未来规划/);
   assert.equal(await evaluate('shadow.querySelector(".momentum button").getAttribute("aria-expanded")'),'true');assert.match(await evaluate('shadow.querySelector(".momentum-intro").textContent'),/不是发送评论/);
@@ -15,6 +19,12 @@ test('real floating UI: free lock, professional intro, paid switch, reminder dis
   await evaluate('assistant.setMomentum({available:true,eligible:true,enabled:true,policy:{enabled:true},reminder:{id:"today:2",stage:2}});[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');assert.equal(await evaluate('actions.at(-1).a'),'momentum_dnd');
   await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
   await evaluate('shadow.querySelector(".momentum button").focus()');assert.equal(await evaluate('shadow.activeElement.textContent'),'查看功能原理与分析体系');
+  await evaluate('assistant.host.dataset.theme="dark";shadow.querySelector(".momentum button").focus()');
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+  await call('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
+  assert.equal(await evaluate('shadow.querySelector(".momentum button").getAttribute("aria-expanded")'),'false');
+  await evaluate('shadow.querySelector(".momentum button").click()');
+  assert.equal(await evaluate('shadow.querySelector(".momentum-intro").scrollWidth<=shadow.querySelector(".momentum-intro").clientWidth'),true);
   const shot=await call('Page.captureScreenshot',{format:'png'});(await import('node:fs')).writeFileSync('/private/tmp/xrh-momentum-v1/floating-ui.png',Buffer.from(shot.result.data,'base64'));
   await evaluate('document.documentElement.lang="en";assistant.close();window.english=ZaneReplyCopilotContent.inlineAssistant.mount(document.body,()=>{});');assert.match(await evaluate('english.host.shadowRoot.textContent'),/View principles and analysis framework/);
  });

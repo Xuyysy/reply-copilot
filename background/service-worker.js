@@ -1,5 +1,5 @@
+import {createMomentumView} from '../services/momentum-view.js';
 import {MomentumStore,momentumReceiptPatch,momentumReceiptKey} from '../services/creator-momentum.js';
-import {DEFAULT_MOMENTUM_CONFIG} from '../domain/creator-momentum.js';
 import "../utils/generation-performance.js";
 import { createReplyRequest } from "../domain/reply-request.js";
 import { StorageService, API_KEY_KEY, HISTORY_KEY, ONBOARDING_COMPLETE_KEY } from "../services/storage-service.js";
@@ -28,41 +28,17 @@ const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
-const momentum=new MomentumStore();let momentumRefresh=null;let momentumBacklog=null;
-async function momentumView(message){
- const state=accountStates.peekState();
- const owner=state?.user?.userId;
- const feature=state?.features?.interactionMomentum;
- const fresh=state?.features?.verifiedAt && Date.now()-state.features.verifiedAt<60000;
- if(owner&&state.features&&!fresh&&!momentumRefresh&&(message.claim===true||message.refresh===true||typeof message.enabled==='boolean')){
-  // Lazy, non-critical refresh, only requested by the separate feature UI.
-  momentumRefresh=accountStates.getState({force:true}).then(()=>broadcastMomentum()).catch(()=>{}).finally(()=>{momentumRefresh=null;});
- }
- const token=await accountClient.token();
- if(!owner||!token||accountStates.cachedToken!==token)return {available:false,eligible:false,enabled:false,policy:DEFAULT_MOMENTUM_CONFIG};
- const settled=await momentum.drain(chrome.storage.local);
- if(!settled){
-  if(!momentumBacklog)momentumBacklog=(async()=>{for(let n=0;n<32;n++)if(await momentum.drain(chrome.storage.local))break;await broadcastMomentum();})().catch(()=>{}).finally(()=>{momentumBacklog=null;});
-  return {available:false,eligible:false,enabled:false,policy:DEFAULT_MOMENTUM_CONFIG};
- }
- if(accountStates.peekState()?.user?.userId!==owner)throw Error('ACCOUNT_CHANGED');
- const eligible=Boolean(fresh&&feature?.eligible&& !['frozen','auth_expired','auth_unavailable','guest'].includes(state.status));
- const policy=feature?.policy||DEFAULT_MOMENTUM_CONFIG;
- const result=await momentum.view(owner,policy,{eligible,available:Boolean(fresh&&feature),enabled:message.enabled,claim:message.claim===true||message.enabled===true,dnd:message.dnd===true});
- if(accountStates.peekState()?.user?.userId!==owner||await accountClient.token()!==token)throw Error('ACCOUNT_CHANGED');
- // Never send account IDs, per-request identities or internal thresholds to X.
- return {available:result.available,eligible:result.eligible,enabled:eligible&&result.enabled,policy:Object.fromEntries(Object.entries(policy).filter(([k])=>!['ranges','maxReminders','cooldownMinutes'].includes(k))),reminder:result.reminder};
-}
+const momentumView=createMomentumView({accountStates,client:accountClient,momentum:new MomentumStore(),storage:chrome.storage.local,broadcast:broadcastMomentum});
 async function broadcastMomentum(){const tabs=await chrome.tabs.query({url:['https://x.com/*','https://twitter.com/*']});await Promise.allSettled(tabs.filter(t=>Number.isInteger(t.id)).map(t=>chrome.tabs.sendMessage(t.id,{type:'REPLY_COPILOT_MOMENTUM_CHANGED'})));}
 
 const deliveryCoordinator = new DeliveryCoordinator({
   storage: chrome.storage.local,
   getAccountId: () => accountStates.getOwnerId(),
   createClient: () => new HostedAIClient({ accountClient }),
-  completion:{recovered:async receipt=>{const key=momentumReceiptKey(receipt.ownerId,receipt.input.requestId),old=await chrome.storage.local.get(key);await chrome.storage.local.set(momentumReceiptPatch(receipt,accountStates.peekState()?.features?.interactionMomentum?.policy||DEFAULT_MOMENTUM_CONFIG,old[key]));},keys:record=>[HISTORY_KEY,USAGE_KEY,momentumReceiptKey(record.ownerId,record.input.requestId)],patch:(data,receipt)=>{
+  completion:{recovered:async receipt=>{const key=momentumReceiptKey(receipt.ownerId,receipt.input.requestId),old=await chrome.storage.local.get(key);await chrome.storage.local.set(momentumReceiptPatch(receipt,momentumView.policyFor(receipt.ownerId),old[key]));},keys:record=>[HISTORY_KEY,USAGE_KEY,momentumReceiptKey(record.ownerId,record.input.requestId)],patch:(data,receipt)=>{
     const meta={requestId:receipt.input.requestId,recommendation:JSON.parse(receipt.raw).recommendation,createdAt:new Date().toISOString()};
-    return {...momentumReceiptPatch(receipt,accountStates.peekState()?.features?.interactionMomentum?.policy||DEFAULT_MOMENTUM_CONFIG,data[momentumReceiptKey(receipt.ownerId,receipt.input.requestId)]),[HISTORY_KEY]:generatedHistory(data[HISTORY_KEY]||[],meta),[USAGE_KEY]:generatedUsage(data[USAGE_KEY]||[],meta)};
-  },fallback:async(record,raw,receipt)=>{if(raw)await Promise.allSettled([history.recordGeneration({requestId:record.input.requestId,result:JSON.parse(raw),acknowledgedOwner:record.ownerId,acknowledgedAt:receipt?.completedAt??Date.now(),momentumPolicy:accountStates.peekState()?.features?.interactionMomentum?.policy}),usage.track('generated',{requestId:record.input.requestId})]);}},
+    return {...momentumReceiptPatch(receipt,momentumView.policyFor(receipt.ownerId),data[momentumReceiptKey(receipt.ownerId,receipt.input.requestId)]),[HISTORY_KEY]:generatedHistory(data[HISTORY_KEY]||[],meta),[USAGE_KEY]:generatedUsage(data[USAGE_KEY]||[],meta)};
+  },fallback:async(record,raw,receipt)=>{if(raw)await Promise.allSettled([history.recordGeneration({requestId:record.input.requestId,result:JSON.parse(raw),acknowledgedOwner:record.ownerId,acknowledgedAt:receipt?.completedAt??Date.now(),momentumPolicy:momentumView.policyFor(record.ownerId)}),usage.track('generated',{requestId:record.input.requestId})]);}},
 });
 const aiProvider = new AIProviderRouter({ accountStates, hostedFactory: () => deliveryCoordinator });
 const activeRequests = new Map();
@@ -84,7 +60,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     void chrome.tabs.query({url:["https://x.com/*","https://twitter.com/*"]}).then(tabs=>Promise.allSettled(tabs.filter(tab=>Number.isInteger(tab.id)).map(tab=>chrome.tabs.sendMessage(tab.id,{type:"REPLY_COPILOT_PERFORMANCE_STATE",enabled:performanceEnabled})))).catch(()=>{});
   }
   if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
-  if (area === "local" && changes.replyCopilotAccountToken) { accountStates.invalidate(); void broadcastSettingsChanged(); }
+  if (area === "local" && changes.replyCopilotAccountToken) { momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); }
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -123,7 +99,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'REPLY_COPILOT_MOMENTUM') {
     if((!fromXPage||sender.frameId!==0)&&!fromExtensionPage)return false;
     if(message.enabled!==undefined&&typeof message.enabled!=='boolean')return false;
-    void momentumView(message).then(value=>sendResponse({ok:true,...value}),()=>sendResponse({ok:false,available:false,eligible:false,enabled:false,policy:DEFAULT_MOMENTUM_CONFIG}));return true;
+    void momentumView(message).then(value=>sendResponse({ok:true,...value}),()=>sendResponse({ok:false,status:'unverified',available:false,eligible:false,enabled:false}));return true;
   }
   if (message?.type === 'REPLY_COPILOT_OPEN_ORIGINAL') {
     if(!fromXPage||sender.frameId!==0)return false;

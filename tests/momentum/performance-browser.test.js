@@ -26,10 +26,12 @@ test('alternating real-browser A/B: fixed Production vs momentum; same mock AI/A
     if(editor.textContent!==result.replies.natural)throw Error('Editor mismatch');
     if(calls.length!==2||calls[0]!=='/v1/ai/generate'||!calls[1].endsWith('/delivered'))throw Error('Normal path acquired extra HTTP');
     const blockingReads=reads,blockingWrites=writes;
+    const statisticsStart=performance.now();
     if(newCode){await stats.drain(storage);const view=await stats.view(owner,policy,{eligible:scenario!=='free_locked',claim:true});assistant.setMomentum(view);if(view.count!==1)throw Error('ACK count not exactly once');if(Boolean(view.reminder)!==(scenario==='paid_on_trigger'))throw Error('Scenario reminder mismatch');}
-    assistant.close();if(n>=2)rows[kind].push({shown,filled,ackMs,http:calls.length,reads:blockingReads,writes:blockingWrites});
+    const statisticsMs=newCode?performance.now()-statisticsStart:0;
+    assistant.close();if(n>=2)rows[kind].push({shown,filled,ackMs,http:calls.length,reads:blockingReads,writes:blockingWrites,statisticsMs});
    }
-   const summarize=xs=>{const quant=(k,q)=>xs.map(x=>x[k]).sort((a,b)=>a-b)[Math.ceil(xs.length*q)-1];return {samples:xs.length,display:{mean:xs.reduce((a,x)=>a+x.shown,0)/xs.length,p50:quant('shown',.5),p90:quant('shown',.9)},fill:{mean:xs.reduce((a,x)=>a+x.filled,0)/xs.length,p50:quant('filled',.5),p90:quant('filled',.9)},ack:{p50:quant('ackMs',.5),p90:quant('ackMs',.9)},normalHTTP:[...new Set(xs.map(x=>x.http))],preGenerateRecoveryHTTP:0,blockingStorageReads:[...new Set(xs.map(x=>x.reads))],blockingStorageWrites:[...new Set(xs.map(x=>x.writes))]};};
+   const summarize=xs=>{const quant=(k,q)=>xs.map(x=>x[k]).sort((a,b)=>a-b)[Math.ceil(xs.length*q)-1];return {samples:xs.length,display:{mean:xs.reduce((a,x)=>a+x.shown,0)/xs.length,p50:quant('shown',.5),p90:quant('shown',.9)},fill:{mean:xs.reduce((a,x)=>a+x.filled,0)/xs.length,p50:quant('filled',.5),p90:quant('filled',.9)},ack:{p50:quant('ackMs',.5),p90:quant('ackMs',.9)},normalHTTP:[...new Set(xs.map(x=>x.http))],postFillStatistics:{p50:quant('statisticsMs',.5),p90:quant('statisticsMs',.9)},preGenerateRecoveryHTTP:0,blockingStorageReads:[...new Set(xs.map(x=>x.reads))],blockingStorageWrites:[...new Set(xs.map(x=>x.writes))]};};
    samples[scenario]={before:summarize(rows.before),after:summarize(rows.after)};
   }
   return samples;

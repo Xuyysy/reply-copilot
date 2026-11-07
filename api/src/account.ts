@@ -18,8 +18,13 @@ export async function me(request: Request, env: Env): Promise<Response> {
   return response({user:{userId:session.user_id,username:user?.username,email:user?.email,role:user?.role,status:user?.status,emailVerified:Boolean(user?.email_verified_at)}},200,env,request);
 }
 export async function entitlements(request: Request, env: Env): Promise<Response> {
-  const {session}=await sessionFor(request,env); const [state,feature]=await Promise.all([accountState(env,session),creatorFeature(env,session.user_id).catch(()=>null)]);
-  return response({features:{interactionMomentum:feature},status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota},200,env,request);
+  const {session}=await sessionFor(request,env);
+  if(new URL(request.url).searchParams.get('feature')==='interactionMomentum'){
+    const feature=await creatorFeature(env,session.user_id).catch(()=>null);
+    return response({features:{interactionMomentum:feature&&{...feature,ownerId:session.user_id}}},200,env,request);
+  }
+  const state=await accountState(env,session);
+  return response({status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota},200,env,request);
 }
 export async function usage(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);

@@ -87,7 +87,7 @@ ZIP 根目录是 manifest，版本 0.3.3 的独立 Staging 测试候选，网站
 
 ## Staging 人工验收（下一阶段授权后）
 
-1. **本轮未部署。** 首先获准将有限后端/后台补丁集成到真实最新 Staging 源码并发布 Worker + Pages，不能整份把 Production 功能分支覆盖 Staging。重新核对当前 42 项绑定、双区域预设、模型、Secrets、购买开关、域名、Cron、现有 UI；只移植 creator 模块、account entitlements 字段、index 路由和 AdminDashboard 小入口。无需 SQL/migration，不换模型、不真实付款。
+1. **本轮未部署。** 首先获准将有限后端/后台补丁集成到真实最新 Staging 源码并发布 Worker + Pages，不能整份把 Production 功能分支覆盖 Staging。重新核对当前 42 项绑定、双区域预设、模型、Secrets、购买开关、域名、Cron、现有 UI；只移植 creator 模块、account entitlements 的按需 feature 分支、index 路由和 AdminDashboard 小入口。无需 SQL/migration，不换模型、不真实付款。
 2. 后台进入“创作者功能”，检查默认全局 OFF、固定 paid-only、三阶段/90分钟、完整双语介绍。填写操作原因，按原机制重新验证密码，保存；刷新确认版本。模拟各阶段，确认只是预览，没有 AI 调用或额度变化。更改后可恢复之前版本/初始默认。
 3. 使用现有真实已购买测试账号和免费测试账号；不要用管理员赠送付费额度伪造购买资格，不创建新收费订单。
 4. 授权安装后备份原 Staging 目录、同路径替换候选并重新加载原扩展，再刷新 X。检查原 ID、账号、正常回复、四项权限保持，不能卸载或清空 storage。
@@ -103,7 +103,7 @@ ZIP 根目录是 manifest，版本 0.3.3 的独立 Staging 测试候选，网站
     import(chrome.runtime.getURL('services/creator-momentum.js')),
   ]);
   const client = new AccountClient();
-  const [account, entitlement] = await Promise.all([client.fetchCurrentUser(), client.fetchEntitlement()]);
+  const [account, entitlement] = await Promise.all([client.fetchCurrentUser(), client.request('/v1/entitlements?feature=interactionMomentum')]);
   if (!entitlement.features?.interactionMomentum) return {available:false};
   const store = new MomentumStore();
   await store.drain(chrome.storage.local);

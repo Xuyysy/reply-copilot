@@ -23,9 +23,10 @@ export class AccountClient {
   openAccountPage() { return this.openWebsite("/account"); }
   openPurchasePage() { return this.openWebsite("/pricing"); }
   async token() { return (await this.storage.get(ACCOUNT_TOKEN_KEY))[ACCOUNT_TOKEN_KEY] || ""; }
-  async request(path, { method = "GET", body, signal, authenticate = true } = {}) {
+  async request(path, { method = "GET", body, signal, authenticate = true, expectedToken } = {}) {
     if (!this.config.hostedApiUrl || !allowedOrigin(this.config.hostedApiUrl, this.config)) throw new Error("云端 AI 服务尚未配置。");
     const token = authenticate ? await this.token() : "";
+    if (expectedToken !== undefined && token !== expectedToken) throw Object.assign(new Error('账户已切换。'),{code:'AUTH_REQUIRED'});
     if (authenticate && !token) throw Object.assign(new Error("请先登录。"), { code: "AUTH_REQUIRED" });
     const url = new URL(path, this.config.hostedApiUrl);
     if (url.origin !== new URL(this.config.hostedApiUrl).origin) throw new Error("云端服务地址无效。");

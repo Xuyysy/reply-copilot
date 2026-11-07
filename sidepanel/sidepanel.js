@@ -130,7 +130,7 @@ async function generate(request) {
     const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
     const preferences = await storage.getBehaviorPreferences();
     const result = await engine.generateReplies({ postContext: { text: request.sourceText, url: request.sourceUrl }, voiceProfile: await profiles.get(), requestId }, { replyStyle: await storage.getReplyStyle() });
-    await Promise.allSettled([history.recordGeneration({ requestId, result, acknowledgedOwner:aiProvider.accountStates.peekState()?.user?.userId,acknowledgedAt:Date.now(),momentumPolicy:aiProvider.accountStates.peekState()?.features?.interactionMomentum?.policy }), usage.track("generated", { requestId })]);
+    await Promise.allSettled([history.recordGeneration({ requestId, result, acknowledgedOwner:aiProvider.accountStates.peekState()?.user?.userId,acknowledgedAt:Date.now(),momentumPolicy:null }), usage.track("generated", { requestId })]);
     if (currentRequest?.requestId === requestId) renderResult(result, preferences.defaultReplyMode);
   } catch (error) {
     if (currentRequest?.requestId === requestId) { await usage.track("api_failure", { requestId }).catch(() => {}); showError(error.message || "Something went wrong. Try again.", error.needsSettings || error.message?.includes("API key is not configured"));

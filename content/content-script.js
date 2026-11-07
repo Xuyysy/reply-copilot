@@ -294,8 +294,14 @@
     record("applied", { style, reply: candidate });
   }
   function refreshMomentum(current,options={}) {
+    const explicit=typeof options.enabled==='boolean';
+    if(current.momentumTogglePending)return;
+    if(explicit)current.momentumTogglePending=true;
     const revision=(current.momentumRevision||0)+1;current.momentumRevision=revision;
-    void safeSend({type:'REPLY_COPILOT_MOMENTUM',...options}).then(value=>{if(current.momentumRevision===revision&&contextAlive&&active===current&&!current.cancelled)current.assistant?.setMomentum?.(value);}).catch(()=>{});
+    const render=value=>{if(current.momentumRevision===revision&&contextAlive&&active===current&&!current.cancelled)current.assistant?.setMomentum?.(value);};
+    void safeSend({type:'REPLY_COPILOT_MOMENTUM',...options})
+      .then(render,()=>render({status:'unverified'}))
+      .finally(()=>{if(explicit)current.momentumTogglePending=false;});
   }
   async function generateActive(requestId) {
     const current = active;

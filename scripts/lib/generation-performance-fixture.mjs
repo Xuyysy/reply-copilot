@@ -42,9 +42,10 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
  globalThis.fetch=dnsFetch;
  const routeApi=async(url,init)=>{
   const parsed=new URL(url);if(parsed.origin!=='http://127.0.0.1:8787')throw Error('Unexpected API');
-  const p=parsed.pathname;paths.push(p);await sleep(options.networkRoundTripMs??6);
+  const p=parsed.pathname;if(marks.click!=null&&marks.candidates==null)paths.push(p+parsed.search);await sleep(options.networkRoundTripMs??6);
   if(options.offline)throw Error('fixture offline');
   if(p==='/v1/me')return Response.json({user:{userId:'fixture-owner',username:'fixture'}});
+  if(p==='/v1/entitlements'&&parsed.searchParams.has('feature'))return Response.json({features:{interactionMomentum:options.momentumFeature&&{ownerId:'fixture-owner',...options.momentumFeature}}});
   if(p==='/v1/entitlements')return Response.json({status:options.quotaExhausted?'credits_exhausted':'credits_available',entitlement:{},...(options.momentumFeature?{features:{interactionMomentum:options.momentumFeature}}:{})});
   if(p==='/v1/usage')return Response.json({quota:{totalRemaining:options.quotaExhausted?0:200-calls.debits}});
   if(p==='/v1/ai/requests/active'||/^\/v1\/ai\/requests\/[^/]+$/.test(p))return Response.json({state:'missing'});
@@ -77,6 +78,7 @@ export async function generationFixture({sourceRoot,scenario='english-short',opt
  try{
   // Wait for diagnostics opt-in to load. No preflight/account warm-up.
   await sleep(10);
+  if(options.warmAccount)await contentChrome.runtime.sendMessage({type:'REPLY_COPILOT_ACCOUNT_STATE'});
   const clickAt=at();marks.click=clickAt;
   listeners.pointerdown({isTrusted:true,type:'pointerdown',target:control});listeners.click({isTrusted:true,type:'click',target:control});
   if(options.waitForFailure){await sleep(250);}else await Promise.race([applied,sleep(options.deadlineMs||1000).then(()=>{throw Error('Fixture did not apply: '+outputs.join(';'));})]);
