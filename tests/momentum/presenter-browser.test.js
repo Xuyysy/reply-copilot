@@ -7,10 +7,10 @@ import {withMomentumBrowser} from '../helpers/momentum-browser.js';
 const files = ['content/momentum-presenter.js', 'content/inline-assistant.js'];
 const source = paths => paths.map(path => readFileSync(path, 'utf8')).join('\n');
 const css = source(['content/inline-assistant.css', 'content/momentum.css']);
-const before = path => execFileSync('git', ['show', 'cac9e0e:' + path], {encoding: 'utf8'});
+const before = path => execFileSync('git', ['show', '5fe5210:' + path], {encoding: 'utf8'});
 const fixture = scripts => `<html lang="en"><body><textarea id="editor" aria-label="Editor"></textarea><div id="side"></div><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${scripts};window.momentumReady=true;</script></body></html>`;
 const setup = styles => `window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.querySelector("#editor"),(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};shadow.append(style);assistant.showResult({natural:'这个例子一下就说明白了。',light_humor:'终于有人把这个坑填了。',thoughtful:'这个区别在实际使用时很重要。'});assistant.setMomentum({status:"free",available:true,eligible:false,policy:{enabled:true}});`;
-const screenshots = '/private/tmp/xrh-momentum-acceptance';
+const screenshots = '/private/tmp/xrh-momentum-interaction';
 async function capture(call, file) {
   mkdirSync(screenshots, {recursive: true});
   const shot = await call('Page.captureScreenshot', {format: 'png'});
@@ -50,7 +50,7 @@ test('floating UI defaults to Chinese on English X and keeps only compact contro
 
 test('side panel and lazy X entry share controls without an initial network request or focus change', {timeout: 30000}, async () => {
   await withMomentumBrowser(fixture(source(files)), async ({evaluate, call}) => {
-    await evaluate(`window.sent=[];window.state={status:"free",count:7,policy:{enabled:true,researchZh:"中文榜单研究"}};window.send=async m=>{sent.push(m);if(m.enabled!==undefined) state={...state,enabled:m.enabled};return state;};document.querySelector("#editor").focus();window.entry=ReplyCopilotMomentumPresenter.mountEntry(send);window.root=document.querySelector("[data-zane-reply-copilot]").shadowRoot;`);
+    await evaluate(`window.sent=[];window.state={status:"free",count:7,policy:{enabled:true,researchZh:"中文榜单研究"}};window.send=async m=>{sent.push(m);if(m.enabled!==undefined) state={...state,enabled:m.enabled};return {...state,saved:m.enabled!==undefined};};document.querySelector("#editor").focus();window.entry=ReplyCopilotMomentumPresenter.mountEntry(send);window.root=document.querySelector("[data-zane-reply-copilot]").shadowRoot;`);
     assert.equal(await evaluate('sent.length'), 0);
     assert.equal(await evaluate('document.activeElement.id'), 'editor');
     await evaluate('root.querySelector("summary").click()');
@@ -59,7 +59,8 @@ test('side panel and lazy X entry share controls without an initial network requ
     assert.equal(await evaluate('root.querySelector("input").disabled'), true);
     await evaluate('window.full=ReplyCopilotMomentumPresenter.connect(document.querySelector("#side"),send,()=>{},{mode:"full"});full.refresh()');
     await evaluate('full.expand()');
-    assert.match(await evaluate('document.querySelector("#side").textContent'), /本机今日确认生成 · 7.*查看套餐.*中文榜单研究/);
+    assert.doesNotMatch(await evaluate('document.querySelector("#side").textContent'), /本机今日确认生成|· 7/);
+    assert.match(await evaluate('document.querySelector("#side").textContent'), /查看套餐.*中文榜单研究/);
     await evaluate('state={...state,status:"paid",enabled:false};Promise.all([full.refresh(),entry.sync()])');
     await evaluate('document.querySelector("#side input").click()');
     await evaluate('entry.sync();new Promise(resolve=>setTimeout(resolve,30))');
@@ -88,4 +89,40 @@ test('only a painted visible reminder is acknowledged, and fresh switches keep t
     assert.equal(await evaluate('shadow.querySelector(".momentum-reminder")===null'),true);
     assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),2);
   });
+});
+
+test('paid switch gives immediate feedback, rolls back a failed save, and locks while paused',{timeout:30000},async()=>{
+ await withMomentumBrowser(fixture(source(files)),async({evaluate,call})=>{
+  await evaluate(setup(css));
+  await evaluate(`window.switcher=shadow.querySelector('.momentum input');
+   window.live={scope:1,status:'paid',enabled:false,proofUntil:Date.now()+10000,policy:{enabled:true}};
+   assistant.setMomentum(live);switcher.click();`);
+  assert.equal(await evaluate('switcher.checked && switcher.disabled'),true);
+  await capture(call,'switch-floating-after.png');
+  await evaluate('switcher.click()');
+  assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_toggle").length'),1);
+  await evaluate('assistant.setMomentum({ok:false},{enabled:true})');
+  assert.equal(await evaluate('switcher.checked'),false);
+  assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/设置未保存/);
+  await evaluate('switcher.click();assistant.setMomentum({...live,enabled:true,saved:true},{enabled:true})');
+  assert.equal(await evaluate('switcher.checked && !switcher.disabled'),true);
+  await evaluate('assistant.setMomentum({...live,enabled:true,policy:{enabled:false}})');
+  assert.equal(await evaluate('switcher.disabled && switcher.checked'),true);
+  assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/系统暂未开放/);
+ });
+});
+
+test('capture before and after for the same paid side panel fixture', {timeout:30000}, async()=>{
+ for(const [name,code,styles] of [['before',files.map(before).join('\n'),before('content/momentum.css')],['after',source(files),css]]){
+  await withMomentumBrowser(fixture(code),async({evaluate,call})=>{
+   await evaluate(`{const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};document.head.append(style);
+   window.events=[];window.panel=ReplyCopilotMomentumPresenter.mount(document.querySelector('#side'),a=>events.push(a),{mode:'full'});
+   panel.update({status:'paid',scope:1,enabled:false,count:21,proofUntil:Date.now()+10000,policy:{enabled:true}});}`);
+   assert.equal(await evaluate('document.querySelector("#side").textContent.includes("· 21")'),name==='before');
+   await capture(call,'count-'+name+'.png');
+   await evaluate('document.querySelector("#side input").click()');
+   assert.equal(await evaluate('document.querySelector("#side input").checked'),name==='after');
+   await capture(call,'switch-'+name+'.png');
+  });
+ }
 });

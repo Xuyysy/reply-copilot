@@ -306,11 +306,11 @@
     current.momentumRevision = revision;
     function render(value) {
       if (current.momentumRevision === revision && contextAlive && active === current && !current.cancelled) {
-        current.assistant?.setMomentum?.(value);
+        current.assistant?.setMomentum?.(value, options);
       }
     }
     void safeSend({type: 'REPLY_COPILOT_MOMENTUM', ...options})
-      .then(render, () => render({status: 'unverified'}))
+      .then(render, () => render({ok:false, status: 'unverified'}))
       .catch(() => {})
       .finally(() => {
         current.momentumRequestPending = false;
@@ -370,7 +370,7 @@
     if (action === "settings") { void safeSend({ type: "REPLY_COPILOT_OPEN_SETTINGS" }); return; }
     if(action==='momentum_details'){void safeSend({type:'REPLY_COPILOT_OPEN_SIDEPANEL',momentumDetails:true});return;}
     if(action==='momentum_refresh'){refreshMomentum(current,{refresh:true});return;}
-    if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled});return;}
+    if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled,scope:data.scope});return;}
     if(action==='momentum_presented'){void safeSend({type:'REPLY_COPILOT_MOMENTUM',presented:data});return;}
     if(action==='momentum_dnd'){refreshMomentum(current,{dnd:true});return;}
     if(action==='momentum_original'){void safeSend({type:'REPLY_COPILOT_OPEN_ORIGINAL'});return;}

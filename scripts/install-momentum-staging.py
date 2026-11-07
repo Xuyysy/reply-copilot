@@ -38,14 +38,17 @@ def verify_manifest(directory, *, momentum=False):
         raise ValueError('Staging manifest identity or host differs')
     if manifest.get('manifest_version') != 3 or 'debugger' in manifest.get('permissions', []):
         raise ValueError('Unexpected manifest or permissions')
-    if f'websiteUrl: "{SITE}"' not in runtime or 'channel: "staging"' not in runtime:
+    if (f'websiteUrl: "{SITE}"' not in runtime or f'hostedApiUrl: "{API}"' not in runtime
+            or 'channel: "staging"' not in runtime):
         raise ValueError('Staging runtime configuration differs')
     if momentum and not (directory / 'content/momentum.css').is_file():
         raise ValueError('Missing Momentum UI')
     return manifest
 
 
-def install(archive, expected):
+def install(archive, expected, expected_commit):
+    if not re.fullmatch('[a-f0-9]{40}', expected_commit):
+        raise ValueError('Invalid expected source commit')
     if not re.fullmatch('[a-f0-9]{64}', expected) or digest(archive) != expected:
         raise ValueError('ZIP SHA-256 differs')
     if not TARGET.is_dir() or TARGET.resolve(strict=True) != TARGET or identity(TARGET) != EXTENSION_ID:
@@ -71,6 +74,10 @@ def install(archive, expected):
                 seen.add(path)
             package.extractall(extracted)
         candidate = verify_manifest(extracted, momentum=True)
+        build = json.loads((extracted / 'build-info.json').read_text())
+        if (build.get('sourceSha') != expected_commit or build.get('channel') != 'staging'
+                or build.get('expectedExtensionId') != EXTENSION_ID):
+            raise ValueError('Staging ZIP does not match the expected source commit or identity')
         for key in ('permissions', 'optional_permissions', 'optional_host_permissions'):
             if set(candidate.get(key, [])) - set(original.get(key, [])):
                 raise ValueError(f'Unexpected permission expansion: {key}')
@@ -85,9 +92,9 @@ def install(archive, expected):
 
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        sys.exit('Usage: python3 install-momentum-staging.py ZIP SHA256')
+    if len(sys.argv) != 4:
+        sys.exit('Usage: python3 install-momentum-staging.py ZIP SHA256 COMMIT')
     try:
-        install(Path(sys.argv[1]), sys.argv[2])
+        install(Path(sys.argv[1]), sys.argv[2], sys.argv[3])
     except (OSError, ValueError) as error:
         sys.exit(f'Staging install stopped: {error}')

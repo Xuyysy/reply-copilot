@@ -118,7 +118,7 @@
       else if (action === "feedback-bad") { onAction("feedback", { feedback: "not_my_style", style: candidates[index]?.[0] }); button.disabled = true; button.textContent = "已记录 ✓"; }
       else if (action === "sidepanel") onAction("sidepanel", { userGesture: true });
     });
-    return { setMomentum(value) { try { momentum?.update(value); } catch {} }, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };

@@ -5,12 +5,12 @@ import {execFileSync} from 'node:child_process';
 import {DEFAULT_MOMENTUM_CONFIG} from '../../domain/creator-momentum.js';
 
 function fixture(createView=createMomentumView){
- let now=0,token='A',owner='owner',eligible=true,error=false,wait=null,calls=0,broadcasts=0,status='credits_available';
+ let now=0,token='A',owner='owner',eligible=true,error=false,wait=null,calls=0,broadcasts=0,status='credits_available', globalEnabled=true;
  const saved=new Map();
  const view=createView({clock:()=>now,accountStates:{peekState:()=>({user:{userId:owner},status}),get cachedToken(){return token;}},client:{
-  token:async()=>token,request:async(path,{expectedToken})=>{calls++;assert.match(path,/feature=interactionMomentum/);assert.equal(expectedToken,token);const id=owner;await wait;if(error)throw Error('offline');return {features:{interactionMomentum:{ownerId:id,eligible,policy:DEFAULT_MOMENTUM_CONFIG}}};}},
+  token:async()=>token,request:async(path,{expectedToken})=>{calls++;assert.match(path,/feature=interactionMomentum/);assert.equal(expectedToken,token);const id=owner;await wait;if(error)throw Error('offline');return {features:{interactionMomentum:{ownerId:id,eligible,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:globalEnabled}}}};}},
   momentum:{snapshot:async(id)=>({enabled:saved.get(id)}),drain:async()=>true,view:async(id,_policy,{enabled})=>{if(enabled!==undefined)saved.set(id,enabled);return {enabled:saved.get(id)};}},storage:{},broadcast:async()=>{broadcasts++;}});
- return {view,saved,get broadcasts(){return broadcasts;},get calls(){return calls;},freeze:()=>{status='frozen';},advance:ms=>{now+=ms;},paid:()=>{eligible=true;},expire:()=>{now+=300001;},free:()=>{eligible=false;},offline:()=>{error=true;},switch:()=>{token='B';owner='other';view.invalidate();},pause:()=>{let release;wait=new Promise(resolve=>{release=resolve;});return release;}};
+ return {view,saved,global:enabled=>{globalEnabled=enabled;},get broadcasts(){return broadcasts;},get calls(){return calls;},freeze:()=>{status='frozen';},advance:ms=>{now+=ms;},paid:()=>{eligible=true;},expire:()=>{now+=300001;},free:()=>{eligible=false;},offline:()=>{error=true;},switch:()=>{token='B';owner='other';view.invalidate();},pause:()=>{let release;wait=new Promise(resolve=>{release=resolve;});return release;}};
 }
 
 test('expired proof refreshes before applying one click; passive views never fetch',async()=>{
@@ -93,4 +93,21 @@ test('same-hour continuous ACKs reduce eligibility queries for enabled and disab
   assert.deepEqual(counts,[previous,current]);
   console.log({eligible,enabled,queriesBefore:counts[0],queriesAfter:counts[1]});
  }
+});
+
+test('global pause refuses a preference write and refresh restores the existing preference',async()=>{
+ const f=fixture();f.saved.set('owner',true);f.global(false);
+ assert.equal((await f.view({ensure:true})).policy.enabled,false);
+ const paused=await f.view({enabled:false});
+ assert.equal(paused.saved,false);assert.equal(paused.enabled,true);assert.equal(f.saved.get('owner'),true);
+ f.global(true);f.advance(5001);
+ assert.equal((await f.view({refresh:true})).enabled,true);
+ assert.equal((await f.view({enabled:false})).saved,true);
+});
+
+test('a queued save from a previous account scope cannot change the new account',async()=>{
+ const f=fixture();const old=await f.view({ensure:true});
+ f.switch();await f.view({ensure:true});
+ const stale=await f.view({enabled:true,scope:old.scope});
+ assert.equal(stale.status,'unverified');assert.equal(f.saved.size,0);
 });

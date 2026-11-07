@@ -4,8 +4,8 @@
     name: '互动势能临界值', intro: '功能原理', fullIntro: '查看完整介绍',
     summary: '按本机今日已确认交付的生成次数提醒。', guest: '待登录',
     free: '未解锁', unverified: '权益未确认', checking: '正在验证…',
-    enabled: '已开启', disabled: '已关闭', paused: '全局暂停',
-    today: '本机今日确认生成', verify: '刷新购买权益', plans: '查看套餐',
+    enabled: '势能监测运行中', disabled: '监测已关闭', paused: '系统暂未开放',
+    saveFailed: '设置未保存，请重试', verify: '刷新购买权益', plans: '查看套餐',
     current: '当前机制', future: '后续研究规划', local: '数据按本机账户和自然日统计，不代表已发布评论或 X 曝光。',
     dnd: '今日不再提醒', dismiss: '关闭当前提醒', original: '去发布原创帖', dndOn: '今日免打扰'
   };
@@ -46,7 +46,6 @@
     const intro = make('div');
     intro.className = 'momentum-intro';
     details.append(intro);
-    const count = full ? make('p') : null;
     const verify = full ? button(copy.verify, () => act('momentum_refresh')) : null;
     const plans = full ? button(copy.plans, () => onAction('pricing', {})) : null;
 
@@ -55,7 +54,7 @@
       const actions = make('div');
       actions.className = 'momentum-tools';
       actions.append(verify, plans);
-      box.append(count, actions);
+      box.append(actions);
     }
     box.append(details);
     container.prepend(box);
@@ -63,6 +62,8 @@
     let value = null;
     let pending = false;
     let checking = false;
+    let desired;
+    let saveFailed = false;
     let scope;
     let reminder;
     const seen = new Set();
@@ -126,22 +127,26 @@
     function act(action, data = {}) {
       if (pending) return;
       pending = true;
+      saveFailed = false;
+      if (action === "momentum_toggle") desired = data.enabled;
       checking = (action === "momentum_refresh" && !(value?.refreshAfter > Date.now())) ||
-        (action === "momentum_toggle" && data.enabled && !(value?.proofUntil > Date.now()));
+        (action === "momentum_toggle" && !(value?.proofUntil > Date.now()));
       renderStatus();
-      onAction(action, data);
+      onAction(action, action === "momentum_toggle" ? {...data, scope} : data);
     }
 
     function renderStatus() {
       const status = value?.status ?? (value?.available ? (value.eligible ? 'paid' : 'free') : 'unverified');
       const paid = status === 'paid';
-      toggle.disabled = pending || !paid;
-      toggle.checked = paid && value?.enabled === true;
-      note.textContent = pending && checking ? copy.checking : !value ? '' : paid
-        ? value.dnd ? copy.dndOn : value.policy?.enabled === false ? copy.paused : value.enabled ? copy.enabled : copy.disabled
+      const paused = paid && value.policy?.enabled === false;
+      const enabled = desired ?? value?.enabled;
+      toggle.disabled = pending || !paid || paused;
+      toggle.checked = paid && enabled === true;
+      toggle.title = paused && enabled ? '个人偏好已开启，当前系统暂停' : '';
+      note.textContent = saveFailed ? copy.saveFailed : pending && checking ? copy.checking : !value ? '' : paid
+        ? paused ? copy.paused : enabled && value.dnd ? copy.dndOn : enabled ? copy.enabled : copy.disabled
         : copy[status] || copy.unverified;
       if (full) {
-        count.textContent = copy.today + ' · ' + (value?.count ?? '—');
         plans.hidden = status !== 'free' && status !== 'guest';
         verify.disabled = pending;
       }
@@ -165,14 +170,26 @@
     details.ontoggle = renderIntro;
     renderStatus();
     return {
-      update(next) {
-        if (next?.scope !== scope) {
+      update(next, request = {}) {
+        const saving = typeof request.enabled === 'boolean';
+        const changingAccount = next?.scope !== undefined && next.scope !== scope;
+        if (changingAccount) {
           scope = next?.scope;
           seen.clear();
           clearReminder();
         }
-        value = next;
-        pending = false;
+        if (saving) {
+          desired = undefined;
+          pending = false;
+          saveFailed = !changingAccount && next?.saved !== true;
+        } else if (changingAccount) {
+          desired = undefined;
+          pending = false;
+          saveFailed = false;
+        } else if (desired === undefined) {
+          pending = false;
+        }
+        if (!saving || next && next.ok !== false) value = next;
         renderStatus();
         renderIntro();
       },
@@ -185,7 +202,7 @@
     let pending = false;
     let queued;
     const presenter = mount(container, (action, data) => {
-      if (action === 'momentum_toggle') void refresh({enabled: data.enabled});
+      if (action === 'momentum_toggle') void refresh({enabled: data.enabled, scope: data.scope});
       else if (action === 'momentum_refresh') void refresh({refresh: true});
       else if (action === 'momentum_dnd') void refresh({dnd: true});
       else if (action === 'momentum_presented') void send({type:'REPLY_COPILOT_MOMENTUM',presented:data}).catch(() => {});
@@ -197,9 +214,9 @@
       const current = ++revision;
       try {
         const response = await send({type: 'REPLY_COPILOT_MOMENTUM', ...options});
-        if (current === revision) presenter.update(response);
+        if (current === revision) presenter.update(response, options);
       } catch {
-        if (current === revision) presenter.update(null);
+        if (current === revision) presenter.update(null, options);
       } finally {
         if (current === revision) {
           pending = false;

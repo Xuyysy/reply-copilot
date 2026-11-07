@@ -9,9 +9,11 @@ const blocked = state => ['frozen', 'auth_expired', 'auth_unavailable'].includes
 export function createMomentumView({accountStates, client, momentum, storage, broadcast, clock = Date.now}) {
   let cached, pending, lastAttempt, backlog;
   let epoch = 0;
+  let scope = crypto.randomUUID();
 
   function invalidate() {
     epoch++;
+    scope = crypto.randomUUID();
     cached = pending = lastAttempt = undefined;
   }
 
@@ -44,8 +46,8 @@ export function createMomentumView({accountStates, client, momentum, storage, br
 
   function locked(status, stats) {
     return {
-      status, scope: epoch, available: false, eligible: false, enabled: false,
-      count: stats?.count ?? null, dnd: stats?.dnd === true,
+      status, scope, available: false, eligible: false, enabled: false,
+      dnd: stats?.dnd === true,
       policy: publicPolicy(DEFAULT_MOMENTUM_CONFIG)
     };
   }
@@ -73,12 +75,14 @@ export function createMomentumView({accountStates, client, momentum, storage, br
       return {confirmed:await momentum.confirmReminder(owner,{id,lease})};
     }
 
+    const saveRequested = typeof message.enabled === 'boolean';
+    if (saveRequested && message.scope !== undefined && message.scope !== scope) return locked('unverified');
     const before = proofFor(token, owner);
     let proof = before;
     // Ordinary ACKs count locally. Only accounts that opted into monitoring renew proof here.
     const renewAfterAck = !proof && message.claim && (await momentum.snapshot?.(owner))?.enabled === true;
     if (!await sameAccount()) return locked('unverified');
-    if ((!proof && (renewAfterAck || message.refresh || message.ensure || message.enabled === true)) ||
+    if ((!proof && (renewAfterAck || message.refresh || message.ensure || saveRequested)) ||
         (message.refresh && clock() - proof.at >= RETRY_INTERVAL)) {
       try { proof = await refresh(token, owner, revision, message.refresh === true); }
       catch { proof = null; if (await sameAccount()) cached = undefined; }
@@ -98,11 +102,12 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     if (!await sameAccount()) return locked('unverified');
     proof = proofFor(token, owner);
     const eligible = proof?.eligible === true;
-    const mutation = message.enabled === false || (eligible && message.enabled === true) || message.dnd === true;
-    const claim = Boolean(settled && eligible && (message.claim || message.surface || message.ensure || message.enabled === true));
     const policy = proof?.policy ?? DEFAULT_MOMENTUM_CONFIG;
+    const canSave = saveRequested && eligible && policy.enabled === true;
+    const mutation = canSave || message.dnd === true;
+    const claim = Boolean(settled && eligible && (message.claim || message.surface || message.ensure || message.enabled === true));
     const result = mutation || claim
-      ? await momentum.view(owner, policy, {eligible, enabled: mutation ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
+      ? await momentum.view(owner, policy, {eligible, enabled: canSave ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
       : await momentum.snapshot?.(owner);
     if (!await sameAccount()) return locked('unverified');
 
@@ -110,9 +115,10 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     if (!await sameAccount()) return locked('unverified');
     if (!proof || proof !== proofFor(token, owner)) return locked('unverified', result);
     return {
-      status: eligible ? 'paid' : 'free', scope: epoch, available: true, eligible,
+      status: eligible ? 'paid' : 'free', scope, available: true, eligible,
       enabled: eligible && result?.enabled === true, proofUntil: proof.at + (eligible ? PAID_TTL : FREE_TTL),
-      refreshAfter: proof.at + RETRY_INTERVAL, count: result?.count ?? 0,
+      refreshAfter: proof.at + RETRY_INTERVAL,
+      ...(saveRequested ? {saved: canSave && result?.enabled === message.enabled} : {}),
       dnd: result?.dnd === true, policy: publicPolicy(policy), reminder: result?.reminder
     };
   }
