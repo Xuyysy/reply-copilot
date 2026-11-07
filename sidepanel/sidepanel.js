@@ -228,5 +228,6 @@ document.addEventListener("visibilitychange", () => {
 });
 
 if (RUNTIME_CONFIG.channel === "staging") {
+  void import("../staging/momentum-panel.js").then(({mountMomentumTesting}) => mountMomentumTesting(document)).catch(() => {});
   void import("./performance-panel.js").then(({mountPerformancePanel}) => mountPerformancePanel(document, chrome.runtime)).catch(() => {});
 }

@@ -1,0 +1,73 @@
+import {localDayKey, selectMomentumReminder} from '../domain/creator-momentum.js';
+import {MOMENTUM_OUTBOX_PREFIX} from '../services/creator-momentum.js';
+
+function read(store,key) {
+  return new Promise((resolve,reject) => {
+    const request = store.get(key);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function diagnose(momentum, storage, owner, state, now = Date.now()) {
+  const date = localDayKey(now);
+  const nextDate = new Date(now);
+  nextDate.setDate(nextDate.getDate()+1);
+  const [record, outbox] = await Promise.all([
+    momentum.transaction(['days','prefs'], async tx => {
+      const day = await read(tx.objectStore('days'),JSON.stringify([owner,date]));
+      const pref = await read(tx.objectStore('prefs'),owner);
+      return {day,pref};
+    },'readonly'),
+    storage.get(null)
+  ]);
+  const {day,pref} = record;
+  const policy = state.available ? state.policy : null;
+  const context = {eligible:state.eligible,enabled:pref?.enabled === true,globalEnabled:policy?.enabled === true};
+  const coolingUntil = day?.lastShownAt ? day.lastShownAt+day.cooldownMinutes*60000 : null;
+  const stage = day?.thresholds ? selectMomentumReminder(day,context,now) : null;
+  const leaseActive = day?.pendingReminder?.expiresAt > now;
+  const reason = !policy ? '请刷新购买权益' : !context.eligible ? '购买权益未解锁' :
+    !context.globalEnabled ? '全局暂停' : !context.enabled ? '个人监测关闭' :
+    !day?.thresholds ? '当天尚未建立阈值' : day.dnd ? '今日免打扰' :
+    pref.latestDay > date ? '本地日期回退' : day.reminderCount >= day.maxReminders ? '达到每日提醒上限' :
+    coolingUntil > now ? '仍在冷却' : leaseActive ? '存在待展示租约' :
+    stage ? '符合领取条件，需可见回复框' : '尚未达到未展示阶段';
+  return {
+    reason,date,configVersion:policy?.version??null,dayVersion:day?.version??null,
+    oldPolicy:Boolean(policy&&day?.version&&policy.version!==day.version),
+    nextLocalDate:localDayKey(nextDate.getTime()),createdAt:day?.createdAt??null,
+    ackCount:day?.count??0,lastAckAt:day?.lastAckAt??null,
+    queuedAcks:Object.keys(outbox).filter(k=>k.startsWith(MOMENTUM_OUTBOX_PREFIX+encodeURIComponent(owner)+':')).length,
+    thresholds:day?.thresholds??null,shownThrough:day?.shownThrough??0,
+    remindersShown:day?.reminderCount??0,coolingUntil,doNotDisturb:day?.dnd===true,
+    eligibleStage:stage,leaseExpiresAt:day?.pendingReminder?.expiresAt??null
+  };
+}
+
+export function registerMomentumTesting({momentum, momentumView, accountStates, accountClient}) {
+  chrome.runtime.onMessage.addListener((message,sender,respond) => {
+    if (sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('sidepanel/sidepanel.html')) return;
+    if (!['MOMENTUM_STAGING_PREVIEW','MOMENTUM_STAGING_DIAGNOSE'].includes(message?.type)) return;
+    void (async()=>{
+      const token=await accountClient.token();
+      const owner=accountStates.peekState()?.user?.userId;
+      if (!token||!owner||accountStates.cachedToken!==token) return {ok:false,error:'请先连接 Staging 账号并刷新购买权益。'};
+      const state=await momentumView({});
+      if (message.type==='MOMENTUM_STAGING_DIAGNOSE') {
+        const diagnostic=await diagnose(momentum,chrome.storage.local,owner,state);
+        if (token!==await accountClient.token()) return {ok:false,error:'账号已切换，请重试。'};
+        return {ok:true,diagnostic};
+      }
+      if (![1,2,3].includes(message.stage)) return {ok:false,error:'请选择有效阶段。'};
+      if (!state.available) return {ok:false,error:'请先在侧边栏刷新购买权益以载入最新配置。'};
+      const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});
+      if (!Number.isInteger(tab?.id)||!/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(tab.url||''))
+        return {ok:false,error:'请切回当前窗口的 X 标签页并打开回复框。'};
+      if (token!==await accountClient.token()) return {ok:false,error:'账号已切换，请重试。'};
+      const {titleZh,bodyZh}=state.policy;
+      return chrome.tabs.sendMessage(tab.id,{type:'MOMENTUM_STAGING_SHOW',sample:{stage:message.stage,titleZh,bodyZh}},{frameId:0});
+    })().then(respond,()=>respond({ok:false,error:'当前 X 页面无法接收测试，请刷新并打开回复框。'}));
+    return true;
+  });
+}

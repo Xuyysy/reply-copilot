@@ -7,10 +7,10 @@ import {withMomentumBrowser} from '../helpers/momentum-browser.js';
 const files = ['content/momentum-presenter.js', 'content/inline-assistant.js'];
 const source = paths => paths.map(path => readFileSync(path, 'utf8')).join('\n');
 const css = source(['content/inline-assistant.css', 'content/momentum.css']);
-const before = path => execFileSync('git', ['show', '5fe5210:' + path], {encoding: 'utf8'});
+const before = path => execFileSync('git', ['show', 'd50a34b:' + path], {encoding: 'utf8'});
 const fixture = scripts => `<html lang="en"><body><textarea id="editor" aria-label="Editor"></textarea><div id="side"></div><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${scripts};window.momentumReady=true;</script></body></html>`;
 const setup = styles => `window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.querySelector("#editor"),(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};shadow.append(style);assistant.showResult({natural:'这个例子一下就说明白了。',light_humor:'终于有人把这个坑填了。',thoughtful:'这个区别在实际使用时很重要。'});assistant.setMomentum({status:"free",available:true,eligible:false,policy:{enabled:true}});`;
-const screenshots = '/private/tmp/xrh-momentum-interaction';
+const screenshots = '/private/tmp/xrh-momentum-pro';
 async function capture(call, file) {
   mkdirSync(screenshots, {recursive: true});
   const shot = await call('Page.captureScreenshot', {format: 'png'});
@@ -118,11 +118,37 @@ test('capture before and after for the same paid side panel fixture', {timeout:3
    await evaluate(`{const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};document.head.append(style);
    window.events=[];window.panel=ReplyCopilotMomentumPresenter.mount(document.querySelector('#side'),a=>events.push(a),{mode:'full'});
    panel.update({status:'paid',scope:1,enabled:false,count:21,proofUntil:Date.now()+10000,policy:{enabled:true}});}`);
-   assert.equal(await evaluate('document.querySelector("#side").textContent.includes("· 21")'),name==='before');
+   assert.equal(await evaluate('document.querySelector("#side").textContent.includes("· 21")'),false);
    await capture(call,'count-'+name+'.png');
    await evaluate('document.querySelector("#side input").click()');
-   assert.equal(await evaluate('document.querySelector("#side input").checked'),name==='after');
+   assert.equal(await evaluate('document.querySelector("#side input").checked'),true);
    await capture(call,'switch-'+name+'.png');
   });
  }
+});
+
+test('three Staging previews use saved copy and dismiss without sending real actions', {timeout:30000},async()=>{
+ await withMomentumBrowser(fixture(source(files)),async({evaluate,call})=>{
+  await evaluate(setup(css));
+  await evaluate('assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true}})');
+  await capture(call,'pro-active.png');
+  for(const [frame,time] of [0,35,70,110,170].entries()){
+   await evaluate(`(() => {const a=shadow.querySelector(".momentum-pro").getAnimations()[0];a.pause();a.currentTime=${time};})()`);
+   await capture(call,'pro-frame-'+frame+'.png');
+  }
+  const animation=await evaluate('getComputedStyle(shadow.querySelector(".momentum-pro")).animationName');
+  assert.equal(animation,'momentum-pro-activate');
+  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  assert.equal(await evaluate('getComputedStyle(shadow.querySelector(".momentum-pro")).animationName'),'none');
+  for(const stage of [1,2,3]){
+   await evaluate(`assistant.previewMomentum({stage:${stage},titleZh:"已保存标题",bodyZh:"已保存正文"});`);
+   assert.match(await evaluate('shadow.querySelector(".momentum-reminder").textContent'),new RegExp('阶段 '+stage+'.*已保存标题.*已保存正文'));
+   if(stage===2) await evaluate('assistant.host.dataset.theme="dark"');
+   if(stage===3) await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
+   await capture(call,'preview-stage-'+stage+'.png');
+   await evaluate('[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');
+   assert.equal(await evaluate('!!shadow.querySelector(".momentum-reminder")'),false);
+  }
+  assert.deepEqual(await evaluate('actions'),[]);
+ });
 });

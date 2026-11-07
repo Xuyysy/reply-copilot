@@ -1,3 +1,4 @@
+import { openReplySidePanel } from '../services/open-sidepanel.js';
 import { RUNTIME_CONFIG } from "../config/runtime.js";
 import {createMomentumView} from '../services/momentum-view.js';
 import {MomentumStore,momentumReceiptPatch,momentumReceiptKey} from '../services/creator-momentum.js';
@@ -29,7 +30,8 @@ const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
 const accountClient = new AccountClient();
-const momentumView=createMomentumView({accountStates,client:accountClient,momentum:new MomentumStore(),storage:chrome.storage.local,broadcast:broadcastMomentum});
+const momentum=new MomentumStore();
+const momentumView=createMomentumView({accountStates,client:accountClient,momentum,storage:chrome.storage.local,broadcast:broadcastMomentum});
 async function broadcastMomentum() {
   const message = {type: 'REPLY_COPILOT_MOMENTUM_CHANGED'};
   await Promise.allSettled([
@@ -255,14 +257,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "REPLY_COPILOT_OPEN_SIDEPANEL") {
-    if (!fromXPage || !Number.isInteger(sender.tab?.windowId)) { sendResponse({ ok: false }); return false; }
-    void (async () => {
-      if (typeof message.sourceText === "string" && message.sourceText.length > 0 && message.sourceText.length <= 12000 && /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) {
-        try { await storage.savePendingRequest(createReplyRequest({ sourceText: message.sourceText, sourceUrl: message.sourceUrl })); } catch { /* open panel without unverified context */ }
+    if (!fromXPage || sender.frameId !== 0 || !Number.isInteger(sender.tab?.windowId)) {
+      sendResponse({ok:false, error:"无法识别当前 X 标签页。"});
+      return false;
+    }
+    void openReplySidePanel(() => chrome.sidePanel.open({windowId:sender.tab.windowId}), async () => {
+      if (message.momentumDetails === true) {
+        await chrome.storage.session.set({openMomentumDetails:true});
+      } else if (typeof message.sourceText === "string" && message.sourceText.length > 0 && message.sourceText.length <= 12000 &&
+          /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) {
+        await storage.savePendingRequest(createReplyRequest({sourceText:message.sourceText,sourceUrl:message.sourceUrl}));
       }
-      try { await chrome.sidePanel.open({ windowId: sender.tab.windowId }); if (message.momentumDetails === true) void chrome.storage.session.set({openMomentumDetails: true}).catch(() => {}); sendResponse({ ok: true }); } catch { sendResponse({ ok: false }); }
-    })();
+    }).then(sendResponse);
     return true;
   }
   return false;
 });
+
+export {momentum, momentumView, accountStates, accountClient};

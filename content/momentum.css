@@ -49,3 +49,24 @@
 @media (prefers-reduced-motion: reduce) {
   .momentum input, .momentum input::after { transition: none; }
 }
+
+.momentum-pro { border-color:#7088b780; background:linear-gradient(145deg,#8ea6d81c,transparent); }
+.momentum[data-running="true"] label > span::before {
+  content:""; display:inline-block; width:5px; height:5px; margin-inline-end:5px;
+  border-radius:50%; background:#6488ee; vertical-align:2px;
+}
+.momentum input:checked:not(:disabled),
+.momentum[data-running="true"] input:checked {
+  background:linear-gradient(140deg,#597fe7,#3155b7); box-shadow:0 0 5px #6488ee35;
+}
+.momentum[data-running="true"] input:checked::after { box-shadow:inset 0 1px 0 #c3d8ff; }
+.momentum[data-running="true"] .momentum-pro {
+  border-color:#6488eec0; animation:momentum-pro-activate 170ms ease-out both;
+}
+@keyframes momentum-pro-activate {
+  from {background-color:#86a7ff60;}
+  to {background-color:#86a7ff18;}
+}
+@media (prefers-reduced-motion: reduce) {
+  .momentum[data-running="true"] .momentum-pro {animation:none;}
+}

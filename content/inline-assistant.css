@@ -22,3 +22,6 @@
   .top .account-badge { margin-left: auto; }
   .actions { flex-wrap: wrap; }
 }
+
+.panel-open-error { display:block; color:#a93832; margin-top:4px; }
+:host([data-theme="dark"]) .panel-open-error { color:#ffaaa5; }

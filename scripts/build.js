@@ -22,6 +22,7 @@ const output = path.join(root, "dist", channel);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
+if (channel === "staging") cpSync(path.join(root, "staging"), path.join(output, "staging"), {recursive:true});
 if (packagedChannel) {
   const configPath = path.join(output, "config", "runtime.js");
   writeFileSync(configPath, `export const RUNTIME_CONFIG = Object.freeze({ channel: ${JSON.stringify(channel)}, websiteUrl: ${JSON.stringify(websiteUrl)}, hostedApiUrl: ${JSON.stringify(hostedApiUrl)}, allowedHttpHosts: [], requestTimeoutMs: 30000 });\n`);
@@ -38,6 +39,10 @@ if (packagedChannel) {
     console.log(`Stable extension ID: ${identity.id}`);
   } else if (expectedId) {
     throw new Error("An expected extension ID requires its Web Store public key file");
+  }
+  if (channel === "staging") {
+    manifest.background.service_worker = "staging/service-worker.js";
+    manifest.content_scripts[0].js.unshift("staging/momentum-content.js");
   }
   manifest.host_permissions = [`${hostedApiUrl}/*`];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);

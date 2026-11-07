@@ -366,9 +366,19 @@
       return;
     }
     if (!hasRuntimeContext()) return;
-    if (action === "sidepanel") { void safeSend({ type: "REPLY_COPILOT_OPEN_SIDEPANEL", sourceText: current.post?.sourceText, sourceUrl: current.post?.sourceUrl }); return; }
     if (action === "settings") { void safeSend({ type: "REPLY_COPILOT_OPEN_SETTINGS" }); return; }
-    if(action==='momentum_details'){void safeSend({type:'REPLY_COPILOT_OPEN_SIDEPANEL',momentumDetails:true});return;}
+    if (action === "sidepanel" || action === "momentum_details") {
+      if (current.panelOpenPending) return;
+      current.panelOpenPending = true;
+      const payload = action === "sidepanel"
+        ? {sourceText:current.post?.sourceText,sourceUrl:current.post?.sourceUrl} : {momentumDetails:true};
+      void safeSend({type:"REPLY_COPILOT_OPEN_SIDEPANEL",...payload}).then(response => {
+        if (active === current && !current.cancelled) {
+          current.assistant?.showPanelError?.(response?.ok ? "" : response?.error || "无法打开侧边栏，请重试。");
+        }
+      }).finally(() => { current.panelOpenPending = false; });
+      return;
+    }
     if(action==='momentum_refresh'){refreshMomentum(current,{refresh:true});return;}
     if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled,scope:data.scope});return;}
     if(action==='momentum_presented'){void safeSend({type:'REPLY_COPILOT_MOMENTUM',presented:data});return;}
@@ -422,6 +432,10 @@
     if (action === "feedback") { void safeSend({ type: "REPLY_COPILOT_FEEDBACK", requestId: current.requestId, ...data }); return; }
     if (action === "manually_confirmed") { record("manually_confirmed", data); return; }
   }
+  globalThis.ReplyCopilotStagingSurface?.register(() => {
+    const assistant = active?.assistant;
+    return active?.editor?.isConnected && !active.cancelled && assistant?.host?.isConnected ? assistant : null;
+  });
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;
     if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") { performanceEnabled=message.enabled===true; return false; }

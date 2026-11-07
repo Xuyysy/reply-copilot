@@ -30,7 +30,7 @@ export class MomentumStore {
    const seen=tx.objectStore('seen'),days=tx.objectStore('days'),id=JSON.stringify([event.ownerId,event.requestId]),key=JSON.stringify([event.ownerId,event.day]);
    if(await request(seen.get(id)))return false;
    const day=await request(days.get(key))||(event.policy?createMomentumDay(event.at,event.policy,this.random,event.day):{day:event.day,count:0,createdAt:event.at});
-   day.count+=1;seen.put({at:event.at},id);days.put(day,key);return true;
+   day.count+=1;day.lastAckAt=Math.max(day.lastAckAt??0,event.at);seen.put({at:event.at},id);days.put(day,key);return true;
   });
  }
  async snapshot(ownerId){

@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
 import {withMomentumBrowser} from '../helpers/momentum-browser.js';
 const {buildSync}=createRequire(new URL('../../api/package.json',import.meta.url))('esbuild');
-const js=buildSync({stdin:{contents:`import {MomentumStore,momentumReceiptPatch} from './services/creator-momentum.js';import {DEFAULT_MOMENTUM_CONFIG,localDayKey} from './domain/creator-momentum.js';window.M={MomentumStore,momentumReceiptPatch,DEFAULT_MOMENTUM_CONFIG,localDayKey};window.momentumReady=true;`,resolveDir:process.cwd()},bundle:true,format:'iife',write:false}).outputFiles[0].text;
+const js=buildSync({stdin:{contents:`import {MomentumStore,momentumReceiptPatch} from './services/creator-momentum.js';import {DEFAULT_MOMENTUM_CONFIG,localDayKey} from './domain/creator-momentum.js';import {diagnose} from './staging/momentum-background.js';window.M={diagnose,MomentumStore,momentumReceiptPatch,DEFAULT_MOMENTUM_CONFIG,localDayKey};window.momentumReady=true;`,resolveDir:process.cwd()},bundle:true,format:'iife',write:false}).outputFiles[0].text;
 test('real IndexedDB: 1500 ACKs, concurrent replay, restart, accounts, OFF/free counting, stages, DND and cross-day',{timeout:60000},async()=>{
  await withMomentumBrowser('<script>'+js+'</script>',async({evaluate,call})=>{
   const report=await evaluate(`(async()=>{
@@ -77,5 +77,37 @@ test('a reminder lost with a closed surface is reclaimed after its lease, and on
   assert.equal(result.cooling,null);
   assert.equal(result.second.stage,2);
   assert.equal(result.dndAck,false);
+ });
+});
+
+test('diagnostics expose frozen daily strategy and next-day adoption without mutating records', {timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const out=await evaluate(`(async()=>{
+   let now=new Date(2026,10,7,12).getTime();
+   const {MomentumStore,localDayKey,DEFAULT_MOMENTUM_CONFIG,diagnose}=M;
+   const old={...DEFAULT_MOMENTUM_CONFIG,enabled:true,version:'old'};
+   const fresh={...old,version:'new',ranges:[[3,7],[8,10],[11,13]]};
+   const store=new MomentumStore({clock:()=>now,random:()=>0});
+   const add=async n=>{for(let i=0;i<n;i++)await store.ingest({ownerId:'A',requestId:'ack-'+localDayKey(now)+'-'+i,day:localDayKey(now),at:now,policy:old});};
+   await add(7);await store.view('A',fresh,{eligible:true,enabled:true,claim:true});
+   const state={eligible:true,available:true,policy:fresh};
+   const storage={get:async()=>({'creatorMomentumDelivery:A:queued':true,'creatorMomentumDelivery:B:other':true})};
+   const inspect=()=>diagnose(store,storage,'A',state,now);
+   const today=await inspect();
+   const todayAgain=await inspect();
+   now=new Date(2026,10,8,12).getTime();
+   await store.view('A',fresh,{eligible:true,claim:true});
+   const tomorrow=await inspect();
+   return {today,todayAgain,tomorrow};
+  })()`);
+  assert.equal(out.today.oldPolicy,true);
+  assert.equal(out.today.ackCount,7);
+  assert.equal(out.today.queuedAcks,1);
+  assert.equal(out.today.thresholds[0],500);
+  assert.equal(out.today.reason,'尚未达到未展示阶段');
+  assert.deepEqual(out.today,out.todayAgain);
+  assert.equal(out.tomorrow.date,out.today.nextLocalDate);
+  assert.equal(out.tomorrow.dayVersion,'new');
+  assert.equal(out.tomorrow.thresholds[0],3);
  });
 });

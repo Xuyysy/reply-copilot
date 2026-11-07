@@ -1,12 +1,12 @@
 (() => {
   // Interface locale is independent of the page and of AI reply preferences.
   const zh = {
-    name: '互动势能临界值', intro: '功能原理', fullIntro: '查看完整介绍',
-    summary: '按本机今日已确认交付的生成次数提醒。', guest: '待登录',
+    name: '互动势能临界值', intro: '势能分析引擎', fullIntro: '查看完整介绍',
+    summary: '基于创作者活跃信号监测，融合互动势能评估模型、分阶段阈值算法与后台动态策略更新，持续识别原创内容的潜在黄金发布窗口。', guest: '待登录',
     free: '未解锁', unverified: '权益未确认', checking: '正在验证…',
     enabled: '势能监测运行中', disabled: '监测已关闭', paused: '系统暂未开放',
     saveFailed: '设置未保存，请重试', verify: '刷新购买权益', plans: '查看套餐',
-    current: '当前机制', future: '后续研究规划', local: '数据按本机账户和自然日统计，不代表已发布评论或 X 曝光。',
+    current: '当前机制', future: '后续研究规划',
     dnd: '今日不再提醒', dismiss: '关闭当前提醒', original: '去发布原创帖', dndOn: '今日免打扰'
   };
 
@@ -66,6 +66,7 @@
     let saveFailed = false;
     let scope;
     let reminder;
+    let preview;
     const seen = new Set();
 
     function clearReminder() {
@@ -73,15 +74,17 @@
       reminder = null;
     }
 
-    function showReminder(event) {
+    function showReminder(event, sample) {
+      if (sample) preview?.remove();
+      else if (preview?.isConnected) return;
       const acknowledge = () => {
         if (event.lease) onAction('momentum_presented', {id:event.id, lease:event.lease});
       };
-      if (seen.has(event.id)) { acknowledge(); return; }
+      if (!sample && seen.has(event.id)) { acknowledge(); return; }
       if (reminder?.dataset.lease === event.lease && event.lease) return;
-      clearReminder();
+      if (!sample) clearReminder();
       const node = make('aside');
-      reminder = node;
+      if (sample) preview = node; else reminder = node;
       node.dataset.lease = event.lease || '';
       node.className = 'momentum-reminder';
       node.setAttribute('role', 'status');
@@ -92,17 +95,21 @@
           acknowledge();
         }
       };
+      const dismiss = () => sample ? node.remove() : clearReminder();
       const close = button('×', event => {
         if (event.isTrusted && visible()) presented();
-        clearReminder();
+        dismiss();
       });
       close.className = 'momentum-close';
       close.setAttribute('aria-label', copy.dismiss);
-      const dnd = button(copy.dnd, () => { clearReminder(); act('momentum_dnd'); });
-      reminder.append(make('strong', value.policy?.titleZh || '今日活跃信号'), close,
-        make('p', value.policy?.bodyZh || '可以考虑整理一条原创帖。'),
-        button(copy.original, () => onAction('momentum_original', {})), dnd);
+      const dnd = button(copy.dnd, () => { dismiss(); if (!sample) act('momentum_dnd'); });
+      const policy = sample || value?.policy;
+      if (sample) node.append(make('small', 'Staging 测试预览 · 阶段 ' + sample.stage));
+      node.append(make('strong', policy?.titleZh || '今日活跃信号'), close,
+        make('p', policy?.bodyZh || '可以考虑整理一条原创帖。'),
+        button(copy.original, () => { if (!sample) onAction('momentum_original', {}); }), dnd);
       box.append(node);
+      if (sample) return node;
       if (!event.lease) { presented(); return; }
       function visible() {
         if (reminder !== node || !node.isConnected || document.visibilityState !== 'visible' ||
@@ -140,6 +147,8 @@
       const paid = status === 'paid';
       const paused = paid && value.policy?.enabled === false;
       const enabled = desired ?? value?.enabled;
+      const running = paid && !paused && value?.enabled === true && enabled === true && !value.dnd;
+      box.dataset.running = String(running);
       toggle.disabled = pending || !paid || paused;
       toggle.checked = paid && enabled === true;
       toggle.title = paused && enabled ? '个人偏好已开启，当前系统暂停' : '';
@@ -159,8 +168,7 @@
       if (full) {
         intro.replaceChildren(make('strong', copy.current),
           make('p', value?.policy?.overviewZh || copy.summary), make('strong', copy.future),
-          make('p', value?.policy?.researchZh || '研究公开推荐机制、互动节奏、中文创作者趋势及个性化提醒。相关外部数据尚未接入。'),
-          make('p', copy.local));
+          make('p', value?.policy?.researchZh || '研究公开推荐机制、互动节奏、中文创作者趋势及个性化提醒。相关外部数据尚未接入。'));
       } else if (!intro.firstChild) {
         intro.append(make('p', copy.summary), button(copy.fullIntro, () => onAction('momentum_details', {})));
       }
@@ -193,7 +201,8 @@
         renderStatus();
         renderIntro();
       },
-      expand() { details.open = true; renderIntro(); }
+      expand() { details.open = true; renderIntro(); },
+      preview(sample) { return showReminder({}, sample); }
     };
   }
 
@@ -250,8 +259,17 @@
       if (!entry.open) return;
       if (!control) {
         entry.append(panel);
+        const error = document.createElement("small");
+        error.setAttribute("role","status");
+        panel.append(error);
+        let opening = false;
         control = connect(panel, send, action => {
-          if (action === 'momentum_details') void send({type: 'REPLY_COPILOT_OPEN_SIDEPANEL', momentumDetails: true});
+          if (action === 'momentum_details' && !opening) {
+            opening = true;
+            void send({type:'REPLY_COPILOT_OPEN_SIDEPANEL', momentumDetails:true}).then(response => {
+              error.textContent = response?.ok ? '' : response?.error || '无法打开侧边栏，请重试。';
+            }).catch(() => { error.textContent = '无法打开侧边栏，请重试。'; }).finally(() => { opening = false; });
+          }
           if (action === 'momentum_original') void send({type: 'REPLY_COPILOT_OPEN_ORIGINAL'});
         });
         void control.refresh({ensure: true});
