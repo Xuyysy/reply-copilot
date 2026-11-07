@@ -62,6 +62,7 @@
 
     let value = null;
     let pending = false;
+    let checking = false;
     let scope;
     let reminder;
     const seen = new Set();
@@ -72,26 +73,61 @@
     }
 
     function showReminder(event) {
-      if (seen.has(event.id)) return;
-      seen.add(event.id);
-      if (seen.size > 12) seen.delete(seen.values().next().value);
+      const acknowledge = () => {
+        if (event.lease) onAction('momentum_presented', {id:event.id, lease:event.lease});
+      };
+      if (seen.has(event.id)) { acknowledge(); return; }
+      if (reminder?.dataset.lease === event.lease && event.lease) return;
       clearReminder();
-      reminder = make('aside');
-      reminder.className = 'momentum-reminder';
-      reminder.setAttribute('role', 'status');
-      const close = button('×', clearReminder);
+      const node = make('aside');
+      reminder = node;
+      node.dataset.lease = event.lease || '';
+      node.className = 'momentum-reminder';
+      node.setAttribute('role', 'status');
+      const presented = () => {
+        if (!seen.has(event.id)) {
+          seen.add(event.id);
+          if (seen.size > 12) seen.delete(seen.values().next().value);
+          acknowledge();
+        }
+      };
+      const close = button('×', event => {
+        if (event.isTrusted && visible()) presented();
+        clearReminder();
+      });
       close.className = 'momentum-close';
       close.setAttribute('aria-label', copy.dismiss);
       const dnd = button(copy.dnd, () => { clearReminder(); act('momentum_dnd'); });
       reminder.append(make('strong', value.policy?.titleZh || '今日活跃信号'), close,
         make('p', value.policy?.bodyZh || '可以考虑整理一条原创帖。'),
         button(copy.original, () => onAction('momentum_original', {})), dnd);
-      box.append(reminder);
+      box.append(node);
+      if (!event.lease) { presented(); return; }
+      function visible() {
+        if (reminder !== node || !node.isConnected || document.visibilityState !== 'visible' ||
+            Date.now() >= event.expiresAt) return false;
+        const rect = node.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+        const x = Math.max(0, rect.left) + Math.min(12, rect.width / 2);
+        const y = Math.max(0, rect.top) + Math.min(12, rect.height / 2);
+        const root = node.getRootNode();
+        const hit = root.elementFromPoint?.(x,y);
+        return node.contains(hit) && (!root.host || document.elementFromPoint(x,y) === root.host);
+      }
+      requestAnimationFrame(() => {
+        if (!visible()) { if (reminder === node) clearReminder(); return; }
+        requestAnimationFrame(() => {
+          if (visible()) presented();
+          else if (reminder === node) clearReminder();
+        });
+      });
     }
 
     function act(action, data = {}) {
       if (pending) return;
       pending = true;
+      checking = (action === "momentum_refresh" && !(value?.refreshAfter > Date.now())) ||
+        (action === "momentum_toggle" && data.enabled && !(value?.proofUntil > Date.now()));
       renderStatus();
       onAction(action, data);
     }
@@ -101,7 +137,7 @@
       const paid = status === 'paid';
       toggle.disabled = pending || !paid;
       toggle.checked = paid && value?.enabled === true;
-      note.textContent = pending ? copy.checking : paid
+      note.textContent = pending && checking ? copy.checking : !value ? '' : paid
         ? value.dnd ? copy.dndOn : value.policy?.enabled === false ? copy.paused : value.enabled ? copy.enabled : copy.disabled
         : copy[status] || copy.unverified;
       if (full) {
@@ -152,12 +188,12 @@
       if (action === 'momentum_toggle') void refresh({enabled: data.enabled});
       else if (action === 'momentum_refresh') void refresh({refresh: true});
       else if (action === 'momentum_dnd') void refresh({dnd: true});
+      else if (action === 'momentum_presented') void send({type:'REPLY_COPILOT_MOMENTUM',presented:data}).catch(() => {});
       else onNavigate(action);
     }, {mode});
     async function refresh(options = {}) {
-      const explicit = typeof options.enabled === "boolean" || options.refresh || options.dnd;
-      if (pending && !explicit) { queued = {...queued, ...options}; return; }
-      if (explicit) pending = true;
+      if (pending) { queued = {...queued, ...options}; return; }
+      pending = true;
       const current = ++revision;
       try {
         const response = await send({type: 'REPLY_COPILOT_MOMENTUM', ...options});
@@ -165,7 +201,7 @@
       } catch {
         if (current === revision) presenter.update(null);
       } finally {
-        if (explicit && current === revision) {
+        if (current === revision) {
           pending = false;
           if (queued) { const next = queued; queued = null; void refresh(next); }
         }

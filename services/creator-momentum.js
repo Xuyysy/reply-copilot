@@ -50,12 +50,32 @@ export class MomentumStore {
    const saved=await request(days.get(key));
    const day=saved?.thresholds?saved:assignPolicy?{...createMomentumDay(now,policy,this.random),...saved}:{day:today,count:saved?.count??0,createdAt:saved?.createdAt??now,...saved};
    if(enabled===false||eligible&&enabled===true)p.enabled=enabled;
-   if(dnd)day.dnd=true;
-   let stage=null;
-   if(claim&&today>=p.latestDay)stage=selectMomentumReminder(day,{eligible,enabled:p.enabled,globalEnabled:policy.enabled},now);
-   const next=stage?recordMomentumReminder(day,stage,now):day;
-   p.latestDay=p.latestDay>today?p.latestDay:today;prefs.put(p,ownerId);days.put(next,key);
-   return {eligible,enabled:p.enabled,available,policy,day:today,count:next.count,dnd:next.dnd===true,reminder:stage?{id:today+':'+stage,stage}:null};
+   if(dnd){day.dnd=true;delete day.pendingReminder;}
+   const stage=claim&&today>=p.latestDay
+    ? selectMomentumReminder(day,{eligible,enabled:p.enabled,globalEnabled:policy.enabled},now) : null;
+   let reminder=null;
+   if(stage&&!day.dnd&&(!day.pendingReminder||day.pendingReminder.expiresAt<=now)){
+    reminder={id:today+':'+stage,stage,lease:crypto.randomUUID(),expiresAt:now+10000};
+    day.pendingReminder=reminder;
+   }
+   p.latestDay=p.latestDay>today?p.latestDay:today;prefs.put(p,ownerId);days.put(day,key);
+   return {eligible,enabled:p.enabled,available,policy,day:today,count:day.count,dnd:day.dnd===true,reminder};
+  });
+ }
+ async confirmReminder(ownerId,{id,lease}){
+  const now=this.clock(),today=localDayKey(now);
+  return this.transaction(['days','prefs'],async tx=>{
+   const days=tx.objectStore('days'),key=JSON.stringify([ownerId,today]);
+   const day=await request(days.get(key));
+   if(day?.deliveredReminder?.id===id&&day.deliveredReminder.lease===lease)return true;
+   if(!day||day.dnd||day.pendingReminder?.id!==id||day.pendingReminder.lease!==lease)return false;
+   const pref=await request(tx.objectStore('prefs').get(ownerId));
+   if(!pref?.enabled||pref.latestDay>today)return false;
+   const next=recordMomentumReminder(day,day.pendingReminder.stage,now);
+   next.deliveredReminder={id,lease};
+   delete next.pendingReminder;
+   days.put(next,key);
+   return true;
   });
  }
  async prune(){

@@ -7,7 +7,7 @@ test('accepted V1 full-path alternating A/B includes binding, account preflight,
  const prior=mkdtempSync(path.join(tmpdir(),'xrh-momentum-pre-review-'));
  try{
   const archive=execFileSync('git',['archive','3cebe3ecbee552ef5b0e68afc7882a2dfb3869fa'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',baseline],{input:archive});
-  const priorArchive=execFileSync('git',['archive','cac9e0ee0f014634a9d15a7842edb417c2580d73'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
+  const priorArchive=execFileSync('git',['archive','a2ed4f993c797ed6f6a9d0aebd275f6f3bf2145b'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
   const before=[],originalCandidate=[],after=[];let promptHash=null;
   for(let i=0;i<14;i++)for(const [kind,sourceRoot]of (i%2?[['after',current],['originalCandidate',prior],['before',baseline]]:[['before',baseline],['originalCandidate',prior],['after',current]])){
    const r=await generationFixture({sourceRoot,options:{momentumFeature:{eligible:true,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:true}}}});

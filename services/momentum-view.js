@@ -1,7 +1,7 @@
 import {DEFAULT_MOMENTUM_CONFIG, validateMomentumConfig} from '../domain/creator-momentum.js';
 
-const PAID_TTL = 60_000;
-const FREE_TTL = 15_000;
+const PAID_TTL = 300_000;
+const FREE_TTL = 120_000;
 const RETRY_INTERVAL = 5_000;
 const publicPolicy = ({ranges, maxReminders, cooldownMinutes, ...policy}) => policy;
 const blocked = state => ['frozen', 'auth_expired', 'auth_unavailable'].includes(state?.status);
@@ -15,10 +15,10 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     cached = pending = lastAttempt = undefined;
   }
 
-  function refresh(token, owner, revision) {
+  function refresh(token, owner, revision, manual) {
     if (pending?.token === token && pending.owner === owner) return pending.promise;
     if (lastAttempt?.token === token && lastAttempt.owner === owner &&
-        clock() - lastAttempt.at >= 0 && clock() - lastAttempt.at < RETRY_INTERVAL) {
+        clock() - lastAttempt.at >= 0 && clock() - lastAttempt.at < (manual ? RETRY_INTERVAL : 60_000)) {
       return Promise.reject(Error('FEATURE_RETRY_LATER'));
     }
 
@@ -66,11 +66,21 @@ export function createMomentumView({accountStates, client, momentum, storage, br
       return locked('unverified');
     }
 
+    if (message.presented) {
+      const {id,lease}=message.presented;
+      if (typeof id !== 'string' || !/^\d{4}-\d{2}-\d{2}:[1-3]$/.test(id) ||
+          typeof lease !== 'string' || !/^[a-f0-9-]{36}$/i.test(lease)) return {confirmed:false};
+      return {confirmed:await momentum.confirmReminder(owner,{id,lease})};
+    }
+
     const before = proofFor(token, owner);
     let proof = before;
-    if ((!proof && (message.claim || message.refresh || message.ensure || message.enabled === true)) ||
+    // Ordinary ACKs count locally. Only accounts that opted into monitoring renew proof here.
+    const renewAfterAck = !proof && message.claim && (await momentum.snapshot?.(owner))?.enabled === true;
+    if (!await sameAccount()) return locked('unverified');
+    if ((!proof && (renewAfterAck || message.refresh || message.ensure || message.enabled === true)) ||
         (message.refresh && clock() - proof.at >= RETRY_INTERVAL)) {
-      try { proof = await refresh(token, owner, revision); }
+      try { proof = await refresh(token, owner, revision, message.refresh === true); }
       catch { proof = null; if (await sameAccount()) cached = undefined; }
     }
     if (!await sameAccount()) return locked('unverified');
@@ -89,7 +99,7 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     proof = proofFor(token, owner);
     const eligible = proof?.eligible === true;
     const mutation = message.enabled === false || (eligible && message.enabled === true) || message.dnd === true;
-    const claim = Boolean(settled && eligible && (message.claim || message.enabled === true));
+    const claim = Boolean(settled && eligible && (message.claim || message.surface || message.ensure || message.enabled === true));
     const policy = proof?.policy ?? DEFAULT_MOMENTUM_CONFIG;
     const result = mutation || claim
       ? await momentum.view(owner, policy, {eligible, enabled: mutation ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
@@ -101,7 +111,8 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     if (!proof || proof !== proofFor(token, owner)) return locked('unverified', result);
     return {
       status: eligible ? 'paid' : 'free', scope: epoch, available: true, eligible,
-      enabled: eligible && result?.enabled === true, count: result?.count ?? 0,
+      enabled: eligible && result?.enabled === true, proofUntil: proof.at + (eligible ? PAID_TTL : FREE_TTL),
+      refreshAfter: proof.at + RETRY_INTERVAL, count: result?.count ?? 0,
       dnd: result?.dnd === true, policy: publicPolicy(policy), reminder: result?.reminder
     };
   }

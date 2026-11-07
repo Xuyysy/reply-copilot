@@ -12,6 +12,7 @@ test('real IndexedDB: 1500 ACKs, concurrent replay, restart, accounts, OFF/free 
    await Promise.all(Array.from({length:20},()=>store.ingest(event('A','request-0'))));
    const free=await store.view('A',config,{eligible:false,enabled:true,claim:true});
    const on=await store.view('A',config,{eligible:true,enabled:true,claim:true});
+   await store.confirmReminder('A',on.reminder);
    const replay=await store.view('A',config,{eligible:true,claim:true});await store.view('A',config,{eligible:true,dnd:true});
    window.store=new MomentumStore({clock:()=>window.clock,random:()=>0.99});const restart=await store.view('A',config,{eligible:true,claim:true});
    const b=await store.view('B',config,{eligible:true,claim:true});
@@ -25,8 +26,10 @@ test('real IndexedDB: 1500 ACKs, concurrent replay, restart, accounts, OFF/free 
 
    const small={...config,ranges:[[1,1],[2,2],[3,3]],version:'small-test-only'};
    await store.ingest(event('C','one',small));const first=await store.view('C',small,{eligible:true,enabled:true,claim:true});
+   await store.confirmReminder('C',first.reminder);
    await store.ingest(event('C','two',small));clock+=89*60000;const cooling=await store.view('C',small,{eligible:true,claim:true});
    await store.ingest(event('C','three',small));clock+=60000;const highest=await store.view('C',small,{eligible:true,claim:true});
+   await store.confirmReminder('C',highest.reminder);
    clock-=1000;const rollback=await store.view('C',small,{eligible:true,claim:true});
    clock=new Date(2026,10,7,10).getTime();const tomorrow=await store.view('A',config,{eligible:true,claim:true});
    return {free,on,replay,restart,b,recovered,first,cooling,highest,rollback,tomorrow,aborted,atomic};
@@ -36,5 +39,43 @@ test('real IndexedDB: 1500 ACKs, concurrent replay, restart, accounts, OFF/free 
   await call('Page.reload');for(let i=0;i<100;i++){if(await evaluate('Boolean(window.momentumReady&&window.M)'))break;await new Promise(r=>setTimeout(r,10));}
   const after=await evaluate(`(async()=>{const s=new M.MomentumStore({clock:()=>new Date(2026,10,6,12).getTime()});return s.view('A',{...M.DEFAULT_MOMENTUM_CONFIG,enabled:true},{eligible:true,claim:true});})()`);assert.equal(after.count,1500);assert.equal(after.reminder,null,'page reload keeps DND and consumed phase');
   const resumed=await evaluate(`(async()=>{const s=new M.MomentumStore({clock:()=>new Date(2026,10,6,12).getTime()}),data=JSON.parse(localStorage.getItem('restart-outbox'));await s.drain({get:async()=>data,remove:async k=>delete data[k]});return s.view('restart',M.DEFAULT_MOMENTUM_CONFIG,{eligible:false});})()`);assert.equal(resumed.count,1,'persisted ACK outbox survives page/worker restart before counting');
+ });
+});
+
+test('a reminder lost with a closed surface is reclaimed after its lease, and only a displayed ACK starts cooldown',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const result=await evaluate(`(async()=>{
+   const {MomentumStore,DEFAULT_MOMENTUM_CONFIG,localDayKey}=M;
+   let now=new Date(2026,10,6,10).getTime();
+   const policy={...DEFAULT_MOMENTUM_CONFIG,enabled:true,ranges:[[1,1],[2,2],[3,3]]};
+   let store=new MomentumStore({clock:()=>now});
+   await store.ingest({ownerId:'test',requestId:'one',day:localDayKey(now),at:now,policy});
+   const first=(await store.view('test',policy,{eligible:true,enabled:true,claim:true})).reminder;
+   const competing=(await store.view('test',policy,{eligible:true,claim:true})).reminder;
+   now+=11000;
+   store=new MomentumStore({clock:()=>now});
+   const recovered=(await store.view('test',policy,{eligible:true,claim:true})).reminder;
+   if(!recovered)return {first,competing,recovered};
+   const oldAck=await store.confirmReminder('test',first);
+   const ack=await store.confirmReminder('test',recovered);
+   const repeatAck=await store.confirmReminder('test',recovered);
+   await store.ingest({ownerId:'test',requestId:'two',day:localDayKey(now),at:now,policy});
+   now+=89*60000;
+   const cooling=(await store.view('test',policy,{eligible:true,claim:true})).reminder;
+   now+=60000;
+   const second=(await store.view('test',policy,{eligible:true,claim:true})).reminder;
+   await store.view('test',policy,{eligible:true,dnd:true});
+   return {first,competing,recovered,oldAck,ack,repeatAck,cooling,second,dndAck:await store.confirmReminder('test',second)};
+  })()`);
+  assert.equal(result.first.stage,1);
+  assert.equal(result.competing,null);
+  assert.equal(result.recovered?.stage,1);
+  assert.notEqual(result.first.lease,result.recovered.lease);
+  assert.equal(result.oldAck,false);
+  assert.equal(result.ack,true);
+  assert.equal(result.repeatAck,true);
+  assert.equal(result.cooling,null);
+  assert.equal(result.second.stage,2);
+  assert.equal(result.dndAck,false);
  });
 });

@@ -70,3 +70,22 @@ test('side panel and lazy X entry share controls without an initial network requ
     assert.equal(await evaluate('root.querySelector(".momentum-entry").getBoundingClientRect().right<=innerWidth'), true);
   });
 });
+
+test('only a painted visible reminder is acknowledged, and fresh switches keep their status', {timeout: 30000}, async () => {
+  await withMomentumBrowser(fixture(source(files)), async ({evaluate}) => {
+    await evaluate(setup(css));
+    await evaluate(`window.proof={status:'paid', enabled:true, proofUntil:Date.now()+60000, policy:{enabled:true}};
+      window.offer={id:'test:1',stage:1,lease:'test-lease',expiresAt:Date.now()+10000};
+      assistant.setMomentum(proof);
+      shadow.querySelector('.momentum input').click();`);
+    assert.doesNotMatch(await evaluate('shadow.querySelector(".momentum small").textContent'), /正在验证/);
+    await evaluate('assistant.setMomentum({...proof,reminder:offer});assistant.close();new Promise(r=>setTimeout(r,100))');
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),0);
+    await evaluate('{'+setup(css)+'}');
+    await evaluate('assistant.setMomentum({...proof,reminder:offer});new Promise(r=>setTimeout(r,120))');
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),1);
+    await evaluate('shadow.querySelector(".momentum-close").click();assistant.setMomentum({...proof,reminder:{...offer,lease:"replayed"}})');
+    assert.equal(await evaluate('shadow.querySelector(".momentum-reminder")===null'),true);
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),2);
+  });
+});

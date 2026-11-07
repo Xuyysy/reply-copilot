@@ -232,7 +232,7 @@
     if (active !== current || !current.assistant) return response;
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
-    refreshMomentum(current);
+    refreshMomentum(current,{surface:true});
     current.assistant.showAccount(current.accountStatus, response?.quota, response?.pending);
     if(response?.recoveryRequired){current.assistant?.setStatus('上一条生成未完成，额度仍在预占。可以恢复或放弃后继续。');current.assistant?.showRecovery?.();}
     if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
@@ -297,12 +297,11 @@
     record("applied", { style, reply: candidate });
   }
   function refreshMomentum(current, options = {}) {
-    const explicit = typeof options.enabled === 'boolean' || options.dnd;
-    if (current.momentumTogglePending) {
+    if (current.momentumRequestPending) {
       current.momentumQueued = {...current.momentumQueued, ...options};
       return;
     }
-    if (explicit) current.momentumTogglePending = true;
+    current.momentumRequestPending = true;
     const revision = (current.momentumRevision || 0) + 1;
     current.momentumRevision = revision;
     function render(value) {
@@ -314,8 +313,7 @@
       .then(render, () => render({status: 'unverified'}))
       .catch(() => {})
       .finally(() => {
-        if (!explicit) return;
-        current.momentumTogglePending = false;
+        current.momentumRequestPending = false;
         const next = current.momentumQueued;
         current.momentumQueued = null;
         if (next && contextAlive && active === current && !current.cancelled) refreshMomentum(current, next);
@@ -373,6 +371,7 @@
     if(action==='momentum_details'){void safeSend({type:'REPLY_COPILOT_OPEN_SIDEPANEL',momentumDetails:true});return;}
     if(action==='momentum_refresh'){refreshMomentum(current,{refresh:true});return;}
     if(action==='momentum_toggle'){refreshMomentum(current,{enabled:data.enabled});return;}
+    if(action==='momentum_presented'){void safeSend({type:'REPLY_COPILOT_MOMENTUM',presented:data});return;}
     if(action==='momentum_dnd'){refreshMomentum(current,{dnd:true});return;}
     if(action==='momentum_original'){void safeSend({type:'REPLY_COPILOT_OPEN_ORIGINAL'});return;}
     if (action === "toggle_auto_generate") {
