@@ -3,9 +3,17 @@
   globalThis.ReplyCopilotStagingSurface = {register(getSurface) { surface = getSurface; }};
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
     if (sender.id !== chrome.runtime.id || sender.tab || message?.type !== 'MOMENTUM_STAGING_SHOW') return;
+    if (!/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href)) {
+      respond({ok:false,error:'当前活动标签页不是 X。'});
+      return;
+    }
     const assistant = surface?.();
-    if (!assistant || document.visibilityState !== 'visible') {
+    if (!assistant) {
       respond({ok:false, error:'请先在当前 X 标签页打开回复框。'});
+      return;
+    }
+    if (document.visibilityState !== 'visible' || assistant.host.shadowRoot?.querySelector('.panel.collapsed')) {
+      respond({ok:false,error:'提醒区域不可见，请展开回复浮窗后重试。'});
       return;
     }
     if (!message.sample || ![1,2,3].includes(message.sample.stage)) return;

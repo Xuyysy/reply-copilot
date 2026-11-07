@@ -5,10 +5,18 @@
     summary: '基于创作者活跃信号监测，融合互动势能评估模型、分阶段阈值算法与后台动态策略更新，持续识别原创内容的潜在黄金发布窗口。', guest: '待登录',
     free: '未解锁', unverified: '权益未确认', checking: '正在验证…',
     enabled: '势能监测运行中', disabled: '监测已关闭', paused: '系统暂未开放',
-    saveFailed: '设置未保存，请重试', verify: '刷新购买权益', plans: '查看套餐',
+    saving: '正在保存…', saveFailed: '设置未保存，请重试', saveTimeout: '保存结果未确认，请重试', verify: '刷新购买权益', plans: '查看套餐',
     current: '当前机制', future: '后续研究规划',
     dnd: '今日不再提醒', dismiss: '关闭当前提醒', original: '去发布原创帖', dndOn: '今日免打扰'
   };
+
+  function request(send, message, timeoutMs = 15000) {
+    let timer;
+    const timeout = new Promise(resolve => {
+      timer = setTimeout(() => resolve({ok:false, timeout:true}), timeoutMs);
+    });
+    return Promise.race([Promise.resolve().then(() => send(message)), timeout]).finally(() => clearTimeout(timer));
+  }
 
   function mount(container, onAction, {mode = 'compact', copy = zh} = {}) {
     const full = mode === 'full';
@@ -63,7 +71,7 @@
     let pending = false;
     let checking = false;
     let desired;
-    let saveFailed = false;
+    let saveFailed = "";
     let scope;
     let reminder;
     let preview;
@@ -134,7 +142,7 @@
     function act(action, data = {}) {
       if (pending) return;
       pending = true;
-      saveFailed = false;
+      saveFailed = "";
       if (action === "momentum_toggle") desired = data.enabled;
       checking = (action === "momentum_refresh" && !(value?.refreshAfter > Date.now())) ||
         (action === "momentum_toggle" && !(value?.proofUntil > Date.now()));
@@ -152,9 +160,9 @@
       toggle.disabled = pending || !paid || paused;
       toggle.checked = paid && enabled === true;
       toggle.title = paused && enabled ? '个人偏好已开启，当前系统暂停' : '';
-      note.textContent = saveFailed ? copy.saveFailed : pending && checking ? copy.checking : !value ? '' : paid
+      note.textContent = saveFailed || (pending && checking ? copy.checking : pending && desired !== undefined ? copy.saving : !value ? '' : paid
         ? paused ? copy.paused : enabled && value.dnd ? copy.dndOn : enabled ? copy.enabled : copy.disabled
-        : copy[status] || copy.unverified;
+        : copy[status] || copy.unverified);
       if (full) {
         plans.hidden = status !== 'free' && status !== 'guest';
         verify.disabled = pending;
@@ -189,11 +197,11 @@
         if (saving) {
           desired = undefined;
           pending = false;
-          saveFailed = !changingAccount && next?.saved !== true;
+          saveFailed = !changingAccount && next?.saved !== true ? (next?.timeout ? copy.saveTimeout : copy.saveFailed) : "";
         } else if (changingAccount) {
           desired = undefined;
           pending = false;
-          saveFailed = false;
+          saveFailed = "";
         } else if (desired === undefined) {
           pending = false;
         }
@@ -222,8 +230,9 @@
       pending = true;
       const current = ++revision;
       try {
-        const response = await send({type: 'REPLY_COPILOT_MOMENTUM', ...options});
+        const response = await request(send, {type: 'REPLY_COPILOT_MOMENTUM', ...options});
         if (current === revision) presenter.update(response, options);
+        if (response?.timeout && typeof options.enabled === 'boolean') queued = {...queued};
       } catch {
         if (current === revision) presenter.update(null, options);
       } finally {
@@ -279,5 +288,5 @@
     return {sync() { if (entry.open) void control?.refresh(); }, remove() { host.remove(); }};
   }
 
-  globalThis.ReplyCopilotMomentumPresenter = {mount, connect, mountEntry};
+  globalThis.ReplyCopilotMomentumPresenter = {mount, connect, mountEntry, request};
 })();

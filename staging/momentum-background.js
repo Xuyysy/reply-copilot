@@ -61,12 +61,23 @@ export function registerMomentumTesting({momentum, momentumView, accountStates, 
       }
       if (![1,2,3].includes(message.stage)) return {ok:false,error:'请选择有效阶段。'};
       if (!state.available) return {ok:false,error:'请先在侧边栏刷新购买权益以载入最新配置。'};
-      const [tab]=await chrome.tabs.query({active:true,lastFocusedWindow:true});
-      if (!Number.isInteger(tab?.id)||!/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(tab.url||''))
-        return {ok:false,error:'请切回当前窗口的 X 标签页并打开回复框。'};
+      if (!Number.isInteger(message.windowId) || message.windowId < 0 ||
+          (Number.isInteger(sender.tab?.windowId) && sender.tab.windowId !== message.windowId)) {
+        return {ok:false,error:'无法确定侧栏所在窗口的目标 X 标签页。'};
+      }
+      const tabs=await chrome.tabs.query({active:true,windowId:message.windowId});
+      const tab=tabs[0];
+      if (tabs.length!==1 || !Number.isInteger(tab?.id)) return {ok:false,error:'无法确定目标 X 标签页。'};
+      if (tab.url && !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(tab.url))
+        return {ok:false,error:'当前窗口的活动标签页不是 X。'};
       if (token!==await accountClient.token()) return {ok:false,error:'账号已切换，请重试。'};
       const {titleZh,bodyZh}=state.policy;
-      return chrome.tabs.sendMessage(tab.id,{type:'MOMENTUM_STAGING_SHOW',sample:{stage:message.stage,titleZh,bodyZh}},{frameId:0});
+      try {
+        const result=await chrome.tabs.sendMessage(tab.id,{type:'MOMENTUM_STAGING_SHOW',sample:{stage:message.stage,titleZh,bodyZh}},{frameId:0});
+        return result ?? {ok:false,error:'X 内容脚本未就绪，请刷新 X 后重试。'};
+      } catch {
+        return {ok:false,error:'当前活动标签页未响应。若已在 X，请刷新后重试。'};
+      }
     })().then(respond,()=>respond({ok:false,error:'当前 X 页面无法接收测试，请刷新并打开回复框。'}));
     return true;
   });

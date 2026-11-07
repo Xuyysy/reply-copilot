@@ -4,12 +4,12 @@ import {createMomentumView} from '../../services/momentum-view.js';
 import {execFileSync} from 'node:child_process';
 import {DEFAULT_MOMENTUM_CONFIG} from '../../domain/creator-momentum.js';
 
-function fixture(createView=createMomentumView){
+function fixture(createView=createMomentumView, deliverBroadcast=()=>{}){
  let now=0,token='A',owner='owner',eligible=true,error=false,wait=null,calls=0,broadcasts=0,status='credits_available', globalEnabled=true;
  const saved=new Map();
  const view=createView({clock:()=>now,accountStates:{peekState:()=>({user:{userId:owner},status}),get cachedToken(){return token;}},client:{
   token:async()=>token,request:async(path,{expectedToken})=>{calls++;assert.match(path,/feature=interactionMomentum/);assert.equal(expectedToken,token);const id=owner;await wait;if(error)throw Error('offline');return {features:{interactionMomentum:{ownerId:id,eligible,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:globalEnabled}}}};}},
-  momentum:{snapshot:async(id)=>({enabled:saved.get(id)}),drain:async()=>true,view:async(id,_policy,{enabled})=>{if(enabled!==undefined)saved.set(id,enabled);return {enabled:saved.get(id)};}},storage:{},broadcast:async()=>{broadcasts++;}});
+  momentum:{snapshot:async(id)=>({enabled:saved.get(id)}),drain:async()=>true,view:async(id,_policy,{enabled})=>{if(enabled!==undefined)saved.set(id,enabled);return {enabled:saved.get(id)};}},storage:{},broadcast:async()=>{broadcasts++;await deliverBroadcast();}});
  return {view,saved,global:enabled=>{globalEnabled=enabled;},get broadcasts(){return broadcasts;},get calls(){return calls;},freeze:()=>{status='frozen';},advance:ms=>{now+=ms;},paid:()=>{eligible=true;},expire:()=>{now+=300001;},free:()=>{eligible=false;},offline:()=>{error=true;},switch:()=>{token='B';owner='other';view.invalidate();},pause:()=>{let release;wait=new Promise(resolve=>{release=resolve;});return release;}};
 }
 
@@ -110,4 +110,18 @@ test('a queued save from a previous account scope cannot change the new account'
  f.switch();await f.view({ensure:true});
  const stale=await f.view({enabled:true,scope:old.scope});
  assert.equal(stale.status,'unverified');assert.equal(f.saved.size,0);
+});
+
+test('a saved switch returns even if one of the UI broadcasts never acknowledges', {timeout:1000},async()=>{
+ let hold=false;
+ const f=fixture(createMomentumView,()=>hold ? new Promise(()=>{}) : undefined);
+ await f.view({ensure:true});
+ hold=true;
+ for(let i=0;i<20;i++){
+  const enabled=i%2===0;
+  const result=await f.view({enabled});
+  assert.equal(result.saved,true);
+  assert.equal(f.saved.get('owner'),enabled);
+ }
+ assert.equal(f.calls,1);
 });

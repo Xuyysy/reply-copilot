@@ -36,8 +36,10 @@ async function broadcastMomentum() {
   const message = {type: 'REPLY_COPILOT_MOMENTUM_CHANGED'};
   await Promise.allSettled([
     chrome.runtime.sendMessage?.(message),
-    chrome.tabs.query({url: ['https://x.com/*', 'https://twitter.com/*']}).then(tabs =>
-      Promise.allSettled(tabs.filter(tab => Number.isInteger(tab.id)).map(tab => chrome.tabs.sendMessage(tab.id, message))))
+    // A URL filter silently omits X tabs when Chrome withholds Tab.url.
+    chrome.tabs.query({}).then(tabs => Promise.allSettled(tabs
+      .filter(tab => Number.isInteger(tab.id) && (!tab.url || X_PAGE.test(tab.url)))
+      .map(tab => chrome.tabs.sendMessage(tab.id, message, {frameId:0}))))
   ]);
 }
 

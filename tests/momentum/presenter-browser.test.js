@@ -152,3 +152,32 @@ test('three Staging previews use saved copy and dismiss without sending real act
   assert.deepEqual(await evaluate('actions'),[]);
  });
 });
+
+test('three switch surfaces complete 20 saves each without generation, and a timed out request can recover', {timeout:30000},async()=>{
+ await withMomentumBrowser(fixture(source(files)),async({evaluate})=>{
+  const result=await evaluate(`(async()=>{
+    const {mount,connect,request}=ReplyCopilotMomentumPresenter;
+    const proof={scope:'same-account',status:'paid',enabled:false,policy:{enabled:true},proofUntil:Date.now()+60000};
+    const results=[];
+    for(const surface of ['floating','independent','sidepanel']){
+      const container=document.createElement('div');document.body.append(container);
+      let saved=false, calls=0;
+      const send=async message=>{if(typeof message.enabled==='boolean'){calls++;saved=message.enabled;}return {...proof,enabled:saved,saved:true};};
+      const entry=surface==='floating' ? mount(container,(action,data)=>void send(data).then(value=>entry.update(value,data))) :
+        connect(container,send,()=>{},{mode:surface==='sidepanel'?'full':'compact'});
+      if(surface==='floating')entry.update(proof);else await entry.refresh();
+      const toggle=container.querySelector('input');
+      for(let i=0;i<20;i++){
+        toggle.click();
+        if(toggle.checked!==(i%2===0)||!toggle.disabled)throw Error('optimistic save missing');
+        await new Promise(resolve=>setTimeout(resolve,0));
+        if(toggle.disabled||toggle.checked!==saved)throw Error('confirmation did not unlock toggle');
+      }
+      results.push(calls);container.remove();
+    }
+    const timeout=await request(()=>new Promise(()=>{}),{},5);
+    return {results,timeout};
+  })()`);
+  assert.deepEqual(result,{results:[20,20,20],timeout:{ok:false,timeout:true}});
+ });
+});

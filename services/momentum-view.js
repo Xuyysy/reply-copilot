@@ -91,7 +91,7 @@ export function createMomentumView({accountStates, client, momentum, storage, br
 
     // Passive UI refreshes read IndexedDB only. ACK claims and manual refreshes drain the existing outbox.
     let settled = true;
-    if (message.claim || message.refresh || message.ensure || message.enabled === true) settled = await momentum.drain(storage);
+    if (!saveRequested && (message.claim || message.refresh || message.ensure)) settled = await momentum.drain(storage);
     if (!settled && !backlog) {
       backlog = (async () => {
         for (let i = 0; i < 32; i++) if (await momentum.drain(storage)) break;
@@ -105,13 +105,16 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     const policy = proof?.policy ?? DEFAULT_MOMENTUM_CONFIG;
     const canSave = saveRequested && eligible && policy.enabled === true;
     const mutation = canSave || message.dnd === true;
-    const claim = Boolean(settled && eligible && (message.claim || message.surface || message.ensure || message.enabled === true));
+    const claim = Boolean(!saveRequested && settled && eligible && (message.claim || message.surface || message.ensure));
     const result = mutation || claim
       ? await momentum.view(owner, policy, {eligible, enabled: canSave ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
       : await momentum.snapshot?.(owner);
     if (!await sameAccount()) return locked('unverified');
 
-    if (mutation || message.claim || ((message.refresh || message.ensure) && before !== proof)) await broadcast();
+    if (mutation || message.claim || ((message.refresh || message.ensure) && before !== proof)) {
+      // Other extension views may be suspended or never answer. Their notification is not a save receipt.
+      void Promise.resolve().then(broadcast).catch(() => {});
+    }
     if (!await sameAccount()) return locked('unverified');
     if (!proof || proof !== proofFor(token, owner)) return locked('unverified', result);
     return {

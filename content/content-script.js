@@ -309,8 +309,13 @@
         current.assistant?.setMomentum?.(value, options);
       }
     }
-    void safeSend({type: 'REPLY_COPILOT_MOMENTUM', ...options})
-      .then(render, () => render({ok:false, status: 'unverified'}))
+    const message = {type:'REPLY_COPILOT_MOMENTUM', ...options};
+    const request = globalThis.ReplyCopilotMomentumPresenter?.request;
+    void (request ? request(safeSend, message) : safeSend(message))
+      .then(response => {
+        render(response);
+        if (response?.timeout && typeof options.enabled === 'boolean') current.momentumQueued = {...current.momentumQueued};
+      }, () => render({ok:false, status:'unverified'}))
       .catch(() => {})
       .finally(() => {
         current.momentumRequestPending = false;

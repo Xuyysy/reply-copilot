@@ -8,6 +8,10 @@ export function mountMomentumTesting(document) {
   async function run(button,message) {
     button.disabled=true;
     try {
+      if (message.type === 'MOMENTUM_STAGING_PREVIEW') {
+        const window = await chrome.windows.getCurrent();
+        message = {...message,windowId:window?.id};
+      }
       const result=await chrome.runtime.sendMessage(message);
       status.textContent=result?.ok ? (result.diagnostic?'已读取本机诊断。':'已在 X 回复浮窗显示测试提醒。') : result?.error || '测试不可用，请重试。';
       if (result?.diagnostic) {
