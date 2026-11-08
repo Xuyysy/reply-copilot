@@ -48,7 +48,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/ci-chrome"
-          printf '#!/usr/bin/env bash\\nexec %q --no-sandbox --disable-dev-shm-usage "$@"\\n' "$REAL_CHROME" > "$RUNNER_TEMP/ci-chrome/chrome"
+          printf '#!/usr/bin/env bash\nexec %q --no-sandbox --disable-dev-shm-usage "$@"\n' "$REAL_CHROME" > "$RUNNER_TEMP/ci-chrome/chrome"
           chmod +x "$RUNNER_TEMP/ci-chrome/chrome"
           sudo mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" /private/tmp
           sudo chmod 1777 /private/tmp
