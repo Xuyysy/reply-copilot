@@ -1,0 +1,99 @@
+name: Reply Copilot CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reply-copilot-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-build:
+    name: Test, build and package (no deployment)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout full history for regression baselines
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+
+      - name: Install Chrome for isolated browser tests
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      - name: Install exact locked dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix api ci
+
+      - name: Check Staging environment and TypeScript
+        run: |
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+
+      - name: Run full suite and preserve the exit code
+        env:
+          CHROME_BINARY: ${{ steps.chrome.outputs.chrome-path }}
+        shell: bash
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/npm-test.log"
+          result=${PIPESTATUS[0]}
+          echo "$result" > "$RUNNER_TEMP/npm-test.exit"
+          echo "Full npm test exit code: $result"
+          exit "$result"
+
+      - name: Build pinned Staging extension
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
+        run: npm run build:staging
+
+      - name: Package and fingerprint Web and extension
+        run: python3 scripts/package-staging-ci.py
+
+      - name: Upload immutable Staging Pages bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-pages-${{ github.sha }}
+          path: web/dist/
+          retention-days: 21
+          if-no-files-found: error
+
+      - name: Upload ZIP and provenance manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-extension-${{ github.sha }}
+          path: dist/ci/
+          retention-days: 21
+          if-no-files-found: error
+
+      - name: Always save full test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/npm-test.log
+            ${{ runner.temp }}/npm-test.exit
+          if-no-files-found: warn
+          retention-days: 21
