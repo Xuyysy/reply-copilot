@@ -70,6 +70,7 @@
       appliedValue = null;
       candidates = STYLES.map(([key]) => [key, replies[key]]).filter(([, value]) => typeof value === "string" && value.trim());
       cycled = false; index = Math.max(0, candidates.findIndex(([key]) => key === selectedStyle));
+      root.querySelector('[data-action="change"]').textContent = "换一个 ↻";
       if (!candidates.length) { setStatus("这次没有可用的回复建议，请重试。"); showRetry(); return; }
       const [style, value] = candidates[index]; reply.textContent = value; reply.classList.remove("hidden"); actions.classList.remove("hidden"); setStatus("建议已生成。");
       styleTabs.replaceChildren();

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,writeFileSync} from 'node:fs';
 import {withMomentumBrowser} from './helpers/momentum-browser.js';
 
 const script=readFileSync(new URL('../content/inline-assistant.js',import.meta.url),'utf8');
@@ -34,6 +34,14 @@ test('floating V2 style controls show exactly one active color after click, defa
   assert.equal(rows.find(x=>x.key==='natural').pressed,'false');
   assert.equal(await evaluate('actions.at(-1).action'),'selected');
   assert.equal(await evaluate('fixture.host.shadowRoot.querySelector(".reply").textContent'),'幽默回复');
+  await evaluate('fixture.host.shadowRoot.querySelector("[data-style=thoughtful]").click()');
+  check(await evaluate(snapshot),'thoughtful');
+  assert.equal(await evaluate('fixture.host.shadowRoot.querySelector(".reply").textContent'),'观点回复');
+  for (const [key, reply] of Object.entries(replies)) {
+    await evaluate(`fixture.showResult(${JSON.stringify(replies)},${JSON.stringify(key)})`);
+    check(await evaluate(snapshot),key);
+    assert.equal(await evaluate('fixture.host.shadowRoot.querySelector(".reply").textContent'),reply);
+  }
   await evaluate('fixture.showResult('+JSON.stringify(replies)+',"thoughtful")');
   rows=await evaluate(snapshot);check(rows,'thoughtful');
   assert.equal(await evaluate('fixture.host.shadowRoot.querySelector(".reply").textContent'),'观点回复');
@@ -41,7 +49,22 @@ test('floating V2 style controls show exactly one active color after click, defa
   rows=await evaluate(snapshot);check(rows,'natural');
   await evaluate('fixture.showResult('+JSON.stringify(replies)+',"light_humor");fixture.host.dataset.theme="dark"');
   rows=await evaluate(snapshot);check(rows,'light_humor');
+  assert.equal(await evaluate('fixture.host.shadowRoot.querySelector("[data-action=change]").textContent'),'换一个 ↻');
   assert.equal(await evaluate('getComputedStyle(fixture.host.shadowRoot.querySelector(".panel")).backgroundColor'),'rgb(26, 36, 52)');
+  for (const width of [320,375,1100]) {
+    await call('Emulation.setDeviceMetricsOverride',{width,height:750,deviceScaleFactor:1,mobile:false});
+    await evaluate(`fixture.showResult({natural:'长文本 '.repeat(500),light_humor:'幽默回复',thoughtful:'观点回复'},'natural');fixture.host.dataset.theme=${JSON.stringify(width===375?'dark':'light')}`);
+    assert.equal(await evaluate('(()=>{const r=fixture.host.shadowRoot.querySelector(".reply");return r.scrollHeight>r.clientHeight && fixture.host.scrollWidth<=innerWidth})()'),true);
+    if(process.env.RC_FLOATING_SCREENSHOTS){
+      const shot=await call('Page.captureScreenshot',{format:'png'});
+      writeFileSync(process.env.RC_FLOATING_SCREENSHOTS+'/floating-'+width+'.png',Buffer.from(shot.result.data,'base64'));
+    }
+  }
+  const grip=await evaluate('(()=>{const r=fixture.host.shadowRoot.querySelector(".drag-grip").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',...grip,button:'left',clickCount:1});
+  await call('Input.dispatchMouseEvent',{type:'mouseMoved',x:grip.x-70,y:grip.y-40,button:'left',buttons:1});
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:grip.x-70,y:grip.y-40,button:'left',clickCount:1});
+  assert.equal(await evaluate('actions.at(-1).action'),'position_changed');
   await evaluate('fixture.host.shadowRoot.querySelector("[data-action=minimize]").click()');
   assert.equal(await evaluate('getComputedStyle(fixture.host.shadowRoot.querySelector(".body")).display'),'none');
  });
