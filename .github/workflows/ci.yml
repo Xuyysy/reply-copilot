@@ -1,0 +1,89 @@
+name: Reply Copilot CI
+
+on:
+  push:
+    branches: ['codex/binding-confirmation-dialog']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reply-copilot-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-build:
+    name: Test, build and package (no deployment)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - name: Checkout full history for regression baselines
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+
+      - name: Install Chrome for isolated browser tests
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+        with:
+          chrome-version: stable
+
+      # Temporary CI bridge for legacy tests that hard-code macOS paths.
+      # Only modifies the disposable GitHub Linux runner, never any user machine.
+      - name: Prepare isolated Linux Chrome test compatibility
+        env:
+          REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-chrome"
+          printf '#!/usr/bin/env bash\nexec %q --no-sandbox --disable-dev-shm-usage "$@"\n' "$REAL_CHROME" > "$RUNNER_TEMP/ci-chrome/chrome"
+          chmod +x "$RUNNER_TEMP/ci-chrome/chrome"
+          sudo mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" /private/tmp
+          sudo chmod 1777 /private/tmp
+          sudo ln -s "$RUNNER_TEMP/ci-chrome/chrome" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          "$RUNNER_TEMP/ci-chrome/chrome" --version
+
+      - name: Install exact locked dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix api ci
+
+      - name: Check Staging environment and TypeScript
+        run: |
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+
+      - name: Run full suite and preserve the exit code
+        env:
+          CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
+        shell: bash
+        run: |
+          set +e
+          npm test 2>&1 | tee "$RUNNER_TEMP/npm-test.log"
+          result=${PIPESTATUS[0]}
+          echo "$result" > "$RUNNER_TEMP/npm-test.exit"
+          echo "Full npm test exit code: $result"
+          exit "$result"
+
+      - name: Always save full test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ github.sha }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/npm-test.log
+            ${{ runner.temp }}/npm-test.exit
+          if-no-files-found: warn
+          retention-days: 21
