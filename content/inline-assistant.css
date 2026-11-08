@@ -107,10 +107,6 @@
  background:var(--rc-surface);border-bottom:1px solid var(--rc-border);
 }
 .panel:not(.gate-open) .drag-grip{margin-right:1px;color:var(--rc-muted);opacity:.65}
-.panel:not(.gate-open) .brand-spark{
- display:grid;place-items:center;width:27px;height:27px;flex:0 0 27px;border-radius:8px;
- background:linear-gradient(135deg,#5e7ef5,#2447c2);color:#fff;font:16px/1 system-ui,sans-serif;
-}
 .panel:not(.gate-open) .top strong{font-size:13px;font-weight:750;letter-spacing:-.025em;color:var(--rc-ink)}
 .panel:not(.gate-open) .top .disclaimer{
  margin-left:auto;padding:4px 7px;border-radius:6px;white-space:nowrap;

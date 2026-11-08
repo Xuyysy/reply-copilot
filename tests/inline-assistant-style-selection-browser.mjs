@@ -76,3 +76,11 @@ test('style highlight CSS never assumes natural is the active first-child',()=>{
  const code=readFileSync(new URL('../content/content-script.js',import.meta.url),'utf8');
  assert.match(code,/current\.preferences\?\.defaultReplyMode\s*\|\|/);
 });
+
+test('floating V2 keeps original brand header; no unapproved decorative icon',()=>{
+ const header=script.match(/root\.innerHTML = '[^']*'/)?.[0] ?? '';
+ assert.match(header,/drag-grip/);
+ assert.match(header,/<strong>x-Reply-Helper<\/strong>/);
+ assert.doesNotMatch(script,/brand-spark|<span[^>]*>✦<\/span>/);
+ assert.doesNotMatch(css,/brand-spark/);
+});
