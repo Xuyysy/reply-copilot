@@ -1,4 +1,4 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync,writeFileSync} from 'node:fs';import {execFileSync} from 'node:child_process';import {createRequire} from 'node:module';import {withMomentumBrowser} from '../helpers/momentum-browser.js';
+import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import path from 'node:path';import {execFileSync} from 'node:child_process';import {createRequire} from 'node:module';import {withMomentumBrowser} from '../helpers/momentum-browser.js';
 const {build}=createRequire(new URL('../../api/package.json',import.meta.url))('esbuild');
 const root=process.cwd(),baseline='2a1db4df49e84fb2b10110d8ea6070757c903acb';
 async function bundle(before){return (await build({stdin:{contents:`import {DeliveryCoordinator} from './services/delivery-coordinator.js';import {HostedAIClient} from './services/hosted-ai-client.js';import {momentumReceiptPatch,momentumReceiptKey,MomentumStore} from './services/creator-momentum.js';import {generatedHistory,generatedUsage} from './services/generation-records.js';import {DEFAULT_MOMENTUM_CONFIG} from './domain/creator-momentum.js';window.${before?'before':'after'}={DeliveryCoordinator,HostedAIClient,momentumReceiptPatch,momentumReceiptKey,MomentumStore,generatedHistory,generatedUsage,DEFAULT_MOMENTUM_CONFIG};`,resolveDir:root},plugins:before?[{name:'fixed-production-baseline',setup(b){b.onLoad({filter:/services\/delivery-coordinator\.js$/},()=>({contents:execFileSync('git',['show',baseline+':services/delivery-coordinator.js'],{encoding:'utf8'}),resolveDir:root+'/services'}));}}]:[],bundle:true,format:'iife',write:false})).outputFiles[0].text;}
@@ -39,7 +39,7 @@ test('alternating real-browser A/B: accepted V1 vs acceptance UI; same mock AI/A
   }
   return samples;
  })()`);
- writeFileSync('/private/tmp/xrh-momentum-performance.json',JSON.stringify({environment:'Isolated headless Chrome, synthetic post/editor and fixed mock AI. Not real X/vendor timings.',baseline,samples:report},null,2));
+ writeFileSync(path.join(tmpdir(),'xrh-momentum-performance.json'),JSON.stringify({environment:'Isolated headless Chrome, synthetic post/editor and fixed mock AI. Not real X/vendor timings.',baseline,samples:report},null,2));
  for(const [scenario,r]of Object.entries(report)){assert.deepEqual(r.before.normalHTTP,[2]);assert.deepEqual(r.after.normalHTTP,[2]);assert.deepEqual(r.before.blockingStorageWrites,r.after.blockingStorageWrites);assert.deepEqual(r.before.blockingStorageReads,r.after.blockingStorageReads);assert.ok(r.after.fill.p90-r.before.fill.p90<Math.max(8,r.before.fill.p90*.1),scenario+' material regression');}
  console.log('Momentum alternating A/B report: '+JSON.stringify(report));
  });

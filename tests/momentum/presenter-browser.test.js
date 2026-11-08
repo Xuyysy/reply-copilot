@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync, mkdirSync, writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
 import {withMomentumBrowser} from '../helpers/momentum-browser.js';
 
 const files = ['content/momentum-presenter.js', 'content/inline-assistant.js'];
@@ -10,7 +12,7 @@ const css = source(['content/inline-assistant.css', 'content/momentum.css']);
 const before = path => execFileSync('git', ['show', 'd50a34b:' + path], {encoding: 'utf8'});
 const fixture = scripts => `<html lang="en"><body><textarea id="editor" aria-label="Editor"></textarea><div id="side"></div><script>window.chrome={runtime:{getURL:()=>''}};</script><script>${scripts};window.momentumReady=true;</script></body></html>`;
 const setup = styles => `window.actions=[];window.assistant=ZaneReplyCopilotContent.inlineAssistant.mount(document.querySelector("#editor"),(a,v)=>actions.push({a,v}),{preferences:{autoGenerateOnReply:true}});window.shadow=assistant.host.shadowRoot;const style=document.createElement('style');style.textContent=${JSON.stringify(styles)};shadow.append(style);assistant.showResult({natural:'这个例子一下就说明白了。',light_humor:'终于有人把这个坑填了。',thoughtful:'这个区别在实际使用时很重要。'});assistant.setMomentum({status:"free",available:true,eligible:false,policy:{enabled:true}});`;
-const screenshots = '/private/tmp/xrh-momentum-pro';
+const screenshots = path.join(tmpdir(), 'xrh-momentum-pro');
 async function capture(call, file) {
   mkdirSync(screenshots, {recursive: true});
   const shot = await call('Page.captureScreenshot', {format: 'png'});
