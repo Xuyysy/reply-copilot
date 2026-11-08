@@ -6,7 +6,7 @@
     const host = document.createElement("div"); host.dataset.replyCopilot = "true"; host.dataset.zaneReplyCopilot = "true";
     const pageTheme = getComputedStyle(document.documentElement).colorScheme || getComputedStyle(document.body).colorScheme;
     if (document.documentElement.dataset.theme === "dark" || document.documentElement.dataset.colorMode === "dark" || pageTheme === "dark") host.dataset.theme = "dark";
-    host.style.cssText = `position:fixed;z-index:2147483000;margin:0;font:14px/1.45 system-ui,sans-serif;max-width:min(${compact ? "560px" : "720px"},calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;width:min(${compact ? "560px" : "720px"},calc(100vw - 24px));right:12px;bottom:12px;`;
+    host.style.cssText = `position:fixed;z-index:2147483000;margin:0;font:14px/1.45 system-ui,sans-serif;max-width:min(${compact ? "480px" : "560px"},calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;width:min(${compact ? "480px" : "560px"},calc(100vw - 24px));right:12px;bottom:12px;`;
     const shadow = host.attachShadow({ mode: "open" });
     try {
       const link = document.createElement("link"); link.rel = "stylesheet"; link.href = chrome.runtime.getURL("content/inline-assistant.css"); shadow.append(link);
@@ -18,7 +18,7 @@
       // Keep mount failures from surfacing as uncaught errors; refreshing the tab loads the new context.
     }
     const root = document.createElement("section"); root.className = "panel"; root.setAttribute("aria-label", "x-Reply-Helper 回复助手");
-    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">打开侧边栏</button></div><div class="momentum-gate hidden" role="dialog" aria-modal="true" aria-labelledby="momentum-gate-title" tabindex="-1"></div>';
+    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><span class="brand-spark" aria-hidden="true">✦</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs" role="group" aria-label="回复风格"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">打开侧边栏</button></div><div class="momentum-gate hidden" role="dialog" aria-modal="true" aria-labelledby="momentum-gate-title" tabindex="-1"></div>';
     let momentum;
     try { momentum = globalThis.ReplyCopilotMomentumPresenter?.mount(root.querySelector(".body"), onAction); } catch {}
     shadow.append(root);
@@ -30,9 +30,16 @@
     const accountBadge = document.createElement("span"); accountBadge.className = "account-badge"; accountBadge.setAttribute("aria-live", "polite");
     root.querySelector(".top .disclaimer").after(accountBadge);
     const styleTabs = root.querySelector(".style-tabs");
+    function markSelectedStyle(style) {
+      for (const tab of styleTabs.querySelectorAll("button[data-style]")) {
+        const selected = tab.dataset.style === style;
+        tab.classList.toggle("active", selected);
+        tab.setAttribute("aria-pressed", String(selected));
+      }
+    }
     function setStatus(message) { status.textContent = message; }
     function setPosition(left, top) {
-      const width = host.getBoundingClientRect().width || Math.min(compact ? 560 : 720, window.innerWidth - 24);
+      const width = host.getBoundingClientRect().width || Math.min(compact ? 480 : 560, window.innerWidth - 24);
       host.style.position = "fixed"; host.style.margin = "0"; host.style.right = "auto"; host.style.bottom = "auto"; host.style.width = `${Math.min(width, window.innerWidth - 24)}px`;
       const height = Math.min(host.getBoundingClientRect().height || 240, window.innerHeight - 16);
       host.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`; host.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
@@ -66,13 +73,14 @@
       if (!candidates.length) { setStatus("这次没有可用的回复建议，请重试。"); showRetry(); return; }
       const [style, value] = candidates[index]; reply.textContent = value; reply.classList.remove("hidden"); actions.classList.remove("hidden"); setStatus("建议已生成。");
       styleTabs.replaceChildren();
-      for (const [key, label] of STYLES) { const tab = document.createElement("button"); tab.type = "button"; tab.dataset.style = key; tab.textContent = label; tab.classList.toggle("active", style === key); tab.addEventListener("click", () => selectStyle(key)); styleTabs.append(tab); }
+      for (const [key, label] of STYLES) { const tab = document.createElement("button"); tab.type = "button"; tab.dataset.style = key; tab.textContent = label; tab.addEventListener("click", () => selectStyle(key)); styleTabs.append(tab); }
+      markSelectedStyle(style);
       root.querySelector(".feedback").classList.remove("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden");
     }
     function selectStyle(key) {
       const selected = candidates.findIndex(([candidate]) => candidate === key); if (selected < 0) return;
       index = selected; const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", value === appliedValue);
-      styleTabs.querySelectorAll("button").forEach((button) => button.classList.toggle("active", button.dataset.style === style));
+      markSelectedStyle(style);
       if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
       onAction("selected", { style, reply: value, userGesture: true });
     }
@@ -185,7 +193,7 @@
       if (action === "change" && candidates.length) {
         if (cycled) { onAction("regenerate", { userGesture: true }); cycled = false; return; }
         index = nextCandidateIndex(index, candidates.length); if (index === 0) cycled = true;
-        const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", value === appliedValue); styleTabs.querySelectorAll("button").forEach((tab) => tab.classList.toggle("active", tab.dataset.style === style)); onAction("selected", { style, reply: value, userGesture: true });
+        const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", value === appliedValue); markSelectedStyle(style); onAction("selected", { style, reply: value, userGesture: true });
         if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
         button.textContent = cycled ? "再生成" : "换一个 ↻";
       } else if (action === "copy" && candidates.length) { const [style, value] = candidates[index]; try { await navigator.clipboard.writeText(value.trim()); setStatus("已复制，请检查后再发送。"); onAction("copied", { style, reply: value }); } catch { setStatus("复制失败，请手动选择文字。"); } }
