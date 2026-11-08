@@ -1,4 +1,3 @@
-import {RUNTIME_CONFIG} from '../config/runtime.js';
 import {StorageService,BEHAVIOR_PREFERENCES_KEY,PENDING_REQUEST_KEY} from '../services/storage-service.js';
 import {VoiceProfileService} from '../services/voice-profile-service.js';
 import {UsageService} from '../services/usage-service.js';
@@ -76,7 +75,3 @@ void chrome.storage.session.remove(PENDING_REQUEST_KEY).catch(()=>{});
 void refreshDashboard();
 void momentumControl.refresh({ensure:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void momentumControl.refresh({ensure:true});});
-if(RUNTIME_CONFIG.channel==='staging'){
-  void import('../staging/momentum-panel.js').then(({mountMomentumTesting})=>mountMomentumTesting(document)).catch(()=>{});
-  void import('./performance-panel.js').then(({mountPerformancePanel})=>mountPerformancePanel(document,chrome.runtime)).catch(()=>{});
-}
