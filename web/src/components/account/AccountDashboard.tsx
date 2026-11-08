@@ -23,6 +23,7 @@ type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | 
 type OrderRefreshFeedback = { orderId: string; message: string; code?: string; requestId?: string; diagnostic?: { stage: string; upstreamHttpStatus: number | null } };
 
 export default function AccountDashboard() {
+  const bindingTitle = useRef<HTMLHeadingElement>(null);
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [data, setData] = useState<Data | null>(null);
@@ -213,9 +214,9 @@ export default function AccountDashboard() {
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
     {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
     <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy) dismissAuthorization(); }}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" showCloseButton={!busy} closeLabel={t("关闭", "Close")}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onOpenAutoFocus={event => { if (bindingTitle.current) { event.preventDefault(); bindingTitle.current.focus({ preventScroll: true }); } }} showCloseButton={!busy} closeLabel={t("关闭", "Close")}>
         <DialogHeader>
-          <DialogTitle>{t("确认绑定 X Reply Helper", "Confirm X Reply Helper binding")}</DialogTitle>
+          <DialogTitle ref={bindingTitle} tabIndex={-1} className="outline-none">{t("确认绑定 X Reply Helper", "Confirm X Reply Helper binding")}</DialogTitle>
           <DialogDescription>{t("你的 Chrome 插件正在请求绑定当前登录账户。", "Your Chrome extension is requesting to connect to the signed-in account.")}</DialogDescription>
         </DialogHeader>
         <dl className="grid min-w-0 gap-3 rounded-lg border bg-muted/40 p-4 text-sm">
