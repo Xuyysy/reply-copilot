@@ -4,13 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Full 40-character SHA from a successful CI run
-        type: string
+        description: Full source SHA of a successful Reply Copilot CI run
         required: true
+        type: string
+        default: '59b1f14856dbb5d0ace54a248643a374ab6dc128'
       ci_run_id:
-        description: CI run ID with verified build artifacts
-        type: string
+        description: Successful CI run ID with Staging Pages artifact
         required: true
+        type: string
+        default: '42473683875'
 
 permissions:
   contents: read
@@ -21,10 +23,13 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy-staging-pages:
-    name: Approved Staging Pages deployment only
+  deploy-staging:
+    # The credentials live only in the staging environment. A manual run on main
+    # must be explicitly requested; never execute this job on a feature branch.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Xuyysy/reply-copilot'
+    name: Manually approved Staging Pages ONLY
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     environment:
       name: staging
       url: https://staging.x-reply-helper.top
@@ -33,26 +38,31 @@ jobs:
       CI_RUN_ID: ${{ inputs.ci_run_id }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Verify successful CI run and commit before reading deployment secrets
+      - name: Check successful CI run and exact source SHA
         shell: bash
         run: |
-          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Full lower-case SHA required'; exit 1; }
-          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Numeric CI run ID required'; exit 1; }
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" > "$RUNNER_TEMP/approved-ci-run.json"
-          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" \
-            '.head_sha==$sha and .conclusion=="success" and .status=="completed" and .head_repository.full_name==$repo and (.path|endswith(".github/workflows/ci.yml"))' \
-            "$RUNNER_TEMP/approved-ci-run.json"
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid 40-character SHA'; exit 1; }
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid numeric CI run ID'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/approved-ci-run.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha
+            and .status == "completed"
+            and .conclusion == "success"
+            and .event == "push"
+            and .head_repository.full_name == $repo
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/approved-ci-run.json"
 
-      - name: Checkout exact approved commit
+      # Never check out or execute scripts from the input source_sha.
+      # Only use a trusted main-branch workflow and downloaded static artifacts.
+      - name: Checkout trusted main branch for locked Wrangler dependencies
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: main
           persist-credentials: false
 
-      - name: Verify checked out SHA
-        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-
-      - name: Download Web build from successful CI run
+      - name: Download Pages build from verified CI run
         uses: actions/download-artifact@v4
         with:
           name: staging-pages-${{ inputs.source_sha }}
@@ -60,7 +70,7 @@ jobs:
           github-token: ${{ github.token }}
           path: web/dist
 
-      - name: Download checksums and source manifest from same CI run
+      - name: Download checksums and provenance from same CI run
         uses: actions/download-artifact@v4
         with:
           name: staging-extension-${{ inputs.source_sha }}
@@ -68,42 +78,86 @@ jobs:
           github-token: ${{ github.token }}
           path: dist/ci
 
-      - name: Verify immutable assets, Staging origin and admin route
+      - name: Independently verify all downloaded static files and Staging target
         shell: bash
         run: |
-          test -f web/dist/index.html
-          test -f web/dist/admin/index.html
-          test -f dist/ci/web-files.sha256
-          sha256sum -c dist/ci/web-files.sha256
-          python3 scripts/verify-staging-ci.py
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          root=pathlib.Path.cwd()
+          web=(root/'web/dist')
+          manifest=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          sha=os.environ['SOURCE_SHA']
+          allowed={
+            'sourceSha':sha,
+            'channel':'staging',
+            'pagesProject':'x-reply-helper-staging',
+            'pagesDomain':'https://staging.x-reply-helper.top',
+            'stagingApi':'https://api-staging.x-reply-helper.top',
+            'extensionId':'kaaehkpihjenlhjjfjcopkjhegmfmchk'
+          }
+          for key,value in allowed.items():
+              if manifest.get(key)!=value: raise SystemExit(f'Provenance/target mismatch: {key}')
+          hashes=(root/'dist/ci/web-files.sha256').read_text().splitlines()
+          expected={}
+          for entry in hashes:
+              matched=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',entry)
+              if not matched: raise SystemExit('Invalid checksum entry')
+              digest,rel=matched.groups()
+              p=(root/rel).resolve()
+              if not p.is_relative_to(web.resolve()) or not p.is_file() or p.is_symlink() or rel in expected:
+                  raise SystemExit('Unsafe or duplicate build entry')
+              expected[rel]=digest
+          actual={}
+          for p in web.rglob('*'):
+              if p.is_symlink(): raise SystemExit('Build contains symlinks')
+              if p.is_file():
+                  rel=p.relative_to(root).as_posix()
+                  actual[rel]=hashlib.sha256(p.read_bytes()).hexdigest()
+          if not actual or actual!=expected or len(actual)!=manifest.get('webFileCount'):
+              raise SystemExit('Web build file list or SHA-256 verification failed')
+          if not (web/'index.html').is_file() or not (web/'admin/index.html').is_file():
+              raise SystemExit('Staging homepage/admin page missing')
+          if any(p.name in ('_worker.js','_routes.json') for p in web.rglob('*')):
+              raise SystemExit('Unexpected Pages Functions or Worker artifact')
+          if not any(allowed['stagingApi'] in p.read_text(errors='replace') for p in web.rglob('*.js')):
+              raise SystemExit('Wrong Staging API origin')
+          if not any('challenges.cloudflare.com/turnstile/v0/api.js' in p.read_text(errors='replace') for p in web.rglob('*.html')):
+              raise SystemExit('Staging Turnstile widget missing')
+          print(f'PASS: {len(actual)} immutable static files verified from {sha}')
+          PY
 
-      - name: Configure pinned Node and Wrangler
+      - name: Use locked Wrangler version from trusted main branch
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: npm
           cache-dependency-path: api/package-lock.json
 
-      - name: Install Wrangler from API lockfile
+      - name: Install Wrangler
         run: npm --prefix api ci
 
-      - name: Deploy ONLY to existing Staging Pages
+      - name: Deploy only x-reply-helper-staging Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
+          set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
           ./api/node_modules/.bin/wrangler pages deploy web/dist \
             --project-name x-reply-helper-staging \
             --branch codex/v0.4-credits \
             --commit-hash "$SOURCE_SHA" \
-            --commit-message "Approved CI Staging Pages $SOURCE_SHA"
+            --commit-message "Approved RC1 Staging Pages $SOURCE_SHA"
 
-      - name: Display Staging destination
+      - name: Deployment summary
         if: success()
+        shell: bash
         run: |
-          echo 'Destination: https://staging.x-reply-helper.top'
-          echo "Source SHA: $SOURCE_SHA"
-          echo 'Record deployment ID and previous rollback deployment after publishing.'
+          echo "### Staging Pages deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Project: x-reply-helper-staging" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Domain: https://staging.x-reply-helper.top" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CI run: $CI_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production/Worker/D1 unchanged" >> "$GITHUB_STEP_SUMMARY"
