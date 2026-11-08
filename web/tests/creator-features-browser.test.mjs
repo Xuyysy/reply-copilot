@@ -52,12 +52,12 @@ test('creator Momentum admin console: low trigger draft, explicit confirm, copy 
   await wait('Boolean(document.querySelector("textarea"))');
   assert.equal(await evaluate('document.querySelectorAll("textarea").length'),4,'content is organized by one language at a time');
   await evaluate('[...document.querySelectorAll("button")].find(b=>b.textContent==="English").click()');
-  assert.match(await evaluate('document.querySelector("textarea").value'),/Interaction Momentum/);
+  assert.match(await evaluate('document.querySelector("textarea").value'),/Creator Momentum Threshold/);
   await clickTab('效果预览');
   await wait('Boolean(document.querySelector("[data-testid=momentum-draft-preview]"))');
   const callsBefore=await evaluate('calls.length');
   await evaluate('[...document.querySelectorAll("button")].find(b=>b.textContent==="阶段 3").click()');
-  assert.match(await evaluate('document.querySelector("[data-testid=momentum-draft-preview]").textContent'),/今日活跃信号|Today’s activity signal/);
+  assert.match(await evaluate('document.querySelector("[data-testid=momentum-draft-preview]").textContent'),/互动势能临界值已触发|Creator Momentum Threshold Reached/);
   assert.equal(await evaluate('calls.length'),callsBefore,'admin draft preview must not call AI or simulator');
   assert.equal(await evaluate('document.body.textContent.includes("模拟阶段")'),false);
   await clickTab('版本记录');
