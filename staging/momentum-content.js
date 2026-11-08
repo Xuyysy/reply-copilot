@@ -28,7 +28,7 @@
     requestAnimationFrame(() => {
       const rect = node.getBoundingClientRect();
       if (!node.isConnected || !rect.height || rect.top >= innerHeight || rect.bottom <= 0) {
-        node.remove();
+        if (assistant.isMomentumPreview?.()) assistant.resolveMomentumGate();
         respond({ok:false,error:'提醒区域不可见，请展开回复浮窗后重试。'});
       } else respond({ok:true});
     });

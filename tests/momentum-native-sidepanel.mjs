@@ -171,16 +171,16 @@ try {
     for(const stage of [1,2,3]){
       await evalIn(panelSession,`document.querySelector("select[aria-label=预览阶段]").value="${stage}"`);
       await click(panelSession,'#momentum-control + section button');
-      try { await until(()=>evalIn(session,`${popup}?.querySelector(".momentum-reminder")?.textContent.includes("阶段 ${stage}")`),4000); }
+      try { await until(()=>evalIn(session,`${popup}?.querySelector(".momentum-gate:not(.hidden)")?.textContent.includes("阶段 ${stage}")`),4000); }
       catch(error){console.error(await evalIn(panelSession,'document.querySelector("#momentum-control + section [role=status]").textContent'));console.error(await evalIn(session,`[document.visibilityState,!!(${popup}),!!document.querySelector('[role=dialog]')]`));throw error;}
-      assert.match(await evalIn(session,`${popup}.querySelector(".momentum-reminder").textContent`),/后台保存的测试标题.*后台保存的测试正文/);
+      assert.match(await evalIn(session,`${popup}.querySelector(".momentum-gate:not(.hidden)").textContent`),/后台保存的测试标题.*后台保存的测试正文/);
       await until(()=>evalIn(panelSession,'document.querySelector("#momentum-control + section [role=status]").textContent.includes("已在 X 回复浮窗显示")'));
       if(out){
         await evalIn(session,"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
         const shot=await call("Page.captureScreenshot",{format:"png"},session);
         writeFileSync(path.join(out,`native-preview-${stage}.png`),Buffer.from(shot.result.data,"base64"));
       }
-      await evalIn(session,`[...${popup}.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()`);
+      await evalIn(session,`[...${popup}.querySelectorAll(".momentum-gate:not(.hidden) button")].find(b=>b.textContent==="今日不再提醒").click()`);
     }
     await evalIn(session,`${popup}.querySelector('[data-action=minimize]').click()`);
     await click(panelSession,'#momentum-control + section button');

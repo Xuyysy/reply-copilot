@@ -176,13 +176,25 @@ test('three Staging previews use saved copy and dismiss without sending real act
   assert.equal(await evaluate('getComputedStyle(shadow.querySelector(".momentum-pro")).animationName'),'none');
   for(const stage of [1,2,3]){
    await evaluate(`assistant.previewMomentum({stage:${stage},titleZh:"已保存标题",bodyZh:"已保存正文"});`);
-   assert.match(await evaluate('shadow.querySelector(".momentum-reminder").textContent'),new RegExp('阶段 '+stage+'.*已保存标题.*已保存正文'));
+   assert.match(await evaluate('shadow.querySelector(".momentum-gate:not(.hidden)").textContent'),new RegExp('阶段 '+stage+'.*已保存标题.*已保存正文', 's'));
    if(stage===2) await evaluate('assistant.host.dataset.theme="dark"');
    if(stage===3) await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
+   assert.deepEqual(await evaluate('[...shadow.querySelectorAll(".momentum-gate-track i")].map(node=>node.dataset.state)'), [1,2,3].map(node=>node===stage?'current':node<stage?'complete':'upcoming'));
+   assert.equal(await evaluate('getComputedStyle(shadow.querySelector(".momentum-gate")).animationName'),'none');
    await capture(call,'preview-stage-'+stage+'.png');
-   await evaluate('[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');
-   assert.equal(await evaluate('!!shadow.querySelector(".momentum-reminder")'),false);
+   await evaluate('[...shadow.querySelectorAll(".momentum-gate:not(.hidden) button")].find(b=>b.textContent==="今日不再提醒").click()');
+   assert.equal(await evaluate('!!shadow.querySelector(".momentum-gate:not(.hidden)")'),false);
   }
+  assert.deepEqual(await evaluate('actions'),[]);
+  await call('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+  await evaluate('assistant.previewMomentum({stage:1});');
+  assert.equal(await evaluate('getComputedStyle(shadow.querySelector(".momentum-gate")).animationName'),'gate-enter');
+  for (const [index, time] of [0, 50, 100, 160, 210, 300, 450, 600, 750].entries()) {
+   await evaluate(`shadow.querySelector(".momentum-gate").getAnimations({subtree:true}).forEach(animation=>{animation.pause();animation.currentTime=${time};});`);
+   await capture(call,'milestone-frame-'+index+'.png');
+  }
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape'});
+  assert.equal(await evaluate('!!shadow.querySelector(".momentum-gate:not(.hidden)")'),false);
   assert.deepEqual(await evaluate('actions'),[]);
  });
 });
@@ -223,7 +235,7 @@ test('reply gate is prominent, keyboard dismissible, and emits an explicit confi
   await evaluate(setup(css));
   await evaluate('assistant.showMomentumGate({id:"2026-11-08:2",stage:2,lease:"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},{titleZh:"后台提醒标题",bodyZh:"后台提醒正文"})');
   assert.equal(await evaluate('shadow.querySelector("[role=dialog][aria-modal=true]").classList.contains("hidden")'),false);
-  assert.match(await evaluate('shadow.querySelector(".momentum-gate").textContent'),/阶段 2.*后台提醒标题.*后台提醒正文/);
+  assert.match(await evaluate('shadow.querySelector(".momentum-gate").textContent'),/阶段 2.*后台提醒标题.*后台提醒正文/s);
   assert.equal(await evaluate('shadow.activeElement===shadow.querySelector(".momentum-gate")'),true);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   await capture(call,'reply-before-generation-gate.png');
