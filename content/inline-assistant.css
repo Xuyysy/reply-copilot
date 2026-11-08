@@ -73,3 +73,11 @@
 .momentum-gate-header { position: sticky; top: 0; z-index: 1; background: #f8faff; }
 :host([data-theme="dark"]) .momentum-gate-header { background: #191f2c; }
 .momentum-gate-close { position: static; }
+
+
+/* Design System V1: minimal floating-window polish. Do not alter gate, generation or layout. */
+.panel:not(.gate-open) { border-color:#dce5f3;box-shadow:0 7px 26px #142c5420; }
+:host([data-theme="dark"]) .panel:not(.gate-open) { border-color:#3a4863; }
+.account-badge { color:#315be8; }
+:host([data-theme="dark"]) .account-badge { color:#a4baff; }
+.panel button:focus-visible,.panel input:focus-visible { outline-color:#6488ee; }

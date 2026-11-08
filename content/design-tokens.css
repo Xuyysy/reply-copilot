@@ -1,0 +1,37 @@
+/* x-Reply-Helper Design System V1. Shared local CSS, zero runtime dependencies.
+   Same visual vocabulary for future web redesign; no external fonts or CDN. */
+:root {
+  color-scheme: light dark;
+  --xrh-brand: #315be8;
+  --xrh-brand-strong: #2349c5;
+  --xrh-brand-text: #294bbf;
+  --xrh-ink: #17233c;
+  --xrh-muted: #65758e;
+  --xrh-canvas: #f6f8fc;
+  --xrh-surface: #ffffff;
+  --xrh-surface-soft: #f2f5fb;
+  --xrh-line: #e3e9f3;
+  --xrh-pro-surface: #eef4ff;
+  --xrh-pro-line: #cbd9f9;
+  --xrh-danger: #aa303a;
+  --xrh-radius: 14px;
+  --xrh-shadow: 0 8px 28px rgba(27, 47, 87, .055);
+  --xrh-focus: 0 0 0 3px rgba(49, 91, 232, .22);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --xrh-brand: #86a7ff;
+    --xrh-brand-strong: #6086fa;
+    --xrh-brand-text: #afc4ff;
+    --xrh-ink: #eff3fd;
+    --xrh-muted: #a0adc4;
+    --xrh-canvas: #111826;
+    --xrh-surface: #1b2536;
+    --xrh-surface-soft: #243047;
+    --xrh-line: #35445c;
+    --xrh-pro-surface: #222f4b;
+    --xrh-pro-line: #3e5687;
+    --xrh-danger: #ff9b9e;
+    --xrh-shadow: 0 8px 28px rgba(0, 0, 0, .16);
+  }
+}
