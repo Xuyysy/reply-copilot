@@ -1,0 +1,109 @@
+name: Deploy approved Staging Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full 40-character SHA from a successful CI run
+        type: string
+        required: true
+      ci_run_id:
+        description: CI run ID with verified build artifacts
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-staging-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging-pages:
+    name: Approved Staging Pages deployment only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify successful CI run and commit before reading deployment secrets
+        shell: bash
+        run: |
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Full lower-case SHA required'; exit 1; }
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Numeric CI run ID required'; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CI_RUN_ID}" > "$RUNNER_TEMP/approved-ci-run.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            '.head_sha==$sha and .conclusion=="success" and .status=="completed" and .head_repository.full_name==$repo and (.path|endswith(".github/workflows/ci.yml"))' \
+            "$RUNNER_TEMP/approved-ci-run.json"
+
+      - name: Checkout exact approved commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify checked out SHA
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Download Web build from successful CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-${{ inputs.source_sha }}
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: web/dist
+
+      - name: Download checksums and source manifest from same CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-${{ inputs.source_sha }}
+          run-id: ${{ inputs.ci_run_id }}
+          github-token: ${{ github.token }}
+          path: dist/ci
+
+      - name: Verify immutable assets, Staging origin and admin route
+        shell: bash
+        run: |
+          test -f web/dist/index.html
+          test -f web/dist/admin/index.html
+          test -f dist/ci/web-files.sha256
+          sha256sum -c dist/ci/web-files.sha256
+          python3 scripts/verify-staging-ci.py
+
+      - name: Configure pinned Node and Wrangler
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install Wrangler from API lockfile
+        run: npm --prefix api ci
+
+      - name: Deploy ONLY to existing Staging Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          ./api/node_modules/.bin/wrangler pages deploy web/dist \
+            --project-name x-reply-helper-staging \
+            --branch codex/v0.4-credits \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved CI Staging Pages $SOURCE_SHA"
+
+      - name: Display Staging destination
+        if: success()
+        run: |
+          echo 'Destination: https://staging.x-reply-helper.top'
+          echo "Source SHA: $SOURCE_SHA"
+          echo 'Record deployment ID and previous rollback deployment after publishing.'
