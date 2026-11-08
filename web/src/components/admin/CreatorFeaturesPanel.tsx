@@ -1,5 +1,5 @@
 import {useEffect,useState} from 'react';
-import {DEFAULT_MOMENTUM_CONFIG,validateMomentumConfig} from '../../../../domain/creator-momentum.js';
+import {validateMomentumConfig} from '../../../../domain/creator-momentum.js';
 import {Button} from '../ui/button';
 import {Input} from '../ui/input';
 import {Card,CardContent,CardHeader,CardTitle} from '../ui/card';
@@ -24,6 +24,7 @@ const SECTIONS=[
 export default function CreatorFeaturesPanel({language,active,busy,read,write,confirm}:Props){
  const t=(zh:string,en:string)=>language==='en'?en:zh;
  const [config,setConfig]=useState<any>(null);
+ const [isStaging,setIsStaging]=useState(false);
  const [published,setPublished]=useState<any>(null);
  const [versions,setVersions]=useState<Array<{id:string;createdAt:number}>>([]);
  const [section,setSection]=useState<TabKey>('strategy');
@@ -33,7 +34,8 @@ export default function CreatorFeaturesPanel({language,active,busy,read,write,co
  const [notice,setNotice]=useState('');
  async function load(){
   try{
-   const r=await read<{config:any;versions:Array<{id:string;createdAt:number}>}>('/v1/admin/creator-momentum');
+   const r=await read<{config:any;versions:Array<{id:string;createdAt:number}>;simulationAvailable?:boolean}>('/v1/admin/creator-momentum');
+   setIsStaging(r.simulationAvailable===true);
    setConfig(r.config);
    setPublished(r.config);
    setVersions(r.versions||[]);
@@ -80,6 +82,7 @@ export default function CreatorFeaturesPanel({language,active,busy,read,write,co
      <p className="text-sm text-muted-foreground">{t('配置 PRO 提醒策略、展示文案与版本。插件不会在侧边栏生成 AI 回复。','Manage PRO reminder policy, customer copy and versions. The sidebar never generates replies.')}</p></div>
     <div className="flex flex-wrap gap-2 text-xs">
      <span className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 font-semibold text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200">PRO · {status}</span>
+     {isStaging&&<span className="rounded-full border px-3 py-1.5 text-xs">Staging</span>}
      {dirty&&<span role="status" className="rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-amber-800 dark:bg-amber-950 dark:text-amber-200">{t('有未发布修改','Unsaved draft')}</span>}
     </div>
    </div>
@@ -114,7 +117,7 @@ export default function CreatorFeaturesPanel({language,active,busy,read,write,co
        <div className="flex flex-wrap items-center justify-between gap-3">
         <div><h3 className="font-semibold">{t('三阶段触发区间','Three trigger ranges')}</h3>
          <p className="mt-1 text-xs text-muted-foreground">{t('次数指本机当日 ACK 确认的 AI 生成，而不是已发送的 X 评论。','Counts are local daily ACK-confirmed generations, not posted X replies.')}</p></div>
-        <Button data-testid="momentum-low-preset" type="button" variant="outline" size="sm" disabled={busy} onClick={setLowPreset}>{t('填入低阈值验收区间','Fill low-range test draft')}</Button>
+        {isStaging&&<Button data-testid="momentum-low-preset" type="button" variant="outline" size="sm" disabled={busy} onClick={setLowPreset}>{t('填入低阈值验收区间','Fill low-range test draft')}</Button>}
        </div>
        <div className="grid gap-3">
         {ranges?.map((range,i)=><div key={i} className="grid min-w-0 items-end gap-3 rounded-lg border bg-muted/20 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
