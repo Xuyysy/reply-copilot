@@ -1,13 +1,19 @@
 (() => {
   let surface;
-  globalThis.ReplyCopilotStagingSurface = {register(getSurface) { surface = getSurface; }};
+  globalThis.ReplyCopilotStagingSurface = {register(value) { surface = value; }};
   chrome.runtime.onMessage.addListener((message, sender, respond) => {
-    if (sender.id !== chrome.runtime.id || sender.tab || message?.type !== 'MOMENTUM_STAGING_SHOW') return;
+    if (sender.id !== chrome.runtime.id || sender.tab || !['MOMENTUM_STAGING_SHOW','MOMENTUM_STAGING_ARM_NEXT_REPLY'].includes(message?.type)) return;
     if (!/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href)) {
       respond({ok:false,error:'当前活动标签页不是 X。'});
       return;
     }
-    const assistant = surface?.();
+    if(message.type==='MOMENTUM_STAGING_ARM_NEXT_REPLY'){
+      if(!message.sample||![1,2,3].includes(message.sample.stage)){respond({ok:false,error:'请选择有效阶段。'});return;}
+      const armed=surface?.armNextReply?.(message.sample)===true;
+      respond(armed?{ok:true,armed:true}:{ok:false,error:'页面控制脚本尚未就绪，请刷新 X 后重试。'});
+      return;
+    }
+    const assistant = surface?.getAssistant?.();
     if (!assistant) {
       respond({ok:false, error:'请先在当前 X 标签页打开回复框。'});
       return;

@@ -35,3 +35,17 @@ test('preview routes to the originating window without reading restricted tab UR
     assert.match((await send()).error,/无法确定/);
   } finally {globalThis.chrome=previous;}
 });
+
+test('next-reply gate simulation is routed to active X tab without touching momentum data',async()=>{
+ const previous=globalThis.chrome;let handle,sent;
+ const panel='chrome-extension://fixture/sidepanel/sidepanel.html';
+ globalThis.chrome={runtime:{id:'fixture',getURL:()=>panel,onMessage:{addListener(listener){handle=listener;}}},tabs:{async query(){return [{id:8}]},async sendMessage(id,message,options){sent={id,message,options};return {ok:true,armed:true};}}};
+ try{
+  let dataReads=0;
+  registerMomentumTesting({accountClient:{token:async()=>'token'},accountStates:{cachedToken:'token',peekState:()=>({user:{userId:'fixture'}})},momentumView:async()=>{dataReads++;return {available:true,policy:{titleZh:'后台标题',bodyZh:'后台正文'}};},momentum:{transaction(){throw Error('diagnostic must not be read');}},});
+  const result=await new Promise(resolve=>handle({type:'MOMENTUM_STAGING_ARM_NEXT_REPLY',stage:3,windowId:4},{id:'fixture',url:panel},resolve));
+  assert.deepEqual(result,{ok:true,armed:true});
+  assert.deepEqual(sent,{id:8,message:{type:'MOMENTUM_STAGING_ARM_NEXT_REPLY',sample:{stage:3,titleZh:'后台标题',bodyZh:'后台正文'}},options:{frameId:0}});
+  assert.equal(dataReads,1,'only saved admin copy and entitlement context are read');
+ }finally{globalThis.chrome=previous;}
+});

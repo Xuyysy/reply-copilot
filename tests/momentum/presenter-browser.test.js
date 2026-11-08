@@ -42,7 +42,8 @@ test('floating UI defaults to Chinese on English X and keeps only compact contro
     await evaluate('assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');
     assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'), true);
     await evaluate('shadow.querySelector(".momentum-close").click();assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:3",stage:3}})');
-    assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'), false);
+    assert.equal(await evaluate('Boolean(shadow.querySelector(".momentum-reminder"))'), true,
+      'an untrusted synthetic click must not acknowledge and consume a real reminder');
     await evaluate('assistant.setMomentum({status:"paid",enabled:true,policy:{enabled:true},reminder:{id:"today:2",stage:2}});[...shadow.querySelectorAll(".momentum-reminder button")].find(b=>b.textContent==="今日不再提醒").click()');
     assert.equal(await evaluate('actions.at(-1).a'), 'momentum_dnd');
   });
@@ -72,8 +73,8 @@ test('side panel and lazy X entry share controls without an initial network requ
   });
 });
 
-test('only a painted visible reminder is acknowledged, and fresh switches keep their status', {timeout: 30000}, async () => {
-  await withMomentumBrowser(fixture(source(files)), async ({evaluate}) => {
+test('a reminder is not consumed on render, and only a visible trusted close acknowledges it', {timeout: 30000}, async () => {
+  await withMomentumBrowser(fixture(source(files)), async ({evaluate,call}) => {
     await evaluate(setup(css));
     await evaluate(`window.proof={status:'paid', enabled:true, proofUntil:Date.now()+60000, policy:{enabled:true}};
       window.offer={id:'test:1',stage:1,lease:'test-lease',expiresAt:Date.now()+10000};
@@ -84,10 +85,14 @@ test('only a painted visible reminder is acknowledged, and fresh switches keep t
     assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),0);
     await evaluate('{'+setup(css)+'}');
     await evaluate('assistant.setMomentum({...proof,reminder:offer});new Promise(r=>setTimeout(r,120))');
-    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),1);
-    await evaluate('shadow.querySelector(".momentum-close").click();assistant.setMomentum({...proof,reminder:{...offer,lease:"replayed"}})');
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),0,'paint does not acknowledge');
+    const point=await evaluate('(()=>{const r=shadow.querySelector(".momentum-close").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');
+    await call('Input.dispatchMouseEvent',{type:'mousePressed',x:point.x,y:point.y,button:'left',clickCount:1});
+    await call('Input.dispatchMouseEvent',{type:'mouseReleased',x:point.x,y:point.y,button:'left',clickCount:1});
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),1,'visible trusted close acknowledges once');
+    await evaluate('assistant.setMomentum({...proof,reminder:{...offer,lease:"replayed"}})');
     assert.equal(await evaluate('shadow.querySelector(".momentum-reminder")===null'),true);
-    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),2);
+    assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_presented").length'),1);
   });
 });
 
@@ -97,18 +102,47 @@ test('paid switch gives immediate feedback, rolls back a failed save, and locks 
   await evaluate(`window.switcher=shadow.querySelector('.momentum input');
    window.live={scope:1,status:'paid',enabled:false,proofUntil:Date.now()+10000,policy:{enabled:true}};
    assistant.setMomentum(live);switcher.click();`);
-  assert.equal(await evaluate('switcher.checked && switcher.disabled'),true);
+  assert.equal(await evaluate('switcher.checked && !switcher.disabled'),true);
+  const firstIntent=await evaluate('actions.at(-1).v.intent');
   await capture(call,'switch-floating-after.png');
   await evaluate('switcher.click()');
-  assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_toggle").length'),1);
-  await evaluate('assistant.setMomentum({ok:false},{enabled:true})');
+  assert.equal(await evaluate('actions.filter(x=>x.a==="momentum_toggle").length'),2);
+  await evaluate(`assistant.setMomentum({ok:false},{enabled:true,intent:${firstIntent}})`);
+  assert.equal(await evaluate('switcher.checked'),false,'stale failure must not roll back the newer OFF intent');
+  const latest=await evaluate('actions.at(-1).v');
+  await evaluate(`assistant.setMomentum({ok:false},{enabled:${latest.enabled},intent:${latest.intent}})`);
   assert.equal(await evaluate('switcher.checked'),false);
   assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/设置未保存/);
-  await evaluate('switcher.click();assistant.setMomentum({...live,enabled:true,saved:true},{enabled:true})');
+  await evaluate('switcher.click()');
+  const success=await evaluate('actions.at(-1).v');
+  await evaluate(`assistant.setMomentum({...live,enabled:true,saved:true},{enabled:true,intent:${success.intent}})`);
   assert.equal(await evaluate('switcher.checked && !switcher.disabled'),true);
   await evaluate('assistant.setMomentum({...live,enabled:true,policy:{enabled:false}})');
   assert.equal(await evaluate('switcher.disabled && switcher.checked'),true);
   assert.match(await evaluate('shadow.querySelector(".momentum small").textContent'),/系统暂未开放/);
+ });
+});
+
+test('30 rapid toggle clicks stay interactive and persist the last user intent', {timeout:30000},async()=>{
+ await withMomentumBrowser(fixture(source(files)),async({evaluate})=>{
+  await evaluate(`window.calls=[];window.resolveFirst=null;
+   window.proof={scope:'account-a',status:'paid',available:true,eligible:true,enabled:false,proofUntil:Date.now()+60000,policy:{enabled:true}};
+   window.send=message=>{calls.push(message);if(message.ensure)return Promise.resolve({...proof});if(typeof message.enabled==='boolean'){
+    if(!resolveFirst)return new Promise(resolve=>{resolveFirst=()=>resolve({...proof,enabled:message.enabled,saved:message.enabled});});
+    return Promise.resolve({...proof,enabled:message.enabled,saved:message.enabled});}
+    return Promise.resolve({...proof});};
+   window.control=ReplyCopilotMomentumPresenter.connect(document.querySelector('#side'),send,()=>{});
+   control.refresh({ensure:true});`);
+  await evaluate('new Promise(resolve=>setTimeout(resolve,25))');
+  await evaluate(`window.switcher=document.querySelector('#side input');switcher.click();`);
+  assert.equal(await evaluate('switcher.checked && !switcher.disabled'),true,'first click updates immediately');
+  await evaluate('for(let i=1;i<30;i++)switcher.click()');
+  assert.equal(await evaluate('calls.filter(x=>typeof x.enabled==="boolean").length'),1,'queued intermediate clicks are coalesced while the first write is pending');
+  assert.equal(await evaluate('switcher.disabled'),false);
+  assert.equal(await evaluate('switcher.checked'),false,'30th click is the visible last intent');
+  await evaluate('resolveFirst();new Promise(resolve=>setTimeout(resolve,50))');
+  const outcome=await evaluate('({writes:calls.filter(x=>typeof x.enabled==="boolean").map(x=>x.enabled),checked:switcher.checked,disabled:switcher.disabled})');
+  assert.deepEqual(outcome,{writes:[true,false],checked:false,disabled:false});
  });
 });
 
@@ -153,7 +187,7 @@ test('three Staging previews use saved copy and dismiss without sending real act
  });
 });
 
-test('three switch surfaces complete 20 saves each without generation, and a timed out request can recover', {timeout:30000},async()=>{
+test('three switch surfaces keep the toggle responsive through 30 rapid saves and preserve the last intent', {timeout:30000},async()=>{
  await withMomentumBrowser(fixture(source(files)),async({evaluate})=>{
   const result=await evaluate(`(async()=>{
     const {mount,connect,request}=ReplyCopilotMomentumPresenter;
@@ -161,23 +195,40 @@ test('three switch surfaces complete 20 saves each without generation, and a tim
     const results=[];
     for(const surface of ['floating','independent','sidepanel']){
       const container=document.createElement('div');document.body.append(container);
-      let saved=false, calls=0;
-      const send=async message=>{if(typeof message.enabled==='boolean'){calls++;saved=message.enabled;}return {...proof,enabled:saved,saved:true};};
-      const entry=surface==='floating' ? mount(container,(action,data)=>void send(data).then(value=>entry.update(value,data))) :
-        connect(container,send,()=>{},{mode:surface==='sidepanel'?'full':'compact'});
-      if(surface==='floating')entry.update(proof);else await entry.refresh();
+      let saved=false, calls=[], releaseFirst;
+      const firstGate=new Promise(resolve=>releaseFirst=resolve);
+      const send=async message=>{if(typeof message.enabled==='boolean'){calls.push(message.enabled);if(calls.length===1)await firstGate;saved=message.enabled;}return {...proof,enabled:saved,saved:true};};
+      const entry=connect(container,send,()=>{},{mode:surface==='sidepanel'?'full':'compact'});
+      await entry.refresh();
       const toggle=container.querySelector('input');
-      for(let i=0;i<20;i++){
+      for(let i=0;i<100&&toggle.disabled;i++)await new Promise(resolve=>setTimeout(resolve,5));
+      if(toggle.disabled)throw Error('paid proof did not finish loading before the rapid-click phase');
+      for(let i=0;i<30;i++){
         toggle.click();
-        if(toggle.checked!==(i%2===0)||!toggle.disabled)throw Error('optimistic save missing');
-        await new Promise(resolve=>setTimeout(resolve,0));
-        if(toggle.disabled||toggle.checked!==saved)throw Error('confirmation did not unlock toggle');
+        if(toggle.checked!==(i%2===0)||toggle.disabled)throw Error('toggle locked or failed to reflect the latest intent immediately: '+JSON.stringify({surface,i,checked:toggle.checked,disabled:toggle.disabled,status:container.textContent}));
       }
+      releaseFirst();
+      for(let i=0;i<100&&calls.length<2;i++)await new Promise(resolve=>setTimeout(resolve,5));
+      if(calls.length!==2||calls[1]!==false||saved!==false||toggle.checked!==false||toggle.disabled)throw Error('last intent was not persisted after coalescing intermediate clicks');
       results.push(calls);container.remove();
     }
-    const timeout=await request(()=>new Promise(()=>{}),{},5);
-    return {results,timeout};
+    return {results};
   })()`);
-  assert.deepEqual(result,{results:[20,20,20],timeout:{ok:false,timeout:true}});
+  assert.deepEqual(result,{results:[[true,false],[true,false],[true,false]]});
+ });
+});
+
+test('reply gate is prominent, keyboard dismissible, and emits an explicit confirmation action',{timeout:30000},async()=>{
+ await withMomentumBrowser(fixture(source(files)),async({evaluate,call})=>{
+  await evaluate(setup(css));
+  await evaluate('assistant.showMomentumGate({id:"2026-11-08:2",stage:2,lease:"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},{titleZh:"后台提醒标题",bodyZh:"后台提醒正文"})');
+  assert.equal(await evaluate('shadow.querySelector("[role=dialog][aria-modal=true]").classList.contains("hidden")'),false);
+  assert.match(await evaluate('shadow.querySelector(".momentum-gate").textContent'),/阶段 2.*后台提醒标题.*后台提醒正文/);
+  assert.equal(await evaluate('shadow.activeElement===shadow.querySelector(".momentum-gate")'),true);
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  await capture(call,'reply-before-generation-gate.png');
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  assert.equal(await evaluate('actions.at(-1).a'), 'momentum_gate_dismiss');
+  assert.equal(await evaluate('actions.at(-1).v.lease'),'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
  });
 });

@@ -28,6 +28,7 @@
   if (globalThis[installKey]) return;
   globalThis[installKey] = true;
   let momentumEntry;
+  let stagingGateNext=null;
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
@@ -220,6 +221,27 @@
       current.trace?.addDurations({precheck:performance.now()-precheckStart});
       current.trace?.mark("precheck_complete");
       if (account?.status === "credits_available") {
+        if(stagingGateNext){
+          const sample=stagingGateNext;stagingGateNext=null;
+          current.stagingMomentumGate=true;
+          current.momentumGate={id:`staging:${sample.stage}`,stage:sample.stage,lease:`staging-${crypto.randomUUID()}`};
+          current.momentumPolicy=sample;
+          if(!current.assistant)current.assistant=api.inlineAssistant.mount(current.anchor,handleAction,{preferences:current.preferences});
+          current.assistant?.showMomentumGate?.(current.momentumGate,current.momentumPolicy);
+          current.trace?.mark('momentum_gate_shown');
+          return;
+        }
+        if(account.momentumGatePending===true){
+          const gate=await safeSend({type:'REPLY_COPILOT_MOMENTUM',gate:true});
+          if(active!==current||current.requestId!==requestId||current.cancelled)return;
+          if(gate?.reminder){
+            current.momentumGate=gate.reminder;
+            current.momentumPolicy=gate.policy;
+            if(!current.assistant)current.assistant=api.inlineAssistant.mount(current.anchor,handleAction,{preferences:current.preferences});
+            current.assistant?.showMomentumGate?.(gate.reminder,current.momentumPolicy);
+            return;
+          }
+        }
         if (current.preferences.autoGenerateOnReply && current.preferences.showFloatingWindow) void generateActive(requestId);
         else { current.assistant?.showReady(current.preferences.autoGenerateOnReply); completeTrace(current,"incomplete"); }
       } else completeTrace(current,"incomplete");
@@ -229,25 +251,26 @@
     const previousStatus = current.accountStatus;
     const wasPending = current.pendingBinding;
     const response = await (pendingResponse || safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }));
-    if (active !== current || !current.assistant) return response;
+    if (active !== current) return response;
     current.accountStatus = response?.ok ? response.status : "auth_unavailable";
     current.pendingBinding = Boolean(response?.pending);
     refreshMomentum(current,{surface:true});
-    current.assistant.showAccount(current.accountStatus, response?.quota, response?.pending);
+    current.assistant?.showAccount(current.accountStatus, response?.quota, response?.pending);
     if(response?.recoveryRequired){current.assistant?.setStatus('上一条生成未完成，额度仍在预占。可以恢复或放弃后继续。');current.assistant?.showRecovery?.();}
-    if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant.showReady(current.preferences?.autoGenerateOnReply);
+    if ((wasPending || previousStatus !== "credits_available") && !response?.pending && current.accountStatus === "credits_available" && !current.result && !current.generating) current.assistant?.showReady(current.preferences?.autoGenerateOnReply);
     if (response?.pending && !bindingTimer) bindingTimer = setInterval(() => void refreshAccount(current), 3500);
     if (!response?.pending && bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
     return response;
   }
   function remountAssistant(current, preferences) {
     current.assistant?.close(); current.assistant = null;
-    if (!preferences.showFloatingWindow || current.dismissed || !current.anchor?.isConnected) return;
+    if ((!preferences.showFloatingWindow&&!current.momentumGate) || current.dismissed || !current.anchor?.isConnected) return;
     current.preferences = preferences;
     current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences });
     if (current.appliedText) { current.assistant.showResult(current.result.replies, current.appliedStyle || "natural"); current.assistant.showApplied(); }
     else if (current.result) current.assistant.showResult(current.result.replies, preferences.defaultReplyMode || current.result.defaultStyle || "natural");
     else if (current.generating) current.assistant.showLoading();
+    else if(current.momentumGate)current.assistant.showMomentumGate(current.momentumGate,current.momentumPolicy);
     else if (current.accountStatus === "credits_available") current.assistant.showReady(preferences.autoGenerateOnReply);
     else void refreshAccount(current);
   }
@@ -326,7 +349,7 @@
   }
   async function generateActive(requestId) {
     const current = active;
-    if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated) return;
+    if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated || current.momentumGate) return;
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
     if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
     current.generating = true; current.assistant?.showLoading();
@@ -350,7 +373,7 @@
       // A protected draft, skip recommendation or unsafe focus is not a
       // successful automatic insertion. Count it separately, without text.
       completeTrace(current,"incomplete");
-      refreshMomentum(current,{claim:true});
+      refreshMomentum(current,{arm:true});
     } catch (error) {
       completeTrace(current,"failed");
       current.generating = false;
@@ -389,6 +412,28 @@
     if(action==='momentum_presented'){void safeSend({type:'REPLY_COPILOT_MOMENTUM',presented:data});return;}
     if(action==='momentum_dnd'){refreshMomentum(current,{dnd:true});return;}
     if(action==='momentum_original'){void safeSend({type:'REPLY_COPILOT_OPEN_ORIGINAL'});return;}
+    if(action==='momentum_gate_dismiss'||action==='momentum_gate_dnd'){
+      if(current.gateResolving||!current.momentumGate||current.momentumGate.id!==data.id||current.momentumGate.lease!==data.lease)return;
+      current.gateResolving=true;
+      if(current.stagingMomentumGate){
+        current.gateResolving=false;current.stagingMomentumGate=false;current.momentumGate=null;
+        current.assistant?.resolveMomentumGate?.();
+        current.assistant?.setStatus('Staging 模拟已解除；本次未调用 AI，也未填入或修改真实提醒记录。');
+        completeTrace(current,'incomplete');return;
+      }
+      void safeSend({type:'REPLY_COPILOT_MOMENTUM',presented:{id:data.id,lease:data.lease},dnd:action==='momentum_gate_dnd'}).then(response=>{
+        if(active!==current||current.cancelled)return;
+        if(!response?.confirmed){current.assistant?.momentumGateError?.('暂时无法保存选择，请保持页面开启后重试。');return;}
+        current.momentumGate=null;current.assistant?.resolveMomentumGate?.();
+        if(!current.editor?.isConnected||matchedComposer(current.post).editor!==current.editor)return;
+        if(current.userTouchedComposer||api.composerAdapter.hasContent(current.editor)){
+          current.assistant?.setStatus('已保留你正在编辑的草稿，本次不会自动填入。');return;
+        }
+        if(current.preferences?.autoGenerateOnReply&&current.accountStatus==='credits_available')void generateActive(current.requestId);
+        else current.assistant?.showReady(current.preferences?.autoGenerateOnReply);
+      }).catch(()=>{if(active===current)current.assistant?.momentumGateError?.('暂时无法保存选择，请重试。');}).finally(()=>{current.gateResolving=false;});
+      return;
+    }
     if (action === "toggle_auto_generate") {
       if (typeof data.enabled !== "boolean") return;
       current.preferences = { ...current.preferences, autoGenerateOnReply: data.enabled };
@@ -414,7 +459,7 @@
           // A recovered result for a different post is copy-only. Never insert it
           // into the currently associated editor or mistake it for this request.
           current.assistant?.showResult(response.result.replies,response.result.defaultStyle||'natural');
-          refreshMomentum(current,{claim:true});
+          refreshMomentum(current,{arm:true});
           current.assistant?.setStatus('上一条回复已恢复，仅供复制；当前帖子可点击重试生成。');current.assistant?.showRetry();return;
         }
         if(response.state!=='ready')current.requestId=crypto.randomUUID();
@@ -437,9 +482,9 @@
     if (action === "feedback") { void safeSend({ type: "REPLY_COPILOT_FEEDBACK", requestId: current.requestId, ...data }); return; }
     if (action === "manually_confirmed") { record("manually_confirmed", data); return; }
   }
-  globalThis.ReplyCopilotStagingSurface?.register(() => {
-    const assistant = active?.assistant;
-    return active?.editor?.isConnected && !active.cancelled && assistant?.host?.isConnected ? assistant : null;
+  globalThis.ReplyCopilotStagingSurface?.register({
+    getAssistant(){const assistant=active?.assistant;return active?.editor?.isConnected&&!active.cancelled&&assistant?.host?.isConnected?assistant:null;},
+    armNextReply(sample){if(!sample||![1,2,3].includes(sample.stage)||typeof sample.titleZh!=='string'||typeof sample.bodyZh!=='string')return false;stagingGateNext=Object.freeze({stage:sample.stage,titleZh:sample.titleZh,bodyZh:sample.bodyZh});return true;}
   });
   function onRuntimeMessage(message) {
     if (!hasRuntimeContext()) return false;

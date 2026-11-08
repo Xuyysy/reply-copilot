@@ -111,7 +111,7 @@ try {
     await call("Runtime.enable",{},workerSession);
     await until(()=>evalIn(workerSession,'typeof chrome!=="undefined" && !!chrome.storage?.local'));
     await call("Fetch.enable",{patterns:[{urlPattern:"https://api-staging.x-reply-helper.top/*"}]},workerSession);
-    await evalIn(panelSession,'chrome.storage.local.set({replyCopilotAccountToken:"isolated-fixture",behaviorPreferences:{autoGenerateOnReply:false}})');
+    await evalIn(panelSession,'chrome.storage.local.set({replyCopilotAccountToken:"isolated-fixture",behaviorPreferences:{autoGenerateOnReply:true}})');
 
   }
   if(acceptance){
@@ -130,6 +130,29 @@ try {
       } finally {db.close();}
     })()`);
     const before=await state();
+    const popup='[...document.querySelectorAll("[data-zane-reply-copilot]")].find(h=>h.shadowRoot?.querySelector(".panel"))?.shadowRoot';
+    await evalIn(session,'document.querySelectorAll("section[role=dialog]").forEach(node=>node.remove())');
+    await new Promise(resolve=>setTimeout(resolve,100));
+    await call("Target.activateTarget",{targetId:target});
+    await evalIn(panelSession,'document.querySelector("select[aria-label=预览阶段]").value="2"');
+    await click(panelSession,'#momentum-control + section .dashboard-actions button:nth-child(2)');
+    const armStatus=await until(()=>evalIn(panelSession,'document.querySelector("#momentum-control + section [role=status]").textContent||null'));
+    assert.match(armStatus,/已设置/,`Staging next-reply simulation could not be armed: ${armStatus}`);
+    await click(session,"#reply");
+    await until(()=>evalIn(session,`${popup}?.querySelector(".momentum-gate:not(.hidden)")`));
+    assert.equal(fixtureCalls.filter(path=>path.includes("/ai/")).length,0,"armed Staging simulation must not call AI before dismissal");
+    if(out){
+      await evalIn(session,"new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))");
+      const shot=await call("Page.captureScreenshot",{format:"png"},session);
+      writeFileSync(path.join(out,"native-reply-before-generation-gate.png"),Buffer.from(shot.result.data,"base64"));
+    }
+    const closePoint=await evalIn(session,`(()=>{const r=${popup}.querySelector(".momentum-gate-primary").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+    await call("Input.dispatchMouseEvent",{type:"mousePressed",...closePoint,button:"left",clickCount:1},session);
+    await call("Input.dispatchMouseEvent",{type:"mouseReleased",...closePoint,button:"left",clickCount:1},session);
+    await until(()=>evalIn(session,`${popup}?.querySelector(".momentum-gate.hidden")`));
+    assert.equal(fixtureCalls.filter(path=>path.includes("/ai/")).length,0,"Staging simulation must suppress AI even when auto-generation is on");
+    assert.deepEqual(await state(),before,"Staging simulated reply gate must leave daily counts, preferences and acknowledgements unchanged");
+    console.log(JSON.stringify({armedNextReply:true,replyComposerOpened:true,gateShownBeforeGeneration:true,dismissed:true,autoGenerateSetting:true,aiRequests:0,simulationStateUnchanged:true}));
     const startupTabs=(await call("Target.getTargets")).result.targetInfos.filter(t=>t.url.startsWith(`chrome-extension://${id}/onboarding/`));
     for(const tab of startupTabs) await call("Target.closeTarget",{targetId:tab.targetId});
     await call("Target.activateTarget",{targetId:target});
@@ -145,7 +168,6 @@ try {
       assert.match(rejection,/请切回当前窗口的 X 标签页/);
       console.log(JSON.stringify({baselineBlocked:true,rejection}));
     } else {
-    const popup='[...document.querySelectorAll("[data-zane-reply-copilot]")].find(h=>h.shadowRoot?.querySelector(".panel"))?.shadowRoot';
     for(const stage of [1,2,3]){
       await evalIn(panelSession,`document.querySelector("select[aria-label=预览阶段]").value="${stage}"`);
       await click(panelSession,'#momentum-control + section button');
@@ -181,6 +203,7 @@ try {
         await call("Input.dispatchKeyEvent",{type:"keyDown",key:" ",code:"Space",windowsVirtualKeyCode:32},sessionId);
         await call("Input.dispatchKeyEvent",{type:"keyUp",key:" ",code:"Space",windowsVirtualKeyCode:32},sessionId);
         await until(()=>evalIn(sessionId,`!(${control}).disabled&&(${control}).checked===${next}`));
+        await until(async()=> (await state())[1][0]?.enabled===next);
         assert.equal((await state())[1][0].enabled,next);
       }
       console.log(JSON.stringify({entry:name,successfulToggles:20}));

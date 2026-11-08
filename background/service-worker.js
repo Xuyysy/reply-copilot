@@ -1,9 +1,8 @@
 import { openReplySidePanel } from '../services/open-sidepanel.js';
 import { RUNTIME_CONFIG } from "../config/runtime.js";
 import {createMomentumView} from '../services/momentum-view.js';
-import {MomentumStore,momentumReceiptPatch,momentumReceiptKey} from '../services/creator-momentum.js';
+import {MomentumStore,momentumReceiptPatch,momentumReceiptKey,momentumGateKey,createMomentumMutationQueue} from '../services/creator-momentum.js';
 import "../utils/generation-performance.js";
-import { createReplyRequest } from "../domain/reply-request.js";
 import { StorageService, API_KEY_KEY, HISTORY_KEY, ONBOARDING_COMPLETE_KEY } from "../services/storage-service.js";
 import { AIProviderRouter } from "../services/ai-provider-router.js";
 import { AccountStateService } from "../services/account-state-service.js";
@@ -13,7 +12,7 @@ import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import {generatedHistory,generatedUsage} from "../services/generation-records.js";
 import { UsageService, USAGE_KEY } from "../services/usage-service.js";
-import { AccountClient, ACCOUNT_TOKEN_KEY } from "../services/account-client.js";
+import { AccountClient, ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY } from "../services/account-client.js";
 import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
@@ -23,7 +22,6 @@ const performanceSamples = globalThis.ReplyCopilotPerformance.createCollector();
 globalThis.replyCopilotPerformanceReport = () => performanceSamples.report();
 globalThis.clearReplyCopilotPerformance = () => performanceSamples.clear();
 const performanceReady = chrome.storage.session.get("generationPerformanceEnabled").then(value => { performanceEnabled=value.generationPerformanceEnabled===true; }, () => {});
-const MENU_ID = "generate-reply-copilot";
 const storage = new StorageService();
 const history = new HistoryService();
 const profiles = new VoiceProfileService();
@@ -58,8 +56,10 @@ const generatedInputs = new Map();
 let settingsOpenPromise = null;
 let bindingPromise = null;
 let lastBindingPoll = 0;
-let pendingClaim = Promise.resolve();
 let behaviorWrite = Promise.resolve();
+// Serialize momentum mutations across the floating window, independent X entry,
+// and side panel. The last message received by the worker is the final intent.
+const runMomentumMutation = createMomentumMutationQueue();
 const X_PAGE = /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)(?:\/|$)/;
 const EXTENSION_PAGE = new RegExp(`^chrome-extension://${chrome.runtime.id}/`);
 async function broadcastSettingsChanged() {
@@ -89,19 +89,9 @@ chrome.runtime.onInstalled.addListener((details) => {
       await chrome.tabs.create({ url: chrome.runtime.getURL("onboarding/onboarding.html") });
     }
   })();
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: MENU_ID, title: "生成回复", contexts: ["selection"], documentUrlPatterns: ["https://x.com/*", "https://twitter.com/*"] });
-  });
-});
-
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId !== MENU_ID) return;
-  let request;
-  try { request = createReplyRequest({ sourceText: info.selectionText || "", sourceUrl: info.pageUrl || tab?.url || "" }); }
-  catch (error) { request = { requestId: crypto.randomUUID(), error: error.message, sourceUrl: info.pageUrl || tab?.url || "", createdAt: new Date().toISOString() }; }
-  await storage.savePendingRequest(request);
-  try { if (Number.isInteger(tab?.windowId)) await chrome.sidePanel.open({ windowId: tab.windowId }); }
-  catch { await storage.savePendingRequest({ ...request, error: "Chrome could not open the side panel. Open it from the Extensions menu and try again." }); }
+  // Remove the legacy selected-text AI action. Replies are generated only from
+  // the post-bound X composer flow, so opening the side panel cannot spend credits.
+  chrome.contextMenus.removeAll();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -111,7 +101,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === 'REPLY_COPILOT_MOMENTUM') {
     if((!fromXPage||sender.frameId!==0)&&!fromExtensionPage)return false;
     if(message.enabled!==undefined&&typeof message.enabled!=='boolean')return false;
-    void momentumView(message).then(value=>sendResponse({ok:true,...value}),()=>sendResponse({ok:false,status:'unverified',available:false,eligible:false,enabled:false}));return true;
+    const mutating = typeof message.enabled === 'boolean' || message.dnd === true || Boolean(message.presented);
+    const operation = mutating ? runMomentumMutation(() => momentumView(message)) : momentumView(message);
+    void operation.then(value=>sendResponse({ok:true,...value}),()=>sendResponse({ok:false,status:'unverified',available:false,eligible:false,enabled:false}));return true;
   }
   if (message?.type === 'REPLY_COPILOT_OPEN_ORIGINAL') {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
@@ -157,14 +149,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "REPLY_COPILOT_ACCOUNT_STATE") {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) { sendResponse({ ok: false }); return false; }
     void (async () => {
-      const pending = await accountClient.hasPendingDeviceAuthorization();
+      // Read the existing auth/pending keys once. When the account cache is
+      // warm, fetch the owner-scoped reply-gate hint in parallel with this
+      // already-required read, so the normal reply fast path adds no serial IO.
+      const localAuth = await chrome.storage.local.get([ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY]);
+      let pending = Boolean(localAuth[ACCOUNT_PENDING_DEVICE_KEY]?.deviceToken);
+      const cachedState = accountStates.peekState();
+      const cachedOwner = !pending && localAuth[ACCOUNT_TOKEN_KEY] &&
+        accountStates.cachedToken === localAuth[ACCOUNT_TOKEN_KEY] ? cachedState?.user?.userId : null;
+      const cachedGateKey = fromXPage && cachedOwner ? momentumGateKey(cachedOwner) : null;
+      const cachedGatePromise = cachedGateKey ? chrome.storage.local.get(cachedGateKey) : null;
       if (pending && Date.now() - lastBindingPoll > 2500) {
         lastBindingPoll = Date.now();
-        try { if (await accountClient.pollDeviceAuthorization()) accountStates.invalidate(); } catch (error) { if (!/已过期/.test(error?.message || "")) throw error; }
+        try { if (await accountClient.pollDeviceAuthorization()) { accountStates.invalidate(); pending = false; } }
+        catch (error) { if (/已过期/.test(error?.message || "")) pending = false; else throw error; }
       }
       const state = await accountStates.getState({ force: pending });
       const recoveryRequired=state.status==='credits_exhausted' && ['running','ready','expired'].includes((await new HostedAIClient({accountClient}).recoverGeneration().catch(()=>({state:'unknown'}))).state);
-      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending: await accountClient.hasPendingDeviceAuthorization(), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
+      const owner=state.user?.userId;
+      let gateHint = false;
+      if (fromXPage && owner) {
+        const gateKey = momentumGateKey(owner);
+        const stored = cachedOwner === owner && cachedGatePromise
+          ? await cachedGatePromise.catch(() => ({})) : await chrome.storage.local.get(gateKey).catch(() => ({}));
+        gateHint = Boolean(stored[gateKey]);
+      }
+      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending, ...(fromXPage?{momentumGatePending:gateHint}:{}), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
     })().catch(() => sendResponse({ ok: false, status: "auth_unavailable" }));
     return true;
   }
@@ -183,18 +193,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "REPLY_COPILOT_OPEN_PRICING") {
     if (!fromXPage || sender.frameId !== 0) { sendResponse({ ok: false }); return false; }
     void accountClient.openPurchasePage().then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
-    return true;
-  }
-  if (message?.type === "REPLY_COPILOT_CLAIM_PENDING") {
-    if (!fromExtensionPage || !sender.url?.endsWith("/sidepanel/sidepanel.html")) { sendResponse({ ok: false }); return false; }
-    pendingClaim = pendingClaim.catch(() => null).then(async () => {
-      const request = await storage.getPendingRequest();
-      await chrome.storage.session.remove("pendingReplyRequest");
-      const createdAt = Date.parse(request?.createdAt || "");
-      if (!request || !Number.isFinite(createdAt) || Date.now() - createdAt > 30_000 || Date.now() < createdAt - 5000) return null;
-      return request;
-    });
-    void pendingClaim.then((request) => sendResponse({ ok: true, request }), () => sendResponse({ ok: false }));
     return true;
   }
   if (message?.type === "REPLY_COPILOT_SET_FLOATING_POSITION") {
@@ -266,9 +264,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void openReplySidePanel(() => chrome.sidePanel.open({windowId:sender.tab.windowId}), async () => {
       if (message.momentumDetails === true) {
         await chrome.storage.session.set({openMomentumDetails:true});
-      } else if (typeof message.sourceText === "string" && message.sourceText.length > 0 && message.sourceText.length <= 12000 &&
-          /^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) {
-        await storage.savePendingRequest(createReplyRequest({sourceText:message.sourceText,sourceUrl:message.sourceUrl}));
       }
     }).then(sendResponse);
     return true;

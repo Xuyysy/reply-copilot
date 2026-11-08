@@ -46,7 +46,7 @@ export async function adminCreator(request:Request,env:Env,action:'read'|'save'|
  try{
   const value=action==='restore'?(await history(env)).find(v=>v.config.version===body.versionId)?.config:body.config;
   if(!value)throw Error('missing');next=validateMomentumConfig({...value as object,version:op.id});
- }catch{throw new ApiFailure(400,'INVALID_CREATOR_CONFIG','请检查阈值范围、提醒次数、冷却时间及双语文案。');}
+ }catch{throw new ApiFailure(400,'INVALID_CREATOR_CONFIG','请检查三阶段阈值、每日提醒上限及双语文案。');}
  // A stale read causes NOT NULL failure, rolling back operation + audit together.
  await commitOperation(env,op,[env.DB.prepare(`INSERT INTO system_settings(key,value,updated_at,updated_by) VALUES(?,?,?,?)
  ON CONFLICT(key) DO UPDATE SET value=CASE WHEN system_settings.value=? THEN excluded.value ELSE NULL END,updated_at=excluded.updated_at,updated_by=excluded.updated_by`).bind(KEY,JSON.stringify(next),nowMs(),actor.user_id,row?.value??null)],before,next);

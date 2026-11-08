@@ -18,7 +18,7 @@
       // Keep mount failures from surfacing as uncaught errors; refreshing the tab loads the new context.
     }
     const root = document.createElement("section"); root.className = "panel"; root.setAttribute("aria-label", "x-Reply-Helper 回复助手");
-    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">打开侧边栏</button></div>';
+    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">打开侧边栏</button></div><div class="momentum-gate hidden" role="dialog" aria-modal="true" aria-labelledby="momentum-gate-title" tabindex="-1"><span class="momentum-gate-stage">互动势能临界值 · PRO</span><button class="momentum-gate-close" data-action="momentum-gate-continue" aria-label="我知道了，继续回复">×</button><h2 id="momentum-gate-title"></h2><p class="momentum-gate-copy"></p><small class="momentum-gate-error" role="status"></small><div class="momentum-gate-actions"><button class="momentum-gate-primary" data-action="momentum-gate-continue">我知道了，继续回复</button><button class="momentum-gate-secondary" data-action="momentum-gate-dnd">今日不再提醒</button></div></div>';
     let momentum;
     try { momentum = globalThis.ReplyCopilotMomentumPresenter?.mount(root.querySelector(".body"), onAction); } catch {}
     shadow.append(root);
@@ -96,6 +96,36 @@
     header.addEventListener("pointercancel", () => { drag = null; });
     root.querySelector('#auto-generate-toggle').checked = Boolean(preferences.autoGenerateOnReply);
     root.querySelector('#auto-generate-toggle').addEventListener('change', (event) => onAction('toggle_auto_generate', { enabled: event.target.checked }));
+    const momentumGate=root.querySelector('.momentum-gate');
+    let momentumGateReturnFocus=null;
+    function setGateBusy(busy,error=''){
+      for(const button of momentumGate.querySelectorAll('button'))button.disabled=busy;
+      momentumGate.querySelector('.momentum-gate-error').textContent=error;
+      momentumGate.dataset.busy=String(busy);
+    }
+    function showMomentumGate(reminder,policy={}){
+      momentumGateReturnFocus=document.activeElement;
+      momentumGate.dataset.id=reminder.id;momentumGate.dataset.lease=reminder.lease;momentumGate.dataset.stage=String(reminder.stage);
+      momentumGate.querySelector('.momentum-gate-stage').textContent=`互动势能临界值 · PRO · 阶段 ${reminder.stage}`;
+      momentumGate.querySelector('#momentum-gate-title').textContent=policy.titleZh||'今日活跃信号';
+      momentumGate.querySelector('.momentum-gate-copy').textContent=policy.bodyZh||'可以考虑把讨论中的想法整理成一条原创帖。是否发布由你决定。';
+      setGateBusy(false);momentumGate.classList.remove('hidden');momentumGate.focus({preventScroll:true});
+    }
+    function hideMomentumGate(){
+      momentumGate.classList.add('hidden');setGateBusy(false);
+      if(momentumGateReturnFocus?.isConnected)momentumGateReturnFocus.focus?.({preventScroll:true});
+      momentumGateReturnFocus=null;
+    }
+    momentumGate.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){event.preventDefault();onAction('momentum_gate_dismiss',{id:momentumGate.dataset.id,lease:momentumGate.dataset.lease});return;}
+      if(event.key==='Tab'){
+        const controls=[...momentumGate.querySelectorAll('button:not(:disabled)')];
+        if(!controls.length)return;
+        const first=controls[0],last=controls[controls.length-1];
+        if(event.shiftKey&&(document.activeElement===first||document.activeElement===momentumGate)){event.preventDefault();last.focus();}
+        else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+      }
+    });
     root.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]"); if (!button) return;
       const action = button.dataset.action;
@@ -104,6 +134,10 @@
       if (["register", "login", "pricing", "check-account"].includes(action)) { onAction(action, {}); return; }
       if (action === "minimize") { root.classList.toggle("collapsed"); button.textContent = root.classList.contains("collapsed") ? "+" : "−"; button.title = root.classList.contains("collapsed") ? "展开悬浮框" : "收起悬浮框"; button.setAttribute("aria-label", button.title); return; }
       if (action === "dismiss") { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); onAction("dismiss", {}); return; }
+      if(action==='momentum-gate-continue'||action==='momentum-gate-dnd'){
+        if(!event.isTrusted||momentumGate.classList.contains('hidden'))return;
+        setGateBusy(true);onAction(action==='momentum-gate-dnd'?'momentum_gate_dnd':'momentum_gate_dismiss',{id:momentumGate.dataset.id,lease:momentumGate.dataset.lease});return;
+      }
       if (action === "generate") { onAction("generate", { userGesture: true }); return; }
       if (action === "change" && candidates.length) {
         if (cycled) { onAction("regenerate", { userGesture: true }); cycled = false; return; }
@@ -129,7 +163,7 @@
       }
       notice.textContent = message;
     }
-    return { showPanelError, previewMomentum: data => momentum?.preview(data), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { showPanelError, previewMomentum: data => momentum?.preview(data), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, showMomentumGate, resolveMomentumGate(){hideMomentumGate();}, momentumGateError(message){setGateBusy(false,message||'暂时无法确认，请重试。');}, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };

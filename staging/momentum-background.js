@@ -24,15 +24,13 @@ export async function diagnose(momentum, storage, owner, state, now = Date.now()
   const {day,pref} = record;
   const policy = state.available ? state.policy : null;
   const context = {eligible:state.eligible,enabled:pref?.enabled === true,globalEnabled:policy?.enabled === true};
-  const coolingUntil = day?.lastShownAt ? day.lastShownAt+day.cooldownMinutes*60000 : null;
   const stage = day?.thresholds ? selectMomentumReminder(day,context,now) : null;
-  const leaseActive = day?.pendingReminder?.expiresAt > now;
   const reason = !policy ? '请刷新购买权益' : !context.eligible ? '购买权益未解锁' :
     !context.globalEnabled ? '全局暂停' : !context.enabled ? '个人监测关闭' :
     !day?.thresholds ? '当天尚未建立阈值' : day.dnd ? '今日免打扰' :
     pref.latestDay > date ? '本地日期回退' : day.reminderCount >= day.maxReminders ? '达到每日提醒上限' :
-    coolingUntil > now ? '仍在冷却' : leaseActive ? '存在待展示租约' :
-    stage ? '符合领取条件，需可见回复框' : '尚未达到未展示阶段';
+    day.pendingReminder?.state==='presenting' ? '提醒正在展示' : day.pendingReminder ? '阶段已达标，等待下一次回复' :
+    stage ? '阶段已达标，等待下一次回复' : day.shownThrough>=3 ? '该阶段已完成' : '尚未达到阶段';
   return {
     reason,date,configVersion:policy?.version??null,dayVersion:day?.version??null,
     oldPolicy:Boolean(policy&&day?.version&&policy.version!==day.version),
@@ -40,15 +38,15 @@ export async function diagnose(momentum, storage, owner, state, now = Date.now()
     ackCount:day?.count??0,lastAckAt:day?.lastAckAt??null,
     queuedAcks:Object.keys(outbox).filter(k=>k.startsWith(MOMENTUM_OUTBOX_PREFIX+encodeURIComponent(owner)+':')).length,
     thresholds:day?.thresholds??null,shownThrough:day?.shownThrough??0,
-    remindersShown:day?.reminderCount??0,coolingUntil,doNotDisturb:day?.dnd===true,
-    eligibleStage:stage,leaseExpiresAt:day?.pendingReminder?.expiresAt??null
+    remindersShown:day?.reminderCount??0,doNotDisturb:day?.dnd===true,
+    eligibleStage:stage,pendingStage:day?.pendingReminder?.stage??null,pendingState:day?.pendingReminder?.state??null
   };
 }
 
 export function registerMomentumTesting({momentum, momentumView, accountStates, accountClient}) {
   chrome.runtime.onMessage.addListener((message,sender,respond) => {
     if (sender.id!==chrome.runtime.id || sender.url!==chrome.runtime.getURL('sidepanel/sidepanel.html')) return;
-    if (!['MOMENTUM_STAGING_PREVIEW','MOMENTUM_STAGING_DIAGNOSE'].includes(message?.type)) return;
+    if (!['MOMENTUM_STAGING_PREVIEW','MOMENTUM_STAGING_ARM_NEXT_REPLY','MOMENTUM_STAGING_DIAGNOSE'].includes(message?.type)) return;
     void (async()=>{
       const token=await accountClient.token();
       const owner=accountStates.peekState()?.user?.userId;
@@ -73,7 +71,7 @@ export function registerMomentumTesting({momentum, momentumView, accountStates, 
       if (token!==await accountClient.token()) return {ok:false,error:'账号已切换，请重试。'};
       const {titleZh,bodyZh}=state.policy;
       try {
-        const result=await chrome.tabs.sendMessage(tab.id,{type:'MOMENTUM_STAGING_SHOW',sample:{stage:message.stage,titleZh,bodyZh}},{frameId:0});
+        const result=await chrome.tabs.sendMessage(tab.id,{type:message.type==='MOMENTUM_STAGING_ARM_NEXT_REPLY'?'MOMENTUM_STAGING_ARM_NEXT_REPLY':'MOMENTUM_STAGING_SHOW',sample:{stage:message.stage,titleZh,bodyZh}},{frameId:0});
         return result ?? {ok:false,error:'X 内容脚本未就绪，请刷新 X 后重试。'};
       } catch {
         return {ok:false,error:'当前活动标签页未响应。若已在 X，请刷新后重试。'};

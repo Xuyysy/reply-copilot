@@ -71,6 +71,8 @@
     let pending = false;
     let checking = false;
     let desired;
+    let intentRevision=0;
+    let confirmedEnabled;
     let saveFailed = "";
     let scope;
     let reminder;
@@ -85,10 +87,9 @@
     function showReminder(event, sample) {
       if (sample) preview?.remove();
       else if (preview?.isConnected) return;
-      const acknowledge = () => {
-        if (event.lease) onAction('momentum_presented', {id:event.id, lease:event.lease});
-      };
-      if (!sample && seen.has(event.id)) { acknowledge(); return; }
+      // Rendering is not delivery. A stage is acknowledged only after an
+      // explicit, trusted user action on the visible reminder.
+      if (!sample && seen.has(event.id)) return;
       if (reminder?.dataset.lease === event.lease && event.lease) return;
       if (!sample) clearReminder();
       const node = make('aside');
@@ -97,10 +98,10 @@
       node.className = 'momentum-reminder';
       node.setAttribute('role', 'status');
       const presented = () => {
-        if (!seen.has(event.id)) {
+        if (!seen.has(event.id) && event.lease) {
           seen.add(event.id);
           if (seen.size > 12) seen.delete(seen.values().next().value);
-          acknowledge();
+          onAction('momentum_presented', {id:event.id, lease:event.lease});
         }
       };
       const dismiss = () => sample ? node.remove() : clearReminder();
@@ -118,10 +119,9 @@
         button(copy.original, () => { if (!sample) onAction('momentum_original', {}); }), dnd);
       box.append(node);
       if (sample) return node;
-      if (!event.lease) { presented(); return; }
+      if (!event.lease) return;
       function visible() {
-        if (reminder !== node || !node.isConnected || document.visibilityState !== 'visible' ||
-            Date.now() >= event.expiresAt) return false;
+        if (reminder !== node || !node.isConnected || document.visibilityState !== 'visible') return false;
         const rect = node.getBoundingClientRect();
         if (!rect.width || !rect.height) return false;
         const x = Math.max(0, rect.left) + Math.min(12, rect.width / 2);
@@ -130,24 +130,25 @@
         const hit = root.elementFromPoint?.(x,y);
         return node.contains(hit) && (!root.host || document.elementFromPoint(x,y) === root.host);
       }
-      requestAnimationFrame(() => {
-        if (!visible()) { if (reminder === node) clearReminder(); return; }
-        requestAnimationFrame(() => {
-          if (visible()) presented();
-          else if (reminder === node) clearReminder();
-        });
-      });
+      requestAnimationFrame(() => {if(!visible()&&reminder===node)clearReminder();});
     }
 
     function act(action, data = {}) {
-      if (pending) return;
+      if(action==='momentum_toggle'){
+        const status=value?.status??(value?.available?(value.eligible?'paid':'free'):'unverified');
+        if(status!=='paid'||value?.policy?.enabled===false)return renderStatus();
+        desired=data.enabled;pending=true;saveFailed='';
+        checking=!(value?.proofUntil>Date.now());
+        const intent=++intentRevision;renderStatus();
+        onAction(action,{...data,scope,intent});return;
+      }
+      if(pending&&action==='momentum_refresh')return;
       pending = true;
       saveFailed = "";
-      if (action === "momentum_toggle") desired = data.enabled;
       checking = (action === "momentum_refresh" && !(value?.refreshAfter > Date.now())) ||
-        (action === "momentum_toggle" && !(value?.proofUntil > Date.now()));
+        false;
       renderStatus();
-      onAction(action, action === "momentum_toggle" ? {...data, scope} : data);
+      onAction(action,data);
     }
 
     function renderStatus() {
@@ -157,15 +158,15 @@
       const enabled = desired ?? value?.enabled;
       const running = paid && !paused && value?.enabled === true && enabled === true && !value.dnd;
       box.dataset.running = String(running);
-      toggle.disabled = pending || !paid || paused;
+      toggle.disabled = !paid || paused;
       toggle.checked = paid && enabled === true;
       toggle.title = paused && enabled ? '个人偏好已开启，当前系统暂停' : '';
-      note.textContent = saveFailed || (pending && checking ? copy.checking : pending && desired !== undefined ? copy.saving : !value ? '' : paid
+      note.textContent = saveFailed || (pending && checking ? copy.checking : !value ? '' : paid
         ? paused ? copy.paused : enabled && value.dnd ? copy.dndOn : enabled ? copy.enabled : copy.disabled
         : copy[status] || copy.unverified);
       if (full) {
         plans.hidden = status !== 'free' && status !== 'guest';
-        verify.disabled = pending;
+        verify.disabled = pending && checking;
       }
       if (!paid || !value?.enabled || value.dnd || value.policy?.enabled === false) clearReminder();
       else if (value.reminder) showReminder(value.reminder);
@@ -188,6 +189,7 @@
     return {
       update(next, request = {}) {
         const saving = typeof request.enabled === 'boolean';
+        if(saving&&request.intent!==intentRevision)return;
         const changingAccount = next?.scope !== undefined && next.scope !== scope;
         if (changingAccount) {
           scope = next?.scope;
@@ -195,17 +197,28 @@
           clearReminder();
         }
         if (saving) {
-          desired = undefined;
           pending = false;
-          saveFailed = !changingAccount && next?.saved !== true ? (next?.timeout ? copy.saveTimeout : copy.saveFailed) : "";
+          checking=false;
+          if(changingAccount){
+            desired=undefined;value=next&&next.ok!==false?next:null;confirmedEnabled=value?.enabled===true;saveFailed='';
+          }else if(next&&next.ok!==false&&next.saved===request.enabled){
+            value=next;confirmedEnabled=next.enabled;desired=undefined;saveFailed='';
+          }else if(request.reconciled&&next&&next.ok!==false&&next.available){
+            value=next;confirmedEnabled=next.enabled;desired=undefined;
+            saveFailed=next.enabled===request.enabled?'':copy.saveTimeout;
+          }else{
+            desired=confirmedEnabled;saveFailed=request.reconciled?copy.saveFailed:(next?.timeout?copy.saveTimeout:copy.saveFailed);
+          }
         } else if (changingAccount) {
           desired = undefined;
           pending = false;
+          confirmedEnabled=next?.enabled===true;
           saveFailed = "";
         } else if (desired === undefined) {
           pending = false;
+          if(next&&next.ok!==false)confirmedEnabled=next.enabled===true;
         }
-        if (!saving || next && next.ok !== false) value = next;
+        if (!saving && next && next.ok !== false) value = next;
         renderStatus();
         renderIntro();
       },
@@ -215,32 +228,52 @@
   }
 
   function connect(container, send, onNavigate, {mode} = {}) {
-    let revision = 0;
-    let pending = false;
-    let queued;
+    let running=false,queuedSave=null,queuedOps=[],intentSequence=0,operationSequence=0,latestApplied=0;
     const presenter = mount(container, (action, data) => {
-      if (action === 'momentum_toggle') void refresh({enabled: data.enabled, scope: data.scope});
+      if (action === 'momentum_toggle') {
+        intentSequence=Math.max(intentSequence,data.intent||0);
+        queuedSave={enabled:data.enabled,scope:data.scope,intent:data.intent};
+        void pump();
+      }
       else if (action === 'momentum_refresh') void refresh({refresh: true});
       else if (action === 'momentum_dnd') void refresh({dnd: true});
       else if (action === 'momentum_presented') void send({type:'REPLY_COPILOT_MOMENTUM',presented:data}).catch(() => {});
       else onNavigate(action);
     }, {mode});
-    async function refresh(options = {}) {
-      if (pending) { queued = {...queued, ...options}; return; }
-      pending = true;
-      const current = ++revision;
-      try {
-        const response = await request(send, {type: 'REPLY_COPILOT_MOMENTUM', ...options});
-        if (current === revision) presenter.update(response, options);
-        if (response?.timeout && typeof options.enabled === 'boolean') queued = {...queued};
-      } catch {
-        if (current === revision) presenter.update(null, options);
-      } finally {
-        if (current === revision) {
-          pending = false;
-          if (queued) { const next = queued; queued = null; void refresh(next); }
+    async function pump(){
+      if(running)return;
+      running=true;
+      try{
+        while(queuedSave||queuedOps.length){
+          const saving=Boolean(queuedSave);
+          const options=saving?(queuedSave):(queuedOps.shift());
+          if(saving)queuedSave=null;
+          const operation=++operationSequence;
+          const message={type:'REPLY_COPILOT_MOMENTUM',...options};
+          let response;
+          try{response=await request(send,message);}catch{response=null;}
+          if(saving){
+            if(options.intent!==intentSequence)continue;
+            if(response?.saved===options.enabled&&response?.ok!==false){latestApplied=operation;presenter.update(response,options);continue;}
+            let current=null;
+            try{current=await request(send,{type:'REPLY_COPILOT_MOMENTUM',refresh:true});}catch{}
+            if(options.intent!==intentSequence)continue;
+            latestApplied=operation;
+            presenter.update(current&&current.ok!==false?current:response&&response.ok!==false?response:null,{...options,reconciled:true});
+          }else if(operation>=latestApplied&&!queuedSave){
+            latestApplied=operation;presenter.update(response||null,options);
+          }
         }
-      }
+      }finally{running=false;if(queuedSave||queuedOps.length)void pump();}
+    }
+    function refresh(options={}){
+      if(typeof options.enabled==='boolean'){
+        intentSequence++;queuedSave={...options,intent:intentSequence};
+      }else if(options.refresh||options.ensure){
+        const existing=queuedOps.findIndex(item=>item.refresh||item.ensure);
+        if(existing>=0)queuedOps[existing]={...queuedOps[existing],...options};else queuedOps.push(options);
+      }else queuedOps.push(options);
+      void pump();
     }
     return {refresh, expand: presenter.expand};
   }

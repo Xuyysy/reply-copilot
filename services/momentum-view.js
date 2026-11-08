@@ -1,4 +1,5 @@
 import {DEFAULT_MOMENTUM_CONFIG, validateMomentumConfig} from '../domain/creator-momentum.js';
+import {momentumGateKey} from './creator-momentum.js';
 
 const PAID_TTL = 300_000;
 const FREE_TTL = 120_000;
@@ -72,7 +73,23 @@ export function createMomentumView({accountStates, client, momentum, storage, br
       const {id,lease}=message.presented;
       if (typeof id !== 'string' || !/^\d{4}-\d{2}-\d{2}:[1-3]$/.test(id) ||
           typeof lease !== 'string' || !/^[a-f0-9-]{36}$/i.test(lease)) return {confirmed:false};
-      return {confirmed:await momentum.confirmReminder(owner,{id,lease})};
+      let result;
+      if(message.dnd===true){
+        const completionProof = cached?.token === token && cached.owner === owner ? cached : null;
+        await momentum.view(owner,completionProof?.policy??DEFAULT_MOMENTUM_CONFIG,{eligible:completionProof?.eligible===true,dnd:true,available:!!completionProof});
+        result={confirmed:true,pending:false,dnd:true};
+      }else {
+        // The reminder was already authorized when it was queued. Completing
+        // that visible interaction may outlive the short entitlement cache.
+        const completionProof = cached?.token === token && cached.owner === owner ? cached : null;
+        result=await momentum.confirmReminder(owner,{id,lease,policy:completionProof?.policy??DEFAULT_MOMENTUM_CONFIG});
+      }
+      if(result.confirmed){
+        const gateKey=momentumGateKey(owner);
+        try { if(result.pending)await storage.set({[gateKey]:true});else await storage.remove?.(gateKey); } catch { /* the durable IndexedDB decision remains authoritative */ }
+        void Promise.resolve().then(broadcast).catch(()=>{});
+      }
+      return result;
     }
 
     const saveRequested = typeof message.enabled === 'boolean';
@@ -80,18 +97,18 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     const before = proofFor(token, owner);
     let proof = before;
     // Ordinary ACKs count locally. Only accounts that opted into monitoring renew proof here.
-    const renewAfterAck = !proof && message.claim && (await momentum.snapshot?.(owner))?.enabled === true;
+    const renewAfterAck = !proof && (message.arm||message.claim) && (await momentum.snapshot?.(owner))?.enabled === true;
     if (!await sameAccount()) return locked('unverified');
-    if ((!proof && (renewAfterAck || message.refresh || message.ensure || saveRequested)) ||
+    if ((!proof && (renewAfterAck || message.refresh || message.ensure || message.gate === true || saveRequested)) ||
         (message.refresh && clock() - proof.at >= RETRY_INTERVAL)) {
-      try { proof = await refresh(token, owner, revision, message.refresh === true); }
+      try { proof = await refresh(token, owner, revision, message.refresh === true || message.gate === true); }
       catch { proof = null; if (await sameAccount()) cached = undefined; }
     }
     if (!await sameAccount()) return locked('unverified');
 
     // Passive UI refreshes read IndexedDB only. ACK claims and manual refreshes drain the existing outbox.
     let settled = true;
-    if (!saveRequested && (message.claim || message.refresh || message.ensure)) settled = await momentum.drain(storage);
+    if (!saveRequested && (message.arm || message.claim || message.gate || message.refresh || message.ensure)) settled = await momentum.drain(storage);
     if (!settled && !backlog) {
       backlog = (async () => {
         for (let i = 0; i < 32; i++) if (await momentum.drain(storage)) break;
@@ -105,13 +122,22 @@ export function createMomentumView({accountStates, client, momentum, storage, br
     const policy = proof?.policy ?? DEFAULT_MOMENTUM_CONFIG;
     const canSave = saveRequested && eligible && policy.enabled === true;
     const mutation = canSave || message.dnd === true;
-    const claim = Boolean(!saveRequested && settled && eligible && (message.claim || message.surface || message.ensure));
-    const result = mutation || claim
-      ? await momentum.view(owner, policy, {eligible, enabled: canSave ? message.enabled : undefined, claim, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
+    const arm = Boolean(settled && eligible && (message.arm || message.claim || message.ensure || saveRequested&&message.enabled===true));
+    const gate = Boolean(!saveRequested && settled && eligible && message.gate === true);
+    const result = mutation || arm || gate
+      ? await momentum.view(owner, policy, {eligible, enabled: canSave ? message.enabled : undefined, arm, gate, dnd: message.dnd === true, available: !!proof, assignPolicy: !!proof})
       : await momentum.snapshot?.(owner);
     if (!await sameAccount()) return locked('unverified');
 
-    if (mutation || message.claim || ((message.refresh || message.ensure) && before !== proof)) {
+    if(arm||gate||message.dnd===true||saveRequested){
+      const gateKey=momentumGateKey(owner);
+      try {
+        if(result?.reminderPending&&result.enabled&&policy.enabled&&result.dnd!==true)await storage.set({[gateKey]:true});
+        else if(result?.dnd||!result?.reminderPending||!result?.enabled||!policy.enabled)await storage.remove?.(gateKey);
+      } catch { /* local gate hints are reconstructible and never fail a saved preference */ }
+    }
+
+    if (mutation || arm || gate || ((message.refresh || message.ensure) && before !== proof)) {
       // Other extension views may be suspended or never answer. Their notification is not a save receipt.
       void Promise.resolve().then(broadcast).catch(() => {});
     }

@@ -11,9 +11,10 @@ export function validateMomentumConfig(value){
  if(typeof value.enabled!=='boolean'||typeof value.version!=='string'||value.version.length>100)throw Error('INVALID_CREATOR_CONFIG');
  const ranges=value.ranges;
  if(!Array.isArray(ranges)||ranges.length!==3||ranges.some((r,i)=>!Array.isArray(r)||r.length!==2||r.some(n=>!Number.isSafeInteger(n)||n<1||n>1000000)||r[0]>r[1]||(i&&r[0]<=ranges[i-1][1])))throw Error('INVALID_CREATOR_RANGES');
- if(!Number.isInteger(value.maxReminders)||value.maxReminders<1||value.maxReminders>3||!Number.isInteger(value.cooldownMinutes)||value.cooldownMinutes<90||value.cooldownMinutes>1440)throw Error('INVALID_CREATOR_LIMITS');
+ if(!Number.isInteger(value.maxReminders)||value.maxReminders<1||value.maxReminders>3||
+    value.cooldownMinutes!==undefined&&(!Number.isInteger(value.cooldownMinutes)||value.cooldownMinutes<90||value.cooldownMinutes>1440))throw Error('INVALID_CREATOR_LIMITS');
  for(const k of TEXT)if(typeof value[k]!=='string'||!value[k].trim()||value[k].length>(k.startsWith('title')?120:6000))throw Error('INVALID_CREATOR_TEXT');
- return {...value,ranges:ranges.map(r=>[...r])};
+ return {...value,cooldownMinutes:value.cooldownMinutes??DEFAULT_MOMENTUM_CONFIG.cooldownMinutes,ranges:ranges.map(r=>[...r])};
 }
 export function localDayKey(at){const d=new Date(at);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 export function dailyPolicy(config){return {version:config.version,ranges:config.ranges,maxReminders:config.maxReminders,cooldownMinutes:config.cooldownMinutes};}
@@ -21,7 +22,8 @@ export function createMomentumDay(at,config=DEFAULT_MOMENTUM_CONFIG,random=Math.
  return {day,count:0,version:config.version,thresholds:config.ranges.map(([a,b])=>a+Math.floor(Math.max(0,Math.min(0.999999999,random()))*(b-a+1))),maxReminders:config.maxReminders,cooldownMinutes:config.cooldownMinutes,shownThrough:0,reminderCount:0,lastShownAt:0,dnd:false,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,createdAt:at};
 }
 export function selectMomentumReminder(day,context,now){
- if(!day||day.day!==localDayKey(now)||!context.eligible||!context.enabled||!context.globalEnabled||day.dnd||day.reminderCount>=day.maxReminders||now<day.lastShownAt||day.lastShownAt&&now-day.lastShownAt<day.cooldownMinutes*60000)return null;
- let stage=null;for(let i=0;i<3;i++)if(day.count>=day.thresholds[i]&&i+1>day.shownThrough)stage=i+1;return stage;
+ if(!day||day.day!==localDayKey(now)||!context.eligible||!context.enabled||!context.globalEnabled||day.dnd||day.reminderCount>=day.maxReminders)return null;
+ for(let i=0;i<3;i++)if(day.count>=day.thresholds[i]&&i+1>(day.shownThrough??0))return i+1;
+ return null;
 }
 export function recordMomentumReminder(day,stage,now){return {...day,shownThrough:Math.max(day.shownThrough,stage),reminderCount:day.reminderCount+1,lastShownAt:now};}

@@ -1,5 +1,6 @@
 // Call open before any await so Chrome receives the originating click activation.
-// The side panel listens for the pending-context storage change after it mounts.
+// This helper only opens the control center; reply generation remains tied to
+// the trusted X Reply button and its verified native composer.
 export async function openReplySidePanel(open, publishContext) {
   try {
     await open();

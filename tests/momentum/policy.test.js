@@ -5,20 +5,27 @@ const config={...DEFAULT_MOMENTUM_CONFIG,enabled:true};
 test('daily thresholds fixed, ordered and in configured ranges; disabled/free still have counted days',()=>{
  const day=createMomentumDay(now,config,()=>0.5);assert.deepEqual(day.thresholds,[575,975,1525]);assert.equal(day.count,0);assert.equal(day.version,config.version);assert.equal(localDayKey(now),day.day);
 });
-test('highest eligible stage only, max daily reminders and cooldown; no UI internal thresholds',()=>{
- let day={...createMomentumDay(now,config,()=>0),count:2000};const context={eligible:true,enabled:true,globalEnabled:true};
- assert.equal(selectMomentumReminder(day,context,now),3);day=recordMomentumReminder(day,3,now);assert.equal(selectMomentumReminder(day,context,now+91*60000),null);
- let lower={...createMomentumDay(now,config,()=>0),count:600};assert.equal(selectMomentumReminder(lower,context,now),1);lower=recordMomentumReminder(lower,1,now);lower.count=1600;assert.equal(selectMomentumReminder(lower,context,now+89*60000),null);assert.equal(selectMomentumReminder(lower,context,now+90*60000),3);
+test('eligible stages are delivered in order on separate operations without cooldown',()=>{
+ let day={...createMomentumDay(now,config,()=>0),count:2000,lastShownAt:now};const context={eligible:true,enabled:true,globalEnabled:true};
+ assert.equal(selectMomentumReminder(day,context,now),1);
+ day=recordMomentumReminder(day,1,now);
+ assert.equal(selectMomentumReminder(day,context,now+1),2);
+ day=recordMomentumReminder(day,2,now+1);
+ assert.equal(selectMomentumReminder(day,context,now+2),3);
+ day=recordMomentumReminder(day,3,now+2);
+ assert.equal(selectMomentumReminder(day,context,now+3),null);
 });
 test('free, switch OFF, pause, DND, clock rollback and expired day never remind',()=>{
  const day={...createMomentumDay(now,config,()=>0),count:1700};const base={eligible:true,enabled:true,globalEnabled:true};
  for(const patch of [{eligible:false},{enabled:false},{globalEnabled:false}])assert.equal(selectMomentumReminder(day,{...base,...patch},now),null);
- assert.equal(selectMomentumReminder({...day,dnd:true},base,now),null);assert.equal(selectMomentumReminder({...day,lastShownAt:now+1},base,now),null);assert.equal(selectMomentumReminder(day,base,now+86400000),null);
- assert.equal(selectMomentumReminder(day,base,now),3,'OFF→ON catches up once');
+ assert.equal(selectMomentumReminder({...day,dnd:true},base,now),null);assert.equal(selectMomentumReminder(day,base,now+86400000),null);
+ assert.equal(selectMomentumReminder(day,base,now),1,'OFF→ON catches up at the earliest uncompleted stage');
 });
-test('configuration rejects overlap, excessive reminders, weak cooldown, HTML-type data and editable paid gate',()=>{
- for(const patch of [{ranges:[[500,650],[600,1100],[1350,1700]]},{maxReminders:4},{cooldownMinutes:89},{enabled:'yes'},{paidOnly:false},{overviewZh:{html:'unsafe'}}])assert.throws(()=>validateMomentumConfig({...config,...patch}));
+test('configuration rejects overlap, excessive reminders, malformed legacy cooldown and editable paid gate',()=>{
+ for(const patch of [{ranges:[[500,650],[600,1100],[1350,1700]]},{maxReminders:4},{cooldownMinutes:'90'},{enabled:'yes'},{paidOnly:false},{overviewZh:{html:'unsafe'}}])assert.throws(()=>validateMomentumConfig({...config,...patch}));
  assert.deepEqual(validateMomentumConfig(config).ranges,config.ranges);
+ const {cooldownMinutes,...withoutCooldown}=config;
+ assert.equal(validateMomentumConfig(withoutCooldown).cooldownMinutes,90);
 });
 
 test('daily cap and frozen day policy survive live configuration changes; global pause wins',()=>{

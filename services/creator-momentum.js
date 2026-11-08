@@ -1,6 +1,18 @@
 import {DEFAULT_MOMENTUM_CONFIG,dailyPolicy,createMomentumDay,localDayKey,selectMomentumReminder,recordMomentumReminder} from '../domain/creator-momentum.js';
 export const MOMENTUM_OUTBOX_PREFIX='creatorMomentumDelivery:';
+export const MOMENTUM_GATE_PREFIX='creatorMomentumGate:';
+export const momentumGateKey=ownerId=>MOMENTUM_GATE_PREFIX+encodeURIComponent(ownerId);
 export const momentumReceiptKey=(ownerId,requestId)=>MOMENTUM_OUTBOX_PREFIX+encodeURIComponent(ownerId)+':'+requestId;
+// A small serial lane for preference mutations arriving from independent
+// extension surfaces. Reads remain concurrent; the final received intent wins.
+export function createMomentumMutationQueue(){
+ let tail=Promise.resolve();
+ return operation=>{
+  const result=tail.catch(()=>{}).then(operation);
+  tail=result.then(()=>undefined,()=>undefined);
+  return result;
+ };
+}
 // Included in the existing atomic receipt/history/usage storage.set, not another write.
 export function momentumReceiptPatch(receipt,policy=DEFAULT_MOMENTUM_CONFIG,previous=null){
  try{
@@ -41,8 +53,10 @@ export class MomentumStore {
    return {count:day?.count??0,dnd:day?.dnd===true,enabled:pref?.enabled===true};
   },'readonly');
  }
- async view(ownerId,policy,{eligible=false,enabled,claim=false,dnd=false,available=true,assignPolicy=true}={}){
+ async view(ownerId,policy,{eligible=false,enabled,arm=false,gate=false,claim=false,dnd=false,available=true,assignPolicy=true}={}){
   if(!ownerId)return {eligible:false,enabled:false,available:false,policy};
+  // `claim` is accepted only as a compatibility alias for opening the gate.
+  gate=gate||claim;
   const now=this.clock(),today=localDayKey(now);
   return this.transaction(['days','prefs'],async tx=>{
    const days=tx.objectStore('days'),prefs=tx.objectStore('prefs'),key=JSON.stringify([ownerId,today]);
@@ -51,31 +65,39 @@ export class MomentumStore {
    const day=saved?.thresholds?saved:assignPolicy?{...createMomentumDay(now,policy,this.random),...saved}:{day:today,count:saved?.count??0,createdAt:saved?.createdAt??now,...saved};
    if(enabled===false||eligible&&enabled===true)p.enabled=enabled;
    if(dnd){day.dnd=true;delete day.pendingReminder;}
-   const stage=claim&&today>=p.latestDay
+   const shouldArm=arm||claim;
+   const stage=(shouldArm||gate)&&today>=p.latestDay
     ? selectMomentumReminder(day,{eligible,enabled:p.enabled,globalEnabled:policy.enabled},now) : null;
    let reminder=null;
-   if(stage&&!day.dnd&&(!day.pendingReminder||day.pendingReminder.expiresAt<=now)){
-    reminder={id:today+':'+stage,stage,lease:crypto.randomUUID(),expiresAt:now+10000};
-    day.pendingReminder=reminder;
+   if(stage&&!day.dnd){
+    if(day.pendingReminder?.id!==today+':'+stage){
+     reminder={id:today+':'+stage,stage,lease:crypto.randomUUID(),createdAt:now,state:'pending'};
+     day.pendingReminder=reminder;
+    }else reminder=day.pendingReminder;
+    if(gate){reminder={...reminder,state:'presenting',attemptedAt:now};day.pendingReminder=reminder;}
    }
    p.latestDay=p.latestDay>today?p.latestDay:today;prefs.put(p,ownerId);days.put(day,key);
-   return {eligible,enabled:p.enabled,available,policy,day:today,count:day.count,dnd:day.dnd===true,reminder};
+   return {eligible,enabled:p.enabled,available,policy,day:today,count:day.count,dnd:day.dnd===true,reminder:gate?reminder:null,reminderPending:Boolean(day.pendingReminder)};
   });
  }
- async confirmReminder(ownerId,{id,lease}){
+ async confirmReminder(ownerId,{id,lease,policy=DEFAULT_MOMENTUM_CONFIG}){
   const now=this.clock(),today=localDayKey(now);
   return this.transaction(['days','prefs'],async tx=>{
    const days=tx.objectStore('days'),key=JSON.stringify([ownerId,today]);
    const day=await request(days.get(key));
-   if(day?.deliveredReminder?.id===id&&day.deliveredReminder.lease===lease)return true;
-   if(!day||day.dnd||day.pendingReminder?.id!==id||day.pendingReminder.lease!==lease)return false;
+   const delivered=day?.deliveredReminders||[];
+   if((day?.deliveredReminder?.id===id&&day.deliveredReminder.lease===lease)||delivered.some(item=>item.id===id&&item.lease===lease))return {confirmed:true,pending:Boolean(day.pendingReminder)};
+   if(!day||day.dnd||day.pendingReminder?.id!==id||day.pendingReminder.lease!==lease)return {confirmed:false,pending:false};
    const pref=await request(tx.objectStore('prefs').get(ownerId));
-   if(!pref?.enabled||pref.latestDay>today)return false;
+   if(pref?.latestDay>today)return {confirmed:false,pending:false};
    const next=recordMomentumReminder(day,day.pendingReminder.stage,now);
    next.deliveredReminder={id,lease};
+   next.deliveredReminders=[...delivered.filter(item=>item.id!==id),{id,lease}].slice(-3);
    delete next.pendingReminder;
+   const nextStage=selectMomentumReminder(next,{eligible:true,enabled:pref?.enabled===true,globalEnabled:policy.enabled===true},now);
+   if(nextStage)next.pendingReminder={id:today+':'+nextStage,stage:nextStage,lease:crypto.randomUUID(),createdAt:now,state:'pending'};
    days.put(next,key);
-   return true;
+   return {confirmed:true,pending:Boolean(next.pendingReminder)};
   });
  }
  async prune(){
