@@ -24,7 +24,11 @@ const css=readdirSync(assets).filter(f=>f.endsWith('.css')).map(f=>readFileSync(
 test('creator Momentum admin console: low trigger draft, explicit confirm, copy preview, history and responsive layout',{timeout:40000},async()=>{
  await withMomentumBrowser('<html><style>'+css+'</style><div id="root"></div><script>'+js+'</script></html>',async({evaluate,call})=>{
   const wait=async expr=>{for(let i=0;i<150;i++){if(await evaluate(expr))return;await new Promise(r=>setTimeout(r,10));}throw Error('Admin condition timeout: '+expr);};
-  const clickTab=label=>evaluate('[...document.querySelectorAll("[role=tab]")].find(b=>b.textContent.trim()==='+JSON.stringify(label)+').click()');
+  const clickTab=async label=>{
+   const point=await evaluate(`(()=>{const tab=[...document.querySelectorAll('[role=tab]')].find(b=>b.textContent.trim()===${JSON.stringify(label)});const r=tab.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);
+   await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+   await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+  };
   await wait('document.body.textContent.includes("default-v1")');
   assert.match(await evaluate('document.body.textContent'),/互动势能运营控制台/);
   assert.match(await evaluate('document.body.textContent'),/已购买用户（固定）/);
