@@ -126,15 +126,20 @@ jobs:
           print(f'PASS: {len(actual)} immutable static files verified from {sha}')
           PY
 
-      - name: Use locked Wrangler version from trusted main branch
+      - name: Configure Node.js for trusted deployment tooling
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: api/package-lock.json
 
-      - name: Install Wrangler
-        run: npm --prefix api ci
+      # Main intentionally contains only the approved deployment workflow.
+      # Do not run scripts from candidate source; install the reviewed CLI
+      # in a throwaway directory to avoid a missing main-branch lockfile.
+      - name: Install pinned Wrangler for Pages Direct Upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/staging-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" --version
 
       - name: Deploy only x-reply-helper-staging Pages
         env:
@@ -145,7 +150,7 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          ./api/node_modules/.bin/wrangler pages deploy web/dist \
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" pages deploy web/dist \
             --project-name x-reply-helper-staging \
             --branch codex/v0.4-credits \
             --commit-hash "$SOURCE_SHA" \
