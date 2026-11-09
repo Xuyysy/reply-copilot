@@ -1,0 +1,80 @@
+name: Independent Staging all-users subscription payment readiness verification
+on:
+  push:
+    branches: [chatgpt/staging-subscription-public-smoke-20261109]
+    paths: [.github/workflows/staging-subscription-public-verify.yml]
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: Verify public catalog, anonymous checkout protection and deployment
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.head_commit.message == 'test(staging): verify all-users subscriptions public payment readiness'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/pricing/
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify no app/merchant configuration changed since released source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git diff --name-only fc0e8774e2c37ada505961db12c375cdbcde7ffa HEAD)" = '.github/workflows/staging-subscription-public-verify.yml'
+      - name: Read-only check active Staging Worker, secrets, Pages and Production isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          b="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$b/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/s.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and (.name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED" or .name=="PAYMENTS_ENABLED"))] | length==4 and all(.[];.text=="1"))
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==25)
+          ' "$RUNNER_TEMP/s.json" > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$b/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/w.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="cce90648-f695-4f2e-b254-bf12a2a7736d" and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/w.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$b/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/p.json"
+          jq -e '.success==true and .result[0].id=="f7f487ea-fc8e-4f1e-afdf-3bce98701fa9"' "$RUNNER_TEMP/p.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$b/workers/scripts/reply-copilot-api-production/deployments?per_page=1" > "$RUNNER_TEMP/prod.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="02713430-0c1f-4edd-9677-8945721bb282"' "$RUNNER_TEMP/prod.json" >/dev/null
+          echo 'PASS verified Staging release and unchanged Production'
+      - name: Verify real public catalog, MK99 payment method strings and four tariff amounts
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o "$RUNNER_TEMP/catalog.json" -w "%{http_code}" --max-time 15 'https://api-staging.x-reply-helper.top/v1/subscriptions/plans')"
+          test "$status" = 200
+          jq -e '
+            .checkoutAvailable==true and .autoRenew==false
+            and ([.plans[] | [.plan_code,.price_fen,.daily_limit,.duration_days]] | sort)==[
+              ["basic",6990,500,30],["max",17990,1500,30],
+              ["pro",11990,1000,30],["ultra",25990,2000,30]
+            ]
+            and (.paymentMethods | length > 0 and all(.[]; .=="WECHAT_H5" or .=="ALIPAY_H5"))
+          ' "$RUNNER_TEMP/catalog.json" >/dev/null
+          echo 'PASS 4 plans, 30 days, MK99 channels enabled, no autorenew'
+      - name: Check anonymous POST cannot open any payment or upgrade order
+        shell: bash
+        run: |
+          set -euo pipefail
+          for ep in orders upgrade-quote; do
+            status="$(curl -sS -o "$RUNNER_TEMP/noauth-$ep.json" -w "%{http_code}" --max-time 15 \
+              -X POST "https://api-staging.x-reply-helper.top/v1/subscriptions/$ep" \
+              -H 'Content-Type: application/json' -H 'Origin: https://staging.x-reply-helper.top' --data '{}')"
+            test "$status" = 401 || { echo "Expected anonymous 401 for $ep; got $status"; exit 1; }
+          done
+          echo 'PASS web session still required; no purchase made'
