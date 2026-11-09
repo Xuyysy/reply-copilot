@@ -136,7 +136,7 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   // accounts. No network or real administrator mutation is possible here.
   await evaluate('window.__longEmail=false;window.__detailRows=0;window.__mount(20,"en")');
   await until('!!document.querySelector(\'[role="tablist"]\')');await tab('users');
-  const openDetails=async()=>{await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');};
+  const openDetails=async()=>{await click(`${panel}?.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');};
   const confirmAction=async()=>{
     await until('!!document.querySelector(\'[role="alertdialog"]\')');
     await evaluate(`(()=>{const input=document.querySelector('[role="alertdialog"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Isolated UI regression reason');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
