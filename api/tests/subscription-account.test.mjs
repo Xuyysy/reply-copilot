@@ -8,7 +8,7 @@ const entitlements=async f=>(await f.call('/v1/entitlements',{method:'GET'}));
 const momentum=async f=>(await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'}));
 
 function seedPeriod(f,{now=Date.now(),plan='pro',used=230,reserved=3,validEvent=true}={}){
- const start=now-2*DAY+12345,end=start+PERIOD;
+ const start=now-2*DAY-12345,end=start+PERIOD;
  const prices={basic:6990,pro:11990,max:17990,ultra:25990};
  const limits={basic:500,pro:1000,max:1500,ultra:2000};
  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,paid_at,applied_at) VALUES('order-sub','test-user',?,'purchase',?,'paid',1,10000000000000,1,1,?,?)")
