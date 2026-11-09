@@ -790,3 +790,223 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
   .public-refresh .checkout-payment-option {margin-right:0;max-width:100%;font-size:12px;}
   .public-refresh .button-row .button {max-width:100%;}
 }
+
+/* ── MOMENTUM FIRST FOLD — new visual architecture, Chrome extension theme ── */
+.public-refresh .momentum-v2-landing {
+  isolation:isolate;
+  position:relative;
+  overflow:hidden;
+  background:#f8faff;
+  background-image:radial-gradient(ellipse at 85% 15%,rgba(135,165,255,.17),transparent 43rem),
+    radial-gradient(ellipse at 5% 58%,rgba(83,138,244,.09),transparent 30rem),
+    linear-gradient(175deg,#fff 0%,#f8faff 59%,#edf3ff 100%);
+  border-bottom:1px solid #dce6fb;
+}
+.public-refresh .momentum-v2-landing:before {
+  content:"";pointer-events:none;position:absolute;inset:0;z-index:-1;
+  background:linear-gradient(90deg,rgba(49,91,232,.045) 1px,transparent 1px),
+             linear-gradient(rgba(49,91,232,.045) 1px,transparent 1px);
+  background-size:82px 82px;
+  mask-image:linear-gradient(180deg,black,transparent 72%);
+}
+.public-refresh .momentum-v2-shell {padding-block:46px 36px;}
+.public-refresh .momentum-v2-eyebrow {
+  display:flex;align-items:center;gap:11px;width:fit-content;
+  padding:8px 10px 8px 14px;margin-bottom:36px;
+  border:1px solid #d8e3fa;background:rgba(255,255,255,.94);
+  border-radius:100px;color:#31508e;
+  box-shadow:0 6px 24px rgba(49,91,232,.04);
+  font:800 11px/1.2 ui-monospace,SFMono-Regular,monospace;letter-spacing:.075em;
+}
+.public-refresh .momentum-v2-pulse {width:7px;height:7px;flex:none;background:#315be8;border-radius:50%;box-shadow:0 0 0 4px #dfe8ff;}
+.public-refresh .momentum-v2-pro {font-size:10px;padding:5px 9px;border-radius:100px;background:#1e3f9c;color:#fff;letter-spacing:.06em;}
+.public-refresh .momentum-v2-grid {
+  display:grid;grid-template-columns:minmax(0,1.03fr) minmax(0,.97fr);
+  gap:clamp(34px,5vw,75px);align-items:center;
+}
+.public-refresh .momentum-v2-copy {min-width:0;padding-block:5px 12px;}
+.public-refresh .momentum-v2-overline {
+  color:#365bcb;font-size:11px;font-weight:900;letter-spacing:.15em;
+  text-transform:uppercase;margin-bottom:17px;
+}
+.public-refresh .momentum-v2-copy h1 {
+  display:flex;flex-direction:column;gap:0;
+  margin:0;color:#12213c;letter-spacing:-.075em;line-height:1.11;
+  font-size:clamp(56px,6.6vw,88px);font-weight:850;
+}
+.public-refresh .momentum-v2-heading-accent {
+  width:fit-content;color:#315be8;
+  background:linear-gradient(99deg,#1b43cb 0%,#315be8 50%,#6994ff 100%);
+  -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+}
+.public-refresh .momentum-v2-claim {display:flex;gap:13px;align-items:flex-start;margin-top:29px;}
+.public-refresh .momentum-v2-quote-mark {
+  color:#315be8;font:900 48px/.9 Georgia,serif;
+  opacity:.8;transform:translateY(-1px);
+}
+.public-refresh .momentum-v2-claim p {
+  margin:0;color:#1c2d4c;font-weight:790;font-size:clamp(18px,2.15vw,25px);
+  line-height:1.56;letter-spacing:-.022em;
+}
+.public-refresh .momentum-v2-lead {
+  font-size:14px;line-height:1.93;color:#667690;
+  margin:24px 0 0;max-width:560px;
+}
+.public-refresh .momentum-v2-actions {display:flex;flex-wrap:wrap;align-items:center;gap:11px;margin-top:34px;}
+.public-refresh .momentum-v2-actions .button {
+  display:inline-flex;gap:14px;justify-content:center;align-items:center;
+  padding:15px 19px;font-weight:750;font-size:14px;border-radius:11px;min-height:51px;
+}
+.public-refresh .momentum-v2-primary {background:#315be8;color:#fff;box-shadow:0 13px 29px rgba(49,91,232,.18);}
+.public-refresh .momentum-v2-actions .momentum-v2-secondary {background:#fff;border-color:#d9e4fa;color:#28446f;}
+.public-refresh .momentum-v2-signature {display:flex;align-items:center;gap:12px;margin-top:28px;color:#7688a6;font-size:11px;font-weight:720;letter-spacing:.025em;}
+.public-refresh .momentum-v2-signature-line {width:24px;flex:none;height:1px;background:#9bb2e8;}
+.public-refresh .momentum-v2-device {
+  isolation:isolate;position:relative;overflow:hidden;
+  min-height:490px;border:1px solid #5270af;border-radius:21px;
+  background:#152b52;background-image:
+    radial-gradient(ellipse at 66% 11%,rgba(61,103,213,.25),transparent 24rem),
+    linear-gradient(150deg,#112342,#1a3767 70%,#18365e);
+  box-shadow:0 30px 63px rgba(23,45,93,.22),0 0 0 7px rgba(255,255,255,.54);
+  color:#ecf4ff;
+}
+.public-refresh .momentum-v2-device:after {
+  content:"";position:absolute;pointer-events:none;inset:auto -80px -160px auto;
+  width:300px;height:300px;border:1px solid rgba(135,178,248,.10);border-radius:50%;
+  box-shadow:0 0 0 45px rgba(111,160,230,.035),0 0 0 100px rgba(111,160,230,.023);
+}
+.public-refresh .momentum-v2-device-bar {
+  min-height:81px;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:20px 24px 15px;border-bottom:1px solid rgba(176,203,249,.12);
+}
+.public-refresh .momentum-v2-device-brand {display:flex;align-items:center;gap:11px;}
+.public-refresh .momentum-v2-brand-mark {display:grid;place-items:center;width:37px;height:37px;flex:none;
+  border-radius:10px;background:#315be8;font-size:21px;color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.15);}
+.public-refresh .momentum-v2-device-brand > div {display:flex;flex-direction:column;gap:5px;}
+.public-refresh .momentum-v2-device-brand strong {font:800 12px/1.1 ui-monospace,monospace;letter-spacing:.055em;color:#f0f5ff;}
+.public-refresh .momentum-v2-device-brand small {font:650 9px/1.2 ui-monospace,monospace;letter-spacing:.07em;color:#91b0e5;}
+.public-refresh .momentum-v2-device-state {display:flex;align-items:center;gap:7px;flex:none;
+  font:700 9px/1.2 ui-monospace,monospace;letter-spacing:.07em;color:#b2d2fa;
+  border:1px solid rgba(150,189,250,.21);padding:8px;border-radius:7px;}
+.public-refresh .momentum-v2-device-state span {width:6px;height:6px;border-radius:50%;background:#7ce8eb;}
+.public-refresh .momentum-v2-display {padding:26px 23px 19px;}
+.public-refresh .momentum-v2-chart-title {
+  display:flex;align-items:center;justify-content:space-between;gap:15px;
+  color:#a4bae1;font-size:10px;font-weight:760;letter-spacing:.09em;
+  font-family:ui-monospace,monospace;
+}
+.public-refresh .momentum-v2-chart {display:block;max-width:100%;width:100%;height:auto;margin-top:10px;filter:drop-shadow(0 0 9px rgba(88,129,237,.05));}
+.public-refresh .momentum-v2-mini-steps {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+.public-refresh .momentum-v2-mini-steps > div {
+  display:flex;flex-direction:column;gap:8px;padding:15px 12px 14px;min-width:0;
+  border:1px solid rgba(166,198,254,.11);border-radius:11px;background:rgba(255,255,255,.045);
+}
+.public-refresh .momentum-v2-mini-steps .mv2-mini-active {border-color:rgba(120,176,255,.5);background:rgba(87,135,244,.16);}
+.public-refresh .mv2-mini-num {font:800 10px ui-monospace,monospace;color:#94baff;}
+.public-refresh .momentum-v2-mini-steps strong {color:#e8f0ff;font-weight:800;font-size:13px;line-height:1.3;}
+.public-refresh .momentum-v2-mini-steps small {color:#91a9cb;font-size:9px;font-weight:700;letter-spacing:.035em;line-height:1.4;}
+.public-refresh .momentum-v2-device-foot {
+  display:flex;gap:10px;align-items:center;margin:0 23px;padding:21px 0;
+  border-top:1px solid rgba(176,203,249,.12);
+  color:#a5bddf;font:700 10px/1.45 ui-monospace,monospace;letter-spacing:.055em;
+}
+.public-refresh .momentum-v2-foot-dot {width:7px;height:7px;flex:none;border:1px solid #9bc5ff;background:#6ba2ff;border-radius:2px;transform:rotate(45deg);}
+.public-refresh .mv2-foot-star {margin-left:auto;font-size:23px;color:#85baff;}
+.public-refresh .momentum-v2-value-bar {
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:0;margin-top:56px;border:1px solid #d8e4f9;border-radius:15px;
+  background:rgba(255,255,255,.94);
+  box-shadow:0 10px 37px rgba(36,69,138,.045);
+}
+.public-refresh .momentum-v2-value-bar > div {padding:23px 27px;min-width:0;display:flex;flex-direction:column;gap:8px;}
+.public-refresh .momentum-v2-value-bar > div+div {border-left:1px solid #e4eaf7;}
+.public-refresh .momentum-v2-value-bar span {font:800 10px ui-monospace,monospace;color:#4263c0;letter-spacing:.09em;}
+.public-refresh .momentum-v2-value-bar strong {font-weight:810;font-size:18px;color:#213453;}
+.public-refresh .momentum-v2-value-bar small {font-size:12px;color:#7788a1;}
+.public-refresh .momentum-v2-bottom-link {display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:24px;font-size:11px;font-weight:760;letter-spacing:.08em;color:#8da0c0;}
+.public-refresh .momentum-v2-bottom-link a {color:#3d59a7;letter-spacing:0;text-decoration:none;font-size:13px;}
+.public-refresh .momentum-v2-bottom-link a:hover {text-decoration:underline;text-underline-offset:4px;}
+.public-refresh .home-product-section-title {padding-top:94px;padding-bottom:9px;text-align:center;}
+.public-refresh .home-product-section-eyebrow {font:800 11px ui-monospace,monospace;color:#315be8;letter-spacing:.12em;margin-bottom:17px;}
+.public-refresh .home-product-section-title h2 {max-width:890px;margin:0 auto;font-size:clamp(30px,4vw,52px);line-height:1.25;letter-spacing:-.046em;}
+.public-refresh .home-product-section-title p {max-width:650px;margin:15px auto 0;color:#69788d;line-height:1.75;font-size:15px;}
+
+/* The secondary assistant block is now a deliberate product demo, not a competing hero. */
+.public-refresh .home-hero {
+  margin-top:20px;margin-bottom:58px;
+  border-radius:21px;
+  background:linear-gradient(124deg,#fff 0%,#f4f7ff 67%,#eef4ff 100%);
+  box-shadow:0 14px 42px rgba(31,56,99,.058);
+}
+.public-refresh .home-hero h1 {font-size:clamp(38px,4.2vw,55px);}
+.public-refresh .home-hero .home-hero-eyebrow {font-size:11px;}
+.public-refresh .home-hero .hero-actions .momentum-hero-link {display:none;}
+.public-refresh .home-product-preview {transform:rotate(-1deg);box-shadow:0 26px 56px rgba(39,61,110,.16);}
+.public-refresh #momentum-framework {margin-top:76px;}
+.public-refresh #momentum-framework .momentum-head h2 {font-size:clamp(34px,4.5vw,60px);}
+.public-refresh #creator-momentum {scroll-margin-top:80px;}
+.public-refresh #momentum-framework, .public-refresh #reply-assistant {scroll-margin-top:92px;}
+@media (max-width:1100px) {
+  .public-refresh .momentum-v2-device {min-height:0;}
+  .public-refresh .momentum-v2-grid {gap:32px;}
+  .public-refresh .momentum-v2-copy h1 {font-size:clamp(47px,6.3vw,70px);}
+  .public-refresh .momentum-v2-claim p {font-size:20px;}
+  .public-refresh .momentum-v2-display {padding:21px 16px;}
+  .public-refresh .momentum-v2-device-bar {padding:17px;}
+  .public-refresh .momentum-v2-device-foot {margin-inline:17px;}
+  .public-refresh .momentum-v2-mini-steps > div {padding:12px 8px;}
+  .public-refresh .momentum-v2-mini-steps strong {font-size:11px;}
+}
+@media (max-width:820px) {
+  .public-refresh .momentum-v2-shell {padding-top:32px;padding-bottom:30px;}
+  .public-refresh .momentum-v2-eyebrow {margin-bottom:23px;}
+  .public-refresh .momentum-v2-grid {grid-template-columns:1fr;gap:33px;}
+  .public-refresh .momentum-v2-copy h1 {font-size:clamp(53px,8vw,75px);}
+  .public-refresh .momentum-v2-claim p {max-width:600px;}
+  .public-refresh .momentum-v2-device {max-width:670px;width:100%;margin-inline:auto;}
+  .public-refresh .momentum-v2-value-bar {margin-top:36px;}
+  .public-refresh .momentum-v2-value-bar > div {padding:21px 15px;}
+  .public-refresh .momentum-v2-value-bar strong {font-size:15px;}
+  .public-refresh .home-product-section-title {padding-top:67px;}
+}
+@media (max-width:520px) {
+  .public-refresh .momentum-v2-shell {padding-top:22px;}
+  .public-refresh .momentum-v2-eyebrow {font-size:8px;letter-spacing:.035em;gap:8px;padding-inline:11px;max-width:100%;}
+  .public-refresh .momentum-v2-pro {padding:4px 6px;}
+  .public-refresh .momentum-v2-overline {font-size:9px;letter-spacing:.09em;}
+  .public-refresh .momentum-v2-copy h1 {font-size:clamp(47px,13.3vw,67px);line-height:1.13;}
+  .public-refresh .momentum-v2-claim {margin-top:20px;gap:9px;}
+  .public-refresh .momentum-v2-claim p {font-size:18px;}
+  .public-refresh .momentum-v2-quote-mark {font-size:35px;}
+  .public-refresh .momentum-v2-lead {font-size:13px;line-height:1.78;margin-top:17px;}
+  .public-refresh .momentum-v2-actions {margin-top:24px;gap:8px;}
+  .public-refresh .momentum-v2-actions .button {width:100%;min-height:45px;font-size:13px;padding:12px 14px;}
+  .public-refresh .momentum-v2-signature {font-size:10px;margin-top:22px;line-height:1.55;}
+  .public-refresh .momentum-v2-device {border-radius:15px;box-shadow:0 18px 37px rgba(23,45,93,.14);}
+  .public-refresh .momentum-v2-device-bar {min-height:67px;padding:14px 11px;gap:5px;}
+  .public-refresh .momentum-v2-device-brand {gap:7px;}
+  .public-refresh .momentum-v2-brand-mark {width:30px;height:30px;font-size:17px;}
+  .public-refresh .momentum-v2-device-brand strong {font-size:9px;}
+  .public-refresh .momentum-v2-device-brand small {font-size:7px;}
+  .public-refresh .momentum-v2-device-state {font-size:7px;padding:6px;}
+  .public-refresh .momentum-v2-display {padding:19px 10px 14px;}
+  .public-refresh .momentum-v2-chart-title {font-size:8px;}
+  .public-refresh .momentum-v2-chart {margin-top:0;}
+  .public-refresh .momentum-v2-mini-steps {gap:5px;}
+  .public-refresh .momentum-v2-mini-steps > div {padding:11px 6px;gap:7px;}
+  .public-refresh .momentum-v2-mini-steps strong {font-size:10px;}
+  .public-refresh .momentum-v2-mini-steps small {font-size:8px;}
+  .public-refresh .momentum-v2-device-foot {padding:16px 0;margin:0 12px;font-size:8px;}
+  .public-refresh .momentum-v2-value-bar {grid-template-columns:1fr;margin-top:26px;border-radius:12px;}
+  .public-refresh .momentum-v2-value-bar > div {padding:14px 19px;gap:5px;}
+  .public-refresh .momentum-v2-value-bar > div+div {border-left:0;border-top:1px solid #e4eaf7;}
+  .public-refresh .momentum-v2-value-bar strong {font-size:15px;}
+  .public-refresh .momentum-v2-bottom-link {flex-wrap:wrap;margin-top:17px;font-size:10px;}
+  .public-refresh .home-product-section-title {padding-top:60px;}
+  .public-refresh .home-product-section-title p {font-size:13px;}
+  .public-refresh .home-hero h1 {font-size:clamp(34px,9vw,44px);}
+  .public-refresh #momentum-framework {margin-top:50px;}
+}
+@media(prefers-reduced-motion:reduce) {
+  .public-refresh :is(.momentum-v2-actions .button,.momentum-v2-chart,.momentum-v2-device,.momentum-v2-value-bar) {transition:none!important;animation:none!important;}
+}
