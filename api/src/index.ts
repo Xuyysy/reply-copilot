@@ -1,5 +1,6 @@
 import {adminCreator} from './creator-momentum';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
+import {subscriptionMk99Notify} from './subscription-notify';
 import {createSubscriptionCheckout} from './subscription-checkout';
 import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
@@ -48,6 +49,7 @@ export default {
       if(request.method==="GET"&&path==="/v1/site")return await siteContent(request,env);
       if(request.method==="GET"&&path==="/v1/subscriptions/plans")return await publicSubscriptionPlans(request,env);
       if(request.method==="POST"&&path==="/v1/subscriptions/orders")return await createSubscriptionCheckout(request,env);
+      if(request.method==="POST"&&path==="/v1/payments/mk99/subscriptions/notify")return await subscriptionMk99Notify(request,env);
       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/refresh$/.test(path))return await refreshSubscriptionMk99Payment(request,env,path.split("/")[4]);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/plans")return await adminSubscriptionPlans(request,env);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/users")return await adminSubscriptionUsers(request,env);
