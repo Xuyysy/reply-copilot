@@ -111,6 +111,10 @@ test('wrong amount, merchant, trade or payment channel cannot grant subscription
   const f=ready();
   try{
    seed(f);
+   // The provider trade number is unknown before first trusted confirmation.
+   // A mismatch is only invalid if this order has ALREADY pinned a different
+   // MK99 transaction. Never reject a valid first query just for its ID.
+   if(options.tradeNo)f.sql.prepare("UPDATE subscription_payment_transactions SET provider_payment_id=? WHERE order_id='sub-order-1'").run('MK99_ALREADY_PINNED');
    const r=await query(f,'sub-order-1',options);
    assert.notEqual(r.status,200,JSON.stringify(options));
    assert.equal(counts(f).periods,0);
