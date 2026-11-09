@@ -75,5 +75,8 @@ test('pricing and checkout distinguish 30-day daily subscriptions from permanent
  assert.match(creditCheckout,/额度包不按天清零/);
  assert.match(creditCheckout,/Permanent credit pack checkout/);
  assert.match(account,/永久付费额度/);
+ assert.match(account,/订阅.*免费.*永久/);
+ assert.match(pricing,/订阅.*免费.*永久/);
+ assert.match(home,/免费.*永久/);
  assert.match(home,/永久额度包不主动过期/);
 });

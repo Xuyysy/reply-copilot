@@ -57,10 +57,12 @@ test('daily availability subtracts consumed and in-flight reservations', () => {
   assert.throws(() => subscriptionDailyAvailability(500, -1, 0), /non-negative/);
 });
 
-test('live subscription prioritizes daily bucket then separately paid permanent credits', () => {
+test('live subscription prioritizes daily bucket, then free, then separately paid permanent credits', () => {
   assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 1, paidRemaining: 10, freeRemaining: 200 }), 'subscription');
-  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 10, freeRemaining: 200 }), 'paid');
-  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 0, freeRemaining: 200 }), 'none');
+  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 10, freeRemaining: 200 }), 'free');
+  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 0, freeRemaining: 200 }), 'free');
+  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 10, freeRemaining: 0 }), 'paid');
+  assert.equal(chooseGenerationSource({ subscriptionActive: true, subscriptionRemaining: 0, paidRemaining: 0, freeRemaining: 0 }), 'none');
 });
 
 test('without a subscription existing free-then-paid priority remains unchanged', () => {

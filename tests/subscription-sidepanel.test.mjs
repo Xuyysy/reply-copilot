@@ -49,6 +49,9 @@ test('side panel visibly separates the subscription daily bucket from paid/free 
    assert.ok(html.includes('id="'+id+'"'),id);
  }
  assert.match(html,/id="subscription-quota" class="subscription-quota hidden"/);
+ assert.match(html,/先使用订阅.*免费.*永久/);
+ assert.match(js,/订阅额度已用完.*免费/);
+ assert.match(js,/订阅额度.*免费.*用完.*永久/);
  assert.match(js,/account\.subscription\?\.status==='active'/);
  assert.match(js,/sub\.usedToday\+sub\.reservedToday/);
  assert.match(js,/sub\.expiresAt/);
