@@ -122,17 +122,17 @@ export async function confirmSubscribedDelivery(env:Env,userId:string,requestId:
   }
 }
 
-type ReleaseMode = 'provider_failed' | 'provider_timeout' | 'delivery_expired';
+type ReleaseMode = 'provider_failed' | 'provider_timeout' | 'provider_abandoned' | 'delivery_expired';
 
 /** Atomic release; stale unknown provider requests conservatively settle budget. */
 async function releaseSubscribedAllocation(env:Env,userId:string,requestId:string,now:number,mode:ReleaseMode,cost?:RequestCost):Promise<boolean>{
   const a=await pendingSubscriptionAllocation(env,userId,requestId);
   if(!a)return false;
-  const claim=uuid(),isDelivery=mode==='delivery_expired',isTimeout=mode==='provider_timeout';
+  const claim=uuid(),isDelivery=mode==='delivery_expired',isTimeout=mode==='provider_timeout',isAbandoned=mode==='provider_abandoned';
   const reqWhere=isDelivery
     ? "status='reserved' AND generation_phase='awaiting_delivery' AND response_expires_at IS NOT NULL AND response_expires_at<? AND delivery_confirmation_id IS NULL"
-    : isTimeout
-    ? "status IN ('reserved','uncertain') AND generation_phase='generating' AND raw_response IS NULL AND response_expires_at IS NULL AND created_at<? AND delivery_confirmation_id IS NULL AND budget_finalization_ref IS NULL"
+    : (isTimeout||isAbandoned)
+    ? "status IN ('reserved','uncertain') AND generation_phase='generating' AND raw_response IS NULL AND response_expires_at IS NULL"+(isTimeout?" AND created_at<?":"")+" AND delivery_confirmation_id IS NULL AND budget_finalization_ref IS NULL"
     : "status='reserved' AND generation_phase='generating' AND raw_response IS NULL AND response_expires_at IS NULL AND delivery_confirmation_id IS NULL AND budget_finalization_ref IS NULL";
   const reqArgs=isDelivery?[now]:isTimeout?[now-10*60_000]:[];
   const reqStmt=isDelivery
@@ -187,7 +187,7 @@ export async function cleanupSubscribedReservations(env:Env,now=nowMs(),userId?:
     const scope=explicitRequestId?" AND r.request_id=?":" AND r.created_at<?";
     const rows=await env.DB.prepare("SELECT r.user_id,r.request_id FROM ai_requests r JOIN subscription_ai_allocations a ON a.user_id=r.user_id AND a.request_id=r.request_id AND a.state='reserved' WHERE r.status IN ('reserved','uncertain') AND r.generation_phase='generating' AND r.raw_response IS NULL AND r.response_expires_at IS NULL AND r.delivery_confirmation_id IS NULL AND r.budget_finalization_ref IS NULL"+scope+extra+" ORDER BY r.created_at LIMIT "+MAX_CLEANUP_PER_CALL).bind(...args).all<{user_id:string;request_id:string}>();
     for(const row of rows.results){
-      try{await releaseSubscribedAllocation(env,row.user_id,row.request_id,now,'provider_timeout');}
+      try{await releaseSubscribedAllocation(env,row.user_id,row.request_id,now,explicitRequestId?'provider_abandoned':'provider_timeout');}
       catch(err){if(!(err instanceof ApiFailure&&err.code==='SUBSCRIPTION_RELEASE_CONFLICT'))throw err;}
     }
   }
