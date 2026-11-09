@@ -55,12 +55,14 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
       AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
       AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
       AND t.currency='CNY' AND t.amount_fen=o.amount_fen AND t.merchant_provider IN ('mk99','local_mock')
+      AND (?<>'production' OR t.merchant_provider='mk99')
       AND EXISTS (
         SELECT 1 FROM subscription_payment_events e
         WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
           AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen
+          AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)
       )
-    LIMIT 1`).bind(userId,now,now).first<ActivePeriod>();
+    LIMIT 1`).bind(userId,now,now,env.ENVIRONMENT).first<ActivePeriod>();
   if (!row) return { ...NONE };
 
   const window = subscriptionDayWindow(row.start_at, now);
