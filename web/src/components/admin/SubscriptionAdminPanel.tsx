@@ -8,6 +8,7 @@ import {Table,TableHeader,TableRow,TableHead,TableBody,TableCell} from '../ui/ta
 
 type Plan={id:string;plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;active:number;current:number;version:number};
 type Subscriber={period_id:string;user_id:string;email:string;username:string|null;plan_code:string;period_status:string;effective_status:string;daily_limit:number;used_today:number;reserved_today:number;remaining_today:number;start_at:number|null;end_at:number|null;order_id:string;order_kind:string;amount_fen:number;order_status:string;payment_status:string|null;risk_state:string|null};
+type SubscriptionOrder={id:string;user_id:string;email:string;kind:'purchase'|'renewal'|'upgrade';amount_fen:number;status:string;plan_code:string;created_at:number;paid_at:number|null;applied_at:number|null;payment_status:string|null;risk_state:string|null;merchant_provider:string|null;verified_event_count:number;provider_trade_id:string|null};
 const price=(fen:number)=>'¥'+(fen/100).toFixed(2);
 
 export default function SubscriptionAdminPanel({language,active}:{language:Language;active:boolean}){
@@ -15,6 +16,7 @@ export default function SubscriptionAdminPanel({language,active}:{language:Langu
  const [state,setState]=useState<'loading'|'ready'|'unavailable'|'error'>('loading');
  const [plans,setPlans]=useState<Plan[]>([]);
  const [users,setUsers]=useState<Subscriber[]>([]);
+ const [orders,setOrders]=useState<SubscriptionOrder[]>([]);
  const [status,setStatus]=useState('');
  const [plan,setPlan]=useState('');
  const [error,setError]=useState('');
@@ -27,9 +29,10 @@ export default function SubscriptionAdminPanel({language,active}:{language:Langu
   if(plan)query.set('plan',plan);
   void Promise.all([
    api<{plans:Plan[]}>('/v1/admin/subscriptions/plans'),
-   api<{users:Subscriber[]}>('/v1/admin/subscriptions/users'+(query.size?'?'+query.toString():''))
-  ]).then(([p,u])=>{
-   if(!mounted)return;setPlans(p.plans);setUsers(u.users);setState('ready');
+   api<{users:Subscriber[]}>('/v1/admin/subscriptions/users'+(query.size?'?'+query.toString():'')),
+   api<{orders:SubscriptionOrder[]}>('/v1/admin/subscriptions/orders')
+  ]).then(([p,u,o])=>{
+   if(!mounted)return;setPlans(p.plans);setUsers(u.users);setOrders(o.orders);setState('ready');
   }).catch((cause:unknown)=>{
    if(!mounted)return;
    if(cause instanceof ApiError && cause.status===404){setState('unavailable');return;}
@@ -76,6 +79,22 @@ export default function SubscriptionAdminPanel({language,active}:{language:Langu
      </TableRow>)}</TableBody></Table>
    </div>
    {!users.length?<p role="status" className="text-sm text-muted-foreground">{t('暂无符合条件的订阅记录。','No matching subscriptions.')}</p>:null}
+  </CardContent></Card>:null}
+  {state==='ready'?<Card><CardHeader><CardTitle>{t('订阅订单审计','Subscription order audit')}</CardTitle></CardHeader><CardContent className="space-y-3">
+   <p className="text-xs text-muted-foreground">{t('最近100条订单。待付款、支付未知或缺少核验事件的记录不能视为已开通权益。','100 recent orders. Pending, unknown or unverified payment events do not grant access.')}</p>
+   <div className="max-h-[30rem] overflow-auto rounded border" role="region" tabIndex={0} aria-label={t('订阅订单列表','Subscription orders')}>
+    <Table className="min-w-[850px]"><TableHeader><TableRow>{[t('用户','User'),t('订单','Order'),t('商品类型','Purchase type'),t('金额','Amount'),t('状态','Status'),t('付款证据','Payment evidence'),t('创建时间','Created')].map(label=><TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader>
+     <TableBody>{orders.map(o=><TableRow key={o.id}>
+      <TableCell className="max-w-40 break-all">{o.email}</TableCell>
+      <TableCell className="max-w-48 break-all text-xs">{o.id}</TableCell>
+      <TableCell>{o.kind} · {o.plan_code}</TableCell>
+      <TableCell>{price(o.amount_fen)}</TableCell>
+      <TableCell>{o.status} / {o.payment_status||'—'}</TableCell>
+      <TableCell>{o.verified_event_count>0&&o.payment_status==='paid'&&o.risk_state==='clear'&&o.paid_at!=null&&o.applied_at!=null?t('已记录成功事件','Success event recorded'):t('未核验或存在风险','Unverified or at risk')}</TableCell>
+      <TableCell>{date(o.created_at)}</TableCell>
+     </TableRow>)}</TableBody></Table>
+   </div>
+   {!orders.length?<p className="text-sm text-muted-foreground">{t('暂无订阅订单。','No subscription orders.')}</p>:null}
   </CardContent></Card>:null}
  </div>;
 }
