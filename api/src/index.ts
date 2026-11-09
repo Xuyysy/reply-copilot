@@ -1,4 +1,5 @@
 import {adminCreator} from './creator-momentum';
+import {adminSubscriptionPlans,adminSubscriptionUsers,publicSubscriptionPlans} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
@@ -43,6 +44,9 @@ export default {
       if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
       if (request.method === "OPTIONS") return options(request, env);
       if(request.method==="GET"&&path==="/v1/site")return await siteContent(request,env);
+      if(request.method==="GET"&&path==="/v1/subscriptions/plans")return await publicSubscriptionPlans(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/plans")return await adminSubscriptionPlans(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/users")return await adminSubscriptionUsers(request,env);
       if(path==="/v1/admin/creator-momentum"&&["GET","POST"].includes(request.method))return await adminCreator(request,env,request.method==="GET"?"read":"save");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/restore")return await adminCreator(request,env,"restore");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/simulate")return await adminCreator(request,env,"simulate");
