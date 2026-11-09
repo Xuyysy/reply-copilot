@@ -1,0 +1,116 @@
+name: Production build artifacts (no deployment)
+
+on:
+  push:
+    branches:
+      - main
+      - 'codex/production-*'
+      - 'codex/chrome-034-production-release'
+      - 'release/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: Build immutable Worker / Pages / Chrome packages
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            web/package-lock.json
+      - name: Install exact dependencies
+        run: |
+          npm --prefix api ci
+          npm --prefix web ci
+      - name: Check Production identity and API types
+        run: |
+          node scripts/production-preflight.mjs
+          npm --prefix api run typecheck
+      - name: Build Worker bundle without uploading to Cloudflare
+        working-directory: api
+        run: |
+          ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json \
+            --dry-run --outdir "$GITHUB_WORKSPACE/dist/production-ci/worker"
+      - name: Build Production Pages
+        env:
+          PUBLIC_API_BASE_URL: https://api.x-reply-helper.top
+          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PRODUCTION_TURNSTILE_SITE_KEY }}
+        run: |
+          test -n "$PUBLIC_TURNSTILE_SITE_KEY" || { echo 'Set public repository variable PRODUCTION_TURNSTILE_SITE_KEY first'; exit 1; }
+          npm --prefix web run build:production
+          mkdir -p dist/production-ci/pages
+          cp -R web/dist/. dist/production-ci/pages/
+      - name: Build production Chrome ZIP (never upload to Web Store)
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+        run: |
+          npm run build:production
+          python3 scripts/package-production-rc.py
+          mkdir -p dist/production-ci/extension
+          cp dist/production-rc/reply-copilot-production-0.3.4.zip dist/production-ci/extension/
+          cp dist/production-rc/provenance.json dist/production-ci/extension/
+          cp api/deploy/production.wrangler.json dist/production-ci/worker-config.json
+      - name: Fingerprint every output with exact Git source
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          base=pathlib.Path('dist/production-ci')
+          assert (base/'worker/index.js').is_file(), 'Wrangler bundle entrypoint missing'
+          assert (base/'pages/index.html').is_file(), 'Production homepage missing'
+          assert (base/'pages/admin/index.html').is_file(), 'Production admin page missing'
+          config=json.loads((base/'worker-config.json').read_text())
+          assert config['name']=='reply-copilot-api-production'
+          assert config['vars']['PAYMENTS_ENABLED']=='1'
+          assert config['vars']['ADMIN_PORTAL_ENABLED']=='1'
+          assert config['vars']['EXTENSION_ORIGIN']=='chrome-extension://fgfjajofkapebgphfidblngcjomkbdaj'
+          assert config['d1_databases'][0]['database_id']=='d9df7d23-9b9c-44ac-a33a-c24474c15691'
+          files={}
+          for p in sorted(base.rglob('*')):
+              assert not p.is_symlink(), 'Symlink in build'
+              if p.is_file():
+                  name=p.relative_to(base).as_posix()
+                  files[name]=hashlib.sha256(p.read_bytes()).hexdigest()
+          assert len(files)>20 and len(files)<600, 'Unexpected package size'
+          manifest={
+            'schema':1,'sourceSha':os.environ['SOURCE_SHA'],
+            'channel':'production',
+            'api':'https://api.x-reply-helper.top',
+            'website':'https://app.x-reply-helper.top',
+            'worker':'reply-copilot-api-production',
+            'pages':'x-reply-helper-production',
+            'extensionId':'fgfjajofkapebgphfidblngcjomkbdaj',
+            'fileCount':len(files),'files':files
+          }
+          (base/'release-manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
+          print(f'PASS: {len(files)} files; source {os.environ["SOURCE_SHA"]}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-build-${{ github.sha }}
+          path: dist/production-ci/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Explain trust boundary
+        run: |
+          echo '### Production bundle prepared; nothing deployed' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Immutable artifact: \`production-build-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Release requires a separate guarded Production deploy workflow.' >> "$GITHUB_STEP_SUMMARY"
