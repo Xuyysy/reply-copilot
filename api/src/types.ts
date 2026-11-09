@@ -23,6 +23,7 @@ export interface Env {
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
   SUBSCRIPTIONS_ENABLED?: string;
+  SUBSCRIPTION_PURCHASES_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;
   PAYMENT_PROVIDER?: string;
   MK99_BASE_URL?: string;
