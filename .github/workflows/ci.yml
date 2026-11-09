@@ -117,7 +117,7 @@ jobs:
           (cd api && npx --no-install wrangler deploy --config deploy/production.wrangler.json --dry-run)
 
       - name: Build and fingerprint Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109'
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109' || github.ref == 'refs/heads/chatgpt/chrome-036-release-candidate-20261109'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
@@ -126,7 +126,7 @@ jobs:
           python3 scripts/package-production-rc.py
 
       - name: Upload Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109'
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109' || github.ref == 'refs/heads/chatgpt/chrome-036-release-candidate-20261109'
         uses: actions/upload-artifact@v4
         with:
           name: production-extension-${{ env.SOURCE_SHA }}
