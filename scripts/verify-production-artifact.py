@@ -79,7 +79,10 @@ def verify(folder: pathlib.Path, source_sha: str):
     ext = json.loads((root / "extension/provenance.json").read_text())
     if ext.get("sourceSha") != source_sha or ext.get("extensionId") != EXPECTED["extensionId"]:
         raise ValueError("Incorrect Chrome source provenance")
-    zip_file = root / "extension/reply-copilot-production-0.3.4.zip"
+    archive = ext.get("archive", "")
+    if not isinstance(archive, str) or not re.fullmatch(r"reply-copilot-production-\\d+\\.\\d+\\.\\d+(?:\\.\\d+)?\\.zip", archive):
+        raise ValueError("Invalid Chrome ZIP filename in provenance")
+    zip_file = root / "extension" / archive
     if not zip_file.is_file() or hashlib.sha256(zip_file.read_bytes()).hexdigest() != ext.get("sha256"):
         raise ValueError("Chrome ZIP digest mismatch")
     return len(actual)
