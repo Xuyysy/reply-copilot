@@ -1,4 +1,5 @@
 name: Staging pricing copy - approved UI-only release
+# Revalidate the exact new SHA after compatibility copy fix.
 
 on:
   push:
