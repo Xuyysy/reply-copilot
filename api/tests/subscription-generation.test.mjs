@@ -77,6 +77,21 @@ test('stale unfinished generation releases subscription reservation and conserva
  }finally{f.sql.close();}
 });
 
+test('explicit authenticated abandon releases a recent in-flight subscription generation once',async()=>{
+ const f=fixture();try{
+   setup(f);await reserve(f,61);
+   f.sql.exec("UPDATE sessions SET kind='extension'");
+   const headers={Authorization:'Bearer '+'b'.repeat(64),Origin:f.env.EXTENSION_ORIGIN};
+   const r=await f.call('/v1/ai/requests/'+id(61)+'/abandon',{headers,body:{requestId:id(61)}});
+   assert.equal(r.status,200,JSON.stringify(r.body));
+   assert.equal(r.body.state,'released');
+   assert.deepEqual({...daily(f)},{used:0,reserved:0});
+   assert.equal(f.sql.prepare("SELECT status FROM ai_requests WHERE request_id=?").get(id(61)).status,'upstream_failed');
+   assert.equal(f.sql.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days").get().settled_micro_usd,100);
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_usage_events WHERE event_type='release'").get().n,1);
+ }finally{f.sql.close();}
+});
+
 test('expired awaiting-delivery response releases only subscription reservation and does not double-settle cost',async()=>{
  const f=fixture();try{
    setup(f);await reserve(f,4);
