@@ -62,6 +62,12 @@ test('side panel and lazy X entry share controls without an initial network requ
     assert.equal(await evaluate('root.querySelector("input").disabled'), true);
     await evaluate('window.full=ReplyCopilotMomentumPresenter.connect(document.querySelector("#side"),send,()=>{},{mode:"full"});full.refresh()');
     await evaluate('full.expand()');
+    // Chrome 0.3.5: introduction must contain only the saved narrative, not a hardcoded disclaimer.
+    assert.equal(await evaluate('document.querySelectorAll("#side .momentum-intro p").length'), 1);
+    assert.doesNotMatch(await evaluate('document.querySelector("#side .momentum-intro").textContent'), /以下为研究与规划说明|外部榜单、实时数据管线和持续模型训练尚未上线|Research and roadmap: external rankings/);
+    await evaluate('document.querySelector("#side .momentum-intro button").click()');
+    assert.equal(await evaluate('document.querySelectorAll("#side .momentum-intro p").length'), 1);
+    assert.doesNotMatch(await evaluate('document.querySelector("#side .momentum-intro").textContent'), /Research and roadmap: external rankings|live data pipelines and continuous model training are not active/);
     assert.doesNotMatch(await evaluate('document.querySelector("#side").textContent'), /本机今日确认生成|· 7/);
     assert.match(await evaluate('document.querySelector("#side").textContent'), /查看套餐.*中文榜单研究/);
     await evaluate('state={...state,status:"paid",enabled:false};Promise.all([full.refresh(),entry.sync()])');
