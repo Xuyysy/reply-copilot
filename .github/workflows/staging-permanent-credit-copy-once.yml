@@ -1,5 +1,5 @@
 name: Staging pricing copy - approved UI-only release
-# Revalidate the exact new SHA after compatibility copy fix.
+# Verified Web label compatibility fix; trigger gated one-time Staging Pages-only release.
 
 on:
   push:
