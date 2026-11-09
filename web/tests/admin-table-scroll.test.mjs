@@ -75,10 +75,10 @@ test('real admin tables scroll independently with sticky headers; controls, dial
     }
   }
   await evaluate('window.__mount(20,"en")');await until('!!document.querySelector(\'[role="tablist"]\')');await tab('users');
-  await click(`${panel}.querySelector('tbody input[type="checkbox"]')`);
+  await click(`${panel}?.querySelector('tbody input[type="checkbox"]')`);
   // Wait for the controlled React checkbox commit, not just mouse dispatch.
-  await until(`${panel}.querySelector('tbody input[type="checkbox"]').checked===true`);
-  assert.equal(await evaluate(`${panel}.querySelector('tbody input[type="checkbox"]').checked`),true);
+  await until(`${panel}?.querySelector('tbody input[type="checkbox"]').checked===true`);
+  assert.equal(await evaluate(`${panel}?.querySelector('tbody input[type="checkbox"]').checked`),true);
   await click(`[...${panel}.querySelectorAll('button')].find(el=>el.textContent.includes('CSV'))`);await until('window.__downloads.length===1');
   await click(`${panel}.querySelector('tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('person0@example.test'));
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
@@ -153,13 +153,13 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await openDetails();await click(`[...document.querySelectorAll('[role="dialog"] button')].find(el=>el.textContent==='Archive account')`);await confirmAction();
   await until(`window.__calls.some(c=>c.path==='/v1/admin/users/u0/archive')`);
-  await click(`${panel}.querySelector('tbody input[type="checkbox"]')`);
+  await click(`${panel}?.querySelector('tbody input[type="checkbox"]')`);
   await click(`${panel}.querySelectorAll('tbody button')[1]`);await until('!!document.querySelector(\'[role="alertdialog"]\')');
   await evaluate(`(()=>{const input=document.querySelector('[role="alertdialog"] input');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,'Isolated layout test reason');input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
   await until(`![...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm').disabled`);
   await click(`[...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm')`);
   await until(`window.__calls.some(c=>c.path==='/v1/admin/users/u0/status'&&c.body.status==='frozen')&&document.querySelector('[role="tabpanel"][data-state="active"] tbody tr')?.textContent.includes('Frozen')`);
-  await click(`${panel}.querySelector('tbody input[type="checkbox"]')`);
+  await click(`${panel}?.querySelector('tbody input[type="checkbox"]')`);
   await click(`${panel}.querySelectorAll('tbody input[type="checkbox"]')[1]`);
   await click(`${panel}.querySelectorAll('tbody input[type="checkbox"]')[2]`);
   await click(`[...${panel}.querySelectorAll('button')].find(el=>el.textContent==='Freeze selected')`);await until('!!document.querySelector(\'[role="alertdialog"]\')');

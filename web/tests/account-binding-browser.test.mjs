@@ -87,7 +87,7 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  await shot('binding-approved-en');
  for(const [status,message] of [['expired','设备码已过期'],['used','设备码已使用']]){
   await go('&status='+status);
-  await until('document.body.textContent.includes('+JSON.stringify(message)+')');
+  await until('document.body?.textContent.includes('+JSON.stringify(message)+')');
   assert.equal(await evaluate('Boolean('+dialog+')'),false);
   assert.deepEqual(await evaluate('posts'),[]);
  }
