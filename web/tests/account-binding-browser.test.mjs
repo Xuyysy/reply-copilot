@@ -69,13 +69,13 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
   const image=await call('Page.captureScreenshot',{format:'png'});
   writeFileSync(path.join(process.env.RC_BINDING_SCREENSHOTS,name+'.png'),Buffer.from(image.result.data,'base64'));
  };
- await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
+ await call('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
  await go('');
  await until(dialog);
  assert.match(await evaluate(dialog+'.textContent'),/确认绑定 X Reply Helper.*First account.*binding-fixture.*A1B2C3D4.*不是你的账户/);
  await until(dialog+'.getBoundingClientRect().right<=innerWidth');
  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
- await shot('binding-zh-mobile');
+ await shot('binding-manual-zh-desktop');
  await click(button('取消'));
  await until('!'+dialog);
  assert.deepEqual(await evaluate('posts'),[]);
@@ -113,12 +113,11 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  assert.deepEqual(await evaluate('posts'),[]);
  assert.equal(await evaluate('Boolean('+button('确认绑定插件')+')'),true);
 
- await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
  await go('&bridge=2#binding=975984bd-b962-4814-8a11-8d842f163890');
  await until(dialog+'?.textContent.includes("即将连接当前账户")');
  await assertLocked();
  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
- await shot('binding-auto-zh-mobile');
+ await shot('binding-auto-zh-desktop');
  await click(button('切换账户'));
  await until('location.pathname==="/login" || location.href.startsWith("chrome-error:")');
  assert.ok((await call('Page.getNavigationHistory')).result.entries.some(e=>e.url.includes('/login?mode=login&device_code=A1B2C3D4')));
