@@ -2,9 +2,11 @@ import type { Env } from "./types";
 import { nowMs } from "./security";
 import { releaseExpiredDeliveryReservations } from "./quota";
 import { preserveLegacySignupDevicesBeforeSessionCleanup } from "./signup-benefits";
+import { activateDueQueuedSubscriptions } from "./subscription-renewal";
 
 export async function cleanup(env: Env, now = nowMs()): Promise<void> {
   await releaseExpiredDeliveryReservations(env, now);
+  await activateDueQueuedSubscriptions(env, now);
   await preserveLegacySignupDevicesBeforeSessionCleanup(env, now);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM email_verifications WHERE expires_at<?").bind(now - 86400_000),
