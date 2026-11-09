@@ -156,6 +156,7 @@ CREATE TABLE subscription_ai_allocations (
   created_at INTEGER NOT NULL,
   consumed_at INTEGER,
   released_at INTEGER,
+  finalization_ref TEXT,
   UNIQUE(user_id,request_id),
   FOREIGN KEY(user_id,request_id) REFERENCES ai_requests(user_id,request_id) ON DELETE RESTRICT,
   FOREIGN KEY(period_id,day_index) REFERENCES subscription_daily_usage(period_id,day_index)
