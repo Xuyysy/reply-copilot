@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -31,6 +32,18 @@ def main():
     sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", sha) or (os.environ.get("GITHUB_SHA") and os.environ["GITHUB_SHA"] != sha):
         raise SystemExit("Build source SHA and checkout mismatch")
+    if sys.argv[1:] == ["--pages-only"]:
+        if not (WEB / "index.html").is_file() or not (WEB / "admin/index.html").is_file():
+            raise SystemExit("Staging homepage or admin page missing")
+        OUT.mkdir(parents=True, exist_ok=True)
+        web_files = [f"{sha256(p)}  {p.relative_to(ROOT).as_posix()}" for p in files(WEB)]
+        (OUT / "web-files.sha256").write_text("\n".join(web_files) + "\n")
+        (OUT / "release-manifest.json").write_text(json.dumps({
+            "sourceSha": sha, "channel": "staging", "extensionId": EXT_ID,
+            "pagesProject": "x-reply-helper-staging", "pagesDomain": SITE,
+            "stagingApi": API, "webFileCount": len(web_files), "pagesOnly": True,
+        }, indent=2) + "\n")
+        return
     if not EXT.is_dir() or not WEB.is_dir():
         raise SystemExit("Staging extension and Staging Pages builds are required")
     manifest = json.loads((EXT / "manifest.json").read_text())

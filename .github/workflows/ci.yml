@@ -78,13 +78,19 @@ jobs:
           exit "$result"
 
       - name: Build pinned Staging extension
+        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
         run: npm run build:staging
 
       - name: Package and fingerprint Web and extension
+        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress'
         run: python3 scripts/package-staging-ci.py
+
+      - name: Fingerprint the Pages-only binding fix
+        if: github.ref == 'refs/heads/codex/chrome-034-binding-progress' || github.head_ref == 'codex/chrome-034-binding-progress'
+        run: python3 scripts/package-staging-ci.py --pages-only
 
       - name: Upload immutable Staging Pages bundle
         uses: actions/upload-artifact@v4
@@ -94,7 +100,7 @@ jobs:
           retention-days: 21
           if-no-files-found: error
 
-      - name: Upload ZIP and provenance manifest
+      - name: Upload Staging release provenance
         uses: actions/upload-artifact@v4
         with:
           name: staging-extension-${{ github.sha }}

@@ -4,7 +4,7 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  const dir=mkdtempSync(path.join(tmpdir(),'xrh-payment-ui-')),pending=new Map();let chrome,buffer='',serial=0,session;
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
- const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify(await evaluate('({notice:document.querySelector("[data-payment-notice]")?.textContent,reads:window.__reads,id:window.__id,status:window.__status})')));};
+ const until=async (expr,attempts=240)=>{for(let i=0;i<attempts;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify(await evaluate('({notice:document.querySelector("[data-payment-notice]")?.textContent,reads:window.__reads,id:window.__id,status:window.__status})')));};
  const click=async expr=>{const point=await evaluate(`(()=>{const e=${expr};e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});};
  try{
  await build({plugins:[{name:'binding-fixture-origin',setup(builder){
@@ -15,7 +15,7 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  if(params.has('bridge'))window.chrome={runtime:{sendMessage(id,message,reply){
   window.bridgeCalls.push(message.type);
   const allowed=id==='fgfjajofkapebgphfidblngcjomkbdaj' && message.deviceCode==='A1B2C3D4' && message.proof==='975984bd-b962-4814-8a11-8d842f163890';
-  reply({status:!allowed?'unavailable':message.type==='XRH_BINDING_VERIFY'?'verified':window.connected?'connected':'account_unavailable'});
+  reply({status:!allowed?'unavailable':message.type==='XRH_BINDING_VERIFY'?'verified':window.connected?'connected':params.has('terminal')?'unavailable':'network_error'});
  }}};
  window.fetch=async(url,init={})=>{
   const u=new URL(url);
@@ -43,6 +43,16 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  const go=async extra=>call('Page.navigate',{url:pathToFileURL(file).href+'?device_code=A1B2C3D4'+extra});
  const dialog='document.querySelector("[role=dialog]")';
  const button=text=>`[...${dialog}.querySelectorAll("button")].find(b=>b.textContent.trim()===${JSON.stringify(text)})`;
+ const assertLocked=async()=>{
+  assert.deepEqual(await evaluate(`[...${dialog}.querySelectorAll('button')].map(b=>b.textContent.trim())`),['切换账户']);
+  assert.equal(await evaluate(`!!${dialog}.querySelector('[data-slot="dialog-close"]')`),false);
+  await call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  await call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  const outside=await evaluate(`(()=>{const r=${dialog}.getBoundingClientRect();return {x:4,y:Math.max(1,r.top-8)};})()`);
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',...outside,button:'left',clickCount:1});
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',...outside,button:'left',clickCount:1});
+  assert.equal(await evaluate('Boolean('+dialog+')'),true);
+ };
  const shot=async name=>{
   if(!process.env.RC_BINDING_SCREENSHOTS)return;
   const image=await call('Page.captureScreenshot',{format:'png'});
@@ -92,7 +102,17 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  assert.deepEqual(await evaluate('posts'),[]);
  assert.equal(await evaluate('Boolean('+button('确认绑定插件')+')'),true);
 
+ await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
  await go('&bridge=2#binding=975984bd-b962-4814-8a11-8d842f163890');
+ await until(dialog+'?.textContent.includes("即将连接当前账户")');
+ await assertLocked();
+ assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+ await shot('binding-auto-zh-mobile');
+ await click(button('切换账户'));
+ await until('location.pathname==="/login" || location.href.startsWith("chrome-error:")');
+ assert.ok((await call('Page.getNavigationHistory')).result.entries.some(e=>e.url.includes('/login?mode=login&device_code=A1B2C3D4')));
+
+ await go('&bridge=3#binding=975984bd-b962-4814-8a11-8d842f163890');
  await until(dialog+'?.textContent.includes("即将连接当前账户")');
  assert.deepEqual(await evaluate('posts'),[]);
  assert.equal(await evaluate('Boolean('+button('确认绑定插件')+')'),false);
@@ -101,8 +121,22 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  await evaluate('releaseApproval()');
  await until(dialog+'?.textContent.includes("正在等待插件完成连接")');
  assert.equal(await evaluate(dialog+'.textContent.includes("插件绑定完成")'),false);
+ assert.equal(await evaluate(`[...${dialog}.querySelectorAll('button')].length`),0);
+ await until(dialog+'?.textContent.includes("等待插件连接超时")',500);
+ assert.equal(await evaluate('Boolean('+button('重新检查连接')+')'),true);
  await evaluate('window.connected=true');
+ await click(button('重新检查连接'));
  await until(dialog+'?.textContent.includes("插件绑定完成")');
  assert.equal(await evaluate('posts.length'),1);
+ await call('Emulation.setDeviceMetricsOverride',{width:1280,height:850,deviceScaleFactor:1,mobile:false});
+ await go('&bridge=4&lang=en&terminal=1#binding=975984bd-b962-4814-8a11-8d842f163890');
+ await until(dialog+'?.textContent.includes("Connecting to this account shortly")');
+ assert.equal(await evaluate(`[...${dialog}.querySelectorAll('button')].map(b=>b.textContent.trim()).join(',')`),'Switch account');
+ await shot('binding-auto-en-desktop');
+ await until('Boolean(window.releaseApproval)');
+ await evaluate('releaseApproval()');
+ await until(dialog+'?.textContent.includes("could not be verified")');
+ assert.equal(await evaluate('Boolean('+button('Check connection again')+')'),true);
+ assert.equal(await evaluate(dialog+'.textContent.includes("Extension connected")'),false);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });
