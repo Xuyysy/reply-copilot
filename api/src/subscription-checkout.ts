@@ -20,8 +20,18 @@ type Pending={
  status:string;transaction_status:string;risk_state:string;checkout_state:string;
  cashier_url:string|null;provider_trade_id:string;provider_payment_id:string|null;
  merchant_account:string|null;notification_sign_type:string|null;paid_at:number|null;
+ verified_paid:number;
 };
-const RESULT_FIELDS="o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at";
+const RESULT_FIELDS="o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at,CASE WHEN
+   o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
+   AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
+   AND t.merchant_provider='mk99' AND t.currency='CNY' AND t.amount_fen=o.amount_fen
+   AND EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id
+     AND p.daily_limit=v.daily_limit AND p.status IN ('active','queued','expired'))
+   AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
+     AND e.merchant_provider='mk99' AND e.event_type='PAYMENT_SUCCEEDED'
+     AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
+   THEN 1 ELSE 0 END verified_paid";
 async function existingFor(env:Env,userId:string,operationId:string):Promise<Pending|null>{
  return env.DB.prepare("SELECT "+RESULT_FIELDS+" FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND (o.operation_id=? OR o.status IN ('pending','unknown')) ORDER BY CASE WHEN o.operation_id=? THEN 0 ELSE 1 END,o.created_at DESC LIMIT 1")
    .bind(userId,operationId,operationId).first<Pending>();
@@ -41,9 +51,9 @@ function snapshot(row:Pending,config:Mk99Config){
  const paymentUrl=cachedCashier(row,config);
  return {id:row.id,planCode:row.plan_code,kind:row.kind,amountFen:row.amount_fen,currency:'CNY',
   channel:row.payment_channel,status:row.status,checkout:{
-   outcome:paymentUrl?'ready':row.status==='paid'?'confirmed':'unknown',paymentUrl,
+   outcome:paymentUrl?'ready':row.verified_paid===1?'confirmed':'unknown',paymentUrl,
    // MK99 cashier creation is never a payment fact.
-   paymentConfirmed:row.status==='paid'
+   paymentConfirmed:row.verified_paid===1
   }};
 }
 function sameOrder(row:Pending,planId:string,channel:PaymentChannel,kind:string,merchantAccount:string,signType:string):boolean{
@@ -96,9 +106,12 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
  // idempotency key never bypasses a pending or UNKNOWN provider transaction.
  const existing=await existingFor(env,session.user_id,operationId);
  if(existing){
-   if(!sameOrder(existing,plan.id,channel,kind,config.pid,config.notifySignType))
+   if(!sameOrder(existing,plan.id,channel,existing.operation_id===operationId?existing.kind:kind,config.pid,config.notifySignType))
      throw new ApiFailure(409,'SUBSCRIPTION_PENDING_ORDER','已有未核对的订阅订单，请先查询原订单。');
-   const body={ok:true,order:snapshot(existing,config),resumed:true};
+   const result=snapshot(existing,config);
+   const body={ok:true,order:result,resumed:true};
+   if(existing.status==='paid'&&!result.checkout.paymentConfirmed)
+     return response({...body,ok:false,code:'SUBSCRIPTION_PAYMENT_UNCONFIRMED'},409,env,request);
    if(existing.checkout_state==='unknown'||existing.checkout_state==='preparing'||existing.checkout_state==='unprepared')
      return response({...body,ok:false,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED'},409,env,request);
    return response(body,200,env,request);
