@@ -57,8 +57,8 @@
         "XIAODOU_RETURN_URL": "https://staging.x-reply-helper.top/account/",
         "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com",
         "SUBSCRIPTIONS_ENABLED": "1",
-        "SUBSCRIPTION_PURCHASES_ENABLED": "0",
-        "SUBSCRIPTION_CHECKOUT_ENABLED": "0"
+        "SUBSCRIPTION_PURCHASES_ENABLED": "1",
+        "SUBSCRIPTION_CHECKOUT_ENABLED": "1"
       },
       "d1_databases": [
         {
