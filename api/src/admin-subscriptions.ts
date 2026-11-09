@@ -47,9 +47,11 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
     o.id order_id,o.kind order_kind,o.amount_fen,o.status order_status,
     o.paid_at order_paid_at,o.applied_at order_applied_at,
     t.status payment_status,t.risk_state,t.paid_at transaction_paid_at,
+    t.currency payment_currency,t.amount_fen payment_amount_fen,t.merchant_provider,
     EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
       AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
-      AND e.amount_fen=t.amount_fen) verified_paid_event,
+      AND e.amount_fen=t.amount_fen
+      AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)) verified_paid_event,
     COALESCE(d.used,0) used_today,COALESCE(d.reserved,0) reserved_today
     FROM subscription_periods p
     JOIN users u ON u.id=p.user_id
@@ -67,7 +69,9 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
       typeof row.end_at==='number'&&row.start_at<=now&&now<row.end_at&&
       row.order_status==='paid'&&row.order_paid_at!=null&&row.order_applied_at!=null&&
       row.payment_status==='paid'&&row.transaction_paid_at!=null&&row.risk_state==='clear'&&
-      row.verified_paid_event===1&&row.account_status==='active'&&row.account_archived_at==null;
+      row.verified_paid_event===1&&row.account_status==='active'&&row.account_archived_at==null&&
+      row.payment_currency==='CNY'&&row.payment_amount_fen===row.amount_fen&&
+      (env.ENVIRONMENT!=='production'||row.merchant_provider==='mk99');
     const used=Number(row.used_today)||0,reserved=Number(row.reserved_today)||0;
     return {...row,effective_status:active?'active':row.period_status==='active'?'expired_or_unverified':row.period_status,
       remaining_today:active?Math.max(0,Number(row.daily_limit)-used-reserved):0};
