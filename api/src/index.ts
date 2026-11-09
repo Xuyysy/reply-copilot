@@ -1,5 +1,5 @@
 import {adminCreator} from './creator-momentum';
-import {adminSubscriptionPlans,adminSubscriptionUsers,publicSubscriptionPlans} from './admin-subscriptions';
+import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
@@ -47,6 +47,7 @@ export default {
       if(request.method==="GET"&&path==="/v1/subscriptions/plans")return await publicSubscriptionPlans(request,env);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/plans")return await adminSubscriptionPlans(request,env);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/users")return await adminSubscriptionUsers(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/orders")return await adminSubscriptionOrders(request,env);
       if(path==="/v1/admin/creator-momentum"&&["GET","POST"].includes(request.method))return await adminCreator(request,env,request.method==="GET"?"read":"save");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/restore")return await adminCreator(request,env,"restore");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/simulate")return await adminCreator(request,env,"simulate");
