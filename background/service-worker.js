@@ -12,7 +12,8 @@ import { HistoryService } from "../services/history-service.js";
 import { VoiceProfileService } from "../services/voice-profile-service.js";
 import {generatedHistory,generatedUsage} from "../services/generation-records.js";
 import { UsageService, USAGE_KEY } from "../services/usage-service.js";
-import { AccountClient, ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY } from "../services/account-client.js";
+import { matchesBindingSender } from "../services/binding-bridge.js";
+import { AccountClient, ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY, ACCOUNT_BINDING_RECEIPT_KEY } from "../services/account-client.js";
 import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
@@ -55,6 +56,34 @@ const activeRequests = new Map();
 const generatedInputs = new Map();
 let settingsOpenPromise = null;
 let bindingPromise = null;
+async function checkBinding() {
+  try {
+    const pending = await accountClient.hasPendingDeviceAuthorization();
+    if (pending && !(await accountClient.pollDeviceAuthorization())) return {status:"waiting_website"};
+    if (pending) accountStates.invalidate();
+    if (!(await accountClient.token())) return {status:"invalid"};
+    const account = await accountStates.getState({force:true});
+    return {status:account.source === "server" && account.user?.userId ? "connected" : "account_unavailable", owner:account.user?.userId};
+  } catch (error) {
+    if (error?.code === "DEVICE_CODE_EXPIRED") return {status:"expired"};
+    if (["DEVICE_CODE_USED","INVALID_DEVICE_TOKEN"].includes(error?.code)) return {status:"invalid"};
+    return {status:"network_error"};
+  }
+}
+chrome.runtime.onMessageExternal?.addListener((message,sender,respond)=>{
+  if (!["XRH_BINDING_VERIFY","XRH_BINDING_STATUS"].includes(message?.type)) return false;
+  void (async()=>{
+    const local=await chrome.storage.local.get([ACCOUNT_PENDING_DEVICE_KEY,ACCOUNT_BINDING_RECEIPT_KEY,ACCOUNT_TOKEN_KEY]);
+    const matches=record=>matchesBindingSender({sender,message,record,websiteUrl:RUNTIME_CONFIG.websiteUrl});
+    const pending=matches(local[ACCOUNT_PENDING_DEVICE_KEY]);
+    const receipt=local[ACCOUNT_BINDING_RECEIPT_KEY];
+    if (message.type==="XRH_BINDING_VERIFY") return {status:pending&&!local[ACCOUNT_TOKEN_KEY]?"verified":"unavailable"};
+    if (!pending && !(matches(receipt) && receipt.token===local[ACCOUNT_TOKEN_KEY])) return {status:"unavailable"};
+    const result=await checkBinding();
+    return {status:result.status==="connected" && result.owner!==message.userId?"account_mismatch":result.status};
+  })().then(respond,()=>respond({status:"network_error"}));
+  return true;
+});
 let lastBindingPoll = 0;
 let behaviorWrite = Promise.resolve();
 // Serialize momentum mutations across the floating window, independent X entry,
@@ -146,6 +175,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void behaviorWrite.then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
   }
+  if (message?.type === "REPLY_COPILOT_CHECK_BINDING") {
+    if (!fromExtensionPage) { sendResponse({ok:false}); return false; }
+    void checkBinding().then(({status})=>sendResponse({ok:true,status}));
+    return true;
+  }
   if (message?.type === "REPLY_COPILOT_ACCOUNT_STATE") {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) { sendResponse({ ok: false }); return false; }
     void (async () => {
@@ -162,7 +196,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (pending && Date.now() - lastBindingPoll > 2500) {
         lastBindingPoll = Date.now();
         try { if (await accountClient.pollDeviceAuthorization()) { accountStates.invalidate(); pending = false; } }
-        catch (error) { if (/已过期/.test(error?.message || "")) pending = false; else throw error; }
+        catch (error) { if (["DEVICE_CODE_EXPIRED","DEVICE_CODE_USED","INVALID_DEVICE_TOKEN"].includes(error?.code)) pending = false; else throw error; }
       }
       const state = await accountStates.getState({ force: pending });
       const recoveryRequired=state.status==='credits_exhausted' && ['running','ready','expired'].includes((await new HostedAIClient({accountClient}).recoverGeneration().catch(()=>({state:'unknown'}))).state);

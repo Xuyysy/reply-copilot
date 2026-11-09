@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
+import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
 import { api, ApiError } from "../../lib/api";
 import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
@@ -23,6 +24,7 @@ type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | 
 type OrderRefreshFeedback = { orderId: string; message: string; code?: string; requestId?: string; diagnostic?: { stage: string; upstreamHttpStatus: number | null } };
 
 export default function AccountDashboard() {
+  const bindingTitle = useRef<HTMLHeadingElement>(null);
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [data, setData] = useState<Data | null>(null);
@@ -32,6 +34,11 @@ export default function AccountDashboard() {
   const [refreshingOrderId, setRefreshingOrderId] = useState<string | null>(null);
   const [orderRefreshFeedback, setOrderRefreshFeedback] = useState<OrderRefreshFeedback | null>(null);
   const [code, setCode] = useState(() => typeof location !== "undefined" ? new URL(location.href).searchParams.get("device_code") : null);
+  const [proof, setProof] = useState<string|null>(null);
+  const [autoBinding, setAutoBinding] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const bindingStopped = useRef(false);
+  useEffect(() => { setProof(readBindingProof(code)); }, [code]);
   const [authorization, setAuthorization] = useState<Authorization>(code ? "checking" : "none");
   const [dialogOpen, setDialogOpen] = useState(false);
   const submitting = useRef(false);
@@ -123,7 +130,42 @@ export default function AccountDashboard() {
   }, [validCode, code, language]);
   useEffect(() => { if (state === "ready" && code) void checkAuthorization(); }, [state, code, checkAuthorization]);
 
+  // Only a matching local extension opens the automatic path. Keep a short
+  // window to switch accounts or cancel before the existing CSRF-protected POST.
+  useEffect(() => {
+    if (authorization !== "pending" || !validCode || !proof || !data?.account.user.userId || bindingStopped.current) return;
+    const owner = data.account.user.userId;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void bindingMessage("XRH_BINDING_VERIFY",validCode,proof,owner).then(result => {
+      if (!active || bindingStopped.current || result !== "verified") return;
+      setAutoBinding(true);
+      timer=setTimeout(() => {
+        if (active && !bindingStopped.current && accountOwner.current===owner) void approve(owner);
+      }, 3500);
+    });
+    return () => { active=false; clearTimeout(timer); };
+  }, [authorization,validCode,proof,data?.account.user.userId]);
+
+  useEffect(() => {
+    if (!["approved","used"].includes(authorization) || !validCode || !proof || !data?.account.user.userId || connected) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let attempts=0;
+    const owner=data.account.user.userId;
+    const poll=async()=>{
+      const status=await bindingMessage("XRH_BINDING_STATUS",validCode,proof,owner);
+      if (!active) return;
+      if (status==="connected") {setConnected(true);return;}
+      if (++attempts < 8 && !["unavailable","expired","invalid","account_mismatch"].includes(status)) timer=setTimeout(poll,1000);
+    };
+    void poll();
+    return ()=>{active=false;clearTimeout(timer);};
+  },[authorization,validCode,proof,data?.account.user.userId,connected]);
+
   function dismissAuthorization() {
+    bindingStopped.current=true;
+    setAutoBinding(false);
     setDialogOpen(false);
     setCode(null);
     setAuthorization("none");
@@ -132,16 +174,28 @@ export default function AccountDashboard() {
     history.replaceState(history.state, "", url);
   }
 
-  async function approve() {
+  async function approve(expectedOwner?: string) {
     if (!validCode || busy || submitting.current || authorization !== "pending") return;
     submitting.current = true;
     setBusy(true); setMessage("");
-    try { await api("/v1/extension/approve", { method: "POST", body: JSON.stringify({ deviceCode: validCode }) }); setAuthorization("approved"); setMessage(t("官网授权已批准，正在等待插件完成连接。", "Website approval complete. Waiting for the extension to finish connecting.")); }
+    try {
+      if (expectedOwner) {
+        const current = await api<Account>("/v1/me");
+        if (!proof || bindingStopped.current || current.user.userId !== expectedOwner ||
+            await bindingMessage("XRH_BINDING_VERIFY",validCode,proof,expectedOwner) !== "verified") {
+          setMessage(t("当前账户或本机绑定请求已变化，请核对后重试。", "The signed-in account or local binding request changed. Review and try again."));
+          if(current.user.userId !== expectedOwner) void load();
+          return;
+        }
+      }
+      await api("/v1/extension/approve", { method: "POST", body: JSON.stringify({ deviceCode: validCode }) });
+      setAuthorization("approved");
+    }
     catch (error) {
       setMessage(readableError(error, language));
       if (error instanceof ApiError && ["INVALID_CODE", "DEVICE_CODE_EXPIRED", "DEVICE_CODE_USED"].includes(error.code)) { setDialogOpen(false); void checkAuthorization(); }
     }
-    finally { submitting.current = false; setBusy(false); }
+    finally { submitting.current = false; setBusy(false); setAutoBinding(false); }
   }
   async function logout() {
     setBusy(true); notices.current!.setOwner(null);setPaymentNotice(null);setData(null);
@@ -150,6 +204,8 @@ export default function AccountDashboard() {
   }
   async function switchAccount() {
     if (busy) return;
+    bindingStopped.current=true;
+    setAutoBinding(false);
     setBusy(true); setMessage("");
     try { await api("/v1/auth/logout", { method: "POST", body: "{}" }); location.href = signInHref; }
     catch (error) { setMessage(readableError(error, language)); setBusy(false); }
@@ -196,6 +252,13 @@ export default function AccountDashboard() {
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
+  const waitingForExtension = connected ? t(
+    "插件绑定完成。请返回 X 页面并刷新，即可开始使用 AI 回复功能。",
+    "Extension connected. Return to X and refresh the page to start using AI replies.",
+  ) : t(
+    "已确认绑定请求，正在等待插件完成连接。请返回插件查看连接状态。",
+    "Binding request approved. Waiting for the extension to finish connecting. Return to the extension to check its status.",
+  );
   if (code && !validCode) return <Alert variant="destructive" role="alert"><AlertDescription>{t("设备码格式无效，请返回插件重新发起绑定。", "Invalid device code. Start again in the extension.")}</AlertDescription></Alert>;
   if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{code ? t("登录或免费注册后，将自动返回插件授权确认。", "Sign in or register and you will return to extension approval automatically.") : t("登录后即可查看余额、额度流水和插件绑定。", "Sign in to see your credits, activity and extension connection.")}</p><div className="flex gap-3"><Button asChild><a href={signInHref}>{t("登录", "Sign in")}</a></Button><Button variant="outline" asChild><a href={registerHref}>{t("免费注册", "Register for free")}<ArrowRight /></a></Button></div></CardContent></Card>;
   if (state === "error" || !data) return <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-5">{message || t("账户暂时无法读取。", "Account unavailable.")}<Button variant="outline" onClick={() => void load()}>{t("重试", "Retry")}</Button></AlertDescription></Alert>;
@@ -207,8 +270,44 @@ export default function AccountDashboard() {
     <div className="flex flex-wrap items-center justify-between gap-5"><div className="min-w-0"><p className="section-kicker">{t("账户概览", "Overview")}</p><h2 className="mb-1 break-words text-3xl font-semibold tracking-tight">{account.user.username || t("我的账户", "My account")}</h2><p className="app-muted break-all">{account.user.email}</p></div><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div>
     {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
-    {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? t("官网授权已批准，正在等待插件完成连接。请返回插件查看绑定状态。", "Website approval complete. Return to the extension to check its connection.") : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
-    <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy) dismissAuthorization(); }}><DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" showCloseButton={!busy} closeLabel={t("关闭", "Close")}><DialogHeader><DialogTitle>{t("连接 x-Reply-Helper", "Connect x-Reply-Helper")}</DialogTitle><DialogDescription>{t("你的 Chrome 插件正在请求连接当前账户。", "Your Chrome extension is requesting access to this account.")}</DialogDescription></DialogHeader><div className="space-y-3 rounded-lg border bg-muted/40 p-4 text-sm"><p>{t("当前账户", "Current account")}：<strong className="break-all">{account.user.username || account.user.email}</strong></p><p>{t("邮箱", "Email")}：<span className="break-all">{account.user.email}</span></p><p>{t("本次设备码", "Device code")}：<strong className="font-mono tracking-widest">{validCode}</strong></p></div><p className="text-sm text-muted-foreground">{authorization === "approved" ? t("官网授权已批准，正在等待插件完成连接。请返回插件查看结果。", "Website approval complete. Return to the extension to check the result.") : t("仅在你本人从插件发起连接时确认。确认后，插件可使用当前账户的生成额度。", "Approve only if you started this in the extension. The extension will be able to use this account's credits.")}</p>{message && <Alert role="status" variant={authorization === "approved" ? "default" : "destructive"}><AlertDescription>{message}</AlertDescription></Alert>}<DialogFooter>{authorization === "approved" ? <Button onClick={dismissAuthorization}>{t("完成", "Done")}</Button> : <><Button variant="ghost" disabled={busy} onClick={() => void switchAccount()}>{t("切换账户", "Switch account")}</Button><Button variant="outline" disabled={busy} onClick={dismissAuthorization}>{t("取消", "Cancel")}</Button><Button disabled={busy} onClick={() => void approve()}>{busy && <Loader2 className="animate-spin" />}{t("确认连接插件", "Approve extension connection")}</Button></>}</DialogFooter></DialogContent></Dialog>
+    {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" && connected ? waitingForExtension : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
+    <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy) dismissAuthorization(); }}>
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onOpenAutoFocus={event => { if (bindingTitle.current) { event.preventDefault(); bindingTitle.current.focus({preventScroll:true}); } }} showCloseButton={!busy} closeLabel={t("关闭", "Close")}>
+        <DialogHeader>
+          <DialogTitle ref={bindingTitle} tabIndex={-1} className="outline-none">{autoBinding ? t("正在连接 X Reply Helper", "Connecting X Reply Helper") : t("确认绑定 X Reply Helper", "Confirm X Reply Helper binding")}</DialogTitle>
+          <DialogDescription>{t("你的 Chrome 插件正在请求绑定当前登录账户。", "Your Chrome extension is requesting to connect to the signed-in account.")}</DialogDescription>
+        </DialogHeader>
+        <dl className="grid min-w-0 gap-3 rounded-lg border bg-muted/40 p-4 text-sm">
+          <div><dt className="text-muted-foreground">{t("当前登录账户", "Signed-in account")}</dt><dd className="break-all font-semibold">{account.user.username || account.user.email}</dd></div>
+          <div><dt className="text-muted-foreground">{t("邮箱", "Email")}</dt><dd className="break-all">{account.user.email}</dd></div>
+          <div><dt className="text-muted-foreground">{t("本次设备码", "Device code")}</dt><dd className="font-mono font-semibold tracking-widest">{validCode}</dd></div>
+        </dl>
+        {authorization === "approved" ? (
+          <Alert role="status"><AlertDescription>{waitingForExtension}</AlertDescription></Alert>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">{t("仅在你本人从插件发起连接时确认。确认后，插件可使用当前账户的生成额度。", "Approve only if you started this in the extension. The extension will be able to use this account’s credits.")}</p>
+            <p className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+              {t("不是你的账户？", "Not your account?")}
+              <button type="button" className="min-h-8 rounded-sm text-foreground underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-2 disabled:opacity-50" disabled={busy} onClick={() => void switchAccount()}>
+                {t("切换账户", "Switch account")}
+              </button>
+            </p>
+            {message && <Alert role="status" variant="destructive"><AlertDescription>{message}</AlertDescription></Alert>}
+          </>
+        )}
+        <DialogFooter>
+          {authorization === "approved" ? (
+            <Button variant="outline" onClick={dismissAuthorization}>{t("关闭", "Close")}</Button>
+          ) : (
+            <>
+              <Button variant="outline" disabled={busy} onClick={dismissAuthorization}>{t("取消", "Cancel")}</Button>
+              {autoBinding ? <p role="status" className="text-sm text-muted-foreground">{t("即将连接当前账户…", "Connecting to this account shortly…")}</p> : <Button disabled={busy} onClick={() => void approve()}>{busy && <Loader2 className="animate-spin" />}{t("确认绑定插件", "Confirm extension binding")}</Button>}
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
     <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
       <Card className="min-w-0 self-start">
         <CardHeader><CardTitle>{t("最近额度流水", "Recent activity")}</CardTitle></CardHeader>

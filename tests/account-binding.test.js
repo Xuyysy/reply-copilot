@@ -32,7 +32,7 @@ test("device binding opens only the website code, never a bearer token URL", asy
   assert.equal(await client.pollDeviceAuthorization(), false);
   assert.equal(await client.pollDeviceAuthorization(), true);
   assert.equal(storage.data[ACCOUNT_TOKEN_KEY], "b".repeat(64));
-  assert.equal(storage.data[ACCOUNT_PENDING_DEVICE_KEY], undefined);
+  assert.equal(storage.data[ACCOUNT_PENDING_DEVICE_KEY], null);
   await assert.rejects(client.beginDeviceAuthorization(), /已连接/);
   await client.logout();
   assert.equal(storage.data[ACCOUNT_TOKEN_KEY], undefined);

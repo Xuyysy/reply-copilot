@@ -6,6 +6,8 @@ import {AccountClient} from '../services/account-client.js';
 const storage=new StorageService(),profiles=new VoiceProfileService(),usage=new UsageService(),accountClient=new AccountClient();
 const $=id=>document.getElementById(id);
 let accountPoll=null;
+let manualBindingCheck=false;
+let wasPending=false;
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -42,14 +44,38 @@ async function refreshDashboard(){
   $('account-name').textContent=account?.pending?'正在等待官网确认':status==='guest'?'尚未连接账户':status==='auth_expired'?'登录已过期':status==='auth_unavailable'?'暂时无法确认账户':status==='frozen'?'账户已冻结':account?.user?.username||account?.user?.email||'已连接账户';
   $('account-summary').textContent=account?.pending?'请在官网完成授权，返回后点击查看绑定状态。':status==='guest'?'注册并验证邮箱，免费领取 200 次。':status==='auth_expired'?'请重新连接官网账户。':status==='auth_unavailable'?'网络暂不可用，请重试；原账户凭据仍保留。':status==='frozen'?'AI 生成已停用。请到官网账户中心查看账户状态。':status==='credits_exhausted'?'生成次数已用完，支付暂未开放。':'余额来自官网服务。';
   if(account?.quota&&account.source==='server'){$('quota-total').textContent=String(account.quota.totalRemaining);$('quota-free').textContent=String(account.quota.freeRemaining);$('quota-paid').textContent=String(account.quota.paidRemaining);}
+  if (!manualBindingCheck && wasPending && account?.user && !account.pending) $('binding-feedback').textContent='插件绑定完成，刷新 X 页面即可使用。';
+  wasPending=Boolean(account?.pending);
   if(account?.pending&&!accountPoll)accountPoll=setInterval(()=>void refreshDashboard(),3500);
   if(!account?.pending&&accountPoll){clearInterval(accountPoll);accountPoll=null;}
 }
 
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button');if(!button)return;
-  if(button.id==='account-refresh'||button.id==='check-binding'){void refreshDashboard();return;}
+  if(button.id==='account-refresh'){void refreshDashboard();return;}
+  if(button.id==='check-binding'){
+    if(manualBindingCheck)return;
+    manualBindingCheck=true;button.disabled=true;
+    const feedback=$('binding-feedback');
+    feedback.textContent='正在检查绑定状态…';
+    try{
+      const result=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_CHECK_BINDING'}).catch(()=>null);
+      const labels={
+        connected:'插件绑定完成，刷新 X 页面即可使用。',
+        waiting_website:'正在等待官网完成登录或授权。',
+        waiting_extension:'正在等待插件完成连接。',
+        expired:'设备码已过期，请重新连接。',
+        invalid:'绑定已失效，请重新连接。',
+        account_unavailable:'已绑定，但暂时无法确认账户状态，请重试。',
+        network_error:'网络异常，请重试。',
+      };
+      feedback.textContent=labels[result?.status]||labels.network_error;
+      await refreshDashboard();
+    }finally{manualBindingCheck=false;button.disabled=false;}
+    return;
+  }
   if(button.id==='connect-register'||button.id==='connect-login'){
+    $('binding-feedback').textContent='';
     button.disabled=true;
     const response=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_BEGIN_BINDING',mode:button.id==='connect-register'?'register':'login'}).catch(()=>null);
     $('account-summary').textContent=response?.ok?'已打开官网，请完成登录与授权。':response?.error||'打开官网失败，请重试。';

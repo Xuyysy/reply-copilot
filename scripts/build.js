@@ -44,6 +44,8 @@ if (packagedChannel) {
     manifest.background.service_worker = "staging/service-worker.js";
     manifest.content_scripts[0].js.unshift("staging/momentum-content.js");
   }
+  const bindingOrigin = channel === "production" ? "https://app.x-reply-helper.top" : "https://staging.x-reply-helper.top";
+  if (websiteUrl === bindingOrigin) manifest.externally_connectable = {matches:[`${bindingOrigin}/*`]};
   manifest.host_permissions = [`${hostedApiUrl}/*`];
   writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   if (existsSync(path.join(output, "dev")) || existsSync(path.join(output, "config", "dev-state.js")) || existsSync(path.join(output, "services", "deepseek-client.js"))) throw new Error("Development-only files entered hosted package");

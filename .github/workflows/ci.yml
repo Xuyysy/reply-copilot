@@ -102,6 +102,23 @@ jobs:
           retention-days: 21
           if-no-files-found: error
 
+      - name: Build and fingerprint Production Chrome candidate
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2'
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+        run: |
+          npm run build:production
+          python3 scripts/package-production-rc.py
+
+      - name: Upload Production Chrome candidate
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-extension-${{ github.sha }}
+          path: dist/production-rc/
+          if-no-files-found: error
+
       - name: Always save full test logs
         if: always()
         uses: actions/upload-artifact@v4

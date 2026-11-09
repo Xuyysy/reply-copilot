@@ -2,6 +2,7 @@ import { RUNTIME_CONFIG } from "../config/runtime.js";
 
 export const ACCOUNT_TOKEN_KEY = "replyCopilotAccountToken";
 export const ACCOUNT_DEVICE_ID_KEY = "replyCopilotDeviceId";
+export const ACCOUNT_BINDING_RECEIPT_KEY = "replyCopilotBindingReceipt";
 export const ACCOUNT_PENDING_DEVICE_KEY = "replyCopilotPendingDevice";
 
 function allowedOrigin(raw, config) {
@@ -12,13 +13,13 @@ function allowedOrigin(raw, config) {
 }
 
 export class AccountClient {
-  constructor({ config = RUNTIME_CONFIG, storage = globalThis.chrome?.storage?.local, fetchImpl = fetch, openTab = (url) => chrome.tabs.create({ url }) } = {}) { this.config = config; this.storage = storage; this.fetchImpl = fetchImpl; this.openTab = openTab; }
+  constructor({ config = RUNTIME_CONFIG, storage = globalThis.chrome?.storage?.local, fetchImpl = fetch, openTab = (url) => chrome.tabs.create({ url }), updateTab = globalThis.chrome?.tabs?.update?.bind(globalThis.chrome.tabs) } = {}) { this.config = config; this.storage = storage; this.fetchImpl = fetchImpl; this.openTab = openTab; this.updateTab = updateTab; }
   websiteUrl(path) {
     if (!this.config.websiteUrl || !allowedOrigin(this.config.websiteUrl, this.config)) return null;
     try { const url = new URL(path, this.config.websiteUrl); return url.origin === new URL(this.config.websiteUrl).origin ? url.href : null; }
     catch { return null; }
   }
-  async openWebsite(path) { const url = this.websiteUrl(path); if (!url) throw new Error("官网尚未配置，请稍后再试。"); await this.openTab(url); }
+  async openWebsite(path) { const url = this.websiteUrl(path); if (!url) throw new Error("官网尚未配置，请稍后再试。"); return this.openTab(url); }
   openLoginPage(mode = "login") { return this.openWebsite(mode === "register" ? "/login?mode=register" : "/login"); }
   openAccountPage() { return this.openWebsite("/account"); }
   openPurchasePage() { return this.openWebsite("/pricing"); }
@@ -50,7 +51,7 @@ export class AccountClient {
     if (await this.token()) throw new Error("账户已连接。如需切换账号，请先在设置中心退出当前账户。");
     const pending = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
     if (pending?.deviceToken && pending?.deviceCode && Date.parse(pending.expiresAt || "") > Date.now()) {
-      await this.openWebsite(`/account?device_code=${pending.deviceCode}`);
+      await this.openBindingTab(pending);
       return pending.deviceCode;
     }
     const saved = await this.storage.get(ACCOUNT_DEVICE_ID_KEY);
@@ -58,24 +59,57 @@ export class AccountClient {
     await this.storage.set({ [ACCOUNT_DEVICE_ID_KEY]: deviceId });
     const data = await this.request("/v1/extension/device-code", { method: "POST", authenticate: false, body: { deviceId } });
     if (!/^[A-F0-9]{8}$/.test(data?.deviceCode || "") || !/^[a-f0-9]{64}$/.test(data?.deviceToken || "")) throw new Error("绑定请求返回内容无效。");
-    await this.storage.set({ [ACCOUNT_PENDING_DEVICE_KEY]: { deviceToken: data.deviceToken, deviceCode: data.deviceCode, expiresAt: data.expiresAt } });
-    await this.openWebsite(`/account?device_code=${data.deviceCode}`);
+    await this.openBindingTab(data);
     return data.deviceCode;
   }
-  async pollDeviceAuthorization() {
+  async openBindingTab({deviceToken, deviceCode, expiresAt}) {
+    const path = `/account?device_code=${deviceCode}`;
+    if (!this.updateTab || !["staging","production"].includes(this.config.channel)) {
+      await this.storage.set({[ACCOUNT_PENDING_DEVICE_KEY]:{deviceToken,deviceCode,expiresAt}});
+      await this.openWebsite(path);
+      return;
+    }
+    const proof = crypto.randomUUID();
+    const url = this.websiteUrl(`${path}#binding=${proof}`);
+    if (!url) throw new Error("官网尚未配置，请稍后再试。");
+    const tab = await this.openTab("about:blank");
+    if (!Number.isInteger(tab?.id)) throw new Error("无法打开绑定页面。");
+    await this.storage.set({[ACCOUNT_PENDING_DEVICE_KEY]:{deviceToken,deviceCode,expiresAt,proof,tabId:tab.id}});
+    await this.updateTab(tab.id,{url});
+  }
+  pollDeviceAuthorization() {
+    if (!this.bindingPoll) this.bindingPoll = this.exchangePending().finally(() => { this.bindingPoll = null; });
+    return this.bindingPoll;
+  }
+  async exchangePending() {
     const pending = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
     if (!pending?.deviceToken) return false;
-    if (Date.parse(pending.expiresAt || "") < Date.now()) { await this.storage.remove(ACCOUNT_PENDING_DEVICE_KEY); throw new Error("绑定码已过期，请重新登录。"); }
-    const data = await this.request("/v1/extension/exchange", { method: "POST", authenticate: false, body: { deviceToken: pending.deviceToken } });
+    if (!(Date.parse(pending.expiresAt || "") > Date.now())) throw Object.assign(new Error("绑定码已过期，请重新登录。"), {code:"DEVICE_CODE_EXPIRED"});
+    let data;
+    try {
+      data = await this.request("/v1/extension/exchange", { method: "POST", authenticate: false, body: { deviceToken: pending.deviceToken } });
+    } catch (error) {
+      if (["DEVICE_CODE_USED","INVALID_DEVICE_TOKEN"].includes(error?.code)) {
+        const current = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
+        if (current?.deviceToken === pending.deviceToken) await this.storage.remove(ACCOUNT_PENDING_DEVICE_KEY);
+      }
+      throw error;
+    }
     if (data?.status === "pending") return false;
     if (data?.status !== "approved" || !/^[a-f0-9]{64}$/.test(data?.accessToken || "")) throw new Error("绑定结果无效。");
-    await this.storage.set({ [ACCOUNT_TOKEN_KEY]: data.accessToken });
-    await this.storage.remove(ACCOUNT_PENDING_DEVICE_KEY);
+    const current = (await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY];
+    if (current?.deviceToken !== pending.deviceToken) return false;
+    const {deviceCode, proof, tabId, expiresAt} = current;
+    await this.storage.set({
+      [ACCOUNT_TOKEN_KEY]: data.accessToken,
+      [ACCOUNT_PENDING_DEVICE_KEY]: null,
+      [ACCOUNT_BINDING_RECEIPT_KEY]: {deviceCode, proof:proof ?? null, tabId:tabId ?? null, expiresAt, token:data.accessToken},
+    });
     return true;
   }
   async hasPendingDeviceAuthorization() { return Boolean((await this.storage.get(ACCOUNT_PENDING_DEVICE_KEY))[ACCOUNT_PENDING_DEVICE_KEY]?.deviceToken); }
   async logout() {
     try { if (await this.token()) await this.request("/v1/auth/logout", { method: "POST", body: {} }); }
-    finally { await this.storage.remove([ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY]); }
+    finally { await this.storage.remove([ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY, ACCOUNT_BINDING_RECEIPT_KEY]); }
   }
 }
