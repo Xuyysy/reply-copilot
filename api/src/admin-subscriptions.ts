@@ -43,8 +43,13 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
   const now=Date.now();
   const rows=await env.DB.prepare(`SELECT p.id period_id,p.user_id,u.email,u.username,u.status account_status,
     p.status period_status,v.plan_code,p.daily_limit,p.start_at,p.end_at,p.created_at,
+    u.archived_at account_archived_at,
     o.id order_id,o.kind order_kind,o.amount_fen,o.status order_status,
-    t.status payment_status,t.risk_state,
+    o.paid_at order_paid_at,o.applied_at order_applied_at,
+    t.status payment_status,t.risk_state,t.paid_at transaction_paid_at,
+    EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
+      AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
+      AND e.amount_fen=t.amount_fen) verified_paid_event,
     COALESCE(d.used,0) used_today,COALESCE(d.reserved,0) reserved_today
     FROM subscription_periods p
     JOIN users u ON u.id=p.user_id
@@ -60,7 +65,9 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
   return response({users:rows.results.map((row:Record<string,unknown>)=>{
     const active=row.period_status==='active'&&typeof row.start_at==='number'&&
       typeof row.end_at==='number'&&row.start_at<=now&&now<row.end_at&&
-      row.order_status==='paid'&&row.payment_status==='paid'&&row.risk_state==='clear';
+      row.order_status==='paid'&&row.order_paid_at!=null&&row.order_applied_at!=null&&
+      row.payment_status==='paid'&&row.transaction_paid_at!=null&&row.risk_state==='clear'&&
+      row.verified_paid_event===1&&row.account_status==='active'&&row.account_archived_at==null;
     const used=Number(row.used_today)||0,reserved=Number(row.reserved_today)||0;
     return {...row,effective_status:active?'active':row.period_status==='active'?'expired_or_unverified':row.period_status,
       remaining_today:active?Math.max(0,Number(row.daily_limit)-used-reserved):0};
