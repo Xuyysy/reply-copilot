@@ -85,6 +85,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
       AND t.provider_trade_id=? AND (t.provider_payment_id IS NULL OR t.provider_payment_id=?)
       AND t.amount_fen=? AND t.amount_fen=x.amount_fen
       AND x.amount_fen=(SELECT price_fen FROM subscription_plan_versions WHERE id=x.plan_version_id)
+      AND EXISTS(SELECT 1 FROM users u WHERE u.id=x.user_id AND u.status='active' AND u.archived_at IS NULL)
     ON CONFLICT(merchant_provider,provider_event_id) DO NOTHING`)
     .bind(uuid(),eventKey,evidence,now,o.transaction_id,o.id,o.user_id,o.provider_trade_id,event.tradeNo,event.amountFen),
   env.DB.prepare(`UPDATE subscription_payment_transactions SET status='paid',paid_at=COALESCE(paid_at,?),
@@ -112,6 +113,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
      FROM subscription_orders x JOIN subscription_plan_versions v ON v.id=x.plan_version_id
      WHERE x.id=? AND x.user_id=? AND x.status='paid' AND x.paid_at IS NOT NULL
        AND x.kind IN ('purchase','renewal')
+       AND EXISTS(SELECT 1 FROM users u WHERE u.id=x.user_id AND u.status='active' AND u.archived_at IS NULL)
        AND EXISTS(SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=x.id
          AND t.id=? AND t.status='paid' AND t.risk_state='clear' AND ${proof})
      ON CONFLICT(source_order_id) DO NOTHING`)
@@ -128,6 +130,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
          AND x.applied_at IS NOT NULL AND t.status='paid' AND t.risk_state='clear'
          AND t.provider_payment_id=? AND t.amount_fen=x.amount_fen AND x.amount_fen=v.price_fen
          AND p.user_id=x.user_id AND p.daily_limit=v.daily_limit
+         AND EXISTS(SELECT 1 FROM users u WHERE u.id=x.user_id AND u.status='active' AND u.archived_at IS NULL)
          AND ((p.status='active' AND p.end_at=p.start_at+2592000000)
           OR (p.status='queued' AND p.start_at IS NULL AND p.end_at IS NULL))
          AND ${proof}) THEN 1 ELSE 0 END`)
