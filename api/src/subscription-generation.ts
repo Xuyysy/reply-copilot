@@ -23,8 +23,8 @@ function invariant(env:Env,operationId:string,assertionSql:string,values:unknown
 
 /**
  * An atomic, separate daily-bucket reservation. Returns false if no currently
- * verified subscription slot is left, so the caller can use separately paid
- * permanent credits. Never takes the welcome/free bucket when subscribed.
+ * verified subscription slot is left, so the caller can use free credits
+ * before separately purchased permanent credits.
  */
 export async function reserveSubscribedGeneration(
   env:Env,userId:string,requestId:string,requestHash:string,

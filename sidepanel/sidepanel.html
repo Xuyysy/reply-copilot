@@ -13,7 +13,12 @@
   <progress id="subscription-progress" max="100" value="0" aria-label="订阅当日额度已用和预留进度"></progress>
   <div class="subscription-breakdown"><span>已用 <strong id="subscription-used">—</strong></span><span>生成中 <strong id="subscription-reserved">—</strong></span></div>
   <p id="subscription-reset" class="muted-note"></p><p id="subscription-expires" class="muted-note"></p>
-  <p class="muted-note">订阅额度先使用；耗尽后仅使用另购的永久次数。新人免费次数不自动扣除。</p>
+  <p class="muted-note">先使用订阅每日额度，用完后使用免费额度，免费额度用完后才扣永久付费额度。</p>
+  <div id="subscription-overage" class="subscription-overage hidden" role="status" aria-live="polite">
+    <p id="subscription-overage-text"></p>
+    <button id="subscription-overage-upgrade" type="button" class="button hidden">升级订阅</button>
+    <button id="subscription-overage-action" type="button" class="button secondary hidden">购买永久额度包</button>
+  </div>
 </div><div id="quota-row" class="quota-row hidden"><div><strong id="quota-total">—</strong><span id="quota-total-label">总剩余</span></div><div><strong id="quota-free">—</strong><span>免费</span></div><div><strong id="quota-paid">—</strong><span>付费</span></div></div><div id="account-buttons" class="dashboard-actions"><button id="connect-register" class="button">免费注册并连接</button><button id="connect-login" class="button secondary">已有账号登录</button><button id="check-binding" class="button secondary hidden">查看绑定状态</button></div></div>
       <details class="dashboard-card quick-settings" open><summary>快捷回复设置</summary><label class="setting-row">默认风格<select id="quick-style"><option value="natural">自然</option><option value="light_humor">幽默</option><option value="thoughtful">观点</option></select></label><label class="setting-row">回复语言<select id="quick-language"><option value="auto">自动识别</option><option value="zh">中文</option><option value="en">English</option></select></label><label class="setting-row">回复长度<select id="quick-length"><option value="short">简短</option><option value="medium">适中</option><option value="adaptive">自适应</option></select></label><label class="setting-row">幽默程度<select id="quick-humor"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label><label class="setting-row">自动生成建议<input id="quick-auto" type="checkbox" role="switch"></label><p id="quick-save-status" class="muted-note" role="status"></p></details>
       <details class="dashboard-card usage-card"><summary>本地使用统计 <span>仅统计本机操作</span></summary><div class="usage-card-content"><div class="quota-row"><div><strong id="stat-week">0</strong><span>近 7 天生成</span></div><div><strong id="stat-all">0</strong><span>累计生成</span></div><div><strong id="stat-copy">0</strong><span>已复制建议</span></div></div><p class="muted-note">仅统计本机事件，不代表服务端扣费或实际发送。</p></div></details>

@@ -116,7 +116,6 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       throw error;
     }
   }
-  const paidOnly=subscription.status==='active';
   const date = shanghaiDay(now);
   const budgetDay = new Date(now).toISOString().slice(0, 10);
   if (!Number.isSafeInteger(budgetReserve) || budgetReserve < 0) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预留无效。");
@@ -124,10 +123,9 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   const budgetLimit = Number(setting?.value);
   if (!Number.isSafeInteger(budgetLimit) || budgetLimit < 1) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预算尚未配置。");
   const account = await env.DB.prepare("SELECT free_generation_reserved,paid_generation_reserved,paid_reserved_for_refunds FROM credit_accounts WHERE user_id=?").bind(session.user_id).first<{free_generation_reserved:number;paid_generation_reserved:number;paid_reserved_for_refunds:number}>();
-  if (!account) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+  if (!account) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
   const lot = await env.DB.prepare(`SELECT id,bucket,source_kind FROM credit_batches
     WHERE user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
-      ${paidOnly?"AND bucket='paid'":""}
     ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
       CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
       COALESCE(paid_at,granted_at),granted_at,id LIMIT 1`).bind(session.user_id).first<CreditBatch>();
@@ -140,7 +138,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs());
       return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{prechecked:true,cleanupRetried:true});
     }
-    throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
+    throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
   }
   // Provider execution is serialized; completed results keep their own quota
   // reservation and replay/ACK contract without locking unrelated new replies.
@@ -150,7 +148,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
     env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase,provider_config_id,provider_config_version)
       SELECT ?,?,?,?,'reserved',0,?,?,?,?,?,'generating',?,? FROM credit_accounts
-      WHERE user_id=? AND ${paidOnly?"paid_balance-paid_reserved_for_refunds-paid_generation_reserved":"free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved"}>0
+      WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved>0
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
       AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?))

@@ -105,31 +105,60 @@ test('expired awaiting-delivery response releases only subscription reservation 
  }finally{f.sql.close();}
 });
 
-test('daily 500/1000/1500/2000 boundary denies welcome-free fallback',async()=>{
+test('daily 500/1000/1500/2000 limits fall back to welcome free credits before permanent paid credits',async()=>{
  for(const [i,plan,limit] of [['basic',500],['pro',1000],['max',1500],['ultra',2000]].map(([p,l],i)=>[i,p,l])){
    const f=fixture();try{
-     setup(f,{plan,used:limit-1});
+     setup(f,{plan,used:limit-1,paid:2});
      await reserve(f,10+i);
      assert.deepEqual({...daily(f)},{used:limit-1,reserved:1});
      await finishGeneration(f.env,'test-user',id(10+i),'reply',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
      assert.equal((await ack(f,10+i)).status,200);
      assert.equal(daily(f).used,limit);
-     await assert.rejects(reserve(f,20+i),err=>err.code==='INSUFFICIENT_CREDITS');
-     assert.equal(f.sql.prepare("SELECT free_balance FROM credit_accounts").get().free_balance,200);
+     assert.equal((await reserve(f,20+i)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(20+i)).credit_source,'free');
+     await finishGeneration(f.env,'test-user',id(20+i),'fallback',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,20+i)).status,200);
+     assert.equal(f.sql.prepare("SELECT free_balance,paid_balance FROM credit_accounts").get().free_balance,199);
+     assert.equal(f.sql.prepare("SELECT paid_balance FROM credit_accounts").get().paid_balance,2);
+     assert.equal(daily(f).used,limit,'welcome credit ACK must not overrun subscribed daily cap');
    }finally{f.sql.close();}
  }
 });
 
-test('subscription overage uses paid permanent lots, never user welcome freebies',async()=>{
+test('subscription overage uses free balance before any separately purchased permanent credits',async()=>{
  const f=fixture();try{
    setup(f,{used:500,paid:2});
    assert.equal((await reserve(f,30)).kind,'new');
-   assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(30)).credit_source,'paid');
+   assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(30)).credit_source,'free');
    assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,0);
    await finishGeneration(f.env,'test-user',id(30),'reply',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
    assert.equal((await ack(f,30)).status,200);
-   assert.equal(f.sql.prepare("SELECT paid_balance,free_balance FROM credit_accounts").get().paid_balance,1);
-   assert.equal(f.sql.prepare("SELECT free_balance FROM credit_accounts").get().free_balance,200);
+   assert.equal(f.sql.prepare("SELECT free_balance,paid_balance FROM credit_accounts").get().free_balance,199);
+   assert.equal(f.sql.prepare("SELECT paid_balance FROM credit_accounts").get().paid_balance,2);
+   assert.equal((await ack(f,30)).body.alreadyConfirmed,true);
+   assert.equal(f.sql.prepare("SELECT free_balance FROM credit_accounts").get().free_balance,199);
+ }finally{f.sql.close();}
+});
+
+test('permanent credits are used only after both daily subscription and free balances are exhausted',async()=>{
+ const f=fixture();try{
+   setup(f,{used:500,paid:2});
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   assert.equal((await reserve(f,31)).kind,'new');
+   assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(31)).credit_source,'paid');
+   await finishGeneration(f.env,'test-user',id(31),'reply',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   assert.equal((await ack(f,31)).status,200);
+   assert.deepEqual({...f.sql.prepare("SELECT free_balance,paid_balance FROM credit_accounts").get()},{free_balance:0,paid_balance:1});
+   assert.equal(daily(f).used,500);
+ }finally{f.sql.close();}
+});
+
+test('exhausted subscription with no free or permanent credits denies a new generation',async()=>{
+ const f=fixture();try{
+   setup(f,{used:500});
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   await assert.rejects(reserve(f,32),err=>err.code==='INSUFFICIENT_CREDITS');
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM ai_credit_allocations").get().n,0);
  }finally{f.sql.close();}
 });
 

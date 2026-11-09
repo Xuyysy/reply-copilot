@@ -20,7 +20,10 @@
     "XIAODOU_RETURN_URL": "https://app.x-reply-helper.top/account/",
     "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com",
     "DEEPSEEK_INPUT_USD_PER_MILLION": "0.30",
-    "DEEPSEEK_OUTPUT_USD_PER_MILLION": "1.32"
+    "DEEPSEEK_OUTPUT_USD_PER_MILLION": "1.32",
+    "SUBSCRIPTIONS_ENABLED": "0",
+    "SUBSCRIPTION_PURCHASES_ENABLED": "0",
+    "SUBSCRIPTION_CHECKOUT_ENABLED": "0"
   },
   "d1_databases": [
     {
