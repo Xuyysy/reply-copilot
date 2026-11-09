@@ -63,10 +63,7 @@ jobs:
           REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
         run: |
           npm run build:production
-          python3 scripts/package-production-rc.py
-          mkdir -p dist/production-ci/extension
-          cp dist/production-rc/reply-copilot-production-0.3.4.zip dist/production-ci/extension/
-          cp dist/production-rc/provenance.json dist/production-ci/extension/
+          python3 scripts/package-production-ci.py
           cp api/deploy/production.wrangler.json dist/production-ci/worker-config.json
       - name: Fingerprint every output with exact Git source
         env:
