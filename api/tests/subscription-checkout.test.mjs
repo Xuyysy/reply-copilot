@@ -1,0 +1,206 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {fixture,withProvider} from './helpers/payment-v2.mjs';
+
+const merchant='20881234567890',origins='https://cashier.example.test';
+function ready(){
+ const f=fixture();
+ Object.assign(f.env,{
+  SUBSCRIPTIONS_ENABLED:'1',SUBSCRIPTION_PURCHASES_ENABLED:'1',SUBSCRIPTION_CHECKOUT_ENABLED:'1',
+  MK99_PID:merchant,MK99_KEY:'local-fixture-not-a-real-merchant-key',
+  MK99_REQUEST_SIGN_TYPE:'MD5',MK99_NOTIFY_SIGN_TYPE:'MD5',
+  MK99_PROTOCOL_CONFIRMED:'1',MK99_AMOUNT_CONTRACT:'CNY_EXACT_BUYER_TOTAL',
+  MK99_CASHIER_ORIGINS:origins
+ });
+ f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_mk99_enabled','payment_mk99_alipay_enabled','payment_mk99_alipay_released','payment_mk99_wechat_enabled','payment_mk99_wechat_released')");
+ return f;
+}
+const request=(planCode='basic',idempotencyKey='checkout-request-0001',channel='ALIPAY_H5')=>({
+  planCode,channel,idempotencyKey
+});
+async function checkout(f,body=request(),handler){
+ let calls=0,outTrade;
+ const result=await withProvider(req=>{
+  calls++;
+  const params=Object.fromEntries(new URLSearchParams(req.body));
+  outTrade=params.out_trade_no;
+  assert.equal(new URL(req.url).origin,'https://mk99.cn');
+  assert.equal(new URL(req.url).pathname,'/openapi/pay/create');
+  if(handler)return handler(req,params);
+  return Response.json({code:1,data:{trade_no:'MK99_paid_'+outTrade,out_trade_no:outTrade,pay_url:origins+'/pay/'+outTrade}});
+ },()=>f.call('/v1/subscriptions/orders',{body}));
+ return {...result,calls,outTrade};
+}
+const metrics=f=>({
+ orders:f.sql.prepare("SELECT count(*) n FROM subscription_orders").get().n,
+ transactions:f.sql.prepare("SELECT count(*) n FROM subscription_payment_transactions").get().n,
+ events:f.sql.prepare("SELECT count(*) n FROM subscription_payment_events").get().n,
+ credits:f.sql.prepare("SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").get().paid_balance,
+ legacy:f.sql.prepare("SELECT count(*) n FROM recharge_orders").get().n,
+ periods:f.sql.prepare("SELECT count(*) n FROM subscription_periods").get().n
+});
+
+test('subscription MK99 checkout is independently disabled even if catalog and paid-query features are enabled',async()=>{
+ const f=ready();
+ try{
+  f.env.SUBSCRIPTION_CHECKOUT_ENABLED='0';
+  const r=await checkout(f);
+  assert.equal(r.status,404);
+  assert.equal(r.calls,0);
+  assert.deepEqual(metrics(f),{orders:0,transactions:0,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('one-shot checkout freezes server price and merchant/channel, never grants credits or a subscription',async()=>{
+ const f=ready();
+ try{
+  const r=await checkout(f);
+  assert.equal(r.status,201,JSON.stringify(r.body));
+  assert.equal(r.calls,1);
+  assert.equal(r.body.order.planCode,'basic');
+  assert.equal(r.body.order.kind,'purchase');
+  assert.equal(r.body.order.amountFen,6990);
+  assert.equal(r.body.order.channel,'ALIPAY_H5');
+  assert.equal(r.body.order.checkout.paymentUrl,origins+'/pay/'+r.outTrade);
+  assert.equal(r.body.order.checkout.paymentConfirmed,false);
+  const o=f.sql.prepare("SELECT kind,amount_fen,operation_id,status FROM subscription_orders").get();
+  assert.equal(o.kind,'purchase');
+  assert.equal(o.amount_fen,6990);
+  assert.match(o.operation_id,/^sub-checkout:test-user:checkout-request-0001$/);
+  const tx=f.sql.prepare("SELECT checkout_state,checkout_attempted_at,cashier_ready_at,cashier_url,merchant_account,provider_trade_id,provider_payment_id,amount_fen FROM subscription_payment_transactions").get();
+  assert.equal(tx.checkout_state,'ready');
+  assert.equal(tx.amount_fen,6990);
+  assert.equal(tx.merchant_account,merchant);
+  assert.equal(tx.provider_trade_id,r.outTrade);
+  assert.ok(tx.checkout_attempted_at>0&&tx.cashier_ready_at>0);
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('same idempotency key and concurrent second submit never trigger another MK99 create',async()=>{
+ const f=ready();
+ try{
+  const one=await checkout(f);
+  assert.equal(one.status,201);
+  const again=await checkout(f);
+  assert.equal(again.status,200);
+  assert.equal(again.calls,0);
+  assert.equal(again.body.resumed,true);
+  assert.equal(again.body.order.id,one.body.order.id);
+  const other=await checkout(f,request('basic','checkout-request-0002'));
+  assert.equal(other.status,200);
+  assert.equal(other.calls,0);
+  assert.equal(other.body.order.id,one.body.order.id);
+  const different=await checkout(f,request('pro','checkout-request-0003'));
+  assert.equal(different.status,409);
+  assert.equal(different.calls,0);
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('provider network uncertainty stores one recoverable order and NEVER redrives it',async()=>{
+ const f=ready();
+ try{
+  const uncertain=await checkout(f,request(),()=>{throw new Error('simulated provider timeout');});
+  assert.equal(uncertain.status,502);
+  assert.equal(uncertain.calls,1);
+  assert.equal(uncertain.body.code,'SUBSCRIPTION_CHECKOUT_UNCONFIRMED');
+  assert.ok(uncertain.body.order.id);
+  const state=f.sql.prepare("SELECT status,checkout_state,cashier_url FROM subscription_payment_transactions").get();
+  assert.equal(state.checkout_state,'unknown');
+  assert.equal(state.status,'unknown');
+  assert.equal(state.cashier_url,null);
+  const again=await checkout(f);
+  assert.equal(again.status,409);
+  assert.equal(again.calls,0);
+  assert.equal(again.body.order.id,uncertain.body.order.id);
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('wrong cashier identity or origin never appears as payable and remains one uncertain local order',async()=>{
+ for(const bad of [
+  ({params})=>Response.json({code:1,data:{trade_no:'MK99_bad',out_trade_no:'WRONG_ORDER',pay_url:origins+'/pay'}}),
+  ({params})=>Response.json({code:1,data:{trade_no:'MK99_bad',out_trade_no:params.out_trade_no,pay_url:'https://evil.example.net/pay'}})
+ ]){
+  const f=ready();
+  try{
+   const r=await checkout(f,request(),(_req,params)=>bad({params}));
+   assert.equal(r.status,502);
+   assert.equal(r.body.order.checkout.paymentUrl,null);
+   assert.equal(r.body.order.checkout.paymentConfirmed,false);
+   assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+  }finally{f.sql.close();}
+ }
+});
+
+test('browser-provided price, extra parameters, bad CSRF and unpublished channel cannot create payment',async()=>{
+ const f=ready();
+ try{
+  let r=await checkout(f,{...request(),priceFen:1});
+  assert.equal(r.status,400);
+  assert.equal(r.calls,0);
+  r=await checkout(f,{...request(),kind:'upgrade'});
+  assert.equal(r.status,400);
+  assert.equal(r.calls,0);
+  r=await checkout(f,request('basic','bad'));
+  assert.equal(r.status,400);
+  r=await checkout(f,request('ultra','checkout-request-0004','CRYPTO'));
+  assert.equal(r.status,400);
+  f.sql.exec("UPDATE system_settings SET value='0' WHERE key='payment_mk99_alipay_released'");
+  r=await checkout(f,request());
+  assert.equal(r.status,503);
+  assert.equal(r.calls,0);
+  assert.deepEqual(metrics(f),{orders:0,transactions:0,events:0,credits:0,legacy:0,periods:0});
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_mk99_alipay_released'");
+  const cross=await f.call('/v1/subscriptions/orders',{body:request(),headers:{Origin:'https://evil.example.net'}});
+  assert.equal(cross.status,403);
+  const csrf=await f.call('/v1/subscriptions/orders',{body:request(),headers:{'X-CSRF-Token':'bad'}});
+  assert.equal(csrf.status,403);
+  assert.deepEqual(metrics(f),{orders:0,transactions:0,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('verified active subscriber creates a renewal, but one queued period blocks further sales',async()=>{
+ const f=ready();
+ try{
+  const now=Date.now(),start=now-1_000;
+  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,paid_at,applied_at) VALUES('prior','test-user','basic-v1','purchase',6990,'paid',1,9999999999999,1,1,?,?)").run(now,now);
+  f.sql.prepare("INSERT INTO subscription_periods(id,user_id,source_order_id,plan_version_id,daily_limit,status,start_at,end_at,created_at,updated_at) VALUES('existing','test-user','prior','basic-v1',500,'active',?,?,1,1)").run(start,start+30*86400000);
+  const r=await checkout(f,request('pro','renewal-checkout-0001'));
+  assert.equal(r.status,201,JSON.stringify(r.body));
+  assert.equal(r.body.order.kind,'renewal');
+  assert.equal(r.body.order.amountFen,11990);
+  assert.equal(r.body.order.checkout.paymentConfirmed,false);
+  f.sql.prepare("UPDATE subscription_orders SET status='paid' WHERE id=?").run(r.body.order.id);
+  f.sql.prepare("INSERT INTO subscription_periods(id,user_id,source_order_id,plan_version_id,daily_limit,status,created_at,updated_at) VALUES('queued','test-user',?,'pro-v1',1000,'queued',1,1)").run(r.body.order.id);
+  const next=await checkout(f,request('max','another-renewal-0002'));
+  assert.equal(next.status,409);
+  assert.equal(next.calls,0);
+  assert.equal(next.body.code,'SUBSCRIPTION_RENEWAL_QUEUED');
+  assert.equal(metrics(f).periods,2);
+ }finally{f.sql.close();}
+});
+
+test('archived account cannot create an MK99 cashier',async()=>{
+ const f=ready();
+ try{
+  f.sql.exec("UPDATE users SET archived_at=1 WHERE id='test-user'");
+  const r=await checkout(f);
+  assert.notEqual(r.status,201);
+  assert.equal(r.calls,0);
+  assert.deepEqual(metrics(f),{orders:0,transactions:0,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
+
+test('fresh subscription checkout migration is additive and refuses invalid checkout states',async()=>{
+ const f=ready();
+ try{
+  const cols=f.sql.prepare("PRAGMA table_info(subscription_payment_transactions)").all().map(x=>x.name);
+  for(const field of ['checkout_state','checkout_attempted_at','cashier_url','cashier_ready_at'])assert.ok(cols.includes(field),field);
+  const indexes=f.sql.prepare("PRAGMA index_list(subscription_orders)").all().map(x=>x.name);
+  assert.ok(indexes.includes('subscription_orders_user_pending_idx'));
+  assert.equal(f.sql.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+ }finally{f.sql.close();}
+});
