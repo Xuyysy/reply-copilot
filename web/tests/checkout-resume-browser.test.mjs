@@ -48,11 +48,11 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
   await evaluate('document.documentElement.lang="en";window.dispatchEvent(new Event("reply-copilot-language"))');assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   if(mode==='pending'){await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);}
  }
- await call('Page.navigate',{url:base+'?package=starter'});await until('!document.querySelector("#create-order").disabled');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
+ await call('Page.navigate',{url:base+'?package=starter'});await until('document.querySelector("#create-order")?.disabled === false');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
  assert.equal(await evaluate('document.querySelectorAll("input[name=payment-channel]").length'),3);assert.equal(await evaluate('document.querySelector("#order-reference,#cashier-help,#replacement-purchase")===null'),true);
  await evaluate('document.querySelector("#create-order").click();document.querySelector("#create-order").click()');await until('document.querySelector("#checkout-status").textContent.includes("该套餐已有待付款")');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
  for(const mode of ['newsuccess','newsuccess-latest','newsuccess-paid']){
- await call('Page.navigate',{url:base+'?package=starter&fixture='+mode});await until('!document.querySelector("#create-order").disabled');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');
+ await call('Page.navigate',{url:base+'?package=starter&fixture='+mode});await until('document.querySelector("#create-order")?.disabled === false');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');
  await until('window.__calls.some(c=>c[0]==="/v1/orders/22222222-2222-4222-8222-222222222222")');
  if(mode==='newsuccess-paid'){await until('document.querySelector("#cashier-link").hidden');continue;}
  await until('!document.querySelector("#cashier-link").hidden');assert.equal(await evaluate('window.__creates'),1);
