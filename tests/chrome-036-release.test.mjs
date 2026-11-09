@@ -39,6 +39,8 @@ test('0.3.6 sidepanel preserves subscription quota, free fallback and prorated u
   assert.match(script, /subscription-checkout\/\?upgrade=1&plan=/);
   assert.match(script, /24\*60\*60\*1000/);
   assert.match(script, /pricing\/\#permanent-credits/);
+  assert.doesNotMatch(script, /支付暂未开放/);
+  assert.match(script, /生成次数已用完，可前往官网查看订阅与永久额度包/);
 });
 
 test('0.3.6 keeps the Chrome 0.3.5 Creator Momentum intro cleanup', () => {
