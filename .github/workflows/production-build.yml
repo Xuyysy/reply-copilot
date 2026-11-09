@@ -1,12 +1,9 @@
-name: Production build artifacts (no deployment)
+name: Production build artifacts (release branch, no deployment)
 
 on:
   push:
     branches:
-      - main
-  pull_request:
-    branches:
-      - main
+      - release/production
   workflow_dispatch:
 
 permissions:
