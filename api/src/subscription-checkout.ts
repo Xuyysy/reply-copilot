@@ -22,7 +22,7 @@ type Pending={
  merchant_account:string|null;notification_sign_type:string|null;paid_at:number|null;
  verified_paid:number;
 };
-const RESULT_FIELDS="o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at,CASE WHEN
+const RESULT_FIELDS=`o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at,CASE WHEN
    o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
    AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
    AND t.merchant_provider='mk99' AND t.currency='CNY' AND t.amount_fen=o.amount_fen
@@ -31,7 +31,7 @@ const RESULT_FIELDS="o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.pl
    AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
      AND e.merchant_provider='mk99' AND e.event_type='PAYMENT_SUCCEEDED'
      AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
-   THEN 1 ELSE 0 END verified_paid";
+   THEN 1 ELSE 0 END verified_paid`;
 async function existingFor(env:Env,userId:string,operationId:string):Promise<Pending|null>{
  return env.DB.prepare("SELECT "+RESULT_FIELDS+" FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND (o.operation_id=? OR o.status IN ('pending','unknown')) ORDER BY CASE WHEN o.operation_id=? THEN 0 ELSE 1 END,o.created_at DESC LIMIT 1")
    .bind(userId,operationId,operationId).first<Pending>();
