@@ -46,6 +46,8 @@ async function refreshDashboard(){
   if(account?.quota&&account.source==='server'){$('quota-total').textContent=String(account.quota.totalRemaining);$('quota-free').textContent=String(account.quota.freeRemaining);$('quota-paid').textContent=String(account.quota.paidRemaining);}
   const sub=account?.source==='server'&&account.subscription?.status==='active'?account.subscription:null;
   $('subscription-quota').classList.toggle('hidden',!sub);
+  $('subscription-overage').classList.toggle('hidden',!sub||sub.remainingToday!==0);
+  $('subscription-overage-action').classList.add('hidden');
   $('quota-total-label').textContent=sub?'原有余额合计':'总剩余';
   if(sub){
     $('subscription-plan').textContent=String(sub.plan).toUpperCase();
@@ -58,7 +60,19 @@ async function refreshDashboard(){
     const time=(value)=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString('zh-CN'):'暂不可用';};
     $('subscription-reset').textContent='下次重置：'+time(sub.resetAt);
     $('subscription-expires').textContent='订阅到期：'+time(sub.expiresAt);
-    $('account-summary').textContent='订阅日额度由官网服务实时确认。';
+    if(sub.remainingToday===0){
+      const free=Math.max(0,Number(account.quota?.freeRemaining)||0);
+      const paid=Math.max(0,Number(account.quota?.paidRemaining)||0);
+      if(free>0){
+        $('subscription-overage-text').textContent='订阅额度已用完，已自动切换至免费额度（剩余 '+free+' 次）。免费额度用完后才会使用永久付费额度。';
+      }else if(paid>0){
+        $('subscription-overage-text').textContent='订阅额度和免费额度均已用完，正在使用永久付费额度（剩余 '+paid+' 次）。';
+      }else{
+        $('subscription-overage-text').textContent='订阅额度、免费额度和永久额度都已用完。可购买永久额度包，或等待下次订阅日额度重置。';
+        $('subscription-overage-action').classList.remove('hidden');
+      }
+      $('account-summary').textContent='订阅日额度已用完，请查看下方额度提醒。';
+    }else $('account-summary').textContent='订阅日额度由官网服务实时确认。';
   }
   if (!manualBindingCheck && wasPending && account?.user && !account.pending) $('binding-feedback').textContent='插件绑定完成，刷新 X 页面即可使用。';
   wasPending=Boolean(account?.pending);
@@ -96,6 +110,11 @@ document.addEventListener('click',async event=>{
     const response=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_BEGIN_BINDING',mode:button.id==='connect-register'?'register':'login'}).catch(()=>null);
     $('account-summary').textContent=response?.ok?'已打开官网，请完成登录与授权。':response?.error||'打开官网失败，请重试。';
     button.disabled=false;void refreshDashboard();return;
+  }
+  if(button.id==='subscription-overage-action'){
+    try{await accountClient.openWebsite('/pricing/#permanent-credits');}
+    catch{$('account-summary').textContent='官网购买页面暂不可用，请稍后重试。';}
+    return;
   }
   const destinations={'nav-website':'/','nav-account':'/account','nav-pricing':'/pricing','nav-guide':'/guide'};
   if(destinations[button.id]){try{await accountClient.openWebsite(destinations[button.id]);}catch{$('account-summary').textContent='官网地址暂不可用。';}return;}
