@@ -691,3 +691,102 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 @media(prefers-reduced-motion:reduce){
   .public-refresh :is(.public-faq-item,.faq-expand,.public-support-email,.public-feedback-form textarea) {transition:none!important;}
 }
+
+
+/* ── CHECKOUT AND DOCUMENT FINISH — visual-only, no payment or legal copy changes ── */
+.public-refresh .page-hero:not(.public-legal-hero) {
+  position:relative;
+  max-width:1180px;
+  margin:32px auto 28px;
+  padding:45px clamp(28px,5vw,64px) 43px;
+  border:1px solid var(--xrh-pro-line);
+  border-radius:19px;
+  background:linear-gradient(120deg,#fbfcff,#edf3ff);
+  box-shadow:0 12px 35px rgba(27,47,87,.045);
+}
+.public-refresh .page-hero:not(.public-legal-hero) .lead {max-width:720px;}
+.public-refresh .page-hero:not(.public-legal-hero) h1 {font-size:clamp(36px,4.65vw,62px);}
+.public-refresh .page-hero:not(.public-legal-hero) .eyebrow {margin-bottom:12px;}
+.public-refresh .checkout-payment-method {
+  border:1px solid var(--xrh-pro-line);
+  border-radius:var(--xrh-radius);
+  background:#f9fbff;
+  padding:22px;
+}
+.public-refresh .checkout-payment-method h3 {color:var(--xrh-ink);}
+.public-refresh .checkout-payment-option {
+  background:#fff;
+  border:1px solid var(--xrh-line);
+  border-radius:10px;
+  min-height:45px;
+  transition:border-color .15s,box-shadow .15s;
+}
+.public-refresh .checkout-payment-option:hover {border-color:var(--xrh-pro-line);}
+.public-refresh .checkout-payment-option:has(input:checked) {
+  border-color:var(--xrh-brand);
+  box-shadow:0 0 0 2px rgba(49,91,232,.12);
+}
+.public-refresh .checkout-payment-option input {accent-color:var(--xrh-brand);}
+.public-refresh .checkout-payment-method p {font-size:13px;color:var(--xrh-muted);line-height:1.65;}
+.public-refresh #package-name {font-size:clamp(23px,3vw,34px);letter-spacing:-.035em;margin-bottom:20px;}
+.public-refresh #package-credits,.public-refresh #package-usd,.public-refresh #package-description,.public-refresh #package-fee {color:#5f718d;line-height:1.7;}
+.public-refresh #package-cny {background:var(--xrh-pro-surface);border-color:var(--xrh-pro-line);}
+.public-refresh .checkout-pay-button {min-height:43px;}
+.public-refresh #checkout-status {line-height:1.65;}
+.public-refresh #cashier-link,.public-refresh #restart-payment,.public-refresh #refresh-order {max-width:100%;}
+.public-refresh .pricing-card.featured {border-color:var(--xrh-pro-line);background:linear-gradient(170deg,#fff,#f6f9ff);}
+.public-refresh .pricing-card .price {color:var(--xrh-ink);}
+.public-refresh #packages .content-card,.public-refresh #subscription-cards .pricing-card {min-width:0;}
+.public-refresh #packages .button {max-width:100%;}
+.public-refresh .subscription-card-grid,.public-refresh .home-subscription-grid {gap:16px;}
+.public-refresh .subscription-featured {border-color:var(--xrh-brand);box-shadow:0 13px 35px rgba(49,91,232,.10);}
+.public-refresh .quota-rules {border-color:var(--xrh-line);}
+.public-refresh .public-legal-hero {
+  max-width:1180px;
+  margin:35px auto 0;
+  padding:45px clamp(28px,5vw,58px);
+  border:1px solid var(--xrh-pro-line);
+  border-radius:18px;
+  background:linear-gradient(125deg,#fff,#eef4ff);
+  box-shadow:var(--xrh-shadow);
+}
+.public-refresh .public-legal-hero h1 {font-size:clamp(37px,4.6vw,60px);margin-bottom:15px;}
+.public-refresh .public-legal-hero .lead {max-width:730px;}
+.public-refresh .public-legal-document {
+  max-width:1090px;
+  padding:35px clamp(25px,4vw,58px) 58px;
+  margin-top:25px;
+  margin-bottom:75px;
+  border:1px solid var(--xrh-line);
+  border-radius:18px;
+  background:#fff;
+  box-shadow:var(--xrh-shadow);
+}
+.public-refresh .public-legal-document h2 {
+  font-size:clamp(20px,2.2vw,27px);
+  line-height:1.35;
+  letter-spacing:-.025em;
+  padding-top:26px;
+  margin:23px 0 13px;
+  color:var(--xrh-ink);
+}
+.public-refresh .public-legal-document h2:first-child {margin-top:0;padding-top:0;}
+.public-refresh .public-legal-document p {font-size:14px;color:#52627b;line-height:1.95;overflow-wrap:break-word;}
+.public-refresh .public-legal-document a {color:var(--xrh-brand-text);font-weight:680;text-decoration:underline;text-underline-offset:4px;}
+.public-refresh .public-legal-document a:hover {color:var(--xrh-brand-strong);}
+@media (max-width:800px) {
+  .public-refresh .page-hero:not(.public-legal-hero) {margin-top:15px;}
+  .public-refresh .public-legal-hero {margin-top:16px;}
+  .public-refresh .checkout-payment-method {padding:16px;}
+}
+@media (max-width:520px) {
+  .public-refresh .page-hero:not(.public-legal-hero) {padding:32px 20px;margin-bottom:17px;border-radius:15px;}
+  .public-refresh .page-hero:not(.public-legal-hero) h1 {font-size:clamp(34px,9vw,46px);}
+  .public-refresh .public-legal-hero {padding:31px 20px;border-radius:15px;}
+  .public-refresh .public-legal-hero h1 {font-size:36px;}
+  .public-refresh .public-legal-document {padding:20px 17px 30px;margin-top:15px;margin-bottom:40px;border-radius:14px;}
+  .public-refresh .public-legal-document p {font-size:13px;}
+  .public-refresh #checkout-payment-method,.public-refresh #payment-method-options {max-width:100%;}
+  .public-refresh .checkout-payment-option {margin-right:0;max-width:100%;font-size:12px;}
+  .public-refresh .button-row .button {max-width:100%;}
+}
