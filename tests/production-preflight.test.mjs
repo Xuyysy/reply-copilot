@@ -9,5 +9,5 @@ test('production preparation accepts the isolated D1 UUID and fixed store identi
 });
 test('all fresh Production migrations preserve empty business data and closed purchases',()=>{
  const result=verifyFreshMigrations();// 0022 is additive subscription-only schema; no existing balance or order grants.
- const resultCount=22;assert.equal(result.migrationCount,resultCount);assert.equal(result.businessTablesEmpty,true);assert.equal(result.purchaseEnabled,false);
+ const resultCount=23;assert.equal(result.migrationCount,resultCount);assert.equal(result.businessTablesEmpty,true);assert.equal(result.purchaseEnabled,false);
 });
