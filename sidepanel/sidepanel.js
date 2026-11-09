@@ -48,6 +48,8 @@ async function refreshDashboard(){
   $('subscription-quota').classList.toggle('hidden',!sub);
   $('subscription-overage').classList.toggle('hidden',!sub||sub.remainingToday!==0);
   $('subscription-overage-action').classList.add('hidden');
+  $('subscription-overage-upgrade').classList.add('hidden');
+  delete $('subscription-overage-upgrade').dataset.plan;
   $('quota-total-label').textContent=sub?'原有余额合计':'总剩余';
   if(sub){
     $('subscription-plan').textContent=String(sub.plan).toUpperCase();
@@ -61,6 +63,16 @@ async function refreshDashboard(){
     $('subscription-reset').textContent='下次重置：'+time(sub.resetAt);
     $('subscription-expires').textContent='订阅到期：'+time(sub.expiresAt);
     if(sub.remainingToday===0){
+      const tiers=['basic','pro','max','ultra'];
+      const currentTier=tiers.indexOf(String(sub.plan||'').toLowerCase());
+      const nextTier=currentTier>=0?tiers[currentTier+1]:null;
+      const timeToExpiry=new Date(sub.expiresAt).getTime()-Date.now();
+      const upgradeAllowed=Boolean(nextTier&&Number.isFinite(timeToExpiry)&&timeToExpiry>=24*60*60*1000);
+      if(upgradeAllowed){
+        $('subscription-overage-upgrade').dataset.plan=nextTier;
+        $('subscription-overage-upgrade').textContent='升级至 '+nextTier.toUpperCase()+'（按剩余时间补差价）';
+        $('subscription-overage-upgrade').classList.remove('hidden');
+      }
       const free=Math.max(0,Number(account.quota?.freeRemaining)||0);
       const paid=Math.max(0,Number(account.quota?.paidRemaining)||0);
       if(free>0){
@@ -110,6 +122,13 @@ document.addEventListener('click',async event=>{
     const response=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_BEGIN_BINDING',mode:button.id==='connect-register'?'register':'login'}).catch(()=>null);
     $('account-summary').textContent=response?.ok?'已打开官网，请完成登录与授权。':response?.error||'打开官网失败，请重试。';
     button.disabled=false;void refreshDashboard();return;
+  }
+  if(button.id==='subscription-overage-upgrade'){
+    const plan=button.dataset.plan;
+    if(!['pro','max','ultra'].includes(plan))return;
+    try{await accountClient.openWebsite('/subscription-checkout/?upgrade=1&plan='+encodeURIComponent(plan));}
+    catch{$('account-summary').textContent='升级页面暂不可用，请稍后重试。';}
+    return;
   }
   if(button.id==='subscription-overage-action'){
     try{await accountClient.openWebsite('/pricing/#permanent-credits');}
