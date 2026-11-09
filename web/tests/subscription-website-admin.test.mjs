@@ -33,3 +33,14 @@ test('admin subscription tab is read-only, uses authenticated bounded APIs and s
  assert.doesNotMatch(subscriptions,/method\s*:\s*['"]POST['"]/);
  assert.doesNotMatch(subscriptions,/\/v1\/admin\/subscriptions\/(grant|activate|refund|update)/);
 });
+
+const account=readFileSync(new URL('../src/components/account/AccountDashboard.tsx',import.meta.url),'utf8');
+test('account shows subscription bucket independently with used, reserved, reset and expiry',()=>{
+ assert.match(account,/data-testid="account-subscription-quota"/);
+ for(const field of ['remainingToday','usedToday','reservedToday','resetAt','expiresAt','dailyLimit'])
+   assert.ok(account.includes('usage.subscription.'+field),field);
+ assert.match(account,/aria-valuenow=\{usage.subscription.usedToday\+usage.subscription.reservedToday\}/);
+ assert.match(account,/usage.subscription\?\.status==="active"/);
+ assert.match(account,/原有免费及永久次数/);
+ assert.match(account,/升档和续购结账尚未开放/);
+});
