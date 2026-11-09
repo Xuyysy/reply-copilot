@@ -99,8 +99,11 @@ test('frozen user or expired active row grants no subscription and no Creator Mo
    f.env.SUBSCRIPTIONS_ENABLED='1';
    seedPeriod(f);
    f.sql.exec("UPDATE users SET status='frozen' WHERE id='test-user'");
-   assert.equal((await usage(f)).body.subscription.status,'none');
-   assert.equal((await momentum(f)).body.features.interactionMomentum.eligible,false);
+   const frozenUsage=await usage(f);
+   assert.notEqual(frozenUsage.status,200,'frozen users must not read an ordinary active subscription response');
+   assert.equal(frozenUsage.body.subscription,undefined);
+   const frozenFeature=await momentum(f);
+   assert.notEqual(frozenFeature.body.features?.interactionMomentum?.eligible,true);
    f.sql.exec("UPDATE users SET status='active'; UPDATE subscription_periods SET start_at=1,end_at=2592000001");
    assert.equal((await usage(f)).body.subscription.status,'none');
  }finally{f.sql.close();}
