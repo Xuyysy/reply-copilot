@@ -134,9 +134,11 @@ jobs:
       # The trusted historical main branch has NO api/package.json or api lockfile.
       # Staging already uses an isolated pinned Wrangler install for this reason.
       - uses: actions/setup-node@v4
+        if: inputs.release_mode == 'deploy'
         with:
           node-version: '24'
       - name: Install pinned isolated Wrangler (no main-branch API dependency)
+        if: inputs.release_mode == 'deploy'
         shell: bash
         run: |
           set -euo pipefail
