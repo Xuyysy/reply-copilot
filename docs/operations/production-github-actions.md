@@ -1,6 +1,6 @@
 # Production GitHub Actions: build and guarded release
 
-> Status: implementation PR from `codex/production-actions-main-only`, using `release/production` for the actual pinned Production build source. **Adding these workflows does not deploy anything.** After PR merge, configure the `production` GitHub Environment before any manual release.
+> Status: implementation PR from `codex/production-actions-main-only`, using `release/production` for the actual pinned Production build source. **Adding these workflows does not deploy anything.** GitHub `production` Environment already has two secret names confirmed by user screenshots; actual values and token permissions still need the new read-only check mode.
 
 ## Sources of truth
 
@@ -29,18 +29,27 @@
 - Add GitHub environment required-reviewer protection if available on the plan. GitHub Free private repositories may not have required reviewers; the owner-only manual dispatch and typed confirmation are additional safeguards, **not equivalent to GitHub enforced reviewers**.
 - No MK99/payment/identity private keys in GitHub; those stay in Cloudflare Worker and are preserved by Wrangler `--keep-vars`.
 
-Pass `source_sha`, successful `ci_run_id` (Reply Copilot CI, event `push`, branch `release/production`), successful `build_run_id` (Production build, same SHA / `push` / `release/production`), `target` (`worker` or `pages`), `expected_current` (Worker **version ID** / Pages **deployment ID**) and `confirmation` (`DEPLOY_WORKER_TO_PRODUCTION` or `DEPLOY_PAGES_TO_PRODUCTION`).
+Pass `release_mode` (`check` or `deploy`), `source_sha`, successful `ci_run_id` (Reply Copilot CI, event `push`, branch `release/production`), successful `build_run_id` (Production build, same SHA / `push` / `release/production`), `target` (`worker` or `pages`), `expected_current` (Worker **version ID** / Pages **deployment ID**) and `confirmation`.
 
-Example (illustrative only; obtain fresh IDs and exact current live versions):
+`check` is the **default** and strictly read-only: it validates both successful GitHub runs, every downloaded file, pinned Production configuration, access to the GitHub Environment secrets, live Cloudflare API reads, current Worker version/Pages deployment, all plaintext vars, 9 secret **names** and D1 **binding ID**. It cannot publish Worker/Pages and does not execute D1 SQL. Use `confirmation=CHECK_ONLY`.
+
+`deploy` is explicitly selected later, and requires the matching `DEPLOY_WORKER_TO_PRODUCTION` or `DEPLOY_PAGES_TO_PRODUCTION` confirmation. This performs the same checks, then releases only that one component, followed by live postflight verification. Never infer a deploy from a check-only success. If GitHub Environment branch restrictions permit only `main`, invoke **both** modes on `main`; artifact source still comes from verified `release/production` CI.
+
+Example: run the read-only preflight first. These exact run IDs and SHA were independently checked as successful on 2026-11-09; refresh the live version/deployment ID before initiating any future deploy:
 ```bash
 gh workflow run production-deploy.yml -R Xuyysy/reply-copilot --ref main \
-  -f source_sha=<APPROVED_40_CHAR_MAIN_SHA> \
-  -f ci_run_id=<SUCCESSFUL_MAIN_CI_RUN_ID> \
-  -f build_run_id=<SUCCESSFUL_MAIN_PRODUCTION_BUILD_RUN_ID> \
+  -f release_mode=check \
+  -f source_sha=42bea83125bb138f63316c6426416c9b4f7ef338 \
+  -f ci_run_id=42559104204 \
+  -f build_run_id=42559104202 \
   -f target=worker \
-  -f expected_current=<CURRENT_WORKER_VERSION_UUID> \
-  -f confirmation=DEPLOY_WORKER_TO_PRODUCTION
+  -f expected_current=02713430-0c1f-4edd-9677-8945721bb282 \
+  -f confirmation=CHECK_ONLY
 ```
+After the preflight passes, an actual release requires manually rerunning the same workflow from `main` with `release_mode=deploy`, the target-specific `confirmation=DEPLOY_WORKER_TO_PRODUCTION` or `DEPLOY_PAGES_TO_PRODUCTION`, and a **fresh exact** `expected_current`. No workflow is launched by the documentation itself.
+
+**Trusted-main toolchain caveat:** the historical `main` branch does *not* contain `api/package.json` or `api/package-lock.json`. Accordingly the manual workflow installs a specific reviewed Wrangler version (`4.151.0`) in an isolated temporary directory, as the existing Staging release workflow does. It never executes build/source scripts from the released `release/production` branch; the only deployed Worker JavaScript is the SHA-verified precompiled artifact.
+
 The workflow independently authenticates the two successful run IDs and SHA, checks each artifact's SHA-256 and target configuration; checks live `PAYMENTS_ENABLED=1`, 9 Secret binding names, D1 UUID, all declared vars and current expected deployment, then uses **precompiled** Worker `--no-bundle --keep-vars --strict`, or uploads **only the verified static Pages** files. After deployment it checks that a new version became active and variables / Secret references / D1 did not change. It refuses on any mismatch. No remote D1 SQL, migrations, payment modification or browser interaction.
 
 Release sequence: Worker first -> server smoke check / paid platform monitoring -> Pages second -> independent browser/manual acceptance -> Chrome Web Store manually, if a new Chrome version exists. **Do not treat a green build as permission to deploy.**
@@ -57,5 +66,5 @@ The initial branch-push experiment used `codex/production-*` triggers, which gen
 
 1. Review the minimal automation-only PR to `main`; do NOT merge the full Production business tree into the divergent historical main. Ensure separate `release/production` branch green CI/build. The PR adds workflows/verifiers/documentation but does not deploy.
 2. Create/verify two `production` GitHub Environment secrets; no deployment-ready variable or credentials in code. The workflow is otherwise inert for deployments.
-3. On subsequent `release/production` pushes the CI and artifact builder run automatically. Releases require the owner to manually dispatch from trusted `main` with the pinned release-branch run IDs and current deployed version.
+3. On subsequent `release/production` pushes the CI and artifact builder run automatically. Owner first dispatches read-only `release_mode=check` from trusted `main` with pinned release-branch successful run IDs and live version. Only after verification, explicitly dispatch `release_mode=deploy` and typed authorization to actually release.
 4. Do not conflate this automation with PR #20, a separate Staging-only Issue comment trigger.
