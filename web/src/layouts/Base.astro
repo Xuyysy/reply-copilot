@@ -2,6 +2,7 @@
 import "../styles/global.css";
 const { title = "x-Reply-Helper", titleEn = title, description = "x-Reply-Helper 让每条 X 回复更像你自己。" } = Astro.props;
 const pageTitle = `${title} · x-Reply-Helper`;
+const isAdminPage = Astro.url.pathname.startsWith("/admin");
 ---
 <!doctype html>
 <html lang="zh-CN" data-title-zh={title} data-title-en={titleEn}>
@@ -18,7 +19,8 @@ const pageTitle = `${title} · x-Reply-Helper`;
     <title>{pageTitle}</title>
     <script is:inline>try{document.documentElement.lang=localStorage.getItem("replyCopilotLanguage")==="en"?"en":"zh-CN"}catch{}</script>
   </head>
-  <body class="site-shell">
+  <body class:list={["site-shell", { "public-refresh": !isAdminPage }]}>
+    {!isAdminPage && <a href="#site-main" class="skip-link">跳转到主要内容 / Skip to content</a>}
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="/" aria-label="x-Reply-Helper home"><img class="brand-mark" src="/favicon.svg" alt="" />x-Reply-Helper</a>
@@ -33,11 +35,28 @@ const pageTitle = `${title} · x-Reply-Helper`;
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
           <a class="button secondary" id="account-entry" href="/account" hidden><span data-zh="我的账户">My account</span></a><button class="button secondary" id="account-retry" type="button" hidden><span data-zh="重试账户状态">Retry account</span></button>
         </div>
+        {!isAdminPage && (
+          <details class="mobile-nav">
+            <summary class="mobile-nav-trigger" aria-label="打开导航菜单 / Open navigation menu">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+              <span data-zh="菜单">Menu</span>
+            </summary>
+            <nav class="mobile-nav-list" aria-label="Mobile navigation">
+              <a href="/" data-zh="首页">Home</a>
+              <a href="/#creator-momentum" data-zh="互动势能临界值">Creator Momentum</a>
+              <a data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install extension</span></a>
+              <a href="/guide" data-zh="使用指南">Guide</a>
+              <a href="/pricing" data-zh="价格与套餐">Pricing</a>
+              <a href="/faq">FAQ</a>
+              <a href="/feedback" data-zh="反馈与支持">Feedback</a>
+            </nav>
+          </details>
+        )}
       </div>
     </header>
     <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>
     <div class="container notice" data-site-text="maintenance" hidden style="white-space:pre-wrap"></div>
-    <main><slot /></main>
+    <main id="site-main"><slot /></main>
     <footer class="footer">
       <div class="container footer-inner">
         <span>© {new Date().getFullYear()} x-Reply-Helper · <span data-site-text="footerText" data-zh="AI 回复草稿，由你决定是否发送">AI drafts. You decide what to send.</span></span>
