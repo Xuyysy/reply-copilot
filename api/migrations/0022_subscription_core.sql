@@ -129,9 +129,18 @@ CREATE TABLE subscription_daily_usage (
   used INTEGER NOT NULL DEFAULT 0 CHECK(used>=0),
   reserved INTEGER NOT NULL DEFAULT 0 CHECK(reserved>=0),
   version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0),
+  last_reservation_ref TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY(period_id,day_index)
 );
+
+-- Strong DB-level cap, including concurrent reservations and tier updates.
+CREATE TRIGGER subscription_day_cap_insert BEFORE INSERT ON subscription_daily_usage
+WHEN NEW.used+NEW.reserved > (SELECT daily_limit FROM subscription_periods WHERE id=NEW.period_id)
+BEGIN SELECT RAISE(ABORT,'subscription_daily_cap_exceeded'); END;
+CREATE TRIGGER subscription_day_cap_update BEFORE UPDATE ON subscription_daily_usage
+WHEN NEW.used+NEW.reserved > (SELECT daily_limit FROM subscription_periods WHERE id=NEW.period_id)
+BEGIN SELECT RAISE(ABORT,'subscription_daily_cap_exceeded'); END;
 
 -- Each request may use EXACTLY ONE source: either a subscription allocation
 -- or the pre-existing ai_credit_allocations. Cross-table exclusivity must be
