@@ -113,6 +113,9 @@ test('invalid overdrawn subscription usage fails closed instead of reporting ext
  const f=fixture();
  try{
    f.env.SUBSCRIPTIONS_ENABLED='1';
+   // Normal D1 prevents this state via cap triggers. Remove the guards ONLY
+   // inside this isolated fixture to simulate an externally corrupted row.
+   f.sql.exec('DROP TRIGGER subscription_day_cap_insert; DROP TRIGGER subscription_day_cap_update');
    seedPeriod(f,{plan:'basic',used:500,reserved:1});
    const r=await usage(f);
    assert.equal(r.status,503);
