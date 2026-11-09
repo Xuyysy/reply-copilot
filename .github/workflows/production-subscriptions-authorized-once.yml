@@ -1,0 +1,338 @@
+name: Authorized one-time Production subscriptions rollout
+
+on:
+  push:
+    branches: [chatgpt/production-subscriptions-release-candidate-20261109]
+    paths: [.github/workflows/production-subscriptions-authorized-once.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-production-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Exact SHA / Production scope / full immutable CI
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.ref == 'refs/heads/chatgpt/production-subscriptions-release-candidate-20261109' &&
+      github.event.head_commit.message == 'ops(production): execute explicitly authorized subscription release'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      ci_run_id: ${{ steps.ci.outputs.ci_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin exact audited code and only approved Production config plus this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          files="$(git diff --name-only 83795d3e19ffb5b2ea162627f1ad31dd53596b53 HEAD)"
+          expected="$(printf '%s\n' '.github/workflows/production-subscriptions-authorized-once.yml' 'api/deploy/production.wrangler.json')"
+          test "$files" = "$expected" || { echo 'Unexpected Production changes'; exit 1; }
+          node --input-type=module <<'JS'
+          import {readFileSync,readdirSync} from 'node:fs';import assert from 'node:assert/strict';
+          const c=JSON.parse(readFileSync('api/deploy/production.wrangler.json','utf8'));
+          const w=JSON.parse(readFileSync('api/wrangler.jsonc','utf8'));
+          assert.equal(c.name,'reply-copilot-api-production');
+          assert.equal(c.d1_databases[0].database_id,'d9df7d23-9b9c-44ac-a33a-c24474c15691');
+          assert.notEqual(c.d1_databases[0].database_id,w.env.staging.d1_databases[0].database_id);
+          assert.equal(c.vars.WEB_ORIGIN,'https://app.x-reply-helper.top');
+          assert.equal(c.vars.API_ORIGIN,'https://api.x-reply-helper.top');
+          assert.equal(c.vars.ENVIRONMENT,'production');
+          assert.equal(c.vars.PAYMENTS_ENABLED,'1');
+          assert.equal(c.vars.ADMIN_PORTAL_ENABLED,'1');
+          assert.equal(c.vars.XIAODOU_WEBHOOKS_ENABLED,'1');
+          assert.equal(c.vars.PAYMENT_PROVIDER,'xiaodou'); // preserve old existing callback behavior; D1 active merchant is MK99
+          for (const k of ['SUBSCRIPTIONS_ENABLED','SUBSCRIPTION_PURCHASES_ENABLED','SUBSCRIPTION_CHECKOUT_ENABLED']) {
+            assert.equal(c.vars[k],'1');
+            assert.equal(w.env.production.vars[k],'0'); // unrelated generic deploy stays safe
+          }
+          assert.equal(c.vars.MK99_PROTOCOL_CONFIRMED,'1');
+          assert.equal(c.vars.MK99_AMOUNT_CONTRACT,'CNY_EXACT_BUYER_TOTAL');
+          const names=readdirSync('api/migrations').filter(x=>/^\d{4}.*\.sql$/.test(x)).sort();
+          assert.equal(names.length,24);
+          assert.deepEqual(names.slice(-3),['0022_subscription_core.sql','0023_subscription_checkout.sql','0024_subscription_upgrade_quotes.sql']);
+          console.log('PASS Production-only source/config, isolated D1, exact additive migration files');
+          JS
+      - name: Require successful full Push CI on the final exact source SHA
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 100); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=chatgpt%2Fproduction-subscriptions-release-candidate-20261109&event=push&per_page=20")"
+            line="$(jq -r --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha==$sha and .event=="push")] | first | if .==null then "" else [.id,.status,(.conclusion // "pending")] | join(" ") end' <<< "$data")"
+            if [[ -n "$line" ]]; then
+              read -r id status conclusion <<< "$line"
+              if [[ "$status" == "completed" ]]; then
+                test "$conclusion" == "success" || { echo "Exact source CI failed: $id"; exit 1; }
+                echo "ci_id=$id" >> "$GITHUB_OUTPUT"
+                echo "PASS full CI $id on SHA $SOURCE_SHA"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'Exact CI not successful'; exit 1
+
+  rollout:
+    name: Back up Production D1, migrate, Worker OFF, Pages, Worker ON
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    environment:
+      name: production
+      url: https://app.x-reply-helper.top/pricing/
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            web/package-lock.json
+      - name: Require Production environment credentials and exact commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$(git rev-parse HEAD)" == "$SOURCE_SHA"
+          npm --prefix api ci
+          npm --prefix web ci
+          npm --prefix api run typecheck
+          npm --prefix api run check:staging
+      - name: Build verified Production site and dry-run Production Worker BEFORE any write
+        shell: bash
+        env:
+          PUBLIC_API_BASE_URL: https://api.x-reply-helper.top
+          PUBLIC_TURNSTILE_SITE_KEY: 0x4AAAAAAFhsvhYsTlFR6LIM
+        run: |
+          set -euo pipefail
+          npm --prefix web run build:production
+          test -s web/dist/pricing/index.html
+          test -s web/dist/account/index.html
+          grep -q '永久额度包' web/dist/pricing/index.html
+          (cd api && ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --dry-run --outdir "$RUNNER_TEMP/production-dry-run")
+          find web/dist -type f -print0 | sort -z | xargs -0 sha256sum > "$RUNNER_TEMP/production-web-files.sha256"
+          echo 'PASS Production Pages and Worker dry-run built from exact approved source'
+      - name: Read-only preflight pinned LIVE Production Worker and Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-production/deployments?per_page=1" > "$RUNNER_TEMP/worker-before.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="02713430-0c1f-4edd-9677-8945721bb282" and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/worker-before.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/pages/projects/x-reply-helper-production/deployments?per_page=1" > "$RUNNER_TEMP/pages-before.json"
+          jq -e '.success==true and .result[0].id=="c8296284-af5e-446a-971d-1aa9e1172c6c" and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-before.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-production/settings" > "$RUNNER_TEMP/settings-before.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="d9df7d23-9b9c-44ac-a33a-c24474c15691")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="ADMIN_PORTAL_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="XIAODOU_WEBHOOKS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="ENVIRONMENT") | .text][0]=="production")
+            and ([.result.bindings[] | select(.name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED") | .text] | index("1")==null)
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==9)
+            and ([.result.bindings[] | select(.type=="secret_text" and (.name=="MK99_PID" or .name=="MK99_PRIVATE_KEY" or .name=="MK99_PLATFORM_PUBLIC_KEY"))] | length==3)
+          ' "$RUNNER_TEMP/settings-before.json" >/dev/null
+          echo 'PASS pinned production worker/pages, isolated DB, 9 Secrets, live payment preserved'
+      - name: D1 read-only preflight schema, merchant real payment history and business data
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          w=./node_modules/.bin/wrangler
+          cfg=deploy/production.wrangler.json
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT COUNT(*) n, MAX(id) last_id,MAX(name) last_name FROM d1_migrations" > "$RUNNER_TEMP/migrations-before.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT (SELECT COUNT(*) FROM users) users,(SELECT COUNT(*) FROM recharge_orders) recharge_orders,(SELECT COUNT(*) FROM credit_ledger) credit_ledger,(SELECT COUNT(*) FROM credit_batches) credit_batches,(SELECT COUNT(*) FROM provider_payment_events) events" > "$RUNNER_TEMP/business-before.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT key,value FROM system_settings WHERE key IN ('active_merchant','purchase_enabled','payment_mk99_enabled','payment_mk99_alipay_enabled','payment_mk99_alipay_released','payment_mk99_wechat_enabled','payment_mk99_wechat_released')" > "$RUNNER_TEMP/merchant-before.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT merchant_provider,amount_contract,status,COUNT(*) n FROM payment_transactions GROUP BY merchant_provider,amount_contract,status ORDER BY n DESC" > "$RUNNER_TEMP/paid-history-before.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="PRAGMA quick_check" > "$RUNNER_TEMP/integrity-before.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="PRAGMA foreign_key_check" > "$RUNNER_TEMP/foreign-before.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+          function rows(name){const v=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/'+name+'.json','utf8'));assert.equal(v[0]?.success,true,name);return v[0]?.results??[]}
+          const m=rows('migrations-before')[0];
+          assert.equal(m.n,21);assert.equal(m.last_id,21);assert.equal(m.last_name,'0021_ai_delivery_statistics_index.sql');
+          const b=rows('business-before')[0];
+          assert.ok(b.users>0 && b.recharge_orders>0 && b.credit_ledger>0 && b.events>0);
+          const cfg=Object.fromEntries(rows('merchant-before').map(r=>[r.key,r.value]));
+          for(const key of ['purchase_enabled','payment_mk99_enabled','payment_mk99_alipay_enabled','payment_mk99_alipay_released','payment_mk99_wechat_enabled','payment_mk99_wechat_released'])assert.equal(cfg[key],'1',key);
+          assert.equal(cfg.active_merchant,'mk99');
+          const history=rows('paid-history-before');
+          assert.ok(history.some(x=>x.merchant_provider==='mk99'&&x.amount_contract==='CNY_EXACT_BUYER_TOTAL'&&x.status==='paid'&&x.n>=11));
+          assert.equal(rows('integrity-before')[0]?.quick_check,'ok');
+          assert.equal(rows('foreign-before').length,0);
+          console.log('PASS D1 exactly 21 migrations; old data preserved; genuine MK99 exact-total paid history, foreign keys and integrity OK');
+          JS
+      - name: Capture Production Time Travel pre-migration recovery bookmark and FULL SQL export
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          uri="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/d1/database/d9df7d23-9b9c-44ac-a33a-c24474c15691/time_travel/bookmark"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$uri" > "$RUNNER_TEMP/production-bookmark-before.json"
+          jq -er '.result.bookmark | select(length > 25)' "$RUNNER_TEMP/production-bookmark-before.json" > "$RUNNER_TEMP/production-bookmark.txt"
+          ./node_modules/.bin/wrangler d1 export reply-copilot-production --config deploy/production.wrangler.json --remote --skip-confirmation --output "$RUNNER_TEMP/production-pre-subscription.sql"
+          test -s "$RUNNER_TEMP/production-pre-subscription.sql"
+          sha256sum "$RUNNER_TEMP/production-pre-subscription.sql" > "$RUNNER_TEMP/production-pre-subscription.sha256"
+          echo 'PASS complete Production D1 SQL backup and Time Travel bookmark recorded (no restoring customer writes automatically)'
+      - name: Preserve PRIVATE pre-migration Production backup artifact before any schema write
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-private-d1-backup-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/production-pre-subscription.sql
+            ${{ runner.temp }}/production-pre-subscription.sha256
+            ${{ runner.temp }}/production-bookmark.txt
+          retention-days: 7
+          if-no-files-found: error
+      - name: Apply ONLY approved additive Production migration 0022, 0023, 0024
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler d1 migrations list reply-copilot-production --config deploy/production.wrangler.json --remote
+          ./node_modules/.bin/wrangler d1 migrations apply reply-copilot-production --config deploy/production.wrangler.json --remote
+      - name: Verify D1 24 migrations, 4 plans, no new subscription orders and database integrity
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          w=./node_modules/.bin/wrangler
+          cfg=deploy/production.wrangler.json
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT COUNT(*) n, MAX(id) last_id, MAX(name) last_name FROM d1_migrations" > "$RUNNER_TEMP/migrations-after.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="SELECT (SELECT COUNT(*) FROM subscription_plan_versions) plans,(SELECT COUNT(*) FROM subscription_orders) orders,(SELECT COUNT(*) FROM subscription_periods) periods" > "$RUNNER_TEMP/subscriptions-after.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="PRAGMA quick_check" > "$RUNNER_TEMP/integrity-after.json"
+          "$w" d1 execute reply-copilot-production --config "$cfg" --remote --json --command="PRAGMA foreign_key_check" > "$RUNNER_TEMP/foreign-after.json"
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+          function rows(name){const v=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/'+name+'.json','utf8'));assert.equal(v[0]?.success,true,name);return v[0]?.results??[]}
+          const m=rows('migrations-after')[0],s=rows('subscriptions-after')[0];
+          assert.equal(m.n,24);assert.equal(m.last_id,24);assert.equal(m.last_name,'0024_subscription_upgrade_quotes.sql');
+          assert.equal(s.plans,4);assert.equal(s.orders,0);assert.equal(s.periods,0);
+          assert.equal(rows('integrity-after')[0]?.quick_check,'ok');assert.equal(rows('foreign-after').length,0);
+          console.log('PASS 0022→0023→0024; four immutable plan seeds; no subscription orders; integrity OK');
+          JS
+      - name: First deploy Production Worker with subscriber catalog and checkout SWITCHES OFF
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp deploy/production.wrangler.json "$RUNNER_TEMP/approved-production-config.json"
+          node --input-type=module <<'JS'
+          import {readFileSync,writeFileSync} from 'node:fs';
+          const file='deploy/production.wrangler.json',c=JSON.parse(readFileSync(file,'utf8'));
+          for(const k of ['SUBSCRIPTIONS_ENABLED','SUBSCRIPTION_PURCHASES_ENABLED','SUBSCRIPTION_CHECKOUT_ENABLED'])c.vars[k]='0';
+          writeFileSync(file,JSON.stringify(c,null,2)+'\n');
+          JS
+          ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --keep-vars --strict
+      - name: Require same Production DB/9 Secrets and verified checkout disabled before page release
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-production/settings" > "$RUNNER_TEMP/settings-worker-off.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="d9df7d23-9b9c-44ac-a33a-c24474c15691")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="MK99_PROTOCOL_CONFIRMED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="MK99_AMOUNT_CONTRACT") | .text][0]=="CNY_EXACT_BUYER_TOTAL")
+            and ([.result.bindings[] | select(.type=="plain_text" and (.name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED"))] | length==3 and all(.[];.text=="0"))
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==9)
+          ' "$RUNNER_TEMP/settings-worker-off.json" >/dev/null
+          echo 'PASS new Production Worker code active with no new subscription sales allowed yet'
+      - name: Deploy verified Production Pages second (existing custom domain)
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd .. && sha256sum --check "$RUNNER_TEMP/production-web-files.sha256" --status)
+          ./node_modules/.bin/wrangler pages deploy ../web/dist \
+            --project-name x-reply-helper-production --branch main \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved subscriptions Production Pages $SOURCE_SHA"
+      - name: Verify exact Production Pages SHA and account/pricing routes live
+        shell: bash
+        run: |
+          set -euo pipefail
+          uri="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-production/deployments?per_page=1"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$uri" > "$RUNNER_TEMP/pages-after.json"
+          jq -e --arg sha "$SOURCE_SHA" '.success==true and .result[0].deployment_trigger.metadata.commit_hash==$sha and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-after.json" >/dev/null
+          echo 'PASS Production Pages exact approved artifact before enabling checkout'
+      - name: Finally enable Production subscription catalog, purchases and checkout using same vetted config
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/approved-production-config.json" deploy/production.wrangler.json
+          ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --keep-vars --strict
+      - name: Final live Production settings and customer purchase guard verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          uri="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$uri/workers/scripts/reply-copilot-api-production/settings" > "$RUNNER_TEMP/settings-live.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="d9df7d23-9b9c-44ac-a33a-c24474c15691")
+            and ([.result.bindings[] | select(.type=="plain_text" and (.name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED" or .name=="PAYMENTS_ENABLED"))] | length==4 and all(.[];.text=="1"))
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="MK99_PROTOCOL_CONFIRMED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="MK99_AMOUNT_CONTRACT") | .text][0]=="CNY_EXACT_BUYER_TOTAL")
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==9)
+          ' "$RUNNER_TEMP/settings-live.json" >/dev/null
+          success=0
+          for i in $(seq 1 30); do
+            status="$(curl -sS -o "$RUNNER_TEMP/plans-live.json" -w '%{http_code}' --max-time 12 https://api.x-reply-helper.top/v1/subscriptions/plans || true)"
+            if [[ "$status" == 200 ]] && jq -e '
+              .autoRenew==false and .checkoutAvailable==true
+              and ([.plans[] | [.plan_code,.price_fen,.daily_limit,.duration_days]] | sort)==[
+                ["basic",6990,500,30],["max",17990,1500,30],
+                ["pro",11990,1000,30],["ultra",25990,2000,30]
+              ]
+              and (.paymentMethods | length>0 and all(.[];.=="WECHAT_H5" or .=="ALIPAY_H5"))
+            ' "$RUNNER_TEMP/plans-live.json" >/dev/null 2>&1;then success=1;break;fi
+            sleep 5
+          done
+          test "$success" == 1 || { echo 'Production catalog/merchant readiness not yet verified - STOP';exit 1; }
+          status="$(curl -sS -o "$RUNNER_TEMP/unauth.json" -w '%{http_code}' --max-time 12 -X POST https://api.x-reply-helper.top/v1/subscriptions/orders -H 'Origin: https://app.x-reply-helper.top' -H 'Content-Type: application/json' --data '{}')"
+          test "$status" == 401 || { echo "Anonymous checkout guard failed: $status";exit 1; }
+          echo 'PASS Production all subscription flags, MK99 merchant checkout, exact plan tariffs, account login barrier'
+      - name: Production release summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo '### Fully authorized Production subscription rollout'
+            echo "- Verified immutable source: $SOURCE_SHA"
+            echo '- CI green; D1 complete SQL backup and restore bookmark saved BEFORE migrations'
+            echo '- Production D1 additive migration 0022→0023→0024, no old credits changed by migration'
+            echo '- Production Worker deployed first with checkout OFF; Pages next; checkout ON last'
+            echo '- MK99 already active for legacy purchases; no real payment/refund created by workflow'
+            echo '- All four subscription tariffs and anonymous checkout guard verified'
+            echo '- Chrome Web Store unchanged; Draft PRs not merged'
+          } >> "$GITHUB_STEP_SUMMARY"
