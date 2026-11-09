@@ -68,3 +68,25 @@ test('admin subscriber list clearly distinguishes paid claim from provider-proof
     assert.equal(r.body.users[0].remaining_today,0);
   }finally{f.sql.close();}
 });
+
+
+test('admin subscription order audit is bounded, restricted and never grants credits',async()=>{
+ const f=fixture();
+ try{
+   f.env.SUBSCRIPTIONS_ENABLED='1';f.env.ADMIN_PORTAL_ENABLED='1';
+   assert.equal((await f.call('/v1/admin/subscriptions/orders',{method:'GET'})).status,403);
+   grantAdmin(f);seedUnverifiedSubscriber(f);
+   const r=await f.call('/v1/admin/subscriptions/orders',{method:'GET'});
+   assert.equal(r.status,200,JSON.stringify(r.body));
+   assert.equal(r.body.orders.length,1);
+   assert.equal(r.body.orders[0].kind,'purchase');
+   assert.equal(r.body.orders[0].amount_fen,6990);
+   assert.equal(r.body.orders[0].verified_event_count,0);
+   assert.equal((await f.call('/v1/admin/subscriptions/orders?kind=bad',{method:'GET'})).status,400);
+   assert.equal((await f.call('/v1/admin/subscriptions/orders?status=bad',{method:'GET'})).status,400);
+   f.sql.exec("INSERT INTO subscription_payment_events(id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,received_at) VALUES('audited-event','sub-t1','local_mock','new-key','PAYMENT_SUCCEEDED',6990,1)");
+   const verified=await f.call('/v1/admin/subscriptions/orders?status=paid&kind=purchase',{method:'GET'});
+   assert.equal(verified.body.orders[0].verified_event_count,1);
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger").get().n,0);
+ }finally{f.sql.close();}
+});
