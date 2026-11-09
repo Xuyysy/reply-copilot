@@ -1,0 +1,25 @@
+name: Staging release gate tests
+on:
+  push:
+    branches: [codex/staging-pages-issue-trigger]
+  pull_request:
+    paths:
+      - '.github/workflows/deploy-staging.yml'
+      - '.github/scripts/staging_release.py'
+      - '.github/tests/test_staging_release.py'
+      - '.github/workflows/staging-release-tests.yml'
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -B -m unittest discover -s .github/tests -v
+      - name: Verify the workflow token can read effective repository permission
+        if: github.event_name == 'push' && github.repository == 'Xuyysy/reply-copilot'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api "repos/$GITHUB_REPOSITORY/collaborators/$GITHUB_ACTOR/permission" --jq '.permission'
