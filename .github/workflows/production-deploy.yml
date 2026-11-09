@@ -3,12 +3,20 @@ name: Deploy approved Production (Worker OR Pages)
 on:
   workflow_dispatch:
     inputs:
+      release_mode:
+        description: Safely CHECK credentials and artifact first, or DEPLOY the approved component
+        type: choice
+        required: true
+        default: check
+        options:
+          - check
+          - deploy
       source_sha:
-        description: Full source SHA from successful main-branch CI and Production build
+        description: Full source SHA from successful release/production CI and build
         required: true
         type: string
       ci_run_id:
-        description: Successful main-branch Reply Copilot CI run ID
+        description: Successful release/production branch Reply Copilot CI run ID
         required: true
         type: string
       build_run_id:
@@ -27,7 +35,7 @@ on:
         required: true
         type: string
       confirmation:
-        description: Type DEPLOY_WORKER_TO_PRODUCTION or DEPLOY_PAGES_TO_PRODUCTION
+        description: For check type CHECK_ONLY; for deploy type DEPLOY_WORKER_TO_PRODUCTION or DEPLOY_PAGES_TO_PRODUCTION
         required: true
         type: string
 
@@ -51,6 +59,7 @@ jobs:
     timeout-minutes: 10
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_MODE: ${{ inputs.release_mode }}
       CI_RUN_ID: ${{ inputs.ci_run_id }}
       BUILD_RUN_ID: ${{ inputs.build_run_id }}
       TARGET: ${{ inputs.target }}
@@ -66,9 +75,9 @@ jobs:
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ && "$BUILD_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
           [[ "$EXPECTED_CURRENT" =~ ^[0-9a-f-]{36}$ ]] || exit 1
           test "$CI_RUN_ID" != "$BUILD_RUN_ID"
-          case "$TARGET:$CONFIRMATION" in
-            worker:DEPLOY_WORKER_TO_PRODUCTION|pages:DEPLOY_PAGES_TO_PRODUCTION) ;;
-            *) echo 'Production confirmation phrase invalid'; exit 1 ;;
+          case "$RELEASE_MODE:$TARGET:$CONFIRMATION" in
+            check:worker:CHECK_ONLY|check:pages:CHECK_ONLY|deploy:worker:DEPLOY_WORKER_TO_PRODUCTION|deploy:pages:DEPLOY_PAGES_TO_PRODUCTION) ;;
+            *) echo 'Release mode, target or confirmation phrase invalid'; exit 1 ;;
           esac
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/production-ci-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/production-build-run.json"
@@ -95,6 +104,7 @@ jobs:
       url: https://app.x-reply-helper.top
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
+      RELEASE_MODE: ${{ inputs.release_mode }}
       TARGET: ${{ inputs.target }}
       EXPECTED_CURRENT: ${{ inputs.expected_current }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -121,39 +131,60 @@ jobs:
         run: python3 scripts/verify-production-artifact.py release "$SOURCE_SHA"
       - name: Verify CURRENT live Worker and Pages state before deployment
         run: python3 scripts/guard-production-release.py before
+      # The trusted historical main branch has NO api/package.json or api lockfile.
+      # Staging already uses an isolated pinned Wrangler install for this reason.
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: api/package-lock.json
-      - name: Install locked main-branch Wrangler
-        run: npm --prefix api ci
-      - name: Deploy ONLY precompiled verified Worker, with vars and Secrets preserved
-        if: inputs.target == 'worker'
+      - name: Install pinned isolated Wrangler (no main-branch API dependency)
         shell: bash
         run: |
           set -euo pipefail
-          cp release/worker-config.json api/deploy/production.wrangler.json
-          ./api/node_modules/.bin/wrangler deploy "$GITHUB_WORKSPACE/release/worker/index.js" \
-            --config api/deploy/production.wrangler.json \
+          npm install --prefix "$RUNNER_TEMP/production-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+          "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" --version
+      - name: Deploy ONLY precompiled verified Worker, with vars and Secrets preserved
+        if: inputs.release_mode == 'deploy' && inputs.target == 'worker'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, pathlib
+          config = json.loads(pathlib.Path('release/worker-config.json').read_text())
+          # Only the precompiled and SHA-verified Worker may be executed.
+          config['main'] = str(pathlib.Path('release/worker/index.js').resolve())
+          # Local developer file paths are not part of the remote Worker settings.
+          config.pop('$schema', None)
+          for db in config.get('d1_databases', []):
+              db.pop('migrations_dir', None)
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'production.wrangler.json'
+          path.write_text(json.dumps(config))
+          PY
+          "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" deploy \
+            --config "$RUNNER_TEMP/production.wrangler.json" \
             --no-bundle --keep-vars --strict
       - name: Deploy ONLY immutable verified Production Pages files
-        if: inputs.target == 'pages'
+        if: inputs.release_mode == 'deploy' && inputs.target == 'pages'
         shell: bash
         run: |
           set -euo pipefail
-          ./api/node_modules/.bin/wrangler pages deploy release/pages \
+          "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" pages deploy release/pages \
             --project-name x-reply-helper-production --branch main \
             --commit-hash "$SOURCE_SHA" \
             --commit-message "Approved Production Pages $SOURCE_SHA"
       - name: Check deployment succeeded AND preserved payment/secret/D1 bindings
+        if: inputs.release_mode == 'deploy'
         run: python3 scripts/guard-production-release.py after
-      - name: Release summary
+      - name: Preflight or release summary
         if: success()
         shell: bash
         run: |
-          echo '### Manually approved Production release' >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$RELEASE_MODE" == 'check' ]]; then
+            echo '### Production preflight passed (READ-ONLY; NOTHING DEPLOYED)' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '### Manually approved Production release completed' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "- Mode: $RELEASE_MODE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Target: $TARGET" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Previous active ID: $EXPECTED_CURRENT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Expected previous active ID: $EXPECTED_CURRENT" >> "$GITHUB_STEP_SUMMARY"
           echo '- D1 SQL/migrations, other component and Chrome Web Store: unchanged' >> "$GITHUB_STEP_SUMMARY"
