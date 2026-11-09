@@ -1,6 +1,7 @@
 import type { Env } from './types';
 import { ApiFailure } from './types';
 import { subscriptionDayWindow, subscriptionDailyAvailability } from '../../domain/subscription-policy.js';
+import { activateQueuedSubscriptionForUser } from './subscription-renewal';
 
 // Deliberately OFF in all deployed environments until the entire subscription
 // payment + reservation + ACK + refunds pipeline is ready and migrated.
@@ -43,7 +44,7 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   if (!subscriptionsEnabled(env)) return { ...NONE };
   if (!Number.isSafeInteger(now) || now < 0) throw new ApiFailure(503, 'SUBSCRIPTION_CLOCK_INVALID', '订阅时间暂时不可用。');
 
-  const row = await env.DB.prepare(`SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code
+  const activeQuery = () => env.DB.prepare(`SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code
     FROM subscription_periods p
     JOIN subscription_plan_versions v ON v.id=p.plan_version_id
     JOIN subscription_orders o ON o.id=p.source_order_id AND o.user_id=p.user_id
@@ -63,6 +64,11 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
           AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)
       )
     LIMIT 1`).bind(userId,now,now,env.ENVIRONMENT).first<ActivePeriod>();
+  let row = await activeQuery();
+  if (!row) {
+    // A verified queued renewal becomes usable on the first request after expiry.
+    if (await activateQueuedSubscriptionForUser(env,userId,now)) row=await activeQuery();
+  }
   if (!row) return { ...NONE };
 
   const window = subscriptionDayWindow(row.start_at, now);
