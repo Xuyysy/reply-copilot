@@ -1,0 +1,177 @@
+name: Staging pricing copy - approved UI-only release
+# Verified Web label compatibility fix; trigger gated one-time Staging Pages-only release.
+
+on:
+  push:
+    branches: [chatgpt/staging-permanent-credit-copy-20261109]
+    paths: [.github/workflows/staging-permanent-credit-copy-once.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: xrh-staging-pages-copy-20261109
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Check exact UI-only scope and successful full CI
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.ref == 'refs/heads/chatgpt/staging-permanent-credit-copy-20261109' &&
+      github.event.head_commit.message == 'ops(staging): publish verified subscription versus permanent credits copy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      ci_run: ${{ steps.success.outputs.ci_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Permit only UI copy and new test, reject service/config changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only fb30466dfec99e89cb39b3e0842e052f260d78a2 HEAD)"
+          expected="$(printf '%s\n' '.github/workflows/staging-permanent-credit-copy-once.yml' 'web/src/components/account/AccountDashboard.tsx' 'web/src/pages/checkout.astro' 'web/src/pages/index.astro' 'web/src/pages/pricing.astro' 'web/tests/subscription-website-admin.test.mjs')"
+          test "$changed" = "$expected" || { echo 'Refusing unreviewed non-UI changes'; exit 1; }
+          echo 'PASS only reviewed Web copy and test changes'
+      - name: Wait for successful exact SHA CI
+        id: success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 100); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=chatgpt%2Fstaging-permanent-credit-copy-20261109&event=push&per_page=20")"
+            item="$(jq -r --arg sha "$SOURCE_SHA" '[.workflow_runs[] | select(.head_sha==$sha and .event=="push")] | first | if .==null then "" else [.id,.status,(.conclusion // "pending")] | join(" ") end' <<< "$data")"
+            if [[ -n "$item" ]]; then
+              read -r id status conclusion <<< "$item"
+              if [[ "$status" == "completed" ]]; then
+                test "$conclusion" = "success" || { echo "Failed exact-SHA CI $id"; exit 1; }
+                echo "ci_run=$id" >> "$GITHUB_OUTPUT"
+                echo "PASS CI $id on $SOURCE_SHA"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'Exact SHA CI not successful within bounded wait'; exit 1
+
+  publish:
+    name: Publish only Staging Pages and verify permanent-credit labels
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/pricing/
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Verify pinned deploy resources before any write
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/worker.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="8e321ad0-6438-41d9-987a-a0c1149c7658" and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/worker.json" > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/settings.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTIONS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_PURCHASES_ENABLED") | .text][0]=="0")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_CHECKOUT_ENABLED") | .text][0]=="0")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==25)
+          ' "$RUNNER_TEMP/settings.json" > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages.json"
+          jq -e '.success==true and .result[0].id=="228b97c0-5b67-4f79-8764-1b54db15ef72" and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages.json" > /dev/null
+          echo 'PASS exact Staging resources; subscription purchases OFF, 25 secrets retained'
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-${{ github.sha }}
+          run-id: ${{ needs.verify.outputs.ci_run }}
+          github-token: ${{ github.token }}
+          path: web/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-${{ github.sha }}
+          run-id: ${{ needs.verify.outputs.ci_run }}
+          github-token: ${{ github.token }}
+          path: dist/ci
+      - name: Verify SHA-pinned Web files and subscription/credit display content
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-staging-ci.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,re
+          root=Path.cwd()
+          info=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          assert info['sourceSha']==os.environ['SOURCE_SHA']
+          folder=(root/'web/dist').resolve()
+          expected={}
+          for line in (root/'dist/ci/web-files.sha256').read_text().splitlines():
+              m=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',line)
+              assert m, 'invalid SHA list'
+              digest,name=m.groups()
+              target=(root/name).resolve()
+              assert target.is_relative_to(folder) and target.is_file() and not target.is_symlink()
+              assert name not in expected
+              expected[name]=digest
+          actual={}
+          for p in folder.rglob('*'):
+              assert not p.is_symlink()
+              if p.is_file():
+                  actual[p.relative_to(root).as_posix()]=hashlib.sha256(p.read_bytes()).hexdigest()
+          assert actual and actual==expected and len(actual)==info['webFileCount']
+          html=(root/'web/dist/pricing/index.html').read_text()
+          for label in ['永久额度包','permanent-credits','credit-packs-title','quota-rules-title']:
+              assert label in html, f'Missing label {label}'
+          checkout=(root/'web/dist/checkout/index.html').read_text()
+          assert '永久额度包结账' in checkout
+          print('PASS byte-for-byte CI Web artifact, billing distinction, and checkout copy')
+          PY
+      - name: Install pinned Wrangler for Pages only
+        shell: bash
+        run: npm --prefix api ci
+      - name: Deploy exact vetted Web artifact only to Staging Pages
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler pages deploy ../web/dist --project-name x-reply-helper-staging --branch codex/v0.4-credits --commit-hash "$SOURCE_SHA" --commit-message "Staging distinction: subscription vs permanent credits $SOURCE_SHA"
+      - name: Verify new Staging Pages deployment and leave Worker unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-after.json"
+          jq -e --arg sha "$SOURCE_SHA" '.success==true and .result[0].deployment_trigger.metadata.commit_hash==$sha and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-after.json" > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/worker-after.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="8e321ad0-6438-41d9-987a-a0c1149c7658"' "$RUNNER_TEMP/worker-after.json" >/dev/null
+          echo 'PASS UI-only Staging Pages change; Staging Worker, D1, Production and merchant funds unchanged'

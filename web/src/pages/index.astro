@@ -43,10 +43,10 @@ import Base from "../layouts/Base.astro";
       const set=(id:string,value:string)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
       set('home-subscription-eyebrow',t('订阅主推','Subscriptions first'));
       set('home-subscription-title',t('每天高频回复？30 天订阅更适合你。','Reply often? A 30-day subscription fits.'));
-      set('home-subscription-description',t('每日 500 至 2,000 次生成，订阅额度每天重置。按次购买的永久额度继续保留，用于订阅额度用完后的补充。','500 to 2,000 daily generations. Subscription allowances reset every 24 hours, while permanent purchased credits remain as an optional top-up.'));
-      set('home-subscription-disclosure',t('不自动续费 · 未使用日额度不累计 · 互动势能临界值对所有付费用户开放。','No auto-renewal · Unused daily allowance does not roll over · Creator Momentum is included with every paid option.'));
-      if(!subscriptionCheckout)set('home-subscription-disclosure',t('订阅结账尚未开放。','Subscription checkout is not yet available.'));
-      set('home-subscription-link',t('查看订阅套餐和额外次数','See subscriptions and extra credits'));
+      set('home-subscription-description',t('订阅每天 500 至 2,000 次、每 24 小时重置。永久额度包不主动过期：订阅当天额度用完后自动补充，也可以不订阅直接购买。','Subscriptions offer 500–2,000 daily generations and reset every 24h. Permanent credit packs do not expire automatically: they cover subscription overage or can be purchased without subscribing.'));
+      set('home-subscription-disclosure',t('订阅不自动续费 · 未使用日额度不累计 · 永久额度包不主动过期 · 互动势能临界值对所有付费用户开放。','Subscriptions do not auto-renew · Unused daily allowance does not roll over · Permanent credits do not expire automatically · Creator Momentum is available to paid users.'));
+      if(!subscriptionCheckout)set('home-subscription-disclosure',t('订阅结账尚未开放 · 永久额度包可独立购买，不主动过期。','Subscription checkout is not yet available · Permanent credit packs are separate purchases and do not expire automatically.'));
+      set('home-subscription-link',t('了解订阅与永久额度包的区别','Compare subscriptions and permanent credits'));
       const container=document.getElementById('home-subscription-cards')!;
       container.replaceChildren();
       for(const p of homeSubscriptions){
