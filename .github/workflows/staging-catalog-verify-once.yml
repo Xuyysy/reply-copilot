@@ -1,0 +1,102 @@
+name: Staging catalog read-only verification (post-deploy)
+
+on:
+  push:
+    branches:
+      - chatgpt/staging-catalog-only-20261109
+    paths:
+      - .github/workflows/staging-catalog-verify-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Verify live Staging catalog and closed checkout (no writes)
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.head_commit.message == 'test(staging): verify deployed catalog after edge propagation'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/pricing/
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify this is a read-only test-only follow-up
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only 0944bdb4dc2b87afbacb0f1c3f3d9313f1dec946 HEAD)" = '.github/workflows/staging-catalog-verify-once.yml'
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Confirm deployed Staging Worker identity and flag isolation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/deployments?per_page=1" > "$RUNNER_TEMP/deploy.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id == "8e321ad0-6438-41d9-987a-a0c1149c7658" and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/deploy.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/settings" > "$RUNNER_TEMP/settings.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTIONS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_PURCHASES_ENABLED") | .text][0]=="0")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_CHECKOUT_ENABLED") | .text][0]=="0")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0]=="1")
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==25)
+          ' "$RUNNER_TEMP/settings.json" >/dev/null
+          echo 'PASS live Staging Worker version, payment, 25 secrets, catalog-only flags'
+      - name: Wait bounded time for propagated public Staging catalog and verify four tariffs
+        shell: bash
+        run: |
+          set -euo pipefail
+          success=0
+          for n in $(seq 1 12); do
+            status="$(curl -sS -o "$RUNNER_TEMP/catalog.json" -w "%{http_code}" --max-time 12 https://api-staging.x-reply-helper.top/v1/subscriptions/plans || true)"
+            if [[ "$status" == "200" ]] && jq -e '
+               .autoRenew==false
+               and .checkoutAvailable==false
+               and ([.plans[] | [.plan_code,.price_fen,.daily_limit,.duration_days]] | sort)==[
+                ["basic",6990,500,30],["max",17990,1500,30],
+                ["pro",11990,1000,30],["ultra",25990,2000,30]
+               ]
+             ' "$RUNNER_TEMP/catalog.json" >/dev/null; then
+              success=1;break
+            fi
+            echo "Staging catalog not yet propagated (attempt $n, status $status)"
+            sleep 5
+          done
+          test "$success" == "1" || { echo 'Staging catalog did not reach verified state'; exit 1; }
+          echo 'PASS public Staging plans, exact four price and daily limit pairs, one-off 30 days, checkout unavailable'
+      - name: Prove new subscription orders and upgrade quote routes remain closed
+        shell: bash
+        run: |
+          set -euo pipefail
+          for endpoint in orders upgrade-quote; do
+            status="$(curl -sS -o "$RUNNER_TEMP/deny-$endpoint.json" -w "%{http_code}" --max-time 12 -X POST \
+              "https://api-staging.x-reply-helper.top/v1/subscriptions/$endpoint" \
+              -H 'Origin: https://staging.x-reply-helper.top' \
+              -H 'Content-Type: application/json' --data '{}')"
+            test "$status" = "404" || { echo "Unsafe checkout response: $endpoint $status"; exit 1; }
+          done
+          echo 'PASS subscription order and quote POST both blocked with 404'
+      - name: Confirm legacy Staging routes and Pages remain live
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 12 https://staging.x-reply-helper.top/pricing/ > "$RUNNER_TEMP/pricing.html"
+          grep -q 'subscription-section' "$RUNNER_TEMP/pricing.html"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages.json"
+          jq -e '.success==true and .result[0].id=="228b97c0-5b67-4f79-8764-1b54db15ef72"' "$RUNNER_TEMP/pages.json" >/dev/null
+          echo 'PASS unchanged Staging Pages. No database, payment, Production or Web Store writes.'
