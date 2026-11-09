@@ -1,0 +1,161 @@
+name: Deploy approved Production (Worker OR Pages)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full source SHA from successful main-branch CI and Production build
+        required: true
+        type: string
+      ci_run_id:
+        description: Successful main-branch Reply Copilot CI run ID
+        required: true
+        type: string
+      build_run_id:
+        description: Successful Production build workflow run ID (same SHA)
+        required: true
+        type: string
+      target:
+        description: Choose ONE component; Worker first, verify, then Pages
+        required: true
+        type: choice
+        options:
+          - worker
+          - pages
+      expected_current:
+        description: Current Worker VERSION ID or Pages DEPLOYMENT ID, checked before writing
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY_WORKER_TO_PRODUCTION or DEPLOY_PAGES_TO_PRODUCTION
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-production-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify release request and independent successful builds
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      TARGET: ${{ inputs.target }}
+      EXPECTED_CURRENT: ${{ inputs.expected_current }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Exact immutable release identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ && "$BUILD_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$EXPECTED_CURRENT" =~ ^[0-9a-f-]{36}$ ]] || exit 1
+          test "$CI_RUN_ID" != "$BUILD_RUN_ID"
+          case "$TARGET:$CONFIRMATION" in
+            worker:DEPLOY_WORKER_TO_PRODUCTION|pages:DEPLOY_PAGES_TO_PRODUCTION) ;;
+            *) echo 'Production confirmation phrase invalid'; exit 1 ;;
+          esac
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/production-ci-run.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/production-build-run.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo
+            and .head_branch == "release/production" and .event == "push"
+            and .status == "completed" and .conclusion == "success"
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/production-ci-run.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo
+            and .head_branch == "release/production" and .event == "push"
+            and .status == "completed" and .conclusion == "success"
+            and .path == ".github/workflows/production-build.yml"
+          ' "$RUNNER_TEMP/production-build-run.json"
+
+  release:
+    name: Manual guarded Production ${{ inputs.target }}
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://app.x-reply-helper.top
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      TARGET: ${{ inputs.target }}
+      EXPECTED_CURRENT: ${{ inputs.expected_current }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RELEASE_READY: ${{ vars.PRODUCTION_RELEASE_READY }}
+    steps:
+      - name: Require explicitly armed isolated Production environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_READY" = 'YES' || { echo 'Production release is disarmed: set production environment variable PRODUCTION_RELEASE_READY=YES'; exit 1; }
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo 'Production environment credentials missing'; exit 1; }
+      - name: Checkout ONLY trusted main release verifier
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Download immutable artifact from independently verified build
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build-${{ inputs.source_sha }}
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: release
+      - name: Validate pinned artifacts and safe Production target
+        run: python3 scripts/verify-production-artifact.py release "$SOURCE_SHA"
+      - name: Verify CURRENT live Worker and Pages state before deployment
+        run: python3 scripts/guard-production-release.py before
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install locked main-branch Wrangler
+        run: npm --prefix api ci
+      - name: Deploy ONLY precompiled verified Worker, with vars and Secrets preserved
+        if: inputs.target == 'worker'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp release/worker-config.json api/deploy/production.wrangler.json
+          ./api/node_modules/.bin/wrangler deploy "$GITHUB_WORKSPACE/release/worker/index.js" \
+            --config api/deploy/production.wrangler.json \
+            --no-bundle --keep-vars --strict
+      - name: Deploy ONLY immutable verified Production Pages files
+        if: inputs.target == 'pages'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./api/node_modules/.bin/wrangler pages deploy release/pages \
+            --project-name x-reply-helper-production --branch main \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved Production Pages $SOURCE_SHA"
+      - name: Check deployment succeeded AND preserved payment/secret/D1 bindings
+        run: python3 scripts/guard-production-release.py after
+      - name: Release summary
+        if: success()
+        shell: bash
+        run: |
+          echo '### Manually approved Production release' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Target: $TARGET" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Previous active ID: $EXPECTED_CURRENT" >> "$GITHUB_STEP_SUMMARY"
+          echo '- D1 SQL/migrations, other component and Chrome Web Store: unchanged' >> "$GITHUB_STEP_SUMMARY"
