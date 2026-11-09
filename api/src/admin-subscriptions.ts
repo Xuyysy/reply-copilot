@@ -77,3 +77,32 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
       remaining_today:active?Math.max(0,Number(row.daily_limit)-used-reserved):0};
   })},200,env,request);
 }
+
+
+/** Bounded, verified-read-only order audit. No manual grant or paid-state mutation. */
+export async function adminSubscriptionOrders(request: Request, env: Env): Promise<Response> {
+  await requireAdminSession(request,env);
+  requireSubscriptionFeature(env);
+  const params=new URL(request.url).searchParams;
+  const kind=params.get('kind')??'';
+  const status=params.get('status')??'';
+  if(kind&&!['purchase','renewal','upgrade'].includes(kind))
+    throw new ApiFailure(400,'INVALID_FILTER','订阅订单类型无效。');
+  if(status&&!['pending','unknown','paid','closed','failed','refund_pending','refunded','manual_review'].includes(status))
+    throw new ApiFailure(400,'INVALID_FILTER','订阅订单状态无效。');
+  const rows=await env.DB.prepare(`SELECT o.id,o.user_id,u.email,o.kind,o.amount_fen,o.status,
+    o.plan_version_id,v.plan_code,o.target_period_id,o.quoted_at,o.quote_expires_at,
+    o.created_at,o.paid_at,o.applied_at,t.merchant_provider,t.provider_trade_id,
+    t.status payment_status,t.risk_state,t.paid_at transaction_paid_at,
+    (SELECT COUNT(*) FROM subscription_payment_events e WHERE e.transaction_id=t.id
+       AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
+       AND e.amount_fen=t.amount_fen
+       AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)) verified_event_count
+    FROM subscription_orders o JOIN users u ON u.id=o.user_id
+    JOIN subscription_plan_versions v ON v.id=o.plan_version_id
+    LEFT JOIN subscription_payment_transactions t ON t.order_id=o.id
+    WHERE (?='' OR o.kind=?) AND (?='' OR o.status=?)
+    ORDER BY o.created_at DESC,o.id DESC LIMIT 100`)
+    .bind(kind,kind,status,status).all();
+  return response({orders:rows.results},200,env,request);
+}
