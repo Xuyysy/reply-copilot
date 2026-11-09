@@ -131,7 +131,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
          AND t.provider_payment_id=? AND t.amount_fen=x.amount_fen AND x.amount_fen=v.price_fen
          AND p.user_id=x.user_id AND p.daily_limit=v.daily_limit
          AND EXISTS(SELECT 1 FROM users u WHERE u.id=x.user_id AND u.status='active' AND u.archived_at IS NULL)
-         AND ((p.status='active' AND p.end_at=p.start_at+2592000000)
+         AND ((p.status IN ('active','expired') AND p.end_at=p.start_at+2592000000)
           OR (p.status='queued' AND p.start_at IS NULL AND p.end_at IS NULL))
          AND ${proof}) THEN 1 ELSE 0 END`)
     .bind(claim,o.id,o.user_id,event.tradeNo,o.transaction_id,eventKey,event.amountFen,evidence),
