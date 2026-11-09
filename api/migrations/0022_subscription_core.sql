@@ -130,6 +130,7 @@ CREATE TABLE subscription_daily_usage (
   reserved INTEGER NOT NULL DEFAULT 0 CHECK(reserved>=0),
   version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0),
   last_reservation_ref TEXT,
+  last_finalization_ref TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY(period_id,day_index)
 );
