@@ -1,0 +1,209 @@
+name: Staging one-time subscription overage and upgrade UI release
+
+on:
+  push:
+    branches: [chatgpt/staging-quota-overage-release-20261109]
+    paths: [.github/workflows/staging-quota-overage-once.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: xrh-staging-quota-overage-20261109
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Exact source + Push CI gate
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.ref == 'refs/heads/chatgpt/staging-quota-overage-release-20261109' &&
+      github.event.head_commit.message == 'ops(staging): publish verified subscription overage, free fallback and upgrade'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 24
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Allow exactly one workflow addition to independently tested app code
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changed="$(git diff --name-only 20c23e28659a7b03b82b876805e89c66580036f4 HEAD)"
+          test "$changed" = ".github/workflows/staging-quota-overage-once.yml" || { echo 'Unexpected unreviewed change';exit 1; }
+          echo "PASS only the rollout workflow differs from 20c23e28659a7b03b82b876805e89c66580036f4"
+      - name: Require tested source Push and PR CI success plus workflow SHA CI success
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for run in 42619198911 42619207862; do
+            conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '.conclusion')"
+            sha="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" --jq '.head_sha')"
+            test "$conclusion" = "success" && test "$sha" = "20c23e28659a7b03b82b876805e89c66580036f4" || { echo "Tested source CI mismatch: $run"; exit 1; }
+          done
+          for n in $(seq 1 110); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=chatgpt%2Fstaging-quota-overage-release-20261109&event=push&per_page=20")"
+            record="$(jq -r --arg sha "$WORKFLOW_SHA" '[.workflow_runs[] | select(.head_sha==$sha and .event=="push")] | first | if .==null then "" else [.id,.status,(.conclusion // "pending")] | join(" ") end' <<< "$data")"
+            if [[ -n "$record" ]]; then
+              read -r id status conclusion <<< "$record"
+              if [[ "$status" == "completed" ]]; then
+                test "$conclusion" = "success" || { echo "Workflow SHA CI failed: $id"; exit 1; }
+                echo "PASS full Push/PR CI for app SHA and exact workflow SHA"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo "Same SHA workflow CI did not succeed";exit 1
+
+  release:
+    name: Deploy only Staging Worker and CI-verified Staging Pages
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/account/
+    env:
+      SOURCE_SHA: 20c23e28659a7b03b82b876805e89c66580036f4
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 20c23e28659a7b03b82b876805e89c66580036f4
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Pin exact independently tested source and staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npm --prefix api ci
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';
+          const c=JSON.parse(readFileSync('api/wrangler.jsonc','utf8')),s=c.env.staging,p=c.env.production;
+          assert.equal(s.name,'reply-copilot-api-staging');
+          assert.equal(s.d1_databases[0].database_id,'cd44bb44-b525-42c4-b286-2cc84dae7fdb');
+          assert.equal(s.vars.ENVIRONMENT,'staging');
+          assert.equal(s.vars.PAYMENTS_ENABLED,'1');
+          for(const key of ['SUBSCRIPTIONS_ENABLED','SUBSCRIPTION_PURCHASES_ENABLED','SUBSCRIPTION_CHECKOUT_ENABLED'])assert.equal(s.vars[key],'1');
+          assert.equal(p.name,'reply-copilot-api-production');
+          for(const key of ['SUBSCRIPTIONS_ENABLED','SUBSCRIPTION_PURCHASES_ENABLED','SUBSCRIPTION_CHECKOUT_ENABLED'])assert.notEqual(p.vars[key],'1');
+          console.log('PASS Staging settings all enabled; Production config not enabled');
+          JS
+      - name: Read-only verify no other deployment since last Staging release
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/before-worker.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="cce90648-f695-4f2e-b254-bf12a2a7736d" and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/before-worker.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/before-settings.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and (.name=="PAYMENTS_ENABLED" or .name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED"))] | length==4 and all(.[];.text=="1"))
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==25)
+          ' "$RUNNER_TEMP/before-settings.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/before-pages.json"
+          jq -e '.success==true and .result[0].id=="f7f487ea-fc8e-4f1e-afdf-3bce98701fa9" and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/before-pages.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-production/deployments?per_page=1" > "$RUNNER_TEMP/production.json"
+          jq -e '.success==true and .result.deployments[0].versions[0].version_id=="02713430-0c1f-4edd-9677-8945721bb282"' "$RUNNER_TEMP/production.json" >/dev/null
+          echo 'PASS previous Staging and Production versions, exact D1 binding, 25 secrets and MK99 flags'
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-20c23e28659a7b03b82b876805e89c66580036f4
+          run-id: 42619198911
+          github-token: ${{ github.token }}
+          path: web/dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-20c23e28659a7b03b82b876805e89c66580036f4
+          run-id: 42619198911
+          github-token: ${{ github.token }}
+          path: dist/ci
+      - name: Verify original exact source CI artifact and every Pages file SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-staging-ci.py
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib,json,os,re
+          root=Path.cwd(); web=(root/'web/dist').resolve()
+          info=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          assert info['sourceSha']==os.environ['SOURCE_SHA']
+          expected={}
+          for line in (root/'dist/ci/web-files.sha256').read_text().splitlines():
+              m=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',line)
+              assert m,'Malformed expected web file digest'
+              digest,name=m.groups();f=(root/name).resolve()
+              assert f.is_relative_to(web) and f.is_file() and not f.is_symlink() and name not in expected
+              expected[name]=digest
+          actual={}
+          for f in web.rglob('*'):
+              assert not f.is_symlink()
+              if f.is_file():
+                  assert f.name not in ('_worker.js','_routes.json')
+                  actual[f.relative_to(root).as_posix()]=hashlib.sha256(f.read_bytes()).hexdigest()
+          assert actual and actual==expected and len(actual)==info['webFileCount']
+          assert 'account-subscription-overage' in (root/'web/dist/account/index.html').read_text() or 'account-subscription-overage' in ''.join(f.read_text(errors='replace') for f in (root/'web/dist/_astro').rglob('*.js'))
+          print(f'PASS {len(actual)} exact immutable Staging Pages files')
+          PY
+      - name: Publish only Staging Worker with existing merchant Secrets retained
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict
+      - name: Verify MK99 and subscription flags survived Worker update
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/after-settings.json"
+          jq -e '
+            .success==true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0]=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and (.name=="PAYMENTS_ENABLED" or .name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED"))] | length==4 and all(.[];.text=="1"))
+            and ([.result.bindings[] | select(.type=="secret_text")] | length==25)
+          ' "$RUNNER_TEMP/after-settings.json" > /dev/null
+          echo 'PASS Staging Worker enabled and original 25 secrets intact'
+      - name: Publish only exact verified Staging Pages artifact
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler pages deploy ../web/dist --project-name x-reply-helper-staging --branch codex/v0.4-credits --commit-hash "$SOURCE_SHA" --commit-message "Subscription daily -> free -> permanent; upgrade UX $SOURCE_SHA"
+      - name: Verify Pages provenance and public subscription catalog after propagation
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-after.json"
+          jq -e --arg sha "$SOURCE_SHA" '.success==true and .result[0].deployment_trigger.metadata.commit_hash==$sha and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-after.json" > /dev/null
+          ready=0
+          for i in $(seq 1 24); do
+            status="$(curl -sS -o "$RUNNER_TEMP/catalog.json" -w "%{http_code}" --max-time 15 https://api-staging.x-reply-helper.top/v1/subscriptions/plans || true)"
+            if [[ "$status" = 200 ]] && jq -e '.checkoutAvailable==true and .autoRenew==false and (.plans | length==4)' "$RUNNER_TEMP/catalog.json" >/dev/null 2>&1;then ready=1;break;fi
+            sleep 5
+          done
+          test "$ready" = 1 || { echo 'Staging subscription catalog unhealthy'; exit 1; }
+          echo 'PASS Staging subscription upgrade-overage release, merchant ready, Production untouched, no real payment initiated'
