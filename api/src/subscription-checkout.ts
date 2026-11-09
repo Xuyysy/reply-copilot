@@ -93,7 +93,7 @@ export async function createSubscriptionUpgradeQuote(request:Request,env:Env):Pr
  requireWebOrigin(request,env);
  await requireCsrf(request,env,token);
  const body=await jsonBody(request,1024);
- if(Object.keys(body).length!==1||!['basic','pro','max','ultra'].includes(String(body.planCode)))
+ if(Object.keys(body).length!==1||typeof body.planCode!=='string'||!['basic','pro','max','ultra'].includes(body.planCode))
    throw new ApiFailure(400,'SUBSCRIPTION_PLAN_INVALID','订阅套餐无效。');
  const now=nowMs();
  if(!await takeRate(env,'subscription-upgrade-quote:'+session.user_id,8,60_000,now))

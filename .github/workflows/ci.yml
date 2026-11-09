@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 50
     env:
-      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.head_ref == 'codex/subscriptions-v1-issue21' && github.event.pull_request.head.sha || github.sha }}
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.head_ref == 'codex/subscriptions-v1-issue21' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout full history for regression baselines
         uses: actions/checkout@v4
