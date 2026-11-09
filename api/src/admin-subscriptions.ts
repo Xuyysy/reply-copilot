@@ -11,6 +11,15 @@ function requireSubscriptionFeature(env: Env): void {
     throw new ApiFailure(404, 'NOT_FOUND', '接口不存在。');
 }
 
+/** Public catalog for the subscription-first pricing page, only after rollout. */
+export async function publicSubscriptionPlans(request: Request, env: Env): Promise<Response> {
+  requireSubscriptionFeature(env);
+  const rows=await env.DB.prepare(`SELECT plan_code,price_fen,daily_limit,duration_days,name_zh,name_en,
+    description_zh,description_en FROM subscription_plan_versions
+    WHERE current=1 AND active=1 ORDER BY daily_limit`).all();
+  return response({plans:rows.results,autoRenew:false},200,env,request);
+}
+
 export async function adminSubscriptionPlans(request: Request, env: Env): Promise<Response> {
   await requireAdminSession(request,env);
   requireSubscriptionFeature(env);
