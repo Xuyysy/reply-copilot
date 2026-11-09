@@ -100,8 +100,8 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   };
 }
 
-/** Subscription overage may consume paid credits only, never welcome credits. */
+/** Available generations are subscription allowance, then free, then paid credits. */
 export function availableNow(quota: { freeRemaining: number; paidRemaining: number }, subscription: SubscriptionAccount): number {
-  if (subscription.status === 'active') return subscription.remainingToday + quota.paidRemaining;
+  if (subscription.status === 'active') return subscription.remainingToday + quota.freeRemaining + quota.paidRemaining;
   return quota.freeRemaining + quota.paidRemaining;
 }

@@ -49,6 +49,18 @@ test('side panel visibly separates the subscription daily bucket from paid/free 
    assert.ok(html.includes('id="'+id+'"'),id);
  }
  assert.match(html,/id="subscription-quota" class="subscription-quota hidden"/);
+ assert.match(html,/先使用订阅.*免费.*永久/);
+ assert.match(html,/id="subscription-overage"[^>]+role="status"[^>]+aria-live="polite"/);
+ assert.match(html,/id="subscription-overage-text"/);
+ assert.match(html,/id="subscription-overage-action"/);
+ assert.match(html,/id="subscription-overage-upgrade"/);
+ assert.match(js,/subscription-overage-upgrade/);
+ assert.match(js,/24\*60\*60\*1000/);
+ assert.match(js,/subscription-checkout\/\?upgrade=1&plan=/);
+ assert.match(js,/sub\.remainingToday===0/);
+ assert.match(js,/accountClient\.openWebsite\('\/pricing\/\#permanent-credits'\)/);
+ assert.match(js,/订阅额度已用完.*免费/);
+ assert.match(js,/订阅额度.*免费.*用完.*永久/);
  assert.match(js,/account\.subscription\?\.status==='active'/);
  assert.match(js,/sub\.usedToday\+sub\.reservedToday/);
  assert.match(js,/sub\.expiresAt/);

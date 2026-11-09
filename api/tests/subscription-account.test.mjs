@@ -53,17 +53,17 @@ test('active proof exposes separate subscription daily quota without changing pa
    assert.equal(r.body.subscription.remainingToday,767);
    assert.equal(r.body.subscription.expiresAt,new Date(end).toISOString());
    assert.equal(r.body.subscription.resetAt,new Date(start+3*DAY).toISOString());
-   assert.equal(r.body.availableNow,767);
+   assert.equal(r.body.availableNow,967);
    const e=await entitlements(f);
    assert.equal(e.body.status,'credits_available');
    assert.equal(e.body.subscription.plan,'pro');
-   assert.equal(e.body.availableNow,767);
+   assert.equal(e.body.availableNow,967);
    assert.equal((await momentum(f)).body.features.interactionMomentum.eligible,true);
    assert.equal(f.sql.prepare("SELECT free_balance,paid_balance FROM credit_accounts WHERE user_id='test-user'").get().free_balance,200);
  }finally{f.sql.close();}
 });
 
-test('subscription does not use leftover welcome freebies after the daily cap is consumed',async()=>{
+test('remaining welcome freebies keep account usable after the subscription daily cap is consumed',async()=>{
  const f=fixture();
  try{
    f.env.SUBSCRIPTIONS_ENABLED='1';
@@ -71,8 +71,9 @@ test('subscription does not use leftover welcome freebies after the daily cap is
    const r=await usage(f),e=await entitlements(f);
    assert.equal(r.body.subscription.remainingToday,0);
    assert.equal(r.body.quota.freeRemaining,200);
-   assert.equal(r.body.availableNow,0);
-   assert.equal(e.body.status,'credits_exhausted');
+   assert.equal(r.body.availableNow,200);
+   assert.equal(e.body.status,'credits_available');
+   assert.equal(e.body.availableNow,200);
    assert.equal((await momentum(f)).body.features.interactionMomentum.eligible,true);
  }finally{f.sql.close();}
 });

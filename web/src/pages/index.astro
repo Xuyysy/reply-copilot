@@ -43,7 +43,7 @@ import Base from "../layouts/Base.astro";
       const set=(id:string,value:string)=>{const el=document.getElementById(id);if(el)el.textContent=value;};
       set('home-subscription-eyebrow',t('订阅主推','Subscriptions first'));
       set('home-subscription-title',t('每天高频回复？30 天订阅更适合你。','Reply often? A 30-day subscription fits.'));
-      set('home-subscription-description',t('订阅每天 500 至 2,000 次、每 24 小时重置。永久额度包不主动过期：订阅当天额度用完后自动补充，也可以不订阅直接购买。','Subscriptions offer 500–2,000 daily generations and reset every 24h. Permanent credit packs do not expire automatically: they cover subscription overage or can be purchased without subscribing.'));
+      set('home-subscription-description',t('订阅每天 500 至 2,000 次、每 24 小时重置。订阅当天用完后先扣免费额度，再扣不主动过期的永久额度包；也可以按剩余时间补差价升级订阅。','Subscriptions offer 500–2,000 daily generations and reset every 24h. When the daily allowance runs out, free credits are used before permanent paid credits; eligible users can also upgrade at a prorated price.'));
       set('home-subscription-disclosure',t('订阅不自动续费 · 未使用日额度不累计 · 永久额度包不主动过期 · 互动势能临界值对所有付费用户开放。','Subscriptions do not auto-renew · Unused daily allowance does not roll over · Permanent credits do not expire automatically · Creator Momentum is available to paid users.'));
       if(!subscriptionCheckout)set('home-subscription-disclosure',t('订阅结账尚未开放 · 永久额度包可独立购买，不主动过期。','Subscription checkout is not yet available · Permanent credit packs are separate purchases and do not expire automatically.'));
       set('home-subscription-link',t('了解订阅与永久额度包的区别','Compare subscriptions and permanent credits'));

@@ -57,8 +57,8 @@ export function subscriptionDailyAvailability(dailyLimit, used, reserved = 0) {
 /**
  * The funding source is selected at reservation time and is immutable for the
  * request through delivery ACK, replay or release. This function never mutates
- * a credit balance. With an active subscription, free welcome credits cannot
- * be used as a subscription-overage source.
+ * a credit balance. Active subscription allowance is first, followed by free
+ * credits and finally permanent paid credits.
  */
 export function chooseGenerationSource({ subscriptionActive, subscriptionRemaining = 0, paidRemaining = 0, freeRemaining = 0 }) {
   if (typeof subscriptionActive !== 'boolean') throw new TypeError('subscriptionActive must be boolean');
@@ -66,6 +66,7 @@ export function chooseGenerationSource({ subscriptionActive, subscriptionRemaini
     nonNegativeInteger(value, name);
   if (subscriptionActive) {
     if (subscriptionRemaining > 0) return 'subscription';
+    if (freeRemaining > 0) return 'free';
     return paidRemaining > 0 ? 'paid' : 'none';
   }
   if (freeRemaining > 0) return 'free';

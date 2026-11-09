@@ -75,5 +75,15 @@ test('pricing and checkout distinguish 30-day daily subscriptions from permanent
  assert.match(creditCheckout,/额度包不按天清零/);
  assert.match(creditCheckout,/Permanent credit pack checkout/);
  assert.match(account,/永久付费额度/);
+ assert.match(account,/订阅.*免费.*永久/);
+ assert.match(account,/role="status"[^>]*data-testid="account-subscription-overage"/);
+ assert.match(account,/今日订阅额度已用完/);
+ assert.match(account,/免费额度.*永久/);
+ assert.match(account,/account-subscription-overage-upgrade/);
+ assert.match(account,/今日订阅额度已用完/);
+ assert.match(account,/升级订阅/);
+ assert.match(account,/24\*60\*60\*1000/);
+ assert.match(pricing,/订阅.*免费.*永久/);
+ assert.match(home,/免费.*永久/);
  assert.match(home,/永久额度包不主动过期/);
 });

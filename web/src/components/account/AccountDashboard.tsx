@@ -339,7 +339,20 @@ export default function AccountDashboard() {
         {subscriptionPlans.filter(plan=>["basic","pro","max","ultra"].indexOf(plan)>["basic","pro","max","ultra"].indexOf(usage.subscription?.plan??"")).map(plan=>
           <a className="button secondary" key={plan} href={"/subscription-checkout/?upgrade=1&plan="+encodeURIComponent(plan)}>{t("升档至","Upgrade to")} {plan.toUpperCase()}</a>)}
       </div>}
-      <p className="text-sm text-muted-foreground">{t("订阅每天重置次数，未用不累计；当天订阅额度用完后自动使用另购的永久付费额度。永久额度不主动过期，新人免费额度保持独立。","Subscriptions reset daily without rollover. After today's subscription limit, available permanent purchased credits are used automatically; they do not expire automatically. Welcome credits remain separate.")}</p>
+      <p className="text-sm text-muted-foreground">{t("订阅每天重置次数，未用不累计；订阅当天额度用完后先扣免费额度，免费额度用完后才使用永久付费额度。永久额度不主动过期，三类额度分开计算。","Subscriptions reset daily without rollover. Once the daily subscription allowance is exhausted, free credits are used before permanent paid credits. Permanent credits do not expire automatically, and all balances remain separate.")}</p>
+      {usage.subscription.remainingToday===0&&<Alert role="status" data-testid="account-subscription-overage"><AlertDescription className="space-y-2">
+        <p>{usage.quota.freeRemaining>0
+          ?t(`今日订阅额度已用完，已自动切换到免费额度（剩余 ${usage.quota.freeRemaining} 次），免费额度用完后才会扣永久付费额度。`,`Today's subscription allowance is exhausted. Free credits are being used (${usage.quota.freeRemaining} remaining), followed by permanent credits.`)
+          :usage.quota.paidRemaining>0
+          ?t(`今日订阅额度与免费额度已用完，正在使用永久付费额度（剩余 ${usage.quota.paidRemaining} 次）。`,`Daily subscription and free credits are exhausted. Permanent paid credits are now in use (${usage.quota.paidRemaining} left).`)
+          :t("今日订阅额度、免费额度和永久付费额度全部用完。可以购买永久额度包、升级订阅（若符合条件），或等待明天重置。","Your daily subscription, free and permanent credits are exhausted. Buy a permanent credit pack, upgrade your subscription if eligible, or wait for the next reset.")}</p>
+        <div className="flex flex-wrap gap-2">
+          {usage.subscription.expiresAt&&new Date(usage.subscription.expiresAt).getTime()-Date.now()>=24*60*60*1000&&
+            subscriptionPlans.filter(plan=>["basic","pro","max","ultra"].indexOf(plan)>["basic","pro","max","ultra"].indexOf(usage.subscription?.plan??"")).sort((a,b)=>["basic","pro","max","ultra"].indexOf(a)-["basic","pro","max","ultra"].indexOf(b)).slice(0,1).map(plan=>
+              <Button size="sm" key={plan} variant="outline" asChild><a data-testid="account-subscription-overage-upgrade" href={"/subscription-checkout/?upgrade=1&plan="+encodeURIComponent(plan)}>{t("升级订阅至","Upgrade subscription to")} {plan.toUpperCase()} · {t("按剩余时间补差价","Prorated price")}</a></Button>)}
+          {usage.quota.freeRemaining===0&&usage.quota.paidRemaining===0&&<Button size="sm" variant="outline" asChild><a href="/pricing/#permanent-credits">{t("购买永久额度包","Buy permanent credits")}<ArrowRight size={14}/></a></Button>}
+        </div>
+      </AlertDescription></Alert>}
       <Button variant="outline" asChild><a href="/pricing">{t("查看订阅与永久额度包","View subscriptions and permanent credits")}<ArrowRight size={16}/></a></Button>
     </CardContent></Card>}
     {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
