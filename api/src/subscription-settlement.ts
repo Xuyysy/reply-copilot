@@ -22,7 +22,7 @@ type Order = {
   payment_channel:string;
 };
 
-async function orderById(env:Env,id:string):Promise<Order|null>{
+export async function orderById(env:Env,id:string):Promise<Order|null>{
  return env.DB.prepare(`SELECT o.id,o.user_id,o.kind,o.plan_version_id,o.status,o.amount_fen,
      v.price_fen,v.daily_limit,v.duration_days,t.id transaction_id,
      t.merchant_provider,t.merchant_account,t.notification_sign_type,t.provider_trade_id,
