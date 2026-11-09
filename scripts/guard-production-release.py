@@ -4,6 +4,7 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.request
 
 WORKER = "reply-copilot-api-production"
@@ -69,9 +70,9 @@ def main():
     target = os.environ["TARGET"]
     expected = os.environ["EXPECTED_CURRENT"]
     snapshot = pathlib.Path(os.environ["RUNNER_TEMP"]) / "production-release-snapshot.json"
-    current = check_bindings()
-    active, deployment = live_id(target)
     if stage == "before":
+        current = check_bindings()
+        active, deployment = live_id(target)
         if active != expected:
             raise RuntimeError("Production changed after approval; refused stale release")
         snapshot.write_text(json.dumps({
@@ -81,10 +82,29 @@ def main():
         print(f"PASS: current Production {target} matches approved rollback point; all bindings checked")
     elif stage == "after":
         before = json.loads(snapshot.read_text())
-        if before["target"] != target or current != before["bindings"]:
-            raise RuntimeError("ALERT: Production variables, secrets or bindings changed")
-        if active == before["previous"]:
-            raise RuntimeError("New Production release did not become active")
+        if before["target"] != target:
+            raise RuntimeError("Production release target unexpectedly changed")
+        # Cloudflare Pages may need time to finish building, and the Worker
+        # versions endpoint may briefly report the previous active version.
+        # Never conceal a variable/secret/D1 drift while waiting.
+        active = deployment = None
+        for attempt in range(15):
+            current = check_bindings()
+            if current != before["bindings"]:
+                raise RuntimeError("ALERT: Production variables, secrets or bindings changed")
+            try:
+                active, deployment = live_id(target)
+            except RuntimeError as error:
+                if target != "pages" or "canonical deployment not successful" not in str(error):
+                    raise
+                if attempt == 14:
+                    raise
+            else:
+                if active != before["previous"]:
+                    break
+            if attempt == 14:
+                raise RuntimeError("New Production release not active within postflight window")
+            time.sleep(5)
         print(f"PASS: new Production {target} is active, all vars/secrets/D1 preserved")
         print(f"New active ID: {active}")
         print(f"New deployment ID: {deployment}")
