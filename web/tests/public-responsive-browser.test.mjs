@@ -40,7 +40,7 @@ test("real built user pages fit phone, tablet and desktop viewports", { timeout:
         assert.equal(result.nav === "none", width > 820, route+"@"+width+": mobile nav");
       }
       if (route === "index") {
-        assert.equal(await evaluate('Boolean(document.querySelector("#creator-momentum .momentum-curve"))'), true);
+        assert.equal(await evaluate('Boolean(document.querySelector("#creator-momentum .momentum-v2-chart"))'), true);
         assert.match(await evaluate('document.querySelector(".momentum-signature").dataset.zh'), /互动是蓄势/);
       }
       if (route === "faq") {
