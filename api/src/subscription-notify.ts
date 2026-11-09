@@ -1,9 +1,10 @@
 import type { Env } from './types';
 import { ApiFailure } from './types';
-import { nowMs, sha256, uuid } from './security';
-import { Mk99Client, Mk99Error, mk99Config, canonicalMk99, parseMk99Form,
+import { nowMs } from './security';
+import { Mk99Client, Mk99Error, mk99Config, parseMk99Form,
   verifyAndParseMk99Notification, type Mk99PaymentEvent } from './mk99';
 import { notifyContentTypeClass, readMk99Body, parseMk99MultipartForm } from './mk99-payments';
+import { recordSubscriptionRisk } from './subscription-risk';
 import { orderById, reconcileVerifiedSubscriptionPurchase } from './subscription-settlement';
 
 /** Signed notification uses the original MK99 contract, but settles only in
@@ -78,40 +79,16 @@ export async function subscriptionMk99Notify(request:Request,env:Env):Promise<Re
  }
 
  const reason=signed.tradeStatus;
- if(reason==='TRADE_REFUND'&&signed.refundAmountFen!==undefined&&signed.refundAmountFen>row.amount_fen)
-   throw new ApiFailure(409,'SUBSCRIPTION_REFUND_AMOUNT_INVALID','退款金额超出原付款。');
- // Freeze/refund is intentionally fail-closed. Even signed UNFREEZE does not
- // restore rights automatically; it must undergo a separate verified review.
- if(reason==='TRADE_REFUND'||reason==='TRADE_FREEZE'){
-   const hash=await sha256(canonicalMk99(form));
-   const key='sub-risk:'+signed.tradeNo+':'+reason+':'+signed.timestamp;
-   await env.DB.batch([
-     env.DB.prepare(`INSERT INTO subscription_payment_events
-       (id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at)
-       VALUES(? ,?,'mk99',?,?,?, ?,?) ON CONFLICT(merchant_provider,provider_event_id) DO NOTHING`)
-       .bind(uuid(),row.id,key,reason,signed.amountFen,hash,now),
-     env.DB.prepare(`UPDATE subscription_payment_transactions SET risk_state='frozen',
-       status=CASE WHEN ?='TRADE_REFUND' THEN 'refunded' ELSE status END,updated_at=?
-       WHERE id=? AND risk_state IN ('clear','manual_review','frozen')
-         AND (provider_payment_id IS NULL OR provider_payment_id=?)`)
-       .bind(reason,now,row.id,signed.tradeNo),
-     env.DB.prepare(`UPDATE subscription_orders SET
-       status=CASE WHEN ?='TRADE_REFUND' THEN 'refunded' ELSE 'refund_pending' END,updated_at=?
-       WHERE id=? AND status IN ('pending','unknown','paid','refund_pending','manual_review')`)
-       .bind(reason,now,row.order_id),
-     env.DB.prepare(`UPDATE subscription_periods
-       SET status=CASE WHEN ?='TRADE_REFUND' THEN 'revoked' ELSE 'refund_pending' END,
-       updated_at=? WHERE source_order_id=? AND status IN ('active','queued','refund_pending')`)
-       .bind(reason,now,row.order_id)
-   ]);
- }
+ await recordSubscriptionRisk(env,row,signed,now);
  if(reason==='TRADE_CLOSED'&&row.order_status!=='paid'){
    await env.DB.batch([
      env.DB.prepare(`UPDATE subscription_payment_transactions SET status='closed',updated_at=?
        WHERE id=? AND status IN ('pending','unknown') AND risk_state='clear'`)
        .bind(now,row.id),
      env.DB.prepare(`UPDATE subscription_orders SET status='closed',updated_at=?
-       WHERE id=? AND status IN ('pending','unknown')`).bind(now,row.order_id)
+       WHERE id=? AND status IN ('pending','unknown') AND EXISTS(
+        SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=subscription_orders.id
+          AND t.status='closed' AND t.risk_state='clear')`).bind(now,row.order_id)
    ]);
  }
  return new Response('success',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});

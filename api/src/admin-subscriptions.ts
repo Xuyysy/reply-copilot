@@ -1,11 +1,16 @@
 import type { Env } from './types';
 import { ApiFailure } from './types';
 import { requireAdminSession } from './admin-auth';
+import { jsonBody,nowMs,requireWebOrigin } from './security';
+import { commitOperation,operation } from './admin-operations';
 import { response } from './http';
+import { orderById,querySubscriptionPayment } from './subscription-settlement';
+import { takeRate } from './auth';
+import { checkoutEnabled } from './subscription-checkout';
+import { paymentControl } from './payment-policy';
 import { subscriptionsEnabled } from './subscription-account';
 
-// Read-only initial admin surface. Mutation, refund and activation endpoints
-// must not be added until the complete payment/ledger state machine is proven.
+// Subscription routes are independently gated from legacy commerce.
 function requireSubscriptionFeature(env: Env): void {
   if (!subscriptionsEnabled(env))
     throw new ApiFailure(404, 'NOT_FOUND', '接口不存在。');
@@ -17,7 +22,9 @@ export async function publicSubscriptionPlans(request: Request, env: Env): Promi
   const rows=await env.DB.prepare(`SELECT plan_code,price_fen,daily_limit,duration_days,name_zh,name_en,
     description_zh,description_en FROM subscription_plan_versions
     WHERE current=1 AND active=1 ORDER BY daily_limit`).all();
-  return response({plans:rows.results,autoRenew:false},200,env,request);
+  const control=checkoutEnabled(env)?await paymentControl(env):null;
+  const paymentMethods=control?.activeMerchant==='mk99'?control.methods.filter(method=>method.provider==='mk99').map(method=>method.channel):[];
+  return response({plans:rows.results,autoRenew:false,checkoutAvailable:paymentMethods.length>0,paymentMethods},200,env,request);
 }
 
 export async function adminSubscriptionPlans(request: Request, env: Env): Promise<Response> {
@@ -73,7 +80,10 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
       row.payment_currency==='CNY'&&row.payment_amount_fen===row.amount_fen&&
       (env.ENVIRONMENT!=='production'||row.merchant_provider==='mk99');
     const used=Number(row.used_today)||0,reserved=Number(row.reserved_today)||0;
-    return {...row,effective_status:active?'active':row.period_status==='active'?'expired_or_unverified':row.period_status,
+    const effectiveStatus=row.order_status==='refunded'?'revoked':
+      ['refund_pending','manual_review'].includes(String(row.order_status))?'refund_pending':
+      active?'active':row.period_status==='active'?'expired_or_unverified':row.period_status;
+    return {...row,effective_status:effectiveStatus,
       remaining_today:active?Math.max(0,Number(row.daily_limit)-used-reserved):0};
   })},200,env,request);
 }
@@ -105,4 +115,112 @@ export async function adminSubscriptionOrders(request: Request, env: Env): Promi
     ORDER BY o.created_at DESC,o.id DESC LIMIT 100`)
     .bind(kind,kind,status,status).all();
   return response({orders:rows.results},200,env,request);
+}
+
+export async function publishSubscriptionPlan(request:Request,env:Env,code:string):Promise<Response>{
+ requireSubscriptionFeature(env);
+ const actor=await requireAdminSession(request,env,true);
+ requireWebOrigin(request,env);
+ const body=await jsonBody(request,8192);
+ const {expectedId,priceFen,nameZh,nameEn,descriptionZh,descriptionEn,active}=body;
+ if(Object.keys(body).some(key=>!['operationId','reason','expectedId','priceFen','nameZh','nameEn','descriptionZh','descriptionEn','active'].includes(key))||
+    typeof expectedId!=='string'||typeof priceFen!=='number'||!Number.isSafeInteger(priceFen)||priceFen<1||priceFen>10_000_000||
+    typeof nameZh!=='string'||!nameZh.trim()||nameZh.length>80||typeof nameEn!=='string'||!nameEn.trim()||nameEn.length>80||
+    typeof descriptionZh!=='string'||descriptionZh.length>1500||typeof descriptionEn!=='string'||descriptionEn.length>1500||
+    typeof active!=='boolean')
+   throw new ApiFailure(400,'INVALID_SUBSCRIPTION_PLAN','订阅套餐配置无效。');
+ const op=await operation(env,actor,body,'subscription_plan_publish',code);
+ if(op.replayed)return response({ok:true,replayed:true},200,env,request);
+ const before=await env.DB.prepare('SELECT * FROM subscription_plan_versions WHERE plan_code=? AND current=1')
+   .bind(code).first<{id:string;version:number;daily_limit:number}>();
+ if(!before||before.id!==expectedId)throw new ApiFailure(409,'SUBSCRIPTION_PLAN_CONFLICT','套餐已变更，请重新加载。');
+ const now=nowMs();
+ const after={id:op.id,version:before.version+1,priceFen,nameZh,nameEn,descriptionZh,descriptionEn,active};
+ await commitOperation(env,op,[
+   env.DB.prepare('UPDATE subscription_plan_versions SET current=0 WHERE id=? AND current=1').bind(before.id),
+   env.DB.prepare(`INSERT INTO subscription_plan_versions
+     (id,plan_code,version,price_fen,daily_limit,name_zh,name_en,description_zh,description_en,active,created_at,updated_at)
+     SELECT ?,plan_code,version+1,?,daily_limit,?,?,?,?,?,?,? FROM subscription_plan_versions WHERE id=? AND current=0`)
+    .bind(op.id,priceFen,nameZh.trim(),nameEn.trim(),descriptionZh.trim(),descriptionEn.trim(),Number(active),now,now,before.id),
+   env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN
+    EXISTS(SELECT 1 FROM subscription_plan_versions v WHERE v.id=? AND v.current=1)
+     AND NOT EXISTS(SELECT 1 FROM subscription_plan_versions v WHERE v.current=1
+      AND ((v.daily_limit<? AND v.price_fen>=?) OR (v.daily_limit>? AND v.price_fen<=?)))
+    THEN 1 ELSE 0 END`).bind(op.id,op.id,before.daily_limit,priceFen,before.daily_limit,priceFen),
+   env.DB.prepare('DELETE FROM credit_operation_assertions WHERE operation_id=?').bind(op.id)
+ ],before,after);
+ return response({ok:true,replayed:op.replayed},200,env,request);
+}
+
+/** Audited hold for chargeback or refund review. Releases and already recorded
+ * consumption remain intact. Only provider evidence may mark a refund final. */
+export async function holdSubscriptionOrder(request:Request,env:Env,id:string):Promise<Response>{
+ requireSubscriptionFeature(env);
+ const actor=await requireAdminSession(request,env,true);
+ requireWebOrigin(request,env);
+ const body=await jsonBody(request,2048);
+ if(Object.keys(body).some(key=>key!=='operationId'&&key!=='reason'))
+   throw new ApiFailure(400,'INVALID_REQUEST','复核请求只能包含操作编号和原因。');
+ const op=await operation(env,actor,body,'subscription_order_hold',id);
+ if(op.replayed)return response({ok:true,replayed:true},200,env,request);
+ const before=await env.DB.prepare(`SELECT o.status,t.risk_state,t.id transaction_id
+   FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=?`)
+   .bind(id).first<{status:string;risk_state:string;transaction_id:string}>();
+ if(!before)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ if(!['paid','refund_pending','manual_review'].includes(before.status))
+   throw new ApiFailure(409,'SUBSCRIPTION_HOLD_UNAVAILABLE','该订单不能进入此复核流程。');
+ const now=nowMs();
+ await commitOperation(env,op,[
+   env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
+    SELECT ?,EXISTS(SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id
+    WHERE o.id=? AND o.status=? AND t.id=? AND t.risk_state=?)`).bind(op.id,id,before.status,before.transaction_id,before.risk_state),
+   env.DB.prepare("UPDATE subscription_payment_transactions SET risk_state='frozen',updated_at=? WHERE id=?").bind(now,before.transaction_id),
+   env.DB.prepare("UPDATE subscription_orders SET status='refund_pending',updated_at=? WHERE id=?").bind(now,id),
+   env.DB.prepare(`UPDATE subscription_periods SET status='refund_pending',updated_at=?
+     WHERE status='active' AND (source_order_id=? OR id IN (SELECT period_id FROM subscription_tier_changes WHERE order_id=?))`).bind(now,id,id),
+   env.DB.prepare('DELETE FROM credit_operation_assertions WHERE operation_id=?').bind(op.id)
+ ],before,{status:'refund_pending',riskState:'frozen'});
+ return response({ok:true,replayed:op.replayed},200,env,request);
+}
+
+export async function adminSubscriptionFinance(request:Request,env:Env):Promise<Response>{
+ await requireAdminSession(request,env);
+ requireSubscriptionFeature(env);
+ const from=nowMs()-30*86400000;
+ const [orders,usage]=await Promise.all([
+  env.DB.prepare(`SELECT o.kind,COUNT(*) orders,SUM(o.amount_fen) gross_paid_fen,
+    SUM(CASE WHEN o.status='refunded' THEN o.amount_fen ELSE 0 END) full_refunded_fen,
+    SUM(CASE WHEN o.status IN ('manual_review','refund_pending') THEN 1 ELSE 0 END) held_orders
+   FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id
+   WHERE o.paid_at>=? AND t.merchant_provider='mk99'
+     AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=o.amount_fen AND e.body_sha256 IS NOT NULL)
+   GROUP BY o.kind`).bind(from).all(),
+  env.DB.prepare(`SELECT
+    (SELECT COUNT(*) FROM subscription_usage_events WHERE created_at>=? AND event_type='consume') consumed,
+    (SELECT COALESCE(SUM(c.estimated_cost_micro_usd),0) FROM ai_usage_costs c
+      JOIN subscription_ai_allocations a ON a.user_id=c.user_id AND a.request_id=c.request_id
+      WHERE c.created_at>=?) cost_micro_usd`).bind(from,from).first()
+ ]);
+ return response({from,orders:orders.results??[],usage},200,env,request);
+}
+
+
+export async function reviewSubscriptionPayment(request:Request,env:Env,id:string):Promise<Response>{
+ requireSubscriptionFeature(env);
+ const actor=await requireAdminSession(request,env,true);
+ requireWebOrigin(request,env);
+ const body=await jsonBody(request,2048);
+ if(Object.keys(body).some(key=>key!=='operationId'&&key!=='reason'))
+   throw new ApiFailure(400,'INVALID_REQUEST','复核请求只能包含操作编号和原因。');
+ const op=await operation(env,actor,body,'subscription_order_verify',id);
+ if(op.replayed)return response({ok:true,replayed:true},200,env,request);
+ if(!await takeRate(env,'admin-subscription-review:'+actor.user_id,8,60000,nowMs()))
+   throw new ApiFailure(429,'TOO_MANY_REQUESTS','复核操作过于频繁。');
+ const order=await orderById(env,id);
+ if(!order)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ // Audit intent before the read-only merchant query. Any verified change to
+ // money/entitlement state is separately atomic in the payment event ledger.
+ await commitOperation(env,op,[],{status:order.status},{merchantQueryRequested:true});
+ if(op.replayed)return response({ok:true,replayed:true},200,env,request);
+ return response(await querySubscriptionPayment(env,order),200,env,request);
 }

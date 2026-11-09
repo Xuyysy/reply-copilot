@@ -17,6 +17,7 @@ import Base from "../layouts/Base.astro";
     import {api, ApiError} from "../lib/api";
     import {packageSummary} from "../lib/package-summary.mjs";
     type SubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;description_zh:string;description_en:string};
+    let checkoutAvailable=false;
     let subscriptionPlans:SubscriptionPlan[]|null=null;
     const subscriptionNames=new Set(['basic','pro','max','ultra']);
     function renderSubscriptions(){
@@ -40,15 +41,20 @@ import Base from "../layouts/Base.astro";
         const allowance=document.createElement('p');allowance.className='subscription-limit';allowance.textContent=p.daily_limit.toLocaleString()+' '+txt('次/天','generations/day');
         const description=document.createElement('p');description.textContent=(en?p.description_en:p.description_zh)||txt('每次生成三个候选回复','Three reply suggestions per generation');
         const unavailable=document.createElement('p');unavailable.className='notice';unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
+        if(checkoutAvailable){
+          const buy=document.createElement('a');buy.className='button';buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
+          buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
+        }
         card.append(label,heading,price,period,allowance,description,unavailable);
         box.append(card);
       }
     }
     async function loadSubscriptions(){
       try{
-        const result=await api<{plans:SubscriptionPlan[];autoRenew:boolean}>('/v1/subscriptions/plans');
+        const result=await api<{plans:SubscriptionPlan[];autoRenew:boolean;checkoutAvailable:boolean}>('/v1/subscriptions/plans');
         // Fail closed: do not advertise non-purchasable or malformed server catalogs.
-        if(result.autoRenew!==false||result.plans.length!==4||result.plans.some(p=>!subscriptionNames.has(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<1||!Number.isSafeInteger(p.daily_limit)||p.daily_limit<1||p.duration_days!==30))return;
+        if(result.autoRenew!==false||!result.plans.length||result.plans.length>4||result.plans.some(p=>!subscriptionNames.has(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<1||!Number.isSafeInteger(p.daily_limit)||p.daily_limit<1||p.duration_days!==30))return;
+        checkoutAvailable=result.checkoutAvailable===true;
         subscriptionPlans=result.plans;
         document.getElementById('subscription-section')!.hidden=false;
         document.getElementById('legacy-pricing-hero')!.hidden=true;

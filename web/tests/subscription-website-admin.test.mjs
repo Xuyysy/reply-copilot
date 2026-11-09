@@ -10,7 +10,7 @@ test('subscription-first website section is strictly gated by trusted catalog, p
  assert.match(pricing,/id="subscription-section"[^>]+hidden/);
  assert.match(pricing,/\/v1\/subscriptions\/plans/);
  assert.match(pricing,/result\.autoRenew!==false/);
- assert.match(pricing,/result\.plans\.length!==4/);
+ assert.match(pricing,/result\.plans\.length>4/);
  assert.match(pricing,/subscriptionNames\.has\(p\.plan_code\)/);
  assert.match(pricing,/document\.getElementById\('legacy-pricing-hero'\)!\.hidden=true/);
  assert.match(pricing,/['"]\/v1\/packages['"]/);
@@ -20,7 +20,7 @@ test('subscription-first website section is strictly gated by trusted catalog, p
  assert.doesNotMatch(pricing,/\/checkout\?subscription=/);
 });
 
-test('admin subscription tab is read-only, uses authenticated bounded APIs and shows three quota submetrics',()=>{
+test('admin subscription tab uses bounded APIs, shared write confirmation and three quota submetrics',()=>{
  assert.match(admin,/import SubscriptionAdminPanel from '\.\/SubscriptionAdminPanel'/);
  assert.match(admin,/\["subscriptions", t\("订阅管理", "Subscriptions"\)\]/);
  assert.match(admin,/<SubscriptionAdminPanel language=\{language\} active=\{tab==="subscriptions"\}/);
@@ -30,7 +30,8 @@ test('admin subscription tab is read-only, uses authenticated bounded APIs and s
    assert.ok(subscriptions.includes(field),field);
  assert.match(subscriptions,/cause instanceof ApiError && cause\.status===404/);
  assert.match(subscriptions,/unverified records are not active paid entitlements/);
- assert.doesNotMatch(subscriptions,/method\s*:\s*['"]POST['"]/);
+ assert.match(subscriptions,/confirm\(t\('发布套餐新版本'/);
+ assert.match(subscriptions,/write\('\/v1\/admin\/subscriptions\/plans\/'/);
  assert.doesNotMatch(subscriptions,/\/v1\/admin\/subscriptions\/(grant|activate|refund|update)/);
 });
 
@@ -42,7 +43,8 @@ test('account shows subscription bucket independently with used, reserved, reset
  assert.match(account,/aria-valuenow=\{usage.subscription.usedToday\+usage.subscription.reservedToday\}/);
  assert.match(account,/usage.subscription\?\.status==="active"/);
  assert.match(account,/原有免费及永久次数/);
- assert.match(account,/升档和续购结账尚未开放/);
+ assert.match(account,/购买下一期/);
+ assert.match(account,/查看原订单/);
 });
 
 const home=readFileSync(new URL('../src/pages/index.astro',import.meta.url),'utf8');

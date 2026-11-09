@@ -132,12 +132,12 @@ test('provider pending, refund, frozen and closed never auto-grant a subscriptio
    assert.equal(r.status,200);
    assert.equal(r.body.paymentConfirmed,false);
    assert.equal(counts(f).periods,0);
-   assert.equal(counts(f).events,0);
+   assert.equal(counts(f).events,['TRADE_REFUND','TRADE_FREEZE'].includes(status)?1:0);
   }finally{f.sql.close();}
  }
 });
 
-test('disabled switches, wrong session ownership or risk prevents merchant queries and grants',async()=>{
+test('disabled switches and wrong owner prevent queries; risk-held payments cannot grant',async()=>{
  const f=ready();
  try{
   seed(f);
@@ -147,7 +147,7 @@ test('disabled switches, wrong session ownership or risk prevents merchant queri
   f.env.SUBSCRIPTION_PURCHASES_ENABLED='1';
   f.sql.exec("UPDATE subscription_payment_transactions SET risk_state='manual_review'");
   r=await query(f,'sub-order-1');
-  assert.equal(r.status,409);assert.equal(counts(f).periods,0);
+  assert.equal(r.status,200);assert.equal(r.body.entitlementApplied,false);assert.equal(counts(f).periods,0);
   f.sql.exec("UPDATE subscription_payment_transactions SET risk_state='clear'");
   f.sql.prepare("INSERT INTO users(id,email,email_verified_at,created_at) VALUES('other','other@example.test',1,1)").run();
   seed(f,'other-order',{userId:'other'});

@@ -234,7 +234,7 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
   if(state?.status==="succeeded"&&state.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
   if(subscriptionsEnabled(env)){
     if(await confirmSubscribedDelivery(env,userId,requestId,now))
-      return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId),subscription:await subscriptionAccount(env,userId)},200,env,request);
+      return response({ok:true,alreadyConfirmed:false,requestId,subscription:await subscriptionAccount(env,userId)},200,env,request);
     const after=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
     if(after?.status==='succeeded'&&after.delivery_confirmation_id)
       return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);

@@ -19,6 +19,17 @@ export class AccountStateService {
     return this.cachedToken===token ? state.user?.userId||null : null;
   }
   peekState() { return this.cached; }
+  updateServerSubscription(subscription, ownerId) {
+    const cached = this.cached;
+    if (!ownerId || cached?.source !== "server" || cached.user?.userId !== ownerId || cached.status === "frozen") return;
+    if (subscription.status !== "active" || !cached.quota) { this.invalidate(); return; }
+    const next = createAccountState({ ...cached, subscription,
+      status: subscription.remainingToday > 0 || cached.quota.paidRemaining > 0 ? "credits_available" : "credits_exhausted"
+    }, "server");
+    if (!next.subscription) { this.invalidate(); return; }
+    // Keep the original account TTL so a delivery never extends cached auth.
+    this.cached = next;
+  }
   updateServerQuota(quota) {
     if (this.cached?.source !== "server" || !Number.isInteger(quota?.totalRemaining)) return;
     // Legacy generate replies carry only permanent-credit balances. If a daily

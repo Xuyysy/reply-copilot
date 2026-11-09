@@ -18,7 +18,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
  if(env.SUBSCRIPTIONS_ENABLED!=='1')return false;
  if(!Number.isSafeInteger(now)||now<0)throw new ApiFailure(503,'SUBSCRIPTION_CLOCK_INVALID','订阅时间状态异常。');
  const q=await env.DB.prepare(`SELECT q.id,q.user_id FROM subscription_periods q
-   WHERE q.user_id=? AND q.status='queued'
+   WHERE q.user_id=? AND q.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=q.source_order_id AND o.status='paid')
    ORDER BY q.created_at ASC,q.id ASC LIMIT 1`).bind(userId).first<QueuedPeriod>();
  if(!q)return false;
  // Preserve full duration. Never use the client's time for a quota bucket.
@@ -31,7 +31,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
       WHERE id=? AND user_id=? AND status='queued' AND start_at IS NULL AND end_at IS NULL
         AND NOT EXISTS (SELECT 1 FROM subscription_periods a WHERE a.user_id=? AND a.status='active')
         AND NOT EXISTS (SELECT 1 FROM subscription_periods older
-          WHERE older.user_id=? AND older.status='queued'
+          WHERE older.user_id=? AND older.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=older.source_order_id AND o.status='paid')
             AND (older.created_at<subscription_periods.created_at
               OR (older.created_at=subscription_periods.created_at AND older.id<subscription_periods.id)))
         AND EXISTS (SELECT 1 FROM users u WHERE u.id=? AND u.status='active' AND u.archived_at IS NULL)
@@ -64,7 +64,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
 export async function activateDueQueuedSubscriptions(env:Env,now=nowMs()):Promise<number>{
  if(env.SUBSCRIPTIONS_ENABLED!=='1')return 0;
  const rows=await env.DB.prepare(`SELECT DISTINCT q.user_id FROM subscription_periods q
-    WHERE q.status='queued'
+    WHERE q.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=q.source_order_id AND o.status='paid')
       AND NOT EXISTS(SELECT 1 FROM subscription_periods p
          WHERE p.user_id=q.user_id AND p.status='active' AND p.end_at>?)
     LIMIT ?`).bind(now,MAX_CANDIDATES).all<{user_id:string}>();

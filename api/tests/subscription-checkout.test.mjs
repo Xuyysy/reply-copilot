@@ -274,3 +274,149 @@ test('late trusted MK99 success resolves uncertain cashier state without calling
   assert.deepEqual(metrics(f),{orders:1,transactions:1,events:1,credits:0,legacy:0,periods:1});
  }finally{f.sql.close();}
 });
+
+test('upgrade quote is server-owned and authenticated settlement preserves the original bucket',async()=>{
+ const f=ready();
+ try {
+  const initial=await checkout(f);
+  assert.equal(initial.status,201);
+  const verify=(order,amount)=>withProvider(req=>Response.json({code:1,data:{
+   out_trade_no:order.outTrade,trade_no:'MK99_paid_'+order.outTrade,trade_status:'TRADE_SUCCESS',
+   total_amount:(amount/100).toFixed(2),pid:merchant,paytype_code:'alipay',currency:'CNY'
+  }}),()=>f.call('/v1/subscriptions/orders/'+order.body.order.id+'/refresh',{method:'POST'}));
+  assert.equal((await verify(initial,6990)).status,200);
+  const before=f.sql.prepare('SELECT * FROM subscription_periods').get();
+  f.sql.prepare('INSERT INTO subscription_daily_usage(period_id,day_index,used,reserved,updated_at) VALUES(?,0,3,1,1)').run(before.id);
+  const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200,JSON.stringify(quote.body));
+  assert.equal(quote.body.quote.amountFen,5000);
+  const order=await checkout(f,{...request('pro','upgrade-request-0001'),quoteId:quote.body.quote.id});
+  assert.equal(order.status,201,JSON.stringify(order.body));
+  assert.equal(order.body.order.kind,'upgrade');
+  assert.equal(order.body.order.amountFen,5000);
+  f.sql.exec("CREATE TRIGGER test_fault BEFORE INSERT ON subscription_tier_changes BEGIN SELECT RAISE(ABORT,'test fault'); END");
+  assert.equal((await verify(order,5000)).status,409);
+  assert.equal(f.sql.prepare('SELECT daily_limit FROM subscription_periods').get().daily_limit,500);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_payment_events').get().n,1);
+  f.sql.exec('DROP TRIGGER test_fault');
+  assert.equal((await verify(order,5000)).status,200);
+  assert.equal((await verify(order,5000)).status,200);
+  assert.equal((await verify(initial,6990)).status,200);
+  const after=f.sql.prepare('SELECT * FROM subscription_periods').get();
+  assert.deepEqual([after.id,after.start_at,after.end_at,after.daily_limit],[before.id,before.start_at,before.end_at,1000]);
+  const usage=await f.call('/v1/usage',{method:'GET'});
+  assert.equal(usage.body.subscription.remainingToday,996);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_tier_changes').get().n,1);
+  const secondQuote=(await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'max'}})).body.quote;
+  assert.equal(secondQuote.amountFen,6000);
+  const secondOrder=await checkout(f,{...request('max','upgrade-request-0002'),quoteId:secondQuote.id});
+  assert.equal((await verify(secondOrder,6000)).status,200);
+  assert.equal((await verify(order,5000)).status,200);
+  assert.equal(f.sql.prepare('SELECT daily_limit FROM subscription_periods').get().daily_limit,1500);
+  const end=Date.now()+3600000;
+  f.sql.prepare('UPDATE subscription_periods SET start_at=?,end_at=?').run(end-30*86400000,end);
+  assert.equal((await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'ultra'}})).body.code,'SUBSCRIPTION_UPGRADE_FINAL_DAY');
+  assert.equal((await checkout(f,request('ultra','next-period-0001'))).body.order.kind,'renewal');
+  assert.equal(metrics(f).credits,0);
+ } finally {f.sql.close();}
+});
+
+test('expired quotes cannot create a cashier and a delayed paid upgrade after expiry enters review',async()=>{
+ const f=ready();
+ try{
+  const first=await checkout(f);
+  const verify=(order,amount)=>withProvider(()=>Response.json({code:1,data:{
+   out_trade_no:order.outTrade,trade_no:'MK99_paid_'+order.outTrade,trade_status:'TRADE_SUCCESS',
+   total_amount:(amount/100).toFixed(2),pid:merchant,paytype_code:'alipay',currency:'CNY'
+  }}),()=>f.call('/v1/subscriptions/orders/'+order.body.order.id+'/refresh',{method:'POST'}));
+  assert.equal((await verify(first,6990)).status,200);
+  let quote=(await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}})).body.quote;
+  f.sql.prepare('UPDATE subscription_upgrade_quotes SET quoted_at=1,expires_at=2 WHERE id=?').run(quote.id);
+  const expired=await checkout(f,{...request('pro','expired-quote-0001'),quoteId:quote.id});
+  assert.equal(expired.status,409);
+  assert.equal(expired.calls,0);
+  quote=(await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}})).body.quote;
+  const pending=await checkout(f,{...request('pro','late-upgrade-0001'),quoteId:quote.id});
+  assert.equal(pending.status,201);
+  f.sql.exec("UPDATE subscription_periods SET status='expired'");
+  const result=await verify(pending,5000);
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  assert.equal(result.body.orderStatus,'manual_review');
+  assert.equal(result.body.paymentConfirmed,true);
+  assert.equal(result.body.entitlementApplied,false);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_tier_changes').get().n,0);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_payment_events').get().n,2);
+  assert.equal((await checkout(f,request('ultra','blocked-while-review'))).calls,0);
+ }finally{f.sql.close();}
+});
+
+test('original-order access isolates users and an unauthenticated catalog never advertises disabled checkout',async()=>{
+ const f=ready();
+ try{
+  f.env.SUBSCRIPTION_CHECKOUT_ENABLED='0';
+  const off=await f.call('/v1/subscriptions/plans',{method:'GET'});
+  assert.equal(off.body.checkoutAvailable,false);
+  assert.deepEqual(off.body.paymentMethods,[]);
+  f.env.SUBSCRIPTION_CHECKOUT_ENABLED='1';
+  const on=await f.call('/v1/subscriptions/plans',{method:'GET'});
+  assert.equal(on.body.checkoutAvailable,true);
+  const order=await checkout(f);
+  const route='/v1/subscriptions/orders/'+order.body.order.id;
+  assert.equal((await f.call(route,{method:'GET'})).body.order.checkout.paymentUrl,order.body.order.checkout.paymentUrl);
+  const list=await f.call('/v1/subscriptions/orders',{method:'GET'});
+  assert.equal(list.body.orders[0].checkout.paymentUrl,null);
+  f.sql.exec("INSERT INTO users(id,email,status,created_at,email_verified_at) VALUES('other','other@test.example','active',1,1)");
+  f.sql.prepare("UPDATE subscription_orders SET user_id='other' WHERE id=?").run(order.body.order.id);
+  assert.equal((await f.call(route,{method:'GET'})).status,404);
+  assert.equal((await f.call('/v1/subscriptions/orders',{method:'GET'})).body.orders.length,0);
+ }finally{f.sql.close();}
+});
+
+test('trusted refund of an unstarted renewal never activates it or corrupts the current period',async()=>{
+ const f=ready();
+ try{
+  const verify=(order,status,amount,refund)=>withProvider(()=>Response.json({code:1,data:{
+   out_trade_no:order.outTrade,trade_no:'MK99_paid_'+order.outTrade,trade_status:status,
+   total_amount:(amount/100).toFixed(2),...(refund?{refund_amount:(refund/100).toFixed(2)}:{}),
+   pid:merchant,paytype_code:'alipay',currency:'CNY'
+  }}),()=>f.call('/v1/subscriptions/orders/'+order.body.order.id+'/refresh',{method:'POST'}));
+  const first=await checkout(f);
+  assert.equal((await verify(first,'TRADE_SUCCESS',6990)).status,200);
+  const next=await checkout(f,request('pro','queued-refund-0001'));
+  assert.equal((await verify(next,'TRADE_SUCCESS',11990)).body.period.status,'queued');
+  const returned=await verify(next,'TRADE_REFUND',11990,11990);
+  assert.equal(returned.status,200);
+  assert.equal(returned.body.orderStatus,'refunded');
+  assert.equal((await verify(next,'TRADE_REFUND',11990,11990)).body.orderStatus,'refunded');
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_payment_events WHERE event_type='TRADE_REFUND'").get().n,1);
+  assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.dailyLimit,500);
+  assert.equal((await checkout(f,request('max','replacement-renewal-0001'))).status,201);
+  assert.equal(metrics(f).credits,0);
+ }finally{f.sql.close();}
+});
+
+test('concurrent quotes for different tiers can yield only one MK99 create',async()=>{
+ const f=ready();
+ try{
+  const initial=await checkout(f);
+  const paid=await withProvider(()=>Response.json({code:1,data:{
+   out_trade_no:initial.outTrade,trade_no:'MK99_paid_'+initial.outTrade,trade_status:'TRADE_SUCCESS',
+   total_amount:'69.90',pid:merchant,paytype_code:'alipay',currency:'CNY'
+  }}),()=>f.call('/v1/subscriptions/orders/'+initial.body.order.id+'/refresh',{method:'POST'}));
+  assert.equal(paid.status,200);
+  const [pro,max]=await Promise.all(['pro','max'].map(planCode=>f.call('/v1/subscriptions/upgrade-quote',{body:{planCode}})));
+  await withProvider(req=>{
+   const params=Object.fromEntries(new URLSearchParams(req.body));
+   return Response.json({code:1,data:{trade_no:'MK99_'+params.out_trade_no,out_trade_no:params.out_trade_no,pay_url:origins+'/pay'}});
+  },async calls=>{
+   const results=await Promise.all([
+    f.call('/v1/subscriptions/orders',{body:{...request('pro','race-quote-pro'),quoteId:pro.body.quote.id}}),
+    f.call('/v1/subscriptions/orders',{body:{...request('max','race-quote-max'),quoteId:max.body.quote.id}})
+   ]);
+   assert.deepEqual(results.map(result=>result.status).sort(),[201,409]);
+   assert.equal(calls.length,1);
+  });
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_upgrade_quotes WHERE order_id IS NOT NULL").get().n,1);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_tier_changes").get().n,0);
+ }finally{f.sql.close();}
+});

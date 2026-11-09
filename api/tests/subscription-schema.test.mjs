@@ -67,3 +67,26 @@ test('subscription allocations and 30-day periods preserve user ownership and si
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
   } finally {db.close();}
 });
+
+test('0022 through 0024 preserve a populated 0021 permanent-credit ledger',()=>{
+ const db=new DatabaseSync(':memory:');
+ try{
+  const files=readdirSync(migrations).filter(name=>name.endsWith('.sql')).sort();
+  const run=name=>db.exec(readFileSync(new URL(name,migrations),'utf8'));
+  for(const name of files.filter(name=>name.slice(0,4)<='0021'))run(name);
+  db.exec(`INSERT INTO users(id,email,email_verified_at,created_at) VALUES('prior','prior@example.test',1,1);
+   INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES('prior',73,19,1,1);
+   INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at)
+     VALUES('ledger-before','prior','purchase_grant',0,19,'old-order','prior verified purchase',1);
+   INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,created_at)
+     SELECT 'legacy-order','prior',id,'Legacy',19,100,'USD','paid',1 FROM recharge_packages LIMIT 1;`);
+  const snapshot=()=>['users','credit_accounts','credit_ledger','credit_batches','recharge_orders']
+    .map(table=>db.prepare('SELECT * FROM '+table).all());
+  const before=snapshot();
+  assert.equal(before[4].length,1);
+  for(const name of files.filter(name=>name.slice(0,4)>'0021'))run(name);
+  assert.deepEqual(snapshot(),before);
+  assert.equal(db.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
+  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+ }finally{db.close();}
+});

@@ -160,3 +160,24 @@ test('production ignores locally mocked subscription proof, preserving free lega
    assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,0);
  }finally{f.sql.close();}
 });
+
+test('0.3.5 wire path receives three candidates and never recaches exhausted permanent quota on a subscription ACK',async()=>{
+ const f=fixture();try{
+  setup(f);
+  f.sql.exec("UPDATE credit_accounts SET free_balance=0; UPDATE sessions SET kind='extension'");
+  const headers={Authorization:'Bearer '+'b'.repeat(64),Origin:f.env.EXTENSION_ORIGIN};
+  const requestId=id(800);
+  const body={requestId,post:{text:'A public post for isolated testing.',url:'https://x.com/example/status/123'}};
+  const first=await f.call('/v1/ai/generate',{headers,body});
+  assert.equal(first.status,200,JSON.stringify(first.body));
+  assert.deepEqual(Object.keys(JSON.parse(first.body.raw).replies).sort(),['light_humor','natural','thoughtful']);
+  assert.equal(first.body.quota,undefined);
+  const received=await ack(f,800);
+  assert.equal(received.status,200);
+  assert.equal(received.body.quota,undefined);
+  assert.equal(received.body.subscription.remainingToday,499);
+  assert.equal((await f.call('/v1/ai/generate',{headers,body})).body.raw,first.body.raw);
+  assert.equal((await ack(f,800)).body.alreadyConfirmed,true);
+  assert.equal(daily(f).used,1);
+ }finally{f.sql.close();}
+});

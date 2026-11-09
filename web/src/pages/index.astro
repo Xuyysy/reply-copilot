@@ -34,6 +34,7 @@ import Base from "../layouts/Base.astro";
     import {api} from "../lib/api";
     import {renderFeaturedPackages} from "../lib/package-summary.mjs";
     type HomeSubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string};
+    let subscriptionCheckout=false;
     let homeSubscriptions:HomeSubscriptionPlan[]|null=null;
     function renderHomeSubscriptions(){
       if(!homeSubscriptions)return;
@@ -43,7 +44,8 @@ import Base from "../layouts/Base.astro";
       set('home-subscription-eyebrow',t('订阅主推','Subscriptions first'));
       set('home-subscription-title',t('每天高频回复？30 天订阅更适合你。','Reply often? A 30-day subscription fits.'));
       set('home-subscription-description',t('每日 500 至 2,000 次生成，订阅额度每天重置。按次购买的永久额度继续保留，用于订阅额度用完后的补充。','500 to 2,000 daily generations. Subscription allowances reset every 24 hours, while permanent purchased credits remain as an optional top-up.'));
-      set('home-subscription-disclosure',t('不自动续费 · 未使用日额度不累计 · 互动势能临界值对所有付费用户开放 · 订阅结账尚未开放。','No auto-renewal · Unused daily allowance does not roll over · Creator Momentum is included with every paid option · Subscription checkout is not yet available.'));
+      set('home-subscription-disclosure',t('不自动续费 · 未使用日额度不累计 · 互动势能临界值对所有付费用户开放。','No auto-renewal · Unused daily allowance does not roll over · Creator Momentum is included with every paid option.'));
+      if(!subscriptionCheckout)set('home-subscription-disclosure',t('订阅结账尚未开放。','Subscription checkout is not yet available.'));
       set('home-subscription-link',t('查看订阅套餐和额外次数','See subscriptions and extra credits'));
       const container=document.getElementById('home-subscription-cards')!;
       container.replaceChildren();
@@ -58,8 +60,9 @@ import Base from "../layouts/Base.astro";
     }
     async function loadHomeSubscriptions(){
       try{
-        const data=await api<{plans:HomeSubscriptionPlan[];autoRenew:boolean}>('/v1/subscriptions/plans');
-        if(data.autoRenew!==false||data.plans.length!==4||data.plans.some(p=>!['basic','pro','max','ultra'].includes(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<=0||!Number.isSafeInteger(p.daily_limit)||p.duration_days!==30))return;
+        const data=await api<{plans:HomeSubscriptionPlan[];autoRenew:boolean;checkoutAvailable:boolean}>('/v1/subscriptions/plans');
+        if(data.autoRenew!==false||!data.plans.length||data.plans.length>4||data.plans.some(p=>!['basic','pro','max','ultra'].includes(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<=0||!Number.isSafeInteger(p.daily_limit)||p.duration_days!==30))return;
+        subscriptionCheckout=data.checkoutAvailable===true;
         homeSubscriptions=data.plans;
         document.getElementById('home-subscriptions')!.hidden=false;
         document.getElementById('home-legacy-pricing')!.hidden=true;

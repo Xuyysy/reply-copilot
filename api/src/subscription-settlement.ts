@@ -5,6 +5,7 @@ import { requireWebOrigin, nowMs, uuid, sha256 } from './security';
 import { response } from './http';
 import { Mk99Client, mk99Config, Mk99Error, type Mk99PaymentEvent } from './mk99';
 import { SUBSCRIPTION_PERIOD_MS } from '../../domain/subscription-policy.js';
+import { recordSubscriptionRisk } from './subscription-risk';
 import { subscriptionsEnabled } from './subscription-account';
 
 // A new payment domain: NEVER call applyPaymentEvent() for subscriptions.
@@ -19,11 +20,11 @@ type Order = {
   transaction_id:string;merchant_provider:string;merchant_account:string|null;
   notification_sign_type:string|null;provider_trade_id:string;provider_payment_id:string|null;
   payment_status:string;risk_state:string;payment_amount_fen:number;payment_currency:string;
-  payment_channel:string;
+  payment_channel:string;target_period_id:string|null;
 };
 
 export async function orderById(env:Env,id:string):Promise<Order|null>{
- return env.DB.prepare(`SELECT o.id,o.user_id,o.kind,o.plan_version_id,o.status,o.amount_fen,
+ return env.DB.prepare(`SELECT o.id,o.user_id,o.kind,o.target_period_id,o.plan_version_id,o.status,o.amount_fen,
      v.price_fen,v.daily_limit,v.duration_days,t.id transaction_id,
      t.merchant_provider,t.merchant_account,t.notification_sign_type,t.provider_trade_id,
      t.provider_payment_id,t.status payment_status,t.risk_state,t.amount_fen payment_amount_fen,
@@ -35,7 +36,7 @@ export async function orderById(env:Env,id:string):Promise<Order|null>{
 
 function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
  const config=mk99Config(env);
- if(o.kind!=='purchase'&&o.kind!=='renewal')
+ if(!['purchase','renewal','upgrade'].includes(o.kind))
    throw new ApiFailure(409,'SUBSCRIPTION_UPGRADE_NOT_READY','升级支付暂时不可结算。');
  if(o.status==='closed'||o.status==='refunded'||o.status==='failed'||o.status==='refund_pending'||o.status==='manual_review' ||
     !['pending','unknown','paid'].includes(o.status) ||
@@ -43,7 +44,7 @@ function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_HELD','该订单当前不可结算，请人工核对。');
  if(o.merchant_provider!=='mk99'||o.merchant_account!==config.pid||o.notification_sign_type!==config.notifySignType||
     o.payment_currency!=='CNY'||o.payment_amount_fen!==o.amount_fen||
-    o.amount_fen!==o.price_fen||o.duration_days!==30||
+    (o.kind!=='upgrade'&&o.amount_fen!==o.price_fen)||o.duration_days!==30||
     !['ALIPAY_H5','WECHAT_H5'].includes(o.payment_channel)||
     o.provider_trade_id!==event.outTradeNo||
     (o.provider_payment_id!=null&&o.provider_payment_id!==event.tradeNo)||
@@ -56,6 +57,94 @@ function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付结果与订阅订单不符。');
 }
 
+// Record the authenticated money fact even when an expired or held period
+// cannot accept the amendment. Support can then reconcile the original charge.
+async function settleUpgrade(env:Env,o:Order,event:Mk99PaymentEvent,now:number){
+ const eventKey='mk99-sub-paid:'+event.tradeNo;
+ const evidence=await sha256(`authenticated_mk99_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
+ const quote=await env.DB.prepare(`SELECT id FROM subscription_upgrade_quotes
+   WHERE order_id=? AND user_id=? AND period_id=? AND to_version_id=? AND amount_fen=?`)
+   .bind(o.id,o.user_id,o.target_period_id,o.plan_version_id,o.amount_fen).first();
+ if(!quote)throw new ApiFailure(409,'SUBSCRIPTION_UPGRADE_NOT_READY','升级付款缺少有效报价记录。');
+ const proof=`EXISTS(SELECT 1 FROM subscription_payment_events
+    WHERE transaction_id=? AND merchant_provider='mk99' AND provider_event_id=?
+      AND event_type='PAYMENT_SUCCEEDED' AND amount_fen=? AND body_sha256=?)`;
+ const proofParams=[o.transaction_id,eventKey,event.amountFen,evidence] as const;
+ const claim=uuid();
+ try{await env.DB.batch([
+  env.DB.prepare(`INSERT INTO subscription_payment_events
+     (id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at)
+    SELECT ?,t.id,'mk99',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,?
+    FROM subscription_payment_transactions t JOIN subscription_orders x ON x.id=t.order_id
+    WHERE t.id=? AND x.id=? AND x.user_id=? AND x.kind='upgrade'
+      AND x.status IN ('pending','unknown','paid') AND t.status IN ('pending','unknown','paid') AND t.risk_state='clear'
+      AND t.merchant_provider='mk99' AND t.provider_trade_id=?
+      AND (t.provider_payment_id IS NULL OR t.provider_payment_id=?)
+      AND t.amount_fen=? AND t.amount_fen=x.amount_fen
+    ON CONFLICT(merchant_provider,provider_event_id) DO NOTHING`)
+    .bind(uuid(),eventKey,evidence,now,o.transaction_id,o.id,o.user_id,o.provider_trade_id,event.tradeNo,event.amountFen),
+  env.DB.prepare(`UPDATE subscription_payment_transactions SET status='paid',
+      paid_at=COALESCE(paid_at,?),provider_payment_id=COALESCE(provider_payment_id,?),updated_at=?
+    WHERE id=? AND risk_state='clear' AND status IN ('pending','unknown','paid')
+      AND (provider_payment_id IS NULL OR provider_payment_id=?) AND ${proof}`)
+    .bind(now,event.tradeNo,now,o.transaction_id,event.tradeNo,...proofParams),
+  env.DB.prepare(`INSERT INTO subscription_tier_changes
+     (id,period_id,order_id,previous_plan_version_id,next_plan_version_id,previous_daily_limit,
+      next_daily_limit,charged_fen,effective_at,original_expires_at)
+    SELECT ?,p.id,x.id,p.plan_version_id,v.id,p.daily_limit,v.daily_limit,x.amount_fen,?,p.end_at
+    FROM subscription_orders x
+    JOIN subscription_upgrade_quotes q ON q.order_id=x.id AND q.user_id=x.user_id AND q.period_id=x.target_period_id
+    JOIN subscription_periods p ON p.id=q.period_id AND p.user_id=x.user_id
+    JOIN subscription_plan_versions v ON v.id=x.plan_version_id AND v.id=q.to_version_id
+    JOIN subscription_payment_transactions t ON t.order_id=x.id
+    JOIN users u ON u.id=x.user_id
+    JOIN subscription_orders source ON source.id=p.source_order_id AND source.user_id=p.user_id
+    JOIN subscription_payment_transactions origin ON origin.order_id=source.id
+    WHERE x.id=? AND x.user_id=? AND x.status IN ('pending','unknown') AND x.applied_at IS NULL
+      AND t.status='paid' AND t.risk_state='clear' AND t.provider_payment_id=?
+      AND q.amount_fen=x.amount_fen AND t.amount_fen=x.amount_fen
+      AND p.plan_version_id=q.from_version_id AND p.status='active' AND p.end_at=q.period_end_at
+      AND p.start_at<=? AND p.end_at>? AND p.daily_limit<v.daily_limit
+      AND u.status='active' AND u.archived_at IS NULL
+      AND source.status='paid' AND source.applied_at IS NOT NULL AND origin.status='paid' AND origin.risk_state='clear'
+      AND ${proof}
+    ON CONFLICT(order_id) DO NOTHING`).bind(claim,now,o.id,o.user_id,event.tradeNo,now,now,...proofParams),
+  env.DB.prepare(`UPDATE subscription_periods SET plan_version_id=?,daily_limit=?,updated_at=?
+    WHERE id=? AND user_id=? AND EXISTS(SELECT 1 FROM subscription_tier_changes c WHERE c.id=? AND c.period_id=subscription_periods.id)`)
+    .bind(o.plan_version_id,o.daily_limit,now,o.target_period_id,o.user_id,claim),
+  env.DB.prepare(`UPDATE subscription_orders SET status='paid',paid_at=COALESCE(paid_at,?),
+      applied_at=COALESCE(applied_at,?),updated_at=?
+    WHERE id=? AND user_id=? AND status IN ('pending','unknown','paid') AND ${proof}
+      AND EXISTS(SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=subscription_orders.id AND c.period_id=subscription_orders.target_period_id)`)
+    .bind(now,now,now,o.id,o.user_id,...proofParams),
+  env.DB.prepare(`UPDATE subscription_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),updated_at=?
+    WHERE id=? AND user_id=? AND status IN ('pending','unknown') AND applied_at IS NULL AND ${proof}
+      AND NOT EXISTS(SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=subscription_orders.id)`)
+    .bind(now,now,o.id,o.user_id,...proofParams),
+  env.DB.prepare(`UPDATE subscription_payment_transactions SET risk_state='manual_review',updated_at=?
+    WHERE id=? AND provider_payment_id=? AND status='paid' AND risk_state='clear'
+      AND EXISTS(SELECT 1 FROM subscription_orders x WHERE x.id=subscription_payment_transactions.order_id AND x.status='manual_review')`)
+    .bind(now,o.transaction_id,event.tradeNo),
+  env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
+    SELECT ?,CASE WHEN ${proof} AND EXISTS(
+      SELECT 1 FROM subscription_orders x JOIN subscription_payment_transactions t ON t.order_id=x.id
+      WHERE x.id=? AND x.user_id=? AND t.id=? AND t.status='paid' AND t.provider_payment_id=?
+        AND ((x.status='paid' AND x.applied_at IS NOT NULL AND t.risk_state='clear'
+          AND EXISTS(SELECT 1 FROM subscription_tier_changes c JOIN subscription_periods p ON p.id=c.period_id
+            WHERE c.order_id=x.id AND p.id=x.target_period_id AND p.user_id=x.user_id
+              AND p.daily_limit>=c.next_daily_limit AND p.end_at=c.original_expires_at))
+          OR (x.status='manual_review' AND x.applied_at IS NULL AND t.risk_state='manual_review'))
+    ) THEN 1 ELSE 0 END`).bind(claim,...proofParams,o.id,o.user_id,o.transaction_id,event.tradeNo),
+  env.DB.prepare('DELETE FROM credit_operation_assertions WHERE operation_id=?').bind(claim)
+ ]);}catch{
+  throw new ApiFailure(409,'SUBSCRIPTION_SETTLEMENT_UNCONFIRMED','订阅结算尚未确认，请保留原订单并重试查询。');
+ }
+ const latest=await orderById(env,o.id);
+ const period=latest?.status==='paid'?await env.DB.prepare(`SELECT id,status,start_at,end_at,daily_limit
+   FROM subscription_periods WHERE id=? AND user_id=?`).bind(o.target_period_id,o.user_id).first():null;
+ return {orderId:o.id,status:latest?.status==='paid'?'paid':'manual_review',period};
+}
+
 /**
  * Only called after Mk99Client.query() has returned a provider result from its
  * fixed, merchant-authenticated HTTPS endpoint. Idempotent settlement grants
@@ -66,6 +155,7 @@ function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
  */
 export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,event:Mk99PaymentEvent,now=nowMs()){
  validateOrder(env,o,event);
+ if(o.kind==='upgrade')return settleUpgrade(env,o,event,now);
  const eventKey='mk99-sub-paid:'+event.tradeNo;
  const evidence=await sha256(`authenticated_mk99_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
  const claim=uuid(),periodId=uuid();
@@ -129,7 +219,9 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
        WHERE x.id=? AND x.user_id=? AND x.status='paid' AND x.paid_at IS NOT NULL
          AND x.applied_at IS NOT NULL AND t.status='paid' AND t.risk_state='clear'
          AND t.provider_payment_id=? AND t.amount_fen=x.amount_fen AND x.amount_fen=v.price_fen
-         AND p.user_id=x.user_id AND p.daily_limit=v.daily_limit
+         AND p.user_id=x.user_id AND (p.daily_limit=v.daily_limit OR EXISTS(
+           SELECT 1 FROM subscription_tier_changes c WHERE c.period_id=p.id AND c.next_plan_version_id=p.plan_version_id
+             AND c.next_daily_limit=p.daily_limit))
          AND EXISTS(SELECT 1 FROM users u WHERE u.id=x.user_id AND u.status='active' AND u.archived_at IS NULL)
          AND ((p.status IN ('active','expired') AND p.end_at=p.start_at+2592000000)
           OR (p.status='queued' AND p.start_at IS NULL AND p.end_at IS NULL))
@@ -158,6 +250,11 @@ export async function refreshSubscriptionMk99Payment(request:Request,env:Env,ord
  if(!row||row.user_id!==session.user_id)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
  if(!await takeRate(env,'subscription-payment-refresh:'+row.user_id,8,60_000,nowMs()))
    throw new ApiFailure(429,'TOO_MANY_REQUESTS','查询太频繁，请稍后再试。');
+ return response(await querySubscriptionPayment(env,row),200,env,request);
+}
+
+/** Same provider trust boundary for customer refresh and reauthenticated review. */
+export async function querySubscriptionPayment(env:Env,row:Order){
  const config=mk99Config(env);
  if(row.merchant_provider!=='mk99'||row.merchant_account!==config.pid||row.notification_sign_type!==config.notifySignType)
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付平台与原订单不匹配。');
@@ -165,11 +262,35 @@ export async function refreshSubscriptionMk99Payment(request:Request,env:Env,ord
  try{event=await new Mk99Client(config).query(row.provider_trade_id);}
  catch(error){throw new ApiFailure(502,error instanceof Mk99Error?error.code:'MK99_QUERY_UNAVAILABLE','支付平台暂时无法确认付款，请稍后重试。');}
  if(event.tradeStatus!=='TRADE_SUCCESS') {
+   if(row.provider_trade_id!==event.outTradeNo||
+      (row.provider_payment_id!==null&&row.provider_payment_id!==event.tradeNo)||
+      event.amountFen!==row.amount_fen||
+      (event.currency!==undefined&&event.currency!=='CNY')||
+      (event.merchantId!==undefined&&event.merchantId!==config.pid)||
+      (event.paytypeCode!==undefined&&event.paytypeCode!==(row.payment_channel==='WECHAT_H5'?'wxpay':'alipay')))
+     throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付结果与订阅订单不符。');
+   await recordSubscriptionRisk(env,{id:row.transaction_id,order_id:row.id,amount_fen:row.amount_fen},event,nowMs());
+   if(event.tradeStatus==='TRADE_CLOSED'){
+     await env.DB.batch([
+       env.DB.prepare(`UPDATE subscription_payment_transactions SET status='closed',updated_at=?
+         WHERE id=? AND status IN ('pending','unknown') AND risk_state='clear'`).bind(nowMs(),row.transaction_id),
+       env.DB.prepare(`UPDATE subscription_orders SET status='closed',updated_at=?
+         WHERE id=? AND status IN ('pending','unknown') AND EXISTS(SELECT 1 FROM subscription_payment_transactions
+           WHERE order_id=subscription_orders.id AND status='closed' AND risk_state='clear')`).bind(nowMs(),row.id)
+     ]);
+   }
+   const latest=await orderById(env,row.id);
    // Never convert provider UNKNOWN/CLOSED/FREEZE into a free grant.
-   return response({ok:true,orderStatus:row.status,verificationSource:'authenticated_https_query',
-     paymentConfirmed:false,providerStatus:event.tradeStatus},200,env,request);
+   return {ok:true,orderStatus:latest?.status??row.status,verificationSource:'authenticated_https_query',
+     paymentConfirmed:false,providerStatus:event.tradeStatus};
+ }
+ // A paid provider status never clears a previously applied risk hold.
+ if(row.risk_state!=='clear'||['refund_pending','manual_review','refunded'].includes(row.status)){
+   validateOrder(env,{...row,status:'paid',payment_status:'paid',risk_state:'clear'},event);
+   return {ok:true,orderStatus:row.status,verificationSource:'authenticated_https_query',
+     paymentConfirmed:true,entitlementApplied:false,providerStatus:event.tradeStatus};
  }
  const settled=await reconcileVerifiedSubscriptionPurchase(env,row,event);
- return response({ok:true,orderStatus:settled.status,verificationSource:'authenticated_https_query',
-   paymentConfirmed:true,period:settled.period},200,env,request);
+ return {ok:true,orderStatus:settled.status,verificationSource:'authenticated_https_query',
+   paymentConfirmed:true,entitlementApplied:settled.status==='paid',period:settled.period};
 }

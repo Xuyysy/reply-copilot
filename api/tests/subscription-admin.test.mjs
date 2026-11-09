@@ -90,3 +90,38 @@ test('admin subscription order audit is bounded, restricted and never grants cre
    assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger").get().n,0);
  }finally{f.sql.close();}
 });
+
+test('admin plan publishing needs reauthentication and preserves the original price snapshot',async()=>{
+ const f=fixture();
+ try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';grantAdmin(f);seedUnverifiedSubscriber(f);
+  const body={operationId:crypto.randomUUID(),reason:'Update plan for future sales',expectedId:'basic-v1',
+   priceFen:7290,nameZh:'基础订阅',nameEn:'Basic',descriptionZh:'',descriptionEn:'',active:true};
+  const route='/v1/admin/subscriptions/plans/basic';
+  assert.equal((await f.call(route,{body})).status,403);
+  f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) SELECT id,? FROM sessions WHERE user_id='test-user'").run(Date.now()+60000);
+  assert.equal((await f.call(route,{body})).status,200);
+  assert.equal((await f.call(route,{body})).status,200);
+  assert.deepEqual(f.sql.prepare("SELECT price_fen,current FROM subscription_plan_versions WHERE plan_code='basic' ORDER BY version").all()
+   .map(row=>[row.price_fen,row.current]),[[6990,0],[7290,1]]);
+  assert.equal(f.sql.prepare("SELECT amount_fen FROM subscription_orders WHERE id='sub1'").get().amount_fen,6990);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM admin_audit_logs WHERE action='subscription_plan_publish'").get().n,1);
+ }finally{f.sql.close();}
+});
+
+test('admin hold requires CSRF and preserves recorded usage and permanent credits',async()=>{
+ const f=fixture();
+ try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';grantAdmin(f);seedUnverifiedSubscriber(f);
+  f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) SELECT id,? FROM sessions WHERE user_id='test-user'").run(Date.now()+60000);
+  const body={operationId:crypto.randomUUID(),reason:'Review possible payment dispute'};
+  const route='/v1/admin/subscriptions/orders/sub1/hold';
+  assert.equal((await f.call(route,{body,headers:{'X-CSRF-Token':'invalid'}})).status,403);
+  assert.equal((await f.call(route,{body})).status,200);
+  assert.equal((await f.call(route,{body})).body.replayed,true);
+  assert.equal(f.sql.prepare("SELECT status FROM subscription_periods WHERE id='period1'").get().status,'refund_pending');
+  assert.equal(f.sql.prepare("SELECT used FROM subscription_daily_usage WHERE period_id='period1'").get().used,490);
+  assert.equal(f.sql.prepare("SELECT free_balance FROM credit_accounts WHERE user_id='test-user'").get().free_balance,200);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM admin_audit_logs WHERE action='subscription_order_hold'").get().n,1);
+ }finally{f.sql.close();}
+});
