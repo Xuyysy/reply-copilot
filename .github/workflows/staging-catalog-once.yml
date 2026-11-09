@@ -1,0 +1,205 @@
+name: Approved one-time Staging subscription catalog only
+
+on:
+  push:
+    branches:
+      - chatgpt/staging-catalog-only-20261109
+    paths:
+      - .github/workflows/staging-catalog-once.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: xrh-staging-catalog-only-20261109
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Validate exact Staging-only source and successful Push CI
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.ref == 'refs/heads/chatgpt/staging-catalog-only-20261109' &&
+      github.event.head_commit.message == 'ops(staging): run approved catalog-only enablement'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Prevent any application code or Production scope change
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          changes="$(git diff --name-only 5fdf9ac012e12c04dae597693de081d0694c072c HEAD)"
+          expected="$(printf '%s\n' '.github/workflows/staging-catalog-once.yml' 'api/wrangler.jsonc')"
+          test "$changes" = "$expected" || { echo "Unexpected file diff"; exit 1; }
+          node --input-type=module <<'JS'
+          import {readFileSync} from 'node:fs';import assert from 'node:assert/strict';
+          const c=JSON.parse(readFileSync('api/wrangler.jsonc','utf8'));
+          const s=c.env.staging, p=c.env.production;
+          assert.equal(s.name,'reply-copilot-api-staging');
+          assert.equal(s.d1_databases[0].database_id,'cd44bb44-b525-42c4-b286-2cc84dae7fdb');
+          assert.equal(s.vars.SUBSCRIPTIONS_ENABLED,'1');
+          assert.equal(s.vars.SUBSCRIPTION_PURCHASES_ENABLED,'0');
+          assert.equal(s.vars.SUBSCRIPTION_CHECKOUT_ENABLED,'0');
+          assert.equal(s.vars.PAYMENTS_ENABLED,'1');
+          assert.equal(s.vars.ENVIRONMENT,'staging');
+          assert.equal(s.vars.WEB_ORIGIN,'https://staging.x-reply-helper.top');
+          assert.equal(s.vars.API_ORIGIN,'https://api-staging.x-reply-helper.top');
+          assert.equal(p.name,'reply-copilot-api-production');
+          assert.equal(p.vars.PAYMENTS_ENABLED,'0');
+          for (const f of ['SUBSCRIPTIONS_ENABLED','SUBSCRIPTION_PURCHASES_ENABLED','SUBSCRIPTION_CHECKOUT_ENABLED'])assert.notEqual(p.vars[f],'1');
+          console.log('PASS staged-only catalog, checkout strictly disabled; Production unchanged');
+          JS
+      - name: Require exact-SHA successful Push CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for n in $(seq 1 100); do
+            data="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=chatgpt%2Fstaging-catalog-only-20261109&event=push&per_page=15")"
+            line="$(jq -r --arg sha "$APPROVED_SHA" '[.workflow_runs[] | select(.head_sha == $sha and .event == "push")] | first | if . == null then "" else [.id,.status,(.conclusion // "pending")] | join(" ") end' <<< "$data")"
+            if [[ -n "$line" ]]; then
+              read -r id status conclusion <<< "$line"
+              if [[ "$status" == "completed" ]]; then
+                test "$conclusion" = "success" || { echo "Exact Push CI failed: $id"; exit 1; }
+                echo "PASS source SHA $APPROVED_SHA Push CI $id"
+                exit 0
+              fi
+            fi
+            sleep 10
+          done
+          echo 'No successful exact SHA CI'; exit 1
+
+  deploy:
+    name: Apply catalog-only Staging Worker update and smoke-test
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/pricing/
+    env:
+      SOURCE_SHA: ${{ github.sha }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Install pinned Wrangler and check Staging environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          npm --prefix api ci
+          npm --prefix api run check:staging
+      - name: Preflight unchanged deployed Worker, D1 and existing security settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/before-deployments.json"
+          jq -e '.success == true and .result.deployments[0].versions[0].version_id == "f88e7145-f284-46ca-a097-6c9812a8ea3d" and .result.deployments[0].versions[0].percentage == 100' "$RUNNER_TEMP/before-deployments.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/before-settings.json"
+          jq -e '
+            .success == true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0] == "cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0] == "1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="XIAODOU_WEBHOOKS_ENABLED") | .text][0] == "1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="ENVIRONMENT") | .text][0] == "staging")
+            and ([.result.bindings[] | select(.name=="SUBSCRIPTIONS_ENABLED" or .name=="SUBSCRIPTION_PURCHASES_ENABLED" or .name=="SUBSCRIPTION_CHECKOUT_ENABLED") | .text] | index("1") == null)
+            and ([.result.bindings[] | select(.type=="secret_text")] | length == 25)
+          ' "$RUNNER_TEMP/before-settings.json" > /dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/before-pages.json"
+          jq -e '.success == true and .result[0].id == "228b97c0-5b67-4f79-8764-1b54db15ef72" and .result[0].latest_stage.status == "success"' "$RUNNER_TEMP/before-pages.json" > /dev/null
+          echo 'PASS Staging Worker and Pages unchanged, 25 Secrets, payment preserved'
+      - name: Verify no current subscription transaction and expected migration schema
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler d1 execute reply-copilot-staging --env staging --remote --command="SELECT (SELECT COUNT(*) FROM subscription_orders) AS orders,(SELECT COUNT(*) FROM subscription_periods) AS periods,(SELECT COUNT(*) FROM d1_migrations) AS migrations" --json > "$RUNNER_TEMP/staging-read-only.json"
+          node --input-type=module <<'JS'
+          import {readFileSync} from 'node:fs';import assert from 'node:assert/strict';
+          const row=JSON.parse(readFileSync(process.env.RUNNER_TEMP+'/staging-read-only.json','utf8'))[0]?.results?.[0];
+          assert.equal(row?.migrations,24);assert.equal(row?.orders,0);assert.equal(row?.periods,0);
+          console.log('PASS existing D1 migrated, no subscription orders/periods');
+          JS
+      - name: Deploy only Staging Worker, retaining dashboard variables and all Secrets
+        working-directory: api
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict
+      - name: Verify exact post-deploy flags and existing 25 Secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$base/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/after-settings.json"
+          jq -e '
+            .success == true
+            and ([.result.bindings[] | select(.type=="d1" and .name=="DB") | .id][0] == "cd44bb44-b525-42c4-b286-2cc84dae7fdb")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="PAYMENTS_ENABLED") | .text][0] == "1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="XIAODOU_WEBHOOKS_ENABLED") | .text][0] == "1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="ENVIRONMENT") | .text][0] == "staging")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTIONS_ENABLED") | .text][0] == "1")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_PURCHASES_ENABLED") | .text][0] == "0")
+            and ([.result.bindings[] | select(.type=="plain_text" and .name=="SUBSCRIPTION_CHECKOUT_ENABLED") | .text][0] == "0")
+            and ([.result.bindings[] | select(.type=="secret_text")] | length == 25)
+          ' "$RUNNER_TEMP/after-settings.json" > /dev/null
+          echo 'PASS Staging catalog enabled, purchases and checkout disabled; Secrets intact'
+      - name: Verify four real Staging plans, checkout closed and invalid unauthenticated purchase rejected
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 5 --retry-delay 2 "https://api-staging.x-reply-helper.top/v1/subscriptions/plans" > "$RUNNER_TEMP/catalog.json"
+          jq -e '
+            .autoRenew == false
+            and .checkoutAvailable == false
+            and (.plans | length == 4)
+            and ([.plans[] | [.plan_code,.price_fen,.daily_limit,.duration_days]] | sort == [
+              ["basic",6990,500,30],
+              ["max",17990,1500,30],
+              ["pro",11990,1000,30],
+              ["ultra",25990,2000,30]
+            ])
+          ' "$RUNNER_TEMP/catalog.json" > /dev/null
+          for endpoint in orders upgrade-quote; do
+            code="$(curl -sS --retry 3 --retry-delay 2 -o "$RUNNER_TEMP/blocked-$endpoint.json" -w "%{http_code}" \
+              -X POST "https://api-staging.x-reply-helper.top/v1/subscriptions/$endpoint" \
+              -H 'Content-Type: application/json' --data '{}')"
+            test "$code" = "404" || { echo "Unexpected subscription purchase status $endpoint: $code"; exit 1; }
+          done
+          echo 'PASS four Staging plans and price/limit/term; order and upgrade checkout closed'
+      - name: Confirm Staging Pages remain pinned and record summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/after-pages.json"
+          jq -e '.success == true and .result[0].id == "228b97c0-5b67-4f79-8764-1b54db15ef72"' "$RUNNER_TEMP/after-pages.json" > /dev/null
+          {
+            echo '### Staging catalog-only rollout verified'
+            echo "- exact source: $SOURCE_SHA"
+            echo '- Staging Worker only; Pages unchanged'
+            echo '- Four subscriptions visible; no checkout; no subscription transaction'
+            echo '- Existing payment and 25 Secrets preserved'
+            echo '- Production and Chrome Web Store unchanged'
+          } >> "$GITHUB_STEP_SUMMARY"
