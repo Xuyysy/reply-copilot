@@ -167,3 +167,15 @@ test('upgrade order is not mistaken for a new 30-day purchase',async()=>{
   assert.equal(counts(f).periods,1);
  }finally{f.sql.close();}
 });
+
+test('archived account cannot gain a subscription from a late provider success',async()=>{
+ const f=ready();
+ try{
+  seed(f);
+  f.sql.exec("UPDATE users SET archived_at=1000 WHERE id='test-user'");
+  const r=await query(f,'sub-order-1');
+  assert.notEqual(r.status,200);
+  assert.deepEqual(counts(f),{periods:0,events:0,creditGrants:0,legacyOrders:0,paid:0});
+  assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id='sub-order-1'").get().status,'pending');
+ }finally{f.sql.close();}
+});
