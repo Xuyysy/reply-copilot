@@ -179,3 +179,19 @@ test('archived account cannot gain a subscription from a late provider success',
   assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id='sub-order-1'").get().status,'pending');
  }finally{f.sql.close();}
 });
+
+test('query replay after an expired 30-day period never reopens the same paid order',async()=>{
+ const f=ready();
+ try{
+  seed(f);
+  assert.equal((await query(f,'sub-order-1')).status,200);
+  f.sql.exec("UPDATE subscription_periods SET start_at=1,end_at=2592000001 WHERE source_order_id='sub-order-1'");
+  const r=await query(f,'sub-order-1');
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.period.status,'expired');
+  assert.equal(r.body.period.start_at,1);
+  assert.equal(r.body.period.end_at,2592000001);
+  assert.deepEqual(counts(f),{periods:1,events:1,creditGrants:0,legacyOrders:0,paid:0});
+  assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
+ }finally{f.sql.close();}
+});
