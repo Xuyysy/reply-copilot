@@ -28,9 +28,9 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
           <a data-nav-id="x" data-site-link="xProfileUrl" aria-disabled="true"><span data-zh="我的 X">My X</span></a>
           <a data-nav-id="install" data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install</span></a>
           {!isAdminPage && <a class="momentum-nav-link" href="/#creator-momentum"><span data-zh="互动势能">Creator Momentum</span><span aria-hidden="true">⚡</span></a>}
-          <a data-nav-id="guide" href="/guide"><span data-zh="使用指南">Guide</span></a>
-          <a data-nav-id="pricing" href="/pricing"><span data-zh="价格">Pricing</span></a>
-          <a data-nav-id="faq" href="/faq">FAQ</a>
+          <a data-nav-id="guide" href="/guide" data-astro-prefetch="hover"><span data-zh="使用指南">Guide</span></a>
+          <a data-nav-id="pricing" href="/pricing" data-astro-prefetch="hover"><span data-zh="价格">Pricing</span></a>
+          <a data-nav-id="faq" href="/faq" data-astro-prefetch="hover">FAQ</a>
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
@@ -46,9 +46,9 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
               <a href="/" data-zh="首页">Home</a>
               <a href="/#creator-momentum" data-zh="互动势能临界值">Creator Momentum</a>
               <a data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install extension</span></a>
-              <a href="/guide" data-zh="使用指南">Guide</a>
-              <a href="/pricing" data-zh="价格与套餐">Pricing</a>
-              <a href="/faq">FAQ</a>
+              <a href="/guide" data-astro-prefetch="hover" data-zh="使用指南">Guide</a>
+              <a href="/pricing" data-astro-prefetch="hover" data-zh="价格与套餐">Pricing</a>
+              <a href="/faq" data-astro-prefetch="hover">FAQ</a>
               <a id="mobile-account-entry" href="/login"><span data-zh="登录 / 账户">Sign in / Account</span></a>
               <a href="/feedback" data-zh="反馈与支持">Feedback</a>
             </nav>
