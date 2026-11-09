@@ -51,3 +51,24 @@ test("home preserves dynamic account, package, CMS and bilingual momentum story"
   assert.match(home, /Engagement builds momentum\. Thresholds signal opportunity/);
   assert.match(home, /role="img"/);
 });
+
+test("momentum-first first-fold replaces generic reply hero while retaining CMS and pricing", () => {
+  const firstFold = home.indexOf('<section id="creator-momentum" class="momentum-v2-landing"');
+  const replySection = home.indexOf('id="reply-assistant"');
+  const formerGenericHero = home.indexOf('class="container hero home-hero"');
+  const research = home.indexOf('id="momentum-framework"');
+  assert.ok(firstFold > 0 && firstFold < replySection, "Founder framework should lead the homepage");
+  assert.ok(replySection < formerGenericHero && formerGenericHero < research, "Reply assistant becomes a secondary product showcase");
+  assert.equal((home.match(/id="creator-momentum"/g) || []).length, 1);
+  assert.match(home, /id="momentum-v2-title"/);
+  assert.match(home, /momentum-v2-chart/);
+  assert.match(home, /数据/); // research copy is retained with the narrative below
+  assert.match(home, /data-site-text="homeTitle"/);
+  assert.match(home, /data-account-cta/);
+  assert.match(home, /renderFeaturedPackages/);
+  assert.match(home, /\/v1\/packages/);
+  const layout = read("web/src/layouts/Base.astro");
+  assert.match(layout, /!isAdminPage && <a class="momentum-nav-link"/);
+  assert.match(site, /\.public-refresh \.momentum-v2-landing/);
+  assert.match(site, /\.public-refresh \.momentum-v2-device/);
+});
