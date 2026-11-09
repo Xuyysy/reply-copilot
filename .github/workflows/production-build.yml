@@ -4,9 +4,9 @@ on:
   push:
     branches:
       - main
-      - 'codex/production-*'
-      - 'codex/chrome-034-production-release'
-      - 'release/**'
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -49,9 +49,11 @@ jobs:
       - name: Build Production Pages
         env:
           PUBLIC_API_BASE_URL: https://api.x-reply-helper.top
-          PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.PRODUCTION_TURNSTILE_SITE_KEY }}
+          # Public Production Turnstile site key, verified with Cloudflare widget host.
+          # This is NOT the private verification secret.
+          PUBLIC_TURNSTILE_SITE_KEY: 0x4AAAAAAFhsvhYsTlFR6LIM
         run: |
-          test -n "$PUBLIC_TURNSTILE_SITE_KEY" || { echo 'Set public repository variable PRODUCTION_TURNSTILE_SITE_KEY first'; exit 1; }
+          test "$PUBLIC_TURNSTILE_SITE_KEY" = '0x4AAAAAAFhsvhYsTlFR6LIM'
           npm --prefix web run build:production
           mkdir -p dist/production-ci/pages
           cp -R web/dist/. dist/production-ci/pages/
@@ -111,6 +113,6 @@ jobs:
       - name: Explain trust boundary
         run: |
           echo '### Production bundle prepared; nothing deployed' >> "$GITHUB_STEP_SUMMARY"
-          echo "- Source SHA: \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Immutable artifact: \`production-build-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo '- Release requires a separate guarded Production deploy workflow.' >> "$GITHUB_STEP_SUMMARY"
