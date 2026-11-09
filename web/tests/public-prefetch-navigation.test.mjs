@@ -1,0 +1,31 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const read = (path) => readFileSync(path, "utf8");
+
+test("public informational pages get selective navigation prefetch; auth and checkout stay native", () => {
+  const config = read("web/astro.config.mjs");
+  const layout = read("web/src/layouts/Base.astro");
+  assert.match(config, /prefetch:\s*\{\s*prefetchAll:\s*false,\s*defaultStrategy:\s*"hover"\s*\}/);
+  assert.doesNotMatch(layout, /ClientRouter|ViewTransitions/);
+  for (const name of ["guide", "pricing", "faq"]) {
+    assert.match(layout, new RegExp('data-nav-id="'+name+'" href="/'+name+'" data-astro-prefetch="hover"'));
+    assert.match(layout, new RegExp('<a href="/'+name+'" data-astro-prefetch="hover"'));
+  }
+  for (const name of ["login", "account", "checkout", "admin"]) {
+    assert.doesNotMatch(layout, new RegExp('href="/'+name+'"[^>]*data-astro-prefetch'));
+  }
+  assert.doesNotMatch(config, /prefetchAll:\s*true/);
+  assert.doesNotMatch(config, /clientPrerender/);
+});
+
+test("immutable cache applies only to fingerprinted Astro assets", () => {
+  const headers = read("web/public/_headers");
+  assert.match(headers, /\/\_astro\/\*\s+Cache-Control:\s*public, max-age=31536000, immutable/);
+  const globalRules = headers.split("\n/_astro/*")[0];
+  assert.doesNotMatch(globalRules, /Cache-Control:/, "global headers must not pin HTML");
+  for (const sensitive of ["/login", "/account", "/checkout", "/admin", "/v1"]) {
+    assert.doesNotMatch(headers, new RegExp(sensitive+"[^\\n]*Cache-Control"));
+  }
+});
