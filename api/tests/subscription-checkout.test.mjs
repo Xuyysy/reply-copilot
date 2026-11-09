@@ -204,3 +204,48 @@ test('fresh subscription checkout migration is additive and refuses invalid chec
   assert.equal(f.sql.prepare('PRAGMA integrity_check').get().integrity_check,'ok');
  }finally{f.sql.close();}
 });
+
+test('a real verified MK99 query settlement is reusable via the original key without a second cashier',async()=>{
+ const f=ready();
+ try{
+  const created=await checkout(f);
+  assert.equal(created.status,201);
+  const orderId=created.body.order.id;
+  const queried=await withProvider(req=>{
+    const params=new URLSearchParams(req.body);
+    assert.equal(new URL(req.url).pathname,'/openapi/pay/query');
+    assert.equal(params.get('out_trade_no'),created.outTrade);
+    return Response.json({code:1,data:{
+      out_trade_no:created.outTrade,trade_no:'MK99_paid_'+created.outTrade,
+      trade_status:'TRADE_SUCCESS',total_amount:'69.90',pid:merchant,paytype_code:'alipay',currency:'CNY'
+    }});
+   },()=>f.call('/v1/subscriptions/orders/'+orderId+'/refresh'));
+  assert.equal(queried.status,200,JSON.stringify(queried.body));
+  assert.equal(queried.body.paymentConfirmed,true);
+  const duplicate=await checkout(f);
+  assert.equal(duplicate.status,200,JSON.stringify(duplicate.body));
+  assert.equal(duplicate.calls,0);
+  assert.equal(duplicate.body.order.id,orderId);
+  assert.equal(duplicate.body.order.checkout.paymentConfirmed,true);
+  assert.equal(duplicate.body.order.checkout.outcome,'confirmed');
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:1,credits:0,legacy:0,periods:1});
+ }finally{f.sql.close();}
+});
+
+test('manually stamped paid state without transaction and event proof is not represented as confirmed',async()=>{
+ const f=ready();
+ try{
+  const created=await checkout(f);
+  assert.equal(created.status,201);
+  const now=Date.now();
+  f.sql.prepare("UPDATE subscription_orders SET status='paid',paid_at=?,applied_at=? WHERE id=?").run(now,now,created.body.order.id);
+  f.sql.prepare("UPDATE subscription_payment_transactions SET status='paid',paid_at=? WHERE order_id=?").run(now,created.body.order.id);
+  const again=await checkout(f);
+  assert.equal(again.status,409,JSON.stringify(again.body));
+  assert.equal(again.calls,0);
+  assert.equal(again.body.code,'SUBSCRIPTION_PAYMENT_UNCONFIRMED');
+  assert.equal(again.body.order.checkout.paymentConfirmed,false);
+  assert.equal(again.body.order.checkout.paymentUrl,null);
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+ }finally{f.sql.close();}
+});
