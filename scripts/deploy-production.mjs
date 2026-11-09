@@ -11,8 +11,8 @@ if(!['--worker','--pages'].includes(action))throw new Error('Use --check, --work
 if(process.env.CONFIRM_PRODUCTION_RELEASE!=='reply-copilot-api-production')throw new Error('Separate Production release authorization required; set explicit target confirmation only after approval');
 if(action==='--worker'){
  run(['npm','run','typecheck'],path.join(root,'api'));
- run(['npx','--no-install','wrangler','deploy','--config','deploy/production.wrangler.json','--dry-run'],path.join(root,'api'));
- run(['npx','--no-install','wrangler','deploy','--config','deploy/production.wrangler.json'],path.join(root,'api'));
+ run(['npx','--no-install','wrangler','deploy','--config','deploy/production.wrangler.json','--keep-vars','--dry-run'],path.join(root,'api'));
+ run(['npx','--no-install','wrangler','deploy','--config','deploy/production.wrangler.json','--keep-vars'],path.join(root,'api'));
 }else{
  if(!process.env.PUBLIC_TURNSTILE_SITE_KEY)throw new Error('A verified Production Turnstile public site key is required');
  run(['npm','run','build:production'],path.join(root,'web')); // Validate before building and verify the generated API origin.

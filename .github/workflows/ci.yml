@@ -78,18 +78,18 @@ jobs:
           exit "$result"
 
       - name: Build pinned Staging extension
-        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress'
+        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress' && github.ref != 'refs/heads/codex/chrome-034-production-release' && github.head_ref != 'codex/chrome-034-production-release'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
         run: npm run build:staging
 
       - name: Package and fingerprint Web and extension
-        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress'
+        if: github.ref != 'refs/heads/codex/chrome-034-binding-progress' && github.head_ref != 'codex/chrome-034-binding-progress' && github.ref != 'refs/heads/codex/chrome-034-production-release' && github.head_ref != 'codex/chrome-034-production-release'
         run: python3 scripts/package-staging-ci.py
 
       - name: Fingerprint the Pages-only binding fix
-        if: github.ref == 'refs/heads/codex/chrome-034-binding-progress' || github.head_ref == 'codex/chrome-034-binding-progress'
+        if: github.ref == 'refs/heads/codex/chrome-034-binding-progress' || github.head_ref == 'codex/chrome-034-binding-progress' || github.ref == 'refs/heads/codex/chrome-034-production-release' || github.head_ref == 'codex/chrome-034-production-release'
         run: python3 scripts/package-staging-ci.py --pages-only
 
       - name: Upload immutable Staging Pages bundle

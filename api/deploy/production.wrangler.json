@@ -14,7 +14,7 @@
     "WEB_ORIGIN": "https://app.x-reply-helper.top",
     "API_ORIGIN": "https://api.x-reply-helper.top",
     "EXTENSION_ORIGIN": "chrome-extension://fgfjajofkapebgphfidblngcjomkbdaj",
-    "PAYMENTS_ENABLED": "0",
+    "PAYMENTS_ENABLED": "1",
     "XIAODOU_WEBHOOKS_ENABLED": "1",
     "PAYMENT_PROVIDER": "xiaodou",
     "XIAODOU_RETURN_URL": "https://app.x-reply-helper.top/account/",

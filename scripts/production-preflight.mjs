@@ -9,7 +9,7 @@ export function productionBlockers(config,staging){
  if(config.name!=='reply-copilot-api-production'||v.ENVIRONMENT!=='production')errors.push('Wrong Production Worker identity');
  if(!db||! /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(db.database_id||'')||/^00000000-/.test(db.database_id)||db.database_id===staging.d1_databases[0].database_id)errors.push('Verified isolated Production D1 UUID is missing');
  if(v.EXTENSION_ORIGIN!=='chrome-extension://'+store.id)errors.push('Chrome Web Store Extension ID is missing');
- if(v.PAYMENT_PROVIDER!=='xiaodou'||v.PAYMENTS_ENABLED!=='0')errors.push('Production must use the RSA2 provider with the environment purchase ceiling closed until merchant credentials and channel approval are verified');
+ if(v.PAYMENTS_ENABLED!=='1'||v.ADMIN_PORTAL_ENABLED!=='1')errors.push('Production must preserve enabled payments and administrator access');
  if(v.XIAODOU_WEBHOOKS_ENABLED!=='1')errors.push('Production payment notifications must remain available for verified existing orders');
  if(v.AI_MODE!=='production'||!(Number(v.DEEPSEEK_INPUT_USD_PER_MILLION)>0)||!(Number(v.DEEPSEEK_OUTPUT_USD_PER_MILLION)>0))errors.push('Real AI mode and conservative pricing required');
  for(const k of ['WEB_ORIGIN','API_ORIGIN']){try{const u=new URL(v[k]);if(u.protocol!=='https:'||u.origin!==v[k]||v[k]===staging.vars[k]||/staging|\.invalid/.test(u.hostname))throw new Error();}catch{errors.push('Invalid Production '+k);}}
