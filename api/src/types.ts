@@ -22,6 +22,7 @@ export interface Env {
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
+  SUBSCRIPTIONS_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;
   PAYMENT_PROVIDER?: string;
   MK99_BASE_URL?: string;
