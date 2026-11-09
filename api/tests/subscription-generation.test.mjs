@@ -143,7 +143,7 @@ test('subscription overage uses free balance before any separately purchased per
 test('permanent credits are used only after both daily subscription and free balances are exhausted',async()=>{
  const f=fixture();try{
    setup(f,{used:500,paid:2});
-   f.sql.exec("UPDATE credit_batches SET remaining_credits=0 WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
    assert.equal((await reserve(f,31)).kind,'new');
    assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(31)).credit_source,'paid');
    await finishGeneration(f.env,'test-user',id(31),'reply',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
@@ -156,7 +156,7 @@ test('permanent credits are used only after both daily subscription and free bal
 test('exhausted subscription with no free or permanent credits denies a new generation',async()=>{
  const f=fixture();try{
    setup(f,{used:500});
-   f.sql.exec("UPDATE credit_batches SET remaining_credits=0 WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
    await assert.rejects(reserve(f,32),err=>err.code==='INSUFFICIENT_CREDITS');
    assert.equal(f.sql.prepare("SELECT count(*) n FROM ai_credit_allocations").get().n,0);
  }finally{f.sql.close();}
