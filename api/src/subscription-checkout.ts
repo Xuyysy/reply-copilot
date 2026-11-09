@@ -112,7 +112,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    const body={ok:true,order:result,resumed:true};
    if(existing.status==='paid'&&!result.checkout.paymentConfirmed)
      return response({...body,ok:false,code:'SUBSCRIPTION_PAYMENT_UNCONFIRMED'},409,env,request);
-   if(existing.checkout_state==='unknown'||existing.checkout_state==='preparing'||existing.checkout_state==='unprepared')
+   if(!result.checkout.paymentConfirmed&&(existing.checkout_state==='unknown'||existing.checkout_state==='preparing'||existing.checkout_state==='unprepared'))
      return response({...body,ok:false,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED'},409,env,request);
    return response(body,200,env,request);
  }
