@@ -5,7 +5,18 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
  const until=async (expr,attempts=240)=>{for(let i=0;i<attempts;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify(await evaluate('({notice:document.querySelector("[data-payment-notice]")?.textContent,reads:window.__reads,id:window.__id,status:window.__status})')));};
- const click=async expr=>{const point=await evaluate(`(()=>{const e=${expr};e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});};
+ const click=async expr=>{
+  await call('Page.bringToFront');
+  const hit=`(()=>{const e=${expr};if(!e||e.disabled)return null;
+    const r=e.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;
+    return e.contains(document.elementFromPoint(x,y))?{x,y}:null;})()`;
+  await until(hit);
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  const point=await evaluate(hit);
+  assert.ok(point,'button remains the hit target after layout settles');
+  await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+  await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+ };
  try{
  await build({plugins:[{name:'binding-fixture-origin',setup(builder){
   builder.onLoad({filter:/extension-binding\.ts$/},async args=>({contents:(await import('node:fs')).readFileSync(args.path,'utf8').replace('extensionIds[location.origin]','extensionIds["https://app.x-reply-helper.top"]'),loader:'ts'}));
@@ -58,10 +69,10 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
   const image=await call('Page.captureScreenshot',{format:'png'});
   writeFileSync(path.join(process.env.RC_BINDING_SCREENSHOTS,name+'.png'),Buffer.from(image.result.data,'base64'));
  };
+ await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
  await go('');
  await until(dialog);
  assert.match(await evaluate(dialog+'.textContent'),/确认绑定 X Reply Helper.*First account.*binding-fixture.*A1B2C3D4.*不是你的账户/);
- await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});
  await until(dialog+'.getBoundingClientRect().right<=innerWidth');
  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
  await shot('binding-zh-mobile');
