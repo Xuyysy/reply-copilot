@@ -41,6 +41,28 @@ const metrics=f=>({
  periods:f.sql.prepare("SELECT count(*) n FROM subscription_periods").get().n
 });
 
+
+test('staging merchant checkout requires the designated test user before any provider request or order write',async()=>{
+ const f=ready();
+ try{
+  f.env.STAGING_PAYMENT_TEST_USER_EMAIL='someone-else@example.test';
+  const wrong=await checkout(f);
+  assert.equal(wrong.status,403);
+  assert.equal(wrong.calls,0);
+  assert.deepEqual(metrics(f),{orders:0,transactions:0,events:0,credits:0,legacy:0,periods:0});
+  const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,403);
+  f.env.STAGING_PAYMENT_TEST_USER_EMAIL='';
+  const missing=await checkout(f);
+  assert.equal(missing.status,403);
+  assert.equal(missing.calls,0);
+  f.env.STAGING_PAYMENT_TEST_USER_EMAIL='V2@EXAMPLE.TEST';
+  const ok=await checkout(f);
+  assert.equal(ok.status,201);
+  assert.equal(ok.calls,1);
+ }finally{f.sql.close();}
+});
+
 test('subscription MK99 checkout is independently disabled even if catalog and paid-query features are enabled',async()=>{
  const f=ready();
  try{
