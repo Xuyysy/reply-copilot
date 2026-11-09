@@ -44,6 +44,22 @@ async function refreshDashboard(){
   $('account-name').textContent=account?.pending?'正在等待官网确认':status==='guest'?'尚未连接账户':status==='auth_expired'?'登录已过期':status==='auth_unavailable'?'暂时无法确认账户':status==='frozen'?'账户已冻结':account?.user?.username||account?.user?.email||'已连接账户';
   $('account-summary').textContent=account?.pending?'请在官网完成授权，返回后点击查看绑定状态。':status==='guest'?'注册并验证邮箱，免费领取 200 次。':status==='auth_expired'?'请重新连接官网账户。':status==='auth_unavailable'?'网络暂不可用，请重试；原账户凭据仍保留。':status==='frozen'?'AI 生成已停用。请到官网账户中心查看账户状态。':status==='credits_exhausted'?'生成次数已用完，支付暂未开放。':'余额来自官网服务。';
   if(account?.quota&&account.source==='server'){$('quota-total').textContent=String(account.quota.totalRemaining);$('quota-free').textContent=String(account.quota.freeRemaining);$('quota-paid').textContent=String(account.quota.paidRemaining);}
+  const sub=account?.source==='server'&&account.subscription?.status==='active'?account.subscription:null;
+  $('subscription-quota').classList.toggle('hidden',!sub);
+  $('quota-total-label').textContent=sub?'原有余额合计':'总剩余';
+  if(sub){
+    $('subscription-plan').textContent=String(sub.plan).toUpperCase();
+    $('subscription-remaining').textContent=String(sub.remainingToday);
+    $('subscription-daily-limit').textContent=String(sub.dailyLimit);
+    $('subscription-used').textContent=String(sub.usedToday);
+    $('subscription-reserved').textContent=String(sub.reservedToday);
+    $('subscription-progress').max=sub.dailyLimit;
+    $('subscription-progress').value=sub.usedToday+sub.reservedToday;
+    const time=(value)=>{const date=new Date(value);return Number.isFinite(date.getTime())?date.toLocaleString('zh-CN'):'暂不可用';};
+    $('subscription-reset').textContent='下次重置：'+time(sub.resetAt);
+    $('subscription-expires').textContent='订阅到期：'+time(sub.expiresAt);
+    $('account-summary').textContent='订阅日额度由官网服务实时确认。';
+  }
   if (!manualBindingCheck && wasPending && account?.user && !account.pending) $('binding-feedback').textContent='插件绑定完成，刷新 X 页面即可使用。';
   wasPending=Boolean(account?.pending);
   if(account?.pending&&!accountPoll)accountPoll=setInterval(()=>void refreshDashboard(),3500);

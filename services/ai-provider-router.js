@@ -10,7 +10,8 @@ export class AIProviderRouter {
       if (state.source !== "server") throw new Error("云端 AI 服务尚未配置；当前仅为开发测试状态。");
       const hosted = this.hostedFactory();
       const raw = await hosted.generateReplies(input);
-      if (hosted.lastQuota) this.accountStates.updateServerQuota?.(hosted.lastQuota);
+      if (hosted.lastSubscription) this.accountStates.updateServerSubscription?.(hosted.lastSubscription, state.user?.userId);
+      else if (hosted.lastQuota) this.accountStates.updateServerQuota?.(hosted.lastQuota);
       return raw;
     }
     if (state.status === "credits_exhausted") throw new Error("生成次数已用完，请前往官网查看充值套餐。");

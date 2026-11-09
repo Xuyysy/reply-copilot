@@ -41,7 +41,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       });
       let body: any;
       try { body = await response.json(); } catch { if(!response.ok)throw new ApiError(`服务请求失败（HTTP ${response.status}）。`, "HTTP_ERROR", response.status);throw new ApiError("服务返回的数据无效。", "INVALID_RESPONSE", response.status); }
-      if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), path === "/v1/orders" ? body?.order : undefined);
+      if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), ["/v1/orders","/v1/subscriptions/orders"].includes(path) ? body?.order : undefined);
       return body as T;
     }, path.includes("/v1/admin/ai-models/") && path.includes("/test-") ? MODEL_TEST_TIMEOUT_MS : path === "/v1/auth/register" ? REGISTER_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS, options.signal || undefined);
   } catch (error) {

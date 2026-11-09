@@ -2,11 +2,68 @@
 import Base from "../layouts/Base.astro";
 ---
 <Base title="价格与充值" titleEn="Pricing and credits">
-  <div class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
+  <section id="subscription-section" class="container section" hidden aria-labelledby="subscription-title" style="padding-top:36px">
+    <div class="section-heading">
+      <p class="eyebrow" id="subscription-eyebrow"></p>
+      <h1 id="subscription-title"></h1>
+      <p class="lead" id="subscription-description"></p>
+    </div>
+    <div id="subscription-cards" class="subscription-card-grid" aria-live="polite"></div>
+    <p id="subscription-disclosure" class="fineprint" style="margin-top:20px"></p>
+  </section>
+  <div id="legacy-pricing-hero" class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
   <section class="container section" style="padding-top:20px"><div class="grid-3"><div class="pricing-card featured"><h3 id="free-title" data-zh="免费赠送">Free grant</h3><div class="price">$0</div><p id="free-detail" data-zh="正在确认账户状态…">Checking account status…</p><a id="free-action" class="button" href="/login?mode=register" hidden data-zh="免费注册领取">Register for free</a><button id="free-retry" class="button secondary" type="button" hidden data-zh="重试">Retry</button></div><div class="pricing-card grid-span-2"><div class="eyebrow" data-zh="充值套餐">Top-up packages</div><div id="packages" class="grid-3" style="margin-top:20px"><p data-zh="正在读取套餐…">Loading packages…</p></div><p id="payment-status" class="notice" style="margin-top:20px" data-zh="付款尚未开放。当前可查看套餐，不能完成真实购买。">Checkout is not open. You can view packages, but cannot pay yet.</p></div></div></section>
   <script>
     import {api, ApiError} from "../lib/api";
     import {packageSummary} from "../lib/package-summary.mjs";
+    type SubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;description_zh:string;description_en:string};
+    let checkoutAvailable=false;
+    let subscriptionPlans:SubscriptionPlan[]|null=null;
+    const subscriptionNames=new Set(['basic','pro','max','ultra']);
+    function renderSubscriptions(){
+      if(!subscriptionPlans)return;
+      const en=document.documentElement.lang==='en';
+      const txt=(zh:string,english:string)=>en?english:zh;
+      const text=(id:string,value:string)=>{const element=document.getElementById(id);if(element)element.textContent=value;};
+      text('subscription-eyebrow',txt('订阅主推 · 一次购买 30 天','Subscriptions · One-time 30-day access'));
+      text('subscription-title',txt('每天都在回复？选一个适合你的订阅。','Reply every day? Choose your subscription.'));
+      text('subscription-description',txt('每天获得固定生成次数，超出后还可使用另行购买的永久额度。所有付费档都可使用互动势能临界值。','Get a daily generation allowance. Use separately purchased permanent credits after the daily cap. Creator Momentum is included in every paid tier.'));
+      text('subscription-disclosure',txt('不自动续费 · 每 24 小时重置 · 未使用的日额度不累计 · 一次成功生成三条候选计 1 次 · 发送由你决定。','No auto-renewal · Resets every 24h · Unused daily generations do not roll over · Three suggestions count as one generation · You choose what to post.'));
+      const box=document.getElementById('subscription-cards')!;
+      box.replaceChildren();
+      for(const p of subscriptionPlans){
+        const card=document.createElement('div');
+        card.className='pricing-card'+(p.plan_code==='pro'?' featured subscription-featured':'');
+        const label=document.createElement('p');label.className='eyebrow';label.textContent=p.plan_code==='pro'?txt('推荐方案','Recommended'):p.plan_code.toUpperCase();
+        const heading=document.createElement('h3');heading.textContent=en?p.name_en:p.name_zh;
+        const price=document.createElement('div');price.className='price';price.textContent='¥'+(p.price_fen/100).toFixed(2);
+        const period=document.createElement('p');period.textContent=txt('一次购买 / 30 天','One-time purchase / 30 days');
+        const allowance=document.createElement('p');allowance.className='subscription-limit';allowance.textContent=p.daily_limit.toLocaleString()+' '+txt('次/天','generations/day');
+        const description=document.createElement('p');description.textContent=(en?p.description_en:p.description_zh)||txt('每次生成三个候选回复','Three reply suggestions per generation');
+        const unavailable=document.createElement('p');unavailable.className='notice';unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
+        if(checkoutAvailable){
+          const buy=document.createElement('a');buy.className='button';buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
+          buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
+        }
+        card.append(label,heading,price,period,allowance,description,unavailable);
+        box.append(card);
+      }
+    }
+    async function loadSubscriptions(){
+      try{
+        const result=await api<{plans:SubscriptionPlan[];autoRenew:boolean;checkoutAvailable:boolean}>('/v1/subscriptions/plans');
+        // Fail closed: do not advertise non-purchasable or malformed server catalogs.
+        if(result.autoRenew!==false||!result.plans.length||result.plans.length>4||result.plans.some(p=>!subscriptionNames.has(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<1||!Number.isSafeInteger(p.daily_limit)||p.daily_limit<1||p.duration_days!==30))return;
+        checkoutAvailable=result.checkoutAvailable===true;
+        subscriptionPlans=result.plans;
+        document.getElementById('subscription-section')!.hidden=false;
+        document.getElementById('legacy-pricing-hero')!.hidden=true;
+        renderSubscriptions();
+      }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
+    }
+    void loadSubscriptions();
+    window.addEventListener('reply-copilot-language',renderSubscriptions);
+
     type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;fee_rate_bps:number;total_payment_fen?:number|null;merchant_pricing?:{feeBearer:string;rateBps:number;status:string};description_zh?:string;description_en?:string;featured?:boolean;recommended_label_zh?:string;recommended_label_en?:string};
     let packages:Package[]|null=null;
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
@@ -26,5 +83,11 @@ import Base from "../layouts/Base.astro";
     async function loadFree(){freeState="loading";renderFree();try{await api("/v1/me");const data=await api<Quota>("/v1/usage");freeQuota=data.quota;freeState=data.signupBenefit?.status==="pending"?"pending":data.quota.totalRemaining<=0?"empty":"ready";}catch(error){freeQuota=null;freeState=error instanceof ApiError&&error.status===401?"guest":"error";}renderFree();}
     document.getElementById("free-retry")?.addEventListener("click",()=>void loadFree());void loadFree();window.addEventListener("reply-copilot-language",renderFree);
   </script>
-  <style>:global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}:global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}</style>
+  <style>
+  :global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}
+  :global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}
+  .subscription-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
+  .subscription-featured{border:2px solid #2663ac}
+  .subscription-limit{font-size:1.35rem;font-weight:700}
+  </style>
 </Base>

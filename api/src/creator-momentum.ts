@@ -6,6 +6,7 @@ import {operation,commitOperation} from './admin-operations';
 import {jsonBody,nowMs} from './security';
 import {takeRate} from './auth';
 import {response} from './http';
+import {subscriptionAccount} from './subscription-account';
 const KEY='creator_momentum_v1';
 type Row={value:string};
 function parse(raw?:string){try{return validateMomentumConfig(JSON.parse(raw??''));}catch{return {...DEFAULT_MOMENTUM_CONFIG,enabled:false};}}
@@ -20,7 +21,10 @@ export async function creatorFeature(env:Env,userId:string){
  AND EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id AND l.user_id=u.id AND l.paid_delta>0)
  AND NOT EXISTS(SELECT 1 FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status IN ('requested','pending','unknown'))
  AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id AND b.status IN ('refund_pending','manual_review'))) eligible`).bind(KEY,userId).first<{config:string|null;eligible:number}>();
- return {eligible:row?.eligible===1,policy:parse(row?.config??undefined)};
+ // A verified, currently active subscription also proves paid eligibility.
+ // Never use available credit balance to infer that money was received.
+ const eligible=row?.eligible===1 || (await subscriptionAccount(env,userId)).status==='active';
+ return {eligible,policy:parse(row?.config??undefined)};
 }
 async function history(env:Env){
  const rows=await env.DB.prepare("SELECT id,before_json,after_json,created_at FROM admin_audit_logs WHERE action IN ('creator_momentum_update','creator_momentum_restore') AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 20").bind(KEY).all<{id:string;before_json:string;after_json:string;created_at:number}>();

@@ -29,6 +29,7 @@ export class HostedAIClient {
         // been confirmed; the caller can retry this same idempotent request.
         throw Object.assign(new Error("回复已生成，但额度确认暂未完成。请重试确认，不会重复生成或扣次。"), { code: "DELIVERY_CONFIRMATION_PENDING" });
       }
+      this.lastSubscription = confirmation?.subscription ?? null;
       this.lastQuota = confirmation?.quota || data.quota || null;
       return data.raw;
     } finally { clearTimeout(timer); signal?.removeEventListener("abort", abort); }
@@ -42,7 +43,7 @@ export class HostedAIClient {
     if(!state.raw)throw Object.assign(Error('上一条结果已过期，请重新生成。'),{code:'GENERATION_FAILED'});
     parseAIOutput(state.raw);
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),8000);
-    try{const ack=await this.accountClient.request(`/v1/ai/requests/${state.requestId}/delivered`,{method:'POST',body:{requestId:state.requestId},signal:controller.signal});this.lastQuota=ack.quota||null;}
+    try{const ack=await this.accountClient.request(`/v1/ai/requests/${state.requestId}/delivered`,{method:'POST',body:{requestId:state.requestId},signal:controller.signal});this.lastQuota=ack.quota||null;this.lastSubscription=ack.subscription??null;}
     catch{throw Object.assign(Error('回复已生成，请恢复上一条完成确认。'),{code:'DELIVERY_CONFIRMATION_PENDING'});}
     finally{clearTimeout(timer);}
     return state.raw;

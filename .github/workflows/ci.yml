@@ -18,10 +18,13 @@ jobs:
     name: Test, build and package (no deployment)
     runs-on: ubuntu-24.04
     timeout-minutes: 50
+    env:
+      SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.head_ref == 'codex/subscriptions-v1-issue21' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout full history for regression baselines
         uses: actions/checkout@v4
         with:
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -89,7 +92,7 @@ jobs:
       - name: Upload immutable Staging Pages bundle
         uses: actions/upload-artifact@v4
         with:
-          name: staging-pages-${{ github.sha }}
+          name: staging-pages-${{ env.SOURCE_SHA }}
           path: web/dist/
           retention-days: 21
           if-no-files-found: error
@@ -97,13 +100,24 @@ jobs:
       - name: Upload ZIP and provenance manifest
         uses: actions/upload-artifact@v4
         with:
-          name: staging-extension-${{ github.sha }}
+          name: staging-extension-${{ env.SOURCE_SHA }}
           path: dist/ci/
           retention-days: 21
           if-no-files-found: error
 
+      - name: Verify subscription release builds and Web types
+        if: github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21'
+        env:
+          PUBLIC_API_BASE_URL: https://api.x-reply-helper.top
+          PUBLIC_TURNSTILE_SITE_KEY: 0x4AAAAAAFhsvhYsTlFR6LIM
+        run: |
+          (cd web && npx --no-install tsc --noEmit)
+          npm --prefix web run build:production
+          (cd api && npx --no-install wrangler deploy --env staging --dry-run)
+          (cd api && npx --no-install wrangler deploy --config deploy/production.wrangler.json --dry-run)
+
       - name: Build and fingerprint Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2'
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
@@ -112,10 +126,10 @@ jobs:
           python3 scripts/package-production-rc.py
 
       - name: Upload Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2'
+        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21'
         uses: actions/upload-artifact@v4
         with:
-          name: production-extension-${{ github.sha }}
+          name: production-extension-${{ env.SOURCE_SHA }}
           path: dist/production-rc/
           if-no-files-found: error
 
@@ -123,7 +137,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-logs-${{ github.sha }}-${{ github.run_id }}
+          name: test-logs-${{ env.SOURCE_SHA }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/npm-test.log
             ${{ runner.temp }}/npm-test.exit

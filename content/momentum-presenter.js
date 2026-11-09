@@ -186,10 +186,7 @@
         });
         const story = make('p', [overview, research].filter(Boolean).join('\n\n') || copy.summary);
         story.lang = introLanguage;
-        const note = make('p', english
-          ? 'Research and roadmap: external rankings, live data pipelines and continuous model training are not active features.'
-          : '以下为研究与规划说明。外部榜单、实时数据管线和持续模型训练尚未上线。');
-        intro.replaceChildren(language, note, story);
+        intro.replaceChildren(language, story);
       } else if (!intro.firstChild) {
         intro.append(make('p', copy.summary), button(copy.fullIntro, () => onAction('momentum_details', {})));
       }
