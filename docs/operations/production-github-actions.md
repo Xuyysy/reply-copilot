@@ -24,8 +24,8 @@
 ## Manual Production deploy (never on push)
 
 `.github/workflows/production-deploy.yml` accepts manual dispatch **from main only and GitHub actor Xuyysy only**, deploys exactly one component, not both. A `production` Environment must contain:
-- Environment **secrets**: `CLOUDFLARE_API_TOKEN` (least-privilege token scoped to existing Production Worker and Pages), `CLOUDFLARE_ACCOUNT_ID`.
-- Environment **variable**: `PRODUCTION_RELEASE_READY=YES`, set only when intentionally enabling Releases.
+- Environment **secrets**: `CLOUDFLARE_API_TOKEN` (scoped to existing Production Worker and Pages), `CLOUDFLARE_ACCOUNT_ID`.
+- No `PRODUCTION_RELEASE_READY` variable is required. The user explicitly chose to avoid the extra YES/NO toggle; owner-only manual workflow dispatch, typed confirmation, pinning successful CI and build runs, live-state safeguards, and GitHub Environment access remain.
 - Add GitHub environment required-reviewer protection if available on the plan. GitHub Free private repositories may not have required reviewers; the owner-only manual dispatch and typed confirmation are additional safeguards, **not equivalent to GitHub enforced reviewers**.
 - No MK99/payment/identity private keys in GitHub; those stay in Cloudflare Worker and are preserved by Wrangler `--keep-vars`.
 
@@ -56,6 +56,6 @@ The initial branch-push experiment used `codex/production-*` triggers, which gen
 ## Remaining setup and scope
 
 1. Review the minimal automation-only PR to `main`; do NOT merge the full Production business tree into the divergent historical main. Ensure separate `release/production` branch green CI/build. The PR adds workflows/verifiers/documentation but does not deploy.
-2. Create/verify `production` GitHub Environment secrets and arm variable; no credentials stored in code. The workflow is otherwise inert for deployments.
-3. On subsequent `main` changes the CI and artifact builder run automatically. Releases require the owner to manually dispatch with the pinned run IDs and current deployed version.
+2. Create/verify two `production` GitHub Environment secrets; no deployment-ready variable or credentials in code. The workflow is otherwise inert for deployments.
+3. On subsequent `release/production` pushes the CI and artifact builder run automatically. Releases require the owner to manually dispatch from trusted `main` with the pinned release-branch run IDs and current deployed version.
 4. Do not conflate this automation with PR #20, a separate Staging-only Issue comment trigger.
