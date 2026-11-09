@@ -10,8 +10,10 @@ test('Production stale-generation cleanup is atomic under real Workers D1 concur
  try{
   const db=await mf.getD1Database('DB');
   for(const file of readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()){
+   // D1.exec accepts complete SQL scripts, including CREATE TRIGGER bodies
+   // whose BEGIN/END blocks contain semicolons. Splitting on ';' corrupts them.
    const sql=readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8').replace(/^\s*--.*$/gm,'');
-   for(const statement of sql.split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(statement).run();
+   await db.exec(sql);
   }
   const statements=[
    "INSERT INTO users(id,email,email_verified_at,created_at) VALUES('test-user','isolated@example.test',1,1)",
