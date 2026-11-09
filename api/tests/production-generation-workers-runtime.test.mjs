@@ -10,10 +10,18 @@ test('Production stale-generation cleanup is atomic under real Workers D1 concur
  try{
   const db=await mf.getD1Database('DB');
   for(const file of readdirSync(new URL('../migrations/',import.meta.url)).filter(x=>x.endsWith('.sql')).sort()){
-   // D1.exec accepts complete SQL scripts, including CREATE TRIGGER bodies
-   // whose BEGIN/END blocks contain semicolons. Splitting on ';' corrupts them.
+   // Miniflare's D1.prepare executes one statement at a time; D1.exec
+   // splits multiline files incorrectly. Preserve CREATE TRIGGER BEGIN...END
+   // statements, including their internal semicolons, when splitting scripts.
    const sql=readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8').replace(/^\s*--.*$/gm,'');
-   await db.exec(sql);
+   const sanitized=sql.replace(/CREATE TRIGGER[\s\S]*?END;/gi,block=>{
+     const last=block.lastIndexOf('END;');
+     return block.slice(0,last).replaceAll(';','__SQL_TRIGGER_SEMI__')+block.slice(last);
+   });
+   for(const chunk of sanitized.split(';')){
+     const statement=chunk.replaceAll('__SQL_TRIGGER_SEMI__',';').trim();
+     if(statement)await db.prepare(statement).run();
+   }
   }
   const statements=[
    "INSERT INTO users(id,email,email_verified_at,created_at) VALUES('test-user','isolated@example.test',1,1)",
