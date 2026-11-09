@@ -6,7 +6,6 @@
     free: '未解锁', unverified: '权益未确认', checking: '正在验证…',
     enabled: '势能监测运行中', disabled: '监测已关闭', paused: '系统暂未开放',
     saving: '正在保存…', saveFailed: '设置未保存，请重试', saveTimeout: '保存结果未确认，请重试', verify: '刷新购买权益', plans: '查看套餐',
-    current: '当前机制', future: '后续研究规划',
     dnd: '今日不再提醒', dismiss: '关闭当前提醒', original: '去发布原创帖', dndOn: '今日免打扰'
   };
 
@@ -20,6 +19,7 @@
 
   function mount(container, onAction, {mode = 'compact', copy = zh} = {}) {
     const full = mode === 'full';
+    let introLanguage = 'zh';
     const make = (tag, text) => {
       const node = document.createElement(tag);
       if (text) node.textContent = text;
@@ -175,9 +175,21 @@
     function renderIntro() {
       if (!details.open) return;
       if (full) {
-        intro.replaceChildren(make('strong', copy.current),
-          make('p', value?.policy?.overviewZh || copy.summary), make('strong', copy.future),
-          make('p', value?.policy?.researchZh || '研究公开推荐机制、互动节奏、中文创作者趋势及个性化提醒。相关外部数据尚未接入。'));
+        const english = introLanguage === 'en';
+        const policy = value?.policy;
+        const overview = english ? policy?.overviewEn : policy?.overviewZh;
+        const research = english ? policy?.researchEn : policy?.researchZh;
+        const language = button(english ? '阅读中文版' : 'Read in English', () => {
+          introLanguage = english ? 'zh' : 'en';
+          renderIntro();
+          intro.querySelector('button')?.focus();
+        });
+        const story = make('p', [overview, research].filter(Boolean).join('\n\n') || copy.summary);
+        story.lang = introLanguage;
+        const note = make('p', english
+          ? 'Research and roadmap: external rankings, live data pipelines and continuous model training are not active features.'
+          : '以下为研究与规划说明。外部榜单、实时数据管线和持续模型训练尚未上线。');
+        intro.replaceChildren(language, note, story);
       } else if (!intro.firstChild) {
         intro.append(make('p', copy.summary), button(copy.fullIntro, () => onAction('momentum_details', {})));
       }
