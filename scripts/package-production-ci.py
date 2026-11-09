@@ -17,7 +17,7 @@ identity = json.loads((root / "config/extension-store-identity.json").read_text(
 version = manifest.get("version", "")
 assert re.fullmatch(r"\d+\.\d+\.\d+(?:\.\d+)?", version), "Bad Chrome version"
 assert identity["id"] == "fgfjajofkapebgphfidblngcjomkbdaj"
-assert manifest.get("key") == identity.get("public_key", manifest.get("key")) and manifest.get("key"), "Missing Store public key"
+assert manifest.get("key") == identity["publicKey"] and manifest.get("key"), "Missing Store public key"
 assert manifest["manifest_version"] == 3
 assert manifest["host_permissions"] == ["https://api.x-reply-helper.top/*"]
 assert manifest["externally_connectable"] == {"matches": ["https://app.x-reply-helper.top/*"]}
