@@ -23,7 +23,8 @@ test("public informational pages get selective navigation prefetch; auth and che
 test("immutable cache applies only to fingerprinted Astro assets", () => {
   const headers = read("web/public/_headers");
   assert.match(headers, /\/\_astro\/\*\s+Cache-Control:\s*public, max-age=31536000, immutable/);
-  assert.doesNotMatch(headers, /\/\*\s+Cache-Control:\s*[^\n]*immutable/);
+  const globalRules = headers.split("\n/_astro/*")[0];
+  assert.doesNotMatch(globalRules, /Cache-Control:/, "global headers must not pin HTML");
   for (const sensitive of ["/login", "/account", "/checkout", "/admin", "/v1"]) {
     assert.doesNotMatch(headers, new RegExp(sensitive+"[^\\n]*Cache-Control"));
   }
