@@ -249,3 +249,28 @@ test('manually stamped paid state without transaction and event proof is not rep
   assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
  }finally{f.sql.close();}
 });
+
+test('late trusted MK99 success resolves uncertain cashier state without calling create again',async()=>{
+ const f=ready();
+ try{
+  const uncertain=await checkout(f,request(),()=>{throw new Error('provider create outcome lost');});
+  assert.equal(uncertain.status,502);
+  const orderId=uncertain.body.order.id;
+  const confirmed=await withProvider(req=>{
+    const params=new URLSearchParams(req.body);
+    assert.equal(new URL(req.url).pathname,'/openapi/pay/query');
+    assert.equal(params.get('out_trade_no'),uncertain.outTrade);
+    return Response.json({code:1,data:{
+      out_trade_no:uncertain.outTrade,trade_no:'MK99_late_confirm_'+uncertain.outTrade,
+      trade_status:'TRADE_SUCCESS',total_amount:'69.90',pid:merchant,paytype_code:'alipay'
+    }});
+  },()=>f.call('/v1/subscriptions/orders/'+orderId+'/refresh'));
+  assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+  const resumed=await checkout(f);
+  assert.equal(resumed.status,200,JSON.stringify(resumed.body));
+  assert.equal(resumed.calls,0);
+  assert.equal(resumed.body.order.checkout.paymentConfirmed,true);
+  assert.equal(resumed.body.order.checkout.outcome,'confirmed');
+  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:1,credits:0,legacy:0,periods:1});
+ }finally{f.sql.close();}
+});
