@@ -62,6 +62,17 @@ test("momentum-first first-fold replaces generic reply hero while retaining CMS 
   assert.equal((home.match(/id="creator-momentum"/g) || []).length, 1);
   assert.match(home, /id="momentum-v2-title"/);
   assert.match(home, /momentum-v2-chart/);
+  // Both core capabilities need to be present in the FIRST visual workspace,
+  // not one full-screen promotional hero followed by the other.
+  const firstFoldEnd = home.indexOf('id="reply-assistant"');
+  const firstFoldSource = home.slice(firstFold, firstFoldEnd);
+  assert.match(firstFoldSource, /momentum-v2-reply-module/);
+  assert.match(firstFoldSource, /AI REPLY ASSISTANT/);
+  assert.match(firstFoldSource, /data-zh="示意草稿 · 由你确认发送"/);
+  assert.match(firstFoldSource, /data-zh="AI 回复助手 · 实用功能"/);
+  assert.match(firstFoldSource, /href="\/login\?mode=register" class="button momentum-v2-primary"/);
+  assert.match(firstFoldSource, /href="#momentum-framework" class="button secondary momentum-v2-secondary"/);
+
   assert.match(home, /数据/); // research copy is retained with the narrative below
   assert.match(home, /data-site-text="homeTitle"/);
   assert.match(home, /data-account-cta/);
