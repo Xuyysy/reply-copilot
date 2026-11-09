@@ -165,9 +165,9 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
  if(!plan||plan.duration_days!==30||plan.price_fen<1)
    throw new ApiFailure(404,'SUBSCRIPTION_PLAN_UNAVAILABLE','订阅档位暂时不可购买。');
 
- const anyActive=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status='active' AND start_at<=? AND end_at>? LIMIT 1").bind(session.user_id,now,now).first();
+ const hasPredecessor=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status IN ('active','refund_pending','revoked') AND start_at<=? AND end_at>? LIMIT 1").bind(session.user_id,now,now).first();
  const queued=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=subscription_periods.source_order_id AND o.status<>'refunded') LIMIT 1").bind(session.user_id).first();
- const kind=quoteId?'upgrade':anyActive?'renewal':'purchase';
+ const kind=quoteId?'upgrade':hasPredecessor?'renewal':'purchase';
 
  // Resolve existing/ambiguous checkout before creating anything new. A new
  // idempotency key never bypasses a pending or UNKNOWN provider transaction.
@@ -219,8 +219,8 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    "AND EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.status='active' AND u.archived_at IS NULL) "+
    "AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=? AND x.status IN ('pending','unknown','manual_review','refund_pending')) "+
    "AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=p.source_order_id AND o.status<>'refunded')) "+
-   "AND ((?='renewal' AND EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status='active' AND p.start_at<=? AND p.end_at>?)) "+
-   "OR (?='purchase' AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status='active' AND p.start_at<=? AND p.end_at>?)))"
+   "AND ((?='renewal' AND EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status IN ('active','refund_pending','revoked') AND p.start_at<=? AND p.end_at>?)) "+
+   "OR (?='purchase' AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status IN ('active','refund_pending','revoked') AND p.start_at<=? AND p.end_at>?)))"
   ).bind(id,session.user_id,plan.id,kind,plan.price_fen,now,quoteExpires,now,now,operationId,
     plan.id,plan.price_fen,session.user_id,session.user_id,session.user_id,
     kind,session.user_id,now,now,kind,session.user_id,now,now),

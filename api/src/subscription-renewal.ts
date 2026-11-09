@@ -29,7 +29,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
    env.DB.prepare(`UPDATE subscription_periods SET status='active',
       start_at=?,end_at=?,updated_at=?
       WHERE id=? AND user_id=? AND status='queued' AND start_at IS NULL AND end_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM subscription_periods a WHERE a.user_id=? AND a.status='active')
+        AND NOT EXISTS (SELECT 1 FROM subscription_periods a WHERE a.user_id=? AND a.status IN ('active','refund_pending','revoked') AND a.end_at>?)
         AND NOT EXISTS (SELECT 1 FROM subscription_periods older
           WHERE older.user_id=? AND older.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=older.source_order_id AND o.status='paid')
             AND (older.created_at<subscription_periods.created_at
@@ -50,7 +50,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
               WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
               AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen
               AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)))`)
-     .bind(now,endAt,now,q.id,userId,userId,userId,userId,env.ENVIRONMENT)
+     .bind(now,endAt,now,q.id,userId,userId,now,userId,userId,env.ENVIRONMENT)
  ];
  try{
    const result=await env.DB.batch(statements);
@@ -66,7 +66,7 @@ export async function activateDueQueuedSubscriptions(env:Env,now=nowMs()):Promis
  const rows=await env.DB.prepare(`SELECT DISTINCT q.user_id FROM subscription_periods q
     WHERE q.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=q.source_order_id AND o.status='paid')
       AND NOT EXISTS(SELECT 1 FROM subscription_periods p
-         WHERE p.user_id=q.user_id AND p.status='active' AND p.end_at>?)
+         WHERE p.user_id=q.user_id AND p.status IN ('active','refund_pending','revoked') AND p.end_at>?)
     LIMIT ?`).bind(now,MAX_CANDIDATES).all<{user_id:string}>();
  let activated=0;
  for(const row of rows.results??[]){

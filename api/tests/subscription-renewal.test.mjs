@@ -72,3 +72,16 @@ test('disabled subscription flag never queries new subscription periods or chang
   assert.equal(state(f).find(x=>x.id==='second-period').status,'queued');
  }finally{f.sql.close();}
 });
+
+test('refund review cannot activate an already paid renewal before its original predecessor expires',async()=>{
+ const f=setup({priorValid:true});
+ try{
+  f.sql.exec("UPDATE subscription_orders SET status='refund_pending' WHERE id='first'; UPDATE subscription_payment_transactions SET risk_state='frozen' WHERE order_id='first'; UPDATE subscription_periods SET status='refund_pending' WHERE id='first-period'");
+  assert.equal((await check(f)).body.subscription.status,'none');
+  assert.equal(state(f).find(x=>x.id==='second-period').status,'queued');
+  const end=Date.now()-1000;
+  f.sql.prepare("UPDATE subscription_periods SET start_at=?,end_at=? WHERE id='first-period'").run(end-PERIOD,end);
+  assert.equal((await check(f)).body.subscription.plan,'pro');
+  assert.equal(state(f).find(x=>x.id==='first-period').status,'refund_pending');
+ }finally{f.sql.close();}
+});

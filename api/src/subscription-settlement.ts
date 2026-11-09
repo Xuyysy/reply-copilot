@@ -163,6 +163,10 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
     WHERE e.transaction_id=? AND e.merchant_provider='mk99'
       AND e.provider_event_id=? AND e.event_type='PAYMENT_SUCCEEDED'
       AND e.amount_fen=? AND e.body_sha256=?)`;
+ const predecessor=`EXISTS(SELECT 1 FROM subscription_periods existing WHERE existing.user_id=x.user_id
+         AND ((existing.status IN ('active','refund_pending','revoked') AND existing.end_at>?)
+           OR (existing.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders q
+              WHERE q.id=existing.source_order_id AND q.status='paid'))))`;
  const statements=[
   env.DB.prepare(`UPDATE subscription_periods SET status='expired',updated_at=?
     WHERE user_id=? AND status='active' AND end_at<=?`).bind(now,o.user_id,now),
@@ -193,12 +197,9 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
   env.DB.prepare(`INSERT INTO subscription_periods
      (id,user_id,source_order_id,plan_version_id,daily_limit,status,start_at,end_at,created_at,updated_at)
      SELECT ?,x.user_id,x.id,x.plan_version_id,v.daily_limit,
-       CASE WHEN EXISTS(SELECT 1 FROM subscription_periods existing WHERE existing.user_id=x.user_id
-         AND existing.status IN ('active','queued')) THEN 'queued' ELSE 'active' END,
-       CASE WHEN EXISTS(SELECT 1 FROM subscription_periods existing WHERE existing.user_id=x.user_id
-         AND existing.status IN ('active','queued')) THEN NULL ELSE ? END,
-       CASE WHEN EXISTS(SELECT 1 FROM subscription_periods existing WHERE existing.user_id=x.user_id
-         AND existing.status IN ('active','queued')) THEN NULL ELSE ? END,
+       CASE WHEN ${predecessor} THEN 'queued' ELSE 'active' END,
+       CASE WHEN ${predecessor} THEN NULL ELSE ? END,
+       CASE WHEN ${predecessor} THEN NULL ELSE ? END,
        ?,?
      FROM subscription_orders x JOIN subscription_plan_versions v ON v.id=x.plan_version_id
      WHERE x.id=? AND x.user_id=? AND x.status='paid' AND x.paid_at IS NOT NULL
@@ -207,7 +208,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
        AND EXISTS(SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=x.id
          AND t.id=? AND t.status='paid' AND t.risk_state='clear' AND ${proof})
      ON CONFLICT(source_order_id) DO NOTHING`)
-    .bind(periodId,now,now+SUBSCRIPTION_PERIOD_MS,now,now,o.id,o.user_id,o.transaction_id,o.transaction_id,eventKey,event.amountFen,evidence),
+    .bind(periodId,now,now,now,now,now+SUBSCRIPTION_PERIOD_MS,now,now,o.id,o.user_id,o.transaction_id,o.transaction_id,eventKey,event.amountFen,evidence),
   env.DB.prepare(`UPDATE subscription_orders SET applied_at=COALESCE(applied_at,?),updated_at=?
     WHERE id=? AND user_id=? AND status='paid' AND EXISTS(SELECT 1 FROM subscription_periods
        WHERE source_order_id=subscription_orders.id AND user_id=subscription_orders.user_id)`)
