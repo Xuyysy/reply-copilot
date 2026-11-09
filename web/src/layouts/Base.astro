@@ -27,6 +27,7 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
         <nav data-site-navigation class="nav" aria-label="Main navigation">
           <a data-nav-id="x" data-site-link="xProfileUrl" aria-disabled="true"><span data-zh="我的 X">My X</span></a>
           <a data-nav-id="install" data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install</span></a>
+          {!isAdminPage && <a class="momentum-nav-link" href="/#creator-momentum"><span data-zh="互动势能">Creator Momentum</span><span aria-hidden="true">⚡</span></a>}
           <a data-nav-id="guide" href="/guide"><span data-zh="使用指南">Guide</span></a>
           <a data-nav-id="pricing" href="/pricing"><span data-zh="价格">Pricing</span></a>
           <a data-nav-id="faq" href="/faq">FAQ</a>
