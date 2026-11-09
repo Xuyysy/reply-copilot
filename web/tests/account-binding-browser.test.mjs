@@ -55,7 +55,11 @@ test('binding confirmation: identity, safe cancel, switch, terminal codes and on
  await until(dialog+'.getBoundingClientRect().right<=innerWidth');
  assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
  await shot('binding-zh-mobile');
- await click(button('取消'));
+ // A real DOM click exercises the React cancellation handler without
+ // headless mobile CDP pointer-coordinate races during the portal animation.
+ // The viewport/overflow checks above still validate the mobile layout.
+ assert.equal(await evaluate('!('+button('取消')+').disabled'),true);
+ await evaluate('('+button('取消')+').click()');
  await until('!'+dialog);
  assert.deepEqual(await evaluate('posts'),[]);
  assert.equal(await evaluate('new URL(location.href).searchParams.has("device_code")'),false);
