@@ -13,7 +13,7 @@ function envelope(input){
 }
 export class DeliveryCoordinator {
   constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
@@ -37,7 +37,7 @@ export class DeliveryCoordinator {
     if(same){
       if(!sameSource(same.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       if(this.completion&&!same.localRecordsCommitted)await this.remember(same,completed);
-      this.lastQuota=same.quota;return same.raw;
+      this.lastQuota=same.quota;this.lastSubscription=null;return same.raw;
     }
     if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
     if(pending){
@@ -78,7 +78,7 @@ export class DeliveryCoordinator {
       if(raw===undefined&&!canStart())throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');
       if(raw===undefined)raw=await client.generateReplies({...record.input,...(performanceTrace ? {performanceTrace} : {})});
       if(this.fenced.has(record.ownerId+':'+record.input.requestId))throw fail('GENERATION_ABANDONED','本次生成已结束。');
-      this.lastQuota=client.lastQuota||null;
+      this.lastQuota=client.lastQuota||null;this.lastSubscription=client.lastSubscription??null;
       const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
       await (performanceTrace?performanceTrace.measure("delivery_persist",()=>this.remember(record,retained)):this.remember(record,retained));
       return {raw,completed:retained};
@@ -139,7 +139,7 @@ export class DeliveryCoordinator {
     }
     if(abandon&&((state.state==='missing'&&record)||['running','expired'].includes(state.state)))state=await client.recoverGeneration(state.requestId||record.input.requestId,true);
     if(['ready','delivered'].includes(state.state)&&state.raw){
-      const raw=await client.receiveDelivery(state);this.lastQuota=client.lastQuota||null;
+      const raw=await client.receiveDelivery(state);this.lastQuota=client.lastQuota||null;this.lastSubscription=client.lastSubscription??null;
       if(record&&record.input.requestId===state.requestId)await this.remember(record,[...(data[COMPLETED]||[]),{...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4));
       if(!record||record.input.requestId!==state.requestId)await this.completion?.recovered?.({ownerId,input:{requestId:state.requestId},raw,completedAt:this.clock()}).catch(()=>{});
       if(record&&record.input.requestId!==state.requestId&&abandon)await this.clearResolved(record);

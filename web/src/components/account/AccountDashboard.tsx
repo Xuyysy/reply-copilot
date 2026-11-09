@@ -1,3 +1,4 @@
+import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
@@ -17,7 +18,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Skeleton } from "../ui/skeleton";
 
 type Account = { user: { userId: string; username: string | null; email: string; role: string; emailVerified: boolean } };
-type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null };
+type SubscriptionUsage = {status:"none"|"active";plan:"basic"|"pro"|"max"|"ultra"|null;dailyLimit:number;usedToday:number;reservedToday:number;remainingToday:number;resetAt:string|null;expiresAt:string|null;startAt:string|null};
+type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null; subscription?:SubscriptionUsage; availableNow?:number };
 type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_status?: string; risk_state?:string; credited_at?:number|null; paid_at?:number|null; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
@@ -27,6 +29,8 @@ export default function AccountDashboard() {
   const bindingTitle = useRef<HTMLHeadingElement>(null);
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
+  const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
+  const [subscriptionPlans,setSubscriptionPlans]=useState<string[]>([]);
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "signed-out" | "error" | "ready">("loading");
   const [message, setMessage] = useState("");
@@ -133,7 +137,7 @@ export default function AccountDashboard() {
   useEffect(() => { if (state === "ready" && code) void checkAuthorization(); }, [state, code, checkAuthorization]);
 
   // Only a matching local extension opens the automatic path. Keep a short
-  // window to switch accounts before the existing CSRF-protected POST.
+  // window to switch accounts or cancel before the existing CSRF-protected POST.
   useEffect(() => {
     if (authorization !== "pending" || !validCode || !proof || !data?.account.user.userId || bindingStopped.current) return;
     const owner = data.account.user.userId;
@@ -265,6 +269,19 @@ export default function AccountDashboard() {
       setRefreshingOrderId(null);
     }
   }
+  const userId=data?.account.user.userId;
+  useEffect(()=>{
+    setSubscriptionOrders([]);setSubscriptionPlans([]);
+    if(state!=="ready"||!userId||validCode)return;
+    let active=true;
+    void api<{orders:SubscriptionOrder[]}>("/v1/subscriptions/orders").then(result=>{
+      if(active)setSubscriptionOrders(result.orders);
+    }).catch(()=>{});
+    void api<{plans:{plan_code:string}[];checkoutAvailable:boolean}>("/v1/subscriptions/plans").then(result=>{
+      if(active&&result.checkoutAvailable)setSubscriptionPlans(result.plans.map(plan=>plan.plan_code));
+    }).catch(()=>{});
+    return()=>{active=false;};
+  },[state,userId,validCode]);
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
@@ -295,8 +312,38 @@ export default function AccountDashboard() {
   return <div className="space-y-5">
     {paymentNotice&&<Alert role="status" data-payment-notice className="pr-12"><AlertDescription>{paymentNoticeText(paymentNotice)}</AlertDescription><Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1" aria-label={t("关闭支付提示","Dismiss payment notice")} onClick={dismissPaymentNotice}><X size={16} aria-hidden="true" /></Button></Alert>}
     <div className="flex flex-wrap items-center justify-between gap-5"><div className="min-w-0"><p className="section-kicker">{t("账户概览", "Overview")}</p><h2 className="mb-1 break-words text-3xl font-semibold tracking-tight">{account.user.username || t("我的账户", "My account")}</h2><p className="app-muted break-all">{account.user.email}</p></div><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div>
+    {subscriptionOrders.length>0&&<Card><CardHeader><CardTitle>{t("订阅订单","Subscription orders")}</CardTitle></CardHeader>
+      <CardContent className="space-y-3">{subscriptionOrders.map(order=><div key={order.id} className="flex flex-wrap items-center justify-between gap-2 border-b pb-2">
+        <p className="min-w-0 break-words"><strong className="uppercase">{order.planCode}</strong> · ¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")} · {subscriptionStatus(order,language)}</p>
+        <a className="button secondary" href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("查看原订单","View original order")}</a>
+      </div>)}</CardContent></Card>}
+    {usage.subscription?.status==="active"&&<Card data-testid="account-subscription-quota" className="border-primary/30"><CardHeader><CardTitle>{t("我的订阅 · 每日生成额度","My subscription · Daily generations")}</CardTitle></CardHeader><CardContent className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><strong className="text-xl uppercase">{usage.subscription.plan}</strong><p className="text-sm text-muted-foreground">{t("每 24 小时重置，未使用额度不累计","Resets every 24 hours; unused daily generations do not roll over")}</p></div>
+        <span className="text-2xl font-bold tabular-nums">{usage.subscription.remainingToday.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {usage.subscription.dailyLimit.toLocaleString()}</span></span>
+      </div>
+      <div role="progressbar" aria-label={t("今日订阅额度使用进度","Daily subscription quota usage")} aria-valuenow={usage.subscription.usedToday+usage.subscription.reservedToday} aria-valuemin={0} aria-valuemax={usage.subscription.dailyLimit} className="h-3 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary" style={{width:`${Math.min(100,100*(usage.subscription.usedToday+usage.subscription.reservedToday)/Math.max(1,usage.subscription.dailyLimit))}%`}} />
+      </div>
+      <div className="grid gap-2 text-sm sm:grid-cols-3">
+        <p>{t("今日已用","Used today")}：<strong>{usage.subscription.usedToday}</strong></p>
+        <p>{t("生成中预留","In-flight reserved")}：<strong>{usage.subscription.reservedToday}</strong></p>
+        <p>{t("今日剩余","Remaining today")}：<strong>{usage.subscription.remainingToday}</strong></p>
+      </div>
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
+        <p>{t("下次重置","Next reset")}：{usage.subscription.resetAt?new Date(usage.subscription.resetAt).toLocaleString(language==="zh"?"zh-CN":"en-US"):"—"}</p>
+        <p>{t("订阅到期","Expires")}：{usage.subscription.expiresAt?new Date(usage.subscription.expiresAt).toLocaleString(language==="zh"?"zh-CN":"en-US"):"—"}</p>
+      </div>
+      {subscriptionPlans.length>0&&<div className="flex flex-wrap gap-2">
+        <a className="button secondary" href="/pricing/">{t("购买下一期","Purchase next period")}</a>
+        {subscriptionPlans.filter(plan=>["basic","pro","max","ultra"].indexOf(plan)>["basic","pro","max","ultra"].indexOf(usage.subscription?.plan??"")).map(plan=>
+          <a className="button secondary" key={plan} href={"/subscription-checkout/?upgrade=1&plan="+encodeURIComponent(plan)}>{t("升档至","Upgrade to")} {plan.toUpperCase()}</a>)}
+      </div>}
+      <p className="text-sm text-muted-foreground">{t("先使用订阅日额度，耗尽后仅使用另购的永久付费额度；新人免费额度保持独立。","Daily subscription quota is consumed first, followed only by separately purchased permanent credits. Welcome credits remain separate.")}</p>
+      <Button variant="outline" asChild><a href="/pricing">{t("查看订阅与额外次数","View plans and extra credits")}<ArrowRight size={16}/></a></Button>
+    </CardContent></Card>}
     {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[usage.subscription?.status==="active"?t("原有免费及永久次数", "Welcome and permanent credits"):t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
     {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" && (connected || connectionProblem || autoBinding) ? waitingForExtension : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{connectionProblem && proof && <Button variant="outline" size="sm" onClick={retryConnection}>{t("重新检查连接", "Check connection again")}</Button>}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
     <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy && !autoBinding) dismissAuthorization(); }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onOpenAutoFocus={event => { if (bindingTitle.current) { event.preventDefault(); bindingTitle.current.focus({preventScroll:true}); } }} onEscapeKeyDown={event => { if (autoBinding || busy) event.preventDefault(); }} onInteractOutside={event => { if (autoBinding || busy) event.preventDefault(); }} showCloseButton={!busy && !autoBinding} closeLabel={t("关闭", "Close")}>

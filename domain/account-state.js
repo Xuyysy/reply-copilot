@@ -14,7 +14,20 @@ export function createAccountState(value, source = "server") {
     dailyRemaining: value.quota.dailyRemaining,
     resetAt: value.quota.resetAt || null,
   } : null;
-  return Object.freeze({ ...(value.features ? {features:value.features} : {}), status: value.status, user: value.user || null, entitlement: value.entitlement || null, trial: value.trial || null, quota, license: value.license || null, lastVerifiedAt: source === "server" ? new Date().toISOString() : null, source });
+  const s=value.subscription;
+  const subscription=s?.status==='active'&&['basic','pro','max','ultra'].includes(s.plan)
+    &&Number.isSafeInteger(s.dailyLimit)&&s.dailyLimit>0
+    &&Number.isSafeInteger(s.usedToday)&&s.usedToday>=0
+    &&Number.isSafeInteger(s.reservedToday)&&s.reservedToday>=0
+    &&Number.isSafeInteger(s.remainingToday)&&s.remainingToday>=0
+    &&s.usedToday+s.reservedToday+s.remainingToday===s.dailyLimit
+    &&typeof s.resetAt==='string'&&typeof s.expiresAt==='string'
+      ?Object.freeze({status:'active',plan:s.plan,dailyLimit:s.dailyLimit,usedToday:s.usedToday,
+        reservedToday:s.reservedToday,remainingToday:s.remainingToday,resetAt:s.resetAt,expiresAt:s.expiresAt})
+      :null;
+  return Object.freeze({ ...(value.features ? {features:value.features} : {}), status: value.status, user: value.user || null,
+    entitlement: value.entitlement || null, trial: value.trial || null, quota, subscription,
+    license: value.license || null, lastVerifiedAt: source === "server" ? new Date().toISOString() : null, source });
 }
 
 export function accountStatusLabel(state) {

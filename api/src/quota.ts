@@ -4,6 +4,8 @@ import { ApiFailure } from "./types";
 import { nowMs, shanghaiDay, uuid } from "./security";
 import { sessionFor, takeRate } from "./auth";
 import { response } from "./http";
+import {subscriptionAccount,subscriptionsEnabled} from "./subscription-account";
+import {reserveSubscribedGeneration,confirmSubscribedDelivery,failSubscribedGeneration,cleanupSubscribedReservations,abandonStaleSubscribedGeneration} from "./subscription-generation";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
 export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string };
@@ -18,6 +20,7 @@ type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
  */
 export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs(), userId?: string): Promise<void> {
   await releaseStaleProductionGenerations(env, now, userId);
+  if (subscriptionsEnabled(env)) await cleanupSubscribedReservations(env,now,userId);
   const scope = userId ? " AND r.user_id=?" : "";
   const params = userId ? [now, userId] : [now];
   const candidate = await env.DB.prepare(`SELECT 1 AS pending FROM ai_requests r
@@ -102,6 +105,18 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     const prior = await existing(env, session.user_id, requestId);
     if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
   }
+  const subscription=await subscriptionAccount(env,session.user_id,now);
+  if(subscription.status==='active' && subscription.remainingToday>0){
+    try{
+      if(await reserveSubscribedGeneration(env,session.user_id,requestId,requestHash,budgetReserve,providerSnapshot,now))
+        return {kind:'new',quota:await balance(env,session.user_id)};
+    }catch(error){
+      const concurrent=await existing(env,session.user_id,requestId);
+      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,now);
+      throw error;
+    }
+  }
+  const paidOnly=subscription.status==='active';
   const date = shanghaiDay(now);
   const budgetDay = new Date(now).toISOString().slice(0, 10);
   if (!Number.isSafeInteger(budgetReserve) || budgetReserve < 0) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预留无效。");
@@ -112,6 +127,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   if (!account) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请前往官网查看充值套餐。");
   const lot = await env.DB.prepare(`SELECT id,bucket,source_kind FROM credit_batches
     WHERE user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
+      ${paidOnly?"AND bucket='paid'":""}
     ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
       CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
       COALESCE(paid_at,granted_at),granted_at,id LIMIT 1`).bind(session.user_id).first<CreditBatch>();
@@ -134,7 +150,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
     env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase,provider_config_id,provider_config_version)
       SELECT ?,?,?,?,'reserved',0,?,?,?,?,?,'generating',?,? FROM credit_accounts
-      WHERE user_id=? AND free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved>0
+      WHERE user_id=? AND ${paidOnly?"paid_balance-paid_reserved_for_refunds-paid_generation_reserved":"free_balance+paid_balance-paid_reserved_for_refunds-free_generation_reserved-paid_generation_reserved"}>0
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
       AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?))
@@ -196,6 +212,7 @@ export async function finishGeneration(env: Env, userId: string, requestId: stri
       env.DB.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version,usage_quality) SELECT ?,?,?,?,?,?,?,provider_config_id,provider_config_version,? FROM ai_requests WHERE user_id=? AND request_id=? AND budget_finalization_ref=? ON CONFLICT(user_id,request_id) DO NOTHING").bind(userId,requestId,usage?.model||"unknown",usage?.inputTokens||0,usage?.outputTokens||0,actual,now,usage?.usageQuality||"verified",userId,requestId,ref),
     ]);return settled[0].meta.changes===1;
   }
+  if(subscriptionsEnabled(env) && await failSubscribedGeneration(env,userId,requestId,now,{model:usage?.model||'unknown-estimated',inputTokens:usage?.inputTokens||0,outputTokens:usage?.outputTokens||0,costMicroUsd:actual,usageQuality:usage?.usageQuality||'estimated'})) return;
   const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
   if(!allocation)return;
   await env.DB.batch([
@@ -215,6 +232,13 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
   const userId=session.user_id,now=nowMs(),operationId=uuid();
   const state=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
   if(state?.status==="succeeded"&&state.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+  if(subscriptionsEnabled(env)){
+    if(await confirmSubscribedDelivery(env,userId,requestId,now))
+      return response({ok:true,alreadyConfirmed:false,requestId,subscription:await subscriptionAccount(env,userId)},200,env,request);
+    const after=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
+    if(after?.status==='succeeded'&&after.delivery_confirmation_id)
+      return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+  }
   const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
   if(!allocation)throw new ApiFailure(409,"DELIVERY_NOT_AVAILABLE","这条回复无法确认或已过期，请重新生成。");
   let batch;
@@ -277,7 +301,7 @@ export async function recoverGeneration(request:Request,env:Env,requestId?:strin
   await env.DB.prepare(`INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,completed_at,generation_phase)
     VALUES(?,?,?,?,'upstream_failed',0,'',?,?,'unknown') ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,shanghaiDay(nowMs()),uuid(),nowMs(),nowMs()).run();
   if(state.state==='expired')await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
-  else await releaseStaleProductionGenerations(env,nowMs(),session.user_id,requestId);
+  else { await releaseStaleProductionGenerations(env,nowMs(),session.user_id,requestId); if(subscriptionsEnabled(env))await abandonStaleSubscribedGeneration(env,nowMs(),session.user_id,requestId); }
   state=await recoveryState(env,session.user_id,requestId);
   if(state.state==='running')throw new ApiFailure(409,'RECOVERY_NOT_SAFE','暂时无法安全结束此任务，请恢复上一条或稍后再试。');
   return response(state,200,env,request);
