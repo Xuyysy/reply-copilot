@@ -123,12 +123,17 @@ test('RSA2 pending orders relaunch from their immutable protocol when the legacy
   const before=f.sql.prepare('SELECT payment_protocol,status,provider_trade_id FROM payment_transactions WHERE order_id=?').get(orderId);
   assert.equal(before.payment_protocol,'rsa2');
   let calls=0;
-  await withProvider(req=>{calls++;return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006},{status:200});},async()=>{
+  const paths=[];
+  await withProvider(req=>{
+   calls++;const path=new URL(req.url).pathname;paths.push(req.method+' '+path);
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+  },async()=>{
    const result=await f.call(`/v1/orders/${orderId}/attempts`,{body:{}});
-   assert.equal(result.status,201);
+   assert.equal(result.status,201,JSON.stringify(result.body));
    assert.equal(result.body.paymentUrl,'https://cashier.example.test/pay/test');
   });
-  assert.equal(calls,1);
+  assert.equal(calls,2);
+  assert.deepEqual(paths,['GET /api/open/v1/payments/'+before.provider_trade_id,'POST /api/open/v1/payments/'+before.provider_trade_id+'/attempts']);
   assert.equal(f.sql.prepare('SELECT payment_protocol,status FROM payment_transactions WHERE order_id=?').get(orderId).status,'pending');
  } finally { f.sql.close(); }
 });
@@ -173,10 +178,13 @@ test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch 
   assert.equal(before.merchant_account,f.env.XIAODOU_APP_ID);
   assert.equal(before.notification_sign_type,f.env.XIAODOU_KEY_ID);
   f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
-  let calls=0;
-  const relaunched=await withProvider(req=>{calls++;assert.match(new URL(req.url).pathname,/\/attempts$/);return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5'},{status:200});},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  const calls=[];
+  const relaunched=await withProvider(req=>{
+   calls.push(req.method+' '+new URL(req.url).pathname);
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+  },()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
   assert.equal(relaunched.status,201,JSON.stringify(relaunched.body));
-  assert.equal(calls,1);
+  assert.deepEqual(calls,['GET /api/open/v1/payments/'+before.provider_trade_id,'POST /api/open/v1/payments/'+before.provider_trade_id+'/attempts']);
   assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
  }finally{f.sql.close();}
 });

@@ -121,7 +121,9 @@ test('V2 material relaunch is validated and cannot run concurrently',async()=>{
   await withProvider(req=>providerResponse(req),async()=>{const r=await f.call('/v1/orders');id=r.body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');});
   await withProvider(req=>providerResponse(req,{outTradeNo,amountFen:990}),async calls=>{
     const result=await Promise.all([f.call(`/v1/orders/${id}/attempts`,{body:{}}),f.call(`/v1/orders/${id}/attempts`,{body:{}})]);
-    assert.equal(calls.length,1);assert.ok(result.every(x=>x.status>=400));
+    assert.equal(calls.filter(x=>x.method==='POST').length,0,'mismatched signed queries must block relaunch before provider POST');
+    assert.equal(calls.filter(x=>x.method==='GET').length,2);
+    assert.ok(result.every(x=>x.status===409&&x.body.code==='PAYMENT_MISMATCH'));
     assert.ok(result.every(x=>!x.body.paymentUrl));noGrant(f.sql);
   });
  }finally{f.sql.close();}
@@ -137,5 +139,105 @@ test('V2 failed trusted query does not modify any financial or order rows',async
   for(const status of [401,403,404,503])await withProvider(req=>providerResponse(req,{code:status===403?'OPEN_API_SOURCE_IP_REJECTED':'OPEN_API_RESOURCE_NOT_FOUND',message:'private'},{status}),async()=>{
     assert.ok((await f.call(`/v1/orders/${id}/refresh`)).status>=400);assert.equal(snapshot(),before);
   });
+ }finally{f.sql.close();}
+});
+
+
+test('RSA2 credit order read restores only the original verified cashier, like subscription recovery',async()=>{
+ const f=fixture();try{
+  let id;
+  await withProvider(req=>providerResponse(req),async calls=>{
+   const created=await f.call('/v1/orders');
+   assert.equal(created.status,201);
+   id=created.body.order.id;
+   assert.equal(calls.length,1);
+   const recovered=await f.call('/v1/orders/'+id,{method:'GET'});
+   assert.equal(recovered.status,200);
+   assert.equal(recovered.body.order.paymentUrl,'https://cashier.example.test/pay/test');
+   assert.equal(recovered.body.order.paymentCashierOrigin,'https://cashier.example.test');
+   assert.equal(calls.length,1,'read must never ask the provider or mint another order');
+  });
+  const tx=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id).id;
+  // A risk hold, an ambiguous attempt, a merchant mismatch, and paid evidence
+  // must each independently suppress a stale link.
+  f.sql.prepare("UPDATE payment_transactions SET risk_state='manual_review' WHERE id=?").run(tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET risk_state='clear', merchant_account='xdop_othermerchant00' WHERE id=?").run(tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET merchant_account=?, status='unknown' WHERE id=?").run(f.env.XIAODOU_APP_ID,tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET status='pending', cashier_url='https://cashier.example.test/pay/test' WHERE id=?").run(tx);
+  f.sql.prepare("UPDATE recharge_orders SET paid_at=1 WHERE id=?").run(id);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('RSA2 credit relaunch requires a signed unpaid lookup before creating a new attempt',async()=>{
+ const f=fixture();try{
+  let id,outTradeNo;
+  await withProvider(req=>providerResponse(req),async()=>{
+   const created=await f.call('/v1/orders');assert.equal(created.status,201);
+   id=created.body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');
+  });
+  const calls=[];
+  const result=await withProvider(req=>{
+   const path=new URL(req.url).pathname;calls.push(req.method+' '+path);
+   if(req.method==='GET')return providerResponse(req,{outTradeNo,amountFen:1006,currency:'CNY',channel:'ALIPAY_H5',status:'CREATED',payUrl:null},{status:200});
+   assert.equal(req.method,'POST');assert.match(path,/\/attempts$/);
+   return providerResponse(req,{outTradeNo,amountFen:1006,currency:'CNY',channel:'ALIPAY_H5',status:'CREATED'});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(result.status,201,JSON.stringify(result.body));
+  assert.equal(result.body.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.deepEqual(calls,['GET /api/open/v1/payments/'+outTradeNo,'POST /api/open/v1/payments/'+outTradeNo+'/attempts']);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('RSA2 credit recovery from an unconfirmed original requires provider nextAction',async()=>{
+ const f=fixture();try{
+  let id,outTradeNo;
+  await withProvider(req=>providerResponse(req),async()=>{id=(await f.call('/v1/orders')).body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');});
+  const txn=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id).id;
+  f.sql.prepare("UPDATE payment_transactions SET status='unknown',cashier_url=NULL WHERE id=?").run(txn);
+  f.sql.prepare("UPDATE payment_attempts SET state='unknown',cashier_url=NULL WHERE transaction_id=?").run(txn);
+  let attempts=0;
+  const unsafe=await withProvider(req=>{
+   if(req.method!=='GET')attempts++;
+   return providerResponse(req,{outTradeNo,amountFen:1006,channel:'ALIPAY_H5',status:'PAYING',payUrl:null},{status:200});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(unsafe.status,409,JSON.stringify(unsafe.body));
+  assert.equal(attempts,0);
+  const recovered=await withProvider(req=>{
+   if(req.method==='GET')return providerResponse(req,{outTradeNo,amountFen:1006,channel:'ALIPAY_H5',status:'CREATED',payUrl:null,nextAction:'CREATE_ATTEMPT'},{status:200});
+   attempts++;
+   return providerResponse(req,{outTradeNo,amountFen:1006,channel:'ALIPAY_H5',status:'PAYING'});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(recovered.status,201,JSON.stringify(recovered.body));
+  assert.equal(attempts,1);
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE id=?').get(txn).status,'pending');
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou GET 502 leaves the original credit order and attempts unchanged',async()=>{
+ const f=fixture();try{
+  let id;
+  await withProvider(req=>providerResponse(req),async()=>{id=(await f.call('/v1/orders')).body.order.id;});
+  const counts=()=>JSON.stringify(['payment_transactions','payment_attempts','credit_accounts','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+  const before=counts();
+  const failed=await withProvider(req=>providerResponse(req,{code:'OPEN_API_GUARD_UNAVAILABLE',message:'do not expose provider message'},{status:502}),async calls=>{
+   const result=await f.call('/v1/orders/'+id+'/attempts',{body:{}});
+   assert.equal(calls.length,1);
+   assert.equal(calls[0].method,'GET','never request /attempts after failed GET');
+   return result;
+  });
+  assert.equal(failed.status,502);
+  assert.equal(failed.body.code,'PROVIDER_HTTP_ERROR');
+  assert.equal(counts(),before);
+  noGrant(f.sql);
  }finally{f.sql.close();}
 });
