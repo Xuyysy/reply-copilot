@@ -16,7 +16,7 @@
     for (const time of article.querySelectorAll("time")) {
       if (time.closest("article") !== article) continue;
       const link = time.closest('a[href*="/status/"]');
-      if (link?.closest("article") !== article) continue;
+      if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
       const identity = statusLink(link);
       if (identity) return identity;
     }
