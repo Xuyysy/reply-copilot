@@ -7,6 +7,9 @@ import { paymentControl, type PaymentChannel } from './payment-policy';
 import { Mk99Client, Mk99Error, mk99Config, type Mk99Config } from './mk99';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
+import {createConfiguredXiaodouClient,validateXiaodouCashierUrl} from './xiaodou-client';
+import {validateFeeProjection} from './xiaodou.js';
+import {inspectCheckoutResponse} from './payment-checkout';
 
 // Explicit third switch: the subscription catalog and existing-order paid
 // reconciliation can be tested WITHOUT allowing a single new real checkout.
@@ -19,21 +22,21 @@ type UpgradeQuote={id:string;user_id:string;period_id:string;from_version_id:str
  amount_fen:number;quoted_at:number;expires_at:number;period_end_at:number;order_id:string|null};
 type Pending={
  id:string;user_id:string;operation_id:string|null;kind:string;
- plan_version_id:string;plan_code:string;amount_fen:number;payment_channel:string;
+ plan_version_id:string;plan_code:string;amount_fen:number;payment_channel:string;merchant_provider:string;
  status:string;transaction_status:string;risk_state:string;checkout_state:string;
  cashier_url:string|null;provider_trade_id:string;provider_payment_id:string|null;
  merchant_account:string|null;notification_sign_type:string|null;paid_at:number|null;
  verified_paid:number;quote_id:string|null;
 };
-const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at,CASE WHEN
+const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,t.merchant_provider,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,o.paid_at,CASE WHEN
    o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
    AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
-   AND t.merchant_provider='mk99' AND t.currency='CNY' AND t.amount_fen=o.amount_fen
+   AND t.merchant_provider IN ('mk99','xiaodou') AND t.currency='CNY' AND t.amount_fen=o.amount_fen
    AND (EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id
      AND p.status IN ('active','queued','expired'))
      OR EXISTS(SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=o.id AND c.period_id=o.target_period_id))
    AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
-     AND e.merchant_provider='mk99' AND e.event_type='PAYMENT_SUCCEEDED'
+     AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
      AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
    THEN 1 ELSE 0 END verified_paid`;
 async function existingFor(env:Env,userId:string,operationId:string):Promise<Pending|null>{
@@ -51,8 +54,12 @@ function cachedCashier(row:Pending,config:Mk99Config):string|null{
   return row.cashier_url;
  }catch{return null;}
 }
-function snapshot(row:Pending,config:Mk99Config|null){
- const paymentUrl=config&&row.merchant_account===config.pid&&row.notification_sign_type===config.notifySignType?cachedCashier(row,config):null;
+function snapshot(row:Pending,config:Mk99Config|null,env:Env){
+ const paymentUrl=row.merchant_provider==='mk99'
+   ?(config&&row.merchant_account===config.pid&&row.notification_sign_type===config.notifySignType?cachedCashier(row,config):null)
+   :(row.merchant_provider==='xiaodou'&&row.notification_sign_type==='RSA-SHA256'&&row.merchant_account===env.XIAODOU_APP_ID&&
+     row.checkout_state==='ready'&&row.status==='pending'&&row.transaction_status==='pending'&&row.risk_state==='clear'&&
+     row.cashier_url&&validateXiaodouCashierUrl(row.cashier_url,env)?row.cashier_url:null);
  return {id:row.id,planCode:row.plan_code,kind:row.kind,amountFen:row.amount_fen,currency:'CNY',
   channel:row.payment_channel,status:row.status,riskState:row.risk_state,checkout:{
    outcome:paymentUrl?'ready':row.verified_paid===1?'confirmed':'unknown',paymentUrl,
@@ -68,22 +75,19 @@ export async function subscriptionOrders(request:Request,env:Env,id?:string):Pro
    const row=await orderFor(env,id);
    if(!row||row.user_id!==session.user_id)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
    let config=null;
-   if(checkoutEnabled(env)){
-     const control=await paymentControl(env);
-     if(control.activeMerchant==='mk99'&&control.methods.some(method=>method.provider==='mk99'&&method.channel===row.payment_channel)){
-       try{config=mk99Config(env);}catch{/* Existing order remains visible with no payment link. */}
-     }
-   }
-   return response({order:snapshot(row,config)},200,env,request);
+   if(row.merchant_provider==='mk99'){
+      try{config=mk99Config(env);}catch{/* Original order remains readable. */}
+    }
+    return response({order:snapshot(row,config,env)},200,env,request);
  }
  const rows=await env.DB.prepare(`SELECT ${RESULT_FIELDS} FROM subscription_orders o
    JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id
    WHERE o.user_id=? ORDER BY o.created_at DESC,o.id DESC LIMIT 50`).bind(session.user_id).all<Pending>();
- return response({orders:(rows.results??[]).map(row=>snapshot(row,null))},200,env,request);
+ return response({orders:(rows.results??[]).map(row=>snapshot(row,null,env))},200,env,request);
 }
-function sameOrder(row:Pending,planId:string,channel:PaymentChannel,kind:string,merchantAccount:string,signType:string):boolean{
+function sameOrder(row:Pending,planId:string,channel:PaymentChannel,kind:string,merchantProvider:string,merchantAccount:string,signType:string):boolean{
  return row.plan_version_id===planId&&row.payment_channel===channel&&
-   row.kind===kind&&row.merchant_account===merchantAccount&&row.notification_sign_type===signType;
+   row.kind===kind&&row.merchant_provider===merchantProvider&&row.merchant_account===merchantAccount&&row.notification_sign_type===signType;
 }
 
 export async function createSubscriptionUpgradeQuote(request:Request,env:Env):Promise<Response>{
