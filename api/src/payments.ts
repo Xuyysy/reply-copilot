@@ -277,10 +277,30 @@ function storedMk99Cashier(env:Env,row:Record<string,unknown>):{url:string;origi
     return {url:row.cashier_url,origin:url.origin};
   }catch{return null;}
 }
+
+/** Restore only an ORIGINAL, previously signed Xiaodou cashier snapshot.
+ * An ordinary GET never contacts Xiaodou, mints a new attempt or grants credit.
+ * Never return a cashier on unknown/paid/risk-held/merchant-mismatched orders. */
+function storedXiaodouCashier(env:Env,row:Record<string,unknown>):{url:string;origin:string}|null {
+  const marker=checkoutFromAttempt(row.checkout_marker);
+  if(row.merchant_provider!=="xiaodou"||row.payment_protocol!=="rsa2"||
+    row.payment_status!=="pending"||row.status!=="awaiting_payment"||
+    row.risk_state!=="clear"||row.credited_at!=null||row.paid_at!=null||
+    Number(row.has_credit_settlement)!==0||marker?.outcome!=="ready"||
+    row.provider_fee_projection_status!=="verified"||
+    row.merchant_account!==env.XIAODOU_APP_ID||
+    row.notification_sign_type!==env.XIAODOU_KEY_ID)return null;
+  try{
+    if(typeof row.cashier_url!=="string"||row.cashier_url.length>8192||/[\\\u0000-\u0020\u007f]/.test(row.cashier_url))return null;
+    const url=new URL(row.cashier_url);
+    if(url.protocol!=="https:"||url.username||url.password)return null;
+    return {url:row.cashier_url,origin:url.origin};
+  }catch{return null;}
+}
 export async function getOrder(request:Request,env:Env,orderId:string):Promise<Response>{
-  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,(EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) OR EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)) has_credit_settlement,t.provider,t.merchant_provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.risk_state,t.merchant_pricing_snapshot,t.cashier_url,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
+  const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,(EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) OR EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)) has_credit_settlement,t.provider,t.merchant_provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.risk_state,t.merchant_pricing_snapshot,t.cashier_url,t.merchant_account,t.notification_sign_type,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
   if(!row)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
-  const cashier=storedMk99Cashier(env,row);
+  const cashier=storedMk99Cashier(env,row)??storedXiaodouCashier(env,row);
   return response({order:{paymentProvider:row.merchant_provider==="mk99"?"mk99":row.provider,paymentProtocol:row.merchant_provider==="mk99"?"mk99":row.payment_protocol,paymentChannel:row.payment_channel??null,...(row.merchant_provider==="mk99"?{riskState:row.risk_state,merchantPricing:row.merchant_pricing_snapshot?JSON.parse(String(row.merchant_pricing_snapshot)):null}:{}),checkout:checkoutFromAttempt(row.checkout_marker),id:row.id,packageId:row.package_id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:cashier?.url??null,paymentCashierOrigin:cashier?.origin??null},quota:await balance(env,session.user_id)},200,env,request);
 }
 async function paymentTransactionForOwner(env:Env,orderId:string,userId:string):Promise<PaymentTransaction>{
@@ -354,9 +374,31 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
     }catch{throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","原订单的易支付配置暂时不可用。");}
     return response({ok:true,orderStatus:"pending",paymentProtocol:"epay",paymentForm:form},200,env,request);
   }
-  if(transaction.provider!=="xiaodou"||!await checkoutAllowedFor(env,transaction)||transaction.status!=="pending")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","当前订单不能重新拉起支付。");
-  const client=paymentClient(env),next=await env.DB.prepare("SELECT COALESCE(max(attempt_number),0)+1 n FROM payment_attempts WHERE transaction_id=?").bind(transaction.id).first<{n:number}>(),attempt=Number(next?.n||1),now=nowMs(),attemptId=uuid(),requestId=`xrh-a-${uuid()}`;
-  const reserved=await env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,?,?,'prepared',?,? WHERE NOT EXISTS(SELECT 1 FROM payment_attempts WHERE transaction_id=? AND state='prepared') AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status='pending') ON CONFLICT(transaction_id,attempt_number) DO NOTHING").bind(attemptId,transaction.id,attempt,requestId,now,now,transaction.id,transaction.id).run();
+  if(transaction.provider!=="xiaodou"||transaction.payment_protocol!=="rsa2"||
+     !await checkoutAllowedFor(env,transaction)||
+     !["pending","unknown"].includes(transaction.status)||
+     transaction.order_status!=="awaiting_payment"||transaction.risk_state!=="clear"||
+     transaction.credited_at!=null)
+    throw new ApiFailure(409,"ORDER_NOT_PAYABLE","当前订单不能重新拉起支付。");
+  const client=paymentClient(env);
+  // Copy the signed-query prerequisite from subscription relaunch. A new
+  // payment attempt never relies on the browser or a stale local status.
+  const queryRequestId=`xrh-q-${uuid()}`;
+  let live:Awaited<ReturnType<typeof client.queryPayment>>;
+  try{live=await client.queryPayment(transaction.provider_trade_id!,{requestId:queryRequestId});}
+  catch(error){throw refreshProviderFailure(error,queryRequestId);}
+  if(live.outTradeNo!==transaction.provider_trade_id||
+     live.amountFen!==transaction.amount_fen||live.currency!=="CNY"||
+     live.channel!==transaction.payment_channel)
+    throw new ApiFailure(409,"PAYMENT_MISMATCH","平台查单结果与原订单不匹配，禁止生成新二维码。");
+  if(!["CREATED","PAYING"].includes(live.status)||live.unknown===true)
+    throw new ApiFailure(409,"PAYMENT_STATUS_UNCONFIRMED","原订单可能已支付或状态不明，请先查验付款状态，勿重复付款。");
+  // If creation previously timed out, the platform must explicitly tell us
+  // there is NO usable attempt before we allow recovery from UNKNOWN.
+  if(transaction.status==="unknown"&&live.nextAction!=="CREATE_ATTEMPT")
+    throw new ApiFailure(409,"PAYMENT_ATTEMPT_UNCONFIRMED","平台未确认可重拉起原订单，请勿重复付款。");
+  const next=await env.DB.prepare("SELECT COALESCE(max(attempt_number),0)+1 n FROM payment_attempts WHERE transaction_id=?").bind(transaction.id).first<{n:number}>(),attempt=Number(next?.n||1),now=nowMs(),attemptId=uuid(),requestId=`xrh-a-${uuid()}`;
+  const reserved=await env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,?,?,'prepared',?,? WHERE NOT EXISTS(SELECT 1 FROM payment_attempts WHERE transaction_id=? AND state='prepared') AND EXISTS(SELECT 1 FROM payment_transactions WHERE id=? AND status IN ('pending','unknown') AND risk_state='clear') ON CONFLICT(transaction_id,attempt_number) DO NOTHING").bind(attemptId,transaction.id,attempt,requestId,now,now,transaction.id,transaction.id).run();
   if(reserved.meta.changes!==1)throw new ApiFailure(409,"PAYMENT_ATTEMPT_IN_PROGRESS","已有支付尝试正在处理，请勿重复提交。");
   let checkout:CheckoutResult,providerError:unknown;
   try {

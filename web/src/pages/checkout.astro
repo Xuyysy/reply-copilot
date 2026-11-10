@@ -165,7 +165,7 @@ import Base from "../layouts/Base.astro";
       show("epay-pay-label",Boolean(next.paymentForm));show("epay-restore-label",!next.paymentForm);
       show("simulate-payment",next.paymentMode==="mock"&&next.status==="pending");
       show("refresh-order",next.status==="unknown"||(next.status==="pending"&&(next.paymentProtocol==="rsa2"||next.paymentProtocol==="epay"||next.paymentProtocol==="mk99")));
-      show("relaunch-rsa2",next.paymentProtocol==="rsa2"&&next.status==="pending");
+      show("relaunch-rsa2",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
       byId<HTMLButtonElement>("relaunch-rsa2").disabled=busy;
       show("create-order",false);
     }
@@ -272,7 +272,7 @@ import Base from "../layouts/Base.astro";
     // RSA2 can resume an old order without creating a second purchase. The
     // backend uses the Xiaodou attempts endpoint and preserves its order ID.
     byId("relaunch-rsa2").addEventListener("click",async()=>{
-      if(busy||!order||order.paymentProtocol!=="rsa2"||order.status!=="pending")return;
+      if(busy||!order||order.paymentProtocol!=="rsa2"||!["pending","unknown"].includes(order.status))return;
       const original=order;busy=true;
       byId<HTMLButtonElement>("relaunch-rsa2").disabled=true;
       show("cashier-link",false);
@@ -289,7 +289,11 @@ import Base from "../layouts/Base.astro";
         setStatus("新的原订单付款入口已生成，旧二维码请勿再使用。","A fresh cashier for the same order is ready. Do not reuse the previous QR code.");
       }catch(error){
         show("cashier-link",false);
-        setStatus("新付款入口暂无法确认，请先刷新原订单状态，勿重复创建订单。","Could not confirm a new cashier. Refresh the original order; do not create another purchase.");
+        if(error instanceof ApiError&&error.code==="PROVIDER_HTTP_ERROR"){
+          setStatus("小豆平台查单返回上游错误，原订单已保留；请稍后再查验，勿重复下单或付款。","Xiaodou's order query returned an upstream error. Your original order remains unchanged; do not retry payment blindly.");
+        }else{
+          setStatus("新付款入口暂无法确认，请先刷新原订单状态，勿重复创建订单。","Could not confirm a new cashier. Refresh the original order; do not create another purchase.");
+        }
       }finally{busy=false;byId<HTMLButtonElement>("relaunch-rsa2").disabled=false;}
     });
     byId("simulate-payment").addEventListener("click",async()=>{
