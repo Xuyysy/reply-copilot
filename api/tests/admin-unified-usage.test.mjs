@@ -21,7 +21,7 @@ function subscription(f,merchant='local_mock',id='sub1',includePeriod=true){
    .run('event-'+id,tid,merchant,'notification-'+id,merchant==='local_mock'?null:'a'.repeat(64),now);
  if(!includePeriod)return null;
  f.sql.prepare("INSERT INTO subscription_periods(id,user_id,source_order_id,plan_version_id,daily_limit,status,start_at,end_at,created_at,updated_at) VALUES(?,'test-user',?,'basic-v1',500,'active',?,?,1,1)")
-   .run('period-'+id,id,now-1000,now+30*86400000);
+   .run('period-'+id,id,now-1000,now-1000+30*86400000);
  f.sql.prepare("INSERT INTO subscription_daily_usage(period_id,day_index,used,reserved,updated_at) VALUES(?,0,1,0,?)").run('period-'+id,now);
  return 'period-'+id;
 }
