@@ -35,7 +35,7 @@ test('payment settings prioritize merchant, real methods and one-click readonly 
 
 test('merchant changes are previewed before save, with audit reason beside the action',()=>{
  assert.match(merchant,/changed&&<p role="status"/);
- assert.match(merchant,/reason=\{reason\}/);
+ assert.match(merchant,/value=\{reason\}/);
  assert.match(merchant,/onReasonChange\(e\.target\.value\)/);
  assert.match(merchant,/disabled=\{busy\|\|!changed\|\|reason\.trim\(\)\.length<8\}/);
  assert.match(merchant,/额度包 \+ 四档订阅一起切换/);
