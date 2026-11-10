@@ -6,7 +6,7 @@ import {withMomentumBrowser} from '../../tests/helpers/momentum-browser.js';
 const {build}=createRequire(new URL('../../api/package.json',import.meta.url))('esbuild');
 const web=new URL('..',import.meta.url).pathname;
 
-test('subscription checkout in Chrome keeps a recovered order unpayable until a trusted refresh', {timeout:30000},async()=>{
+test('subscription checkout restores a recoverable cashier on first order read and refresh', {timeout:30000},async()=>{
  const bundle=await build({
   stdin:{resolveDir:web,loader:'tsx',contents:`
    import React from 'react';
@@ -43,7 +43,7 @@ test('subscription checkout in Chrome keeps a recovered order unpayable until a 
    assert.fail('Timed out waiting for '+expression);
   };
   await until('document.querySelector("button")!==null');
-  assert.equal(await evaluate('document.querySelector("a[target]")===null'),true);
+  await until('document.querySelector("a[target]")!==null');
   await evaluate('document.querySelector("button").click();document.querySelector("button").click()');
   await until('document.querySelector("a[target]")!==null');
   assert.equal(await evaluate('document.querySelector("a[target]").href'),'https://cashier.fixture.invalid/original');
@@ -53,5 +53,48 @@ test('subscription checkout in Chrome keeps a recovered order unpayable until a 
   await until('document.body.textContent.includes("Payment verified and entitlement processed")');
   assert.equal(await evaluate('document.querySelector("a[target]")===null'),true);
   assert.equal(await evaluate('window.__calls.some(([method,path])=>method==="POST"&&path==="/v1/subscriptions/orders")'),false);
+ });
+});
+
+
+test('Xiaodou pending statuses remain visible and relaunch the same original subscription in Chrome', {timeout:30000},async()=>{
+ const bundle=await build({
+  stdin:{resolveDir:web,loader:'tsx',contents:\`
+   import React from 'react';
+   import {createRoot} from 'react-dom/client';
+   import SubscriptionCheckout from './src/components/account/SubscriptionCheckout';
+   const id='22222222-2222-4222-8222-222222222222';
+   const Search=window.URLSearchParams;
+   window.URLSearchParams=class extends Search {constructor(v){super(v===''?'order='+id:v);}};
+   window.__calls=[];window.__fresh=false;window.__providerStatus='CREATED';
+   function makeOrder(){return {id,merchantProvider:'xiaodou',planCode:'basic',kind:'renewal',amountFen:6990,
+     status:'pending',riskState:'clear',checkout:{outcome:'ready',paymentConfirmed:false,
+     paymentUrl:window.__fresh?'https://cashier.fixture.invalid/new':'https://cashier.fixture.invalid/original'}};}
+   window.fetch=async(url,options={})=>{
+    const path=new URL(url).pathname;
+    window.__calls.push([options.method??'GET',path]);
+    if(path==='/v1/auth/csrf')return Response.json({csrfToken:'synthetic'});
+    if(path.endsWith('/attempts')){window.__fresh=true;return Response.json({order:makeOrder()});}
+    if(path.endsWith('/refresh'))return Response.json({paymentConfirmed:false,orderStatus:'pending',providerStatus:window.__providerStatus});
+    if(path.endsWith(id))return Response.json({order:makeOrder()});
+    throw Error('unexpected '+path);
+   };
+   createRoot(document.querySelector('#root')).render(<SubscriptionCheckout/>);
+   window.momentumReady=true;
+  \`},
+  bundle:true,platform:'browser',format:'iife',write:false,
+  define:{'import.meta.env.PUBLIC_API_BASE_URL':'"https://subscription.fixture.invalid"','import.meta.env.DEV':'false'}
+ });
+ await withMomentumBrowser('<div id="root"></div><script>'+bundle.outputFiles[0].text.replaceAll('</script','<\\/script')+'</script>',async({evaluate})=>{
+  const until=async x=>{for(let i=0;i<150;i++){if(await evaluate(x))return;await new Promise(r=>setTimeout(r,20));}assert.fail('timeout: '+x);};
+  await until('document.querySelector("a[target]")!==null');
+  assert.equal(await evaluate('document.querySelector("a[target]").href'),'https://cashier.fixture.invalid/original');
+  await evaluate('window.__providerStatus="PAYING";document.querySelector("button").click()');
+  await until('document.body.textContent.includes("仍待付款")');
+  assert.equal(await evaluate('document.querySelector("a[target]").href'),'https://cashier.fixture.invalid/original');
+  await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("重新生成")).click()');
+  await until('document.querySelector("a[target]").href.endsWith("/new")');
+  assert.equal(await evaluate('window.__calls.filter(([method,p])=>method==="POST"&&p.endsWith("/attempts")).length'),1);
+  assert.equal(await evaluate('window.__calls.some(([method,p])=>method==="POST"&&p==="/v1/subscriptions/orders")'),false);
  });
 });

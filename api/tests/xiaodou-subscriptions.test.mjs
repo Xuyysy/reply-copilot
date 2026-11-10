@@ -281,3 +281,43 @@ test('server-side payment methods fail closed when Xiaodou source IP or subscrip
   assert.deepEqual(p.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
  }finally{f.sql.close();}
 });
+
+
+test('Xiaodou relaunch checks signed unpaid state then refreshes QR without creating a subscription',async()=>{
+ const f=ready();
+ try{
+  const created=await create(f,req('xd-relaunch-0001'));assert.equal(created.status,201);
+  const id=created.body.order.id;
+  const trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  const paths=[];
+  const result=await withProvider(r=>{
+   const path=new URL(r.url).pathname;paths.push(r.method+' '+path);
+   if(r.method==='GET')return providerResponse(r,{outTradeNo:trade,status:'CREATED',amountFen:6990,channel:'ALIPAY_H5',currency:'CNY',payUrl:null},{status:200});
+   assert.equal(r.method,'POST');
+   assert.equal(path,'/api/open/v1/payments/'+trade+'/attempts');
+   return providerResponse(r,{outTradeNo:trade,status:'PAYING',openOrderId:'xd-open-order-0001',
+     amountFen:6990,channel:'ALIPAY_H5',currency:'CNY',payUrl:'https://cashier.example.test/pay/fresh'});
+  },()=>f.call('/v1/subscriptions/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  assert.deepEqual(paths,['GET /api/open/v1/payments/'+trade,'POST /api/open/v1/payments/'+trade+'/attempts']);
+  assert.equal(result.body.order.id,id);
+  assert.equal(result.body.order.checkout.paymentUrl,'https://cashier.example.test/pay/fresh');
+  assert.deepEqual(metrics(f),{subscriptionOrders:1,events:0,periods:0,credits:0,packageOrders:0});
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou UNKNOWN prevents QR relaunch and any new provider attempt',async()=>{
+ const f=ready();
+ try{
+  const created=await create(f,req('xd-relaunch-unknown-0001'));assert.equal(created.status,201);
+  const id=created.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  let calls=0;
+  const result=await withProvider(r=>{
+   calls++;assert.equal(r.method,'GET');
+   return providerResponse(r,{outTradeNo:trade,status:'UNKNOWN',amountFen:6990,channel:'ALIPAY_H5',currency:'CNY',payUrl:null},{status:200});
+  },()=>f.call('/v1/subscriptions/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(result.status,409,JSON.stringify(result.body));
+  assert.equal(calls,1);
+  assert.deepEqual(metrics(f),{subscriptionOrders:1,events:0,periods:0,credits:0,packageOrders:0});
+ }finally{f.sql.close();}
+});
