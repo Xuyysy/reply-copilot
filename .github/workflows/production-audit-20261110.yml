@@ -1,0 +1,153 @@
+name: Final read-only Production release audit (2026-11-10)
+
+# Re-verify the user-authorized Worker+Pages coordinated release AFTER Cloudflare
+# propagation. No deploy, SQL, secret write, payment action or Chrome publish.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/production-audit-20261110.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-production-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Confirm once-only trusted audit trigger
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      startsWith(github.event.head_commit.message, 'ops(production): read-only audit of completed release')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify audit cannot change or deploy any application files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = '11363fbfa410f5db8960fe29ab34a256d5a9d320'
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/production-audit-20261110.yml'
+          git diff --check HEAD^ HEAD
+          echo 'PASS: single read-only audit workflow added.'
+
+  audit:
+    name: Verify live Production Worker, Pages, bindings, subscriptions and account
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: production
+      url: https://app.x-reply-helper.top/account/
+    env:
+      SOURCE_SHA: 9bcaf78d290771af3a775862938b0b4291621501
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET: worker
+      EXPECTED_CURRENT: d26e3c36-44ad-4cbf-8f3d-286102f72292
+    steps:
+      - name: Require read-only audit credentials
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Re-download exact already-verified immutable Production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build-9bcaf78d290771af3a775862938b0b4291621501
+          run-id: 42773302749
+          github-token: ${{ github.token }}
+          path: release
+      - name: Verify all release assets and canonical production identity
+        run: python3 scripts/verify-production-artifact.py release "$SOURCE_SHA"
+      - name: Compare active Production Worker, all expected variables, 9 secrets and D1 identity
+        run: python3 scripts/guard-production-release.py before
+      - name: Compare active Production Pages and all Worker bindings without any write
+        env:
+          TARGET: pages
+          EXPECTED_CURRENT: cc8ca030-5e55-48db-90a8-943ddda653ff
+        run: python3 scripts/guard-production-release.py before
+      - name: Verify no variable or secret drift from original Production baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import runpy
+          mod=runpy.run_path('scripts/guard-production-release.py')
+          state=mod['check_bindings']()
+          expected={
+            'ADMIN_PORTAL_ENABLED':'1',
+            'AI_MODE':'production',
+            'API_ORIGIN':'https://api.x-reply-helper.top',
+            'DEEPSEEK_INPUT_USD_PER_MILLION':'0.30',
+            'DEEPSEEK_OUTPUT_USD_PER_MILLION':'1.32',
+            'DISPOSABLE_EMAIL_DOMAINS':'mailinator.com,guerrillamail.com,tempmail.com',
+            'ENVIRONMENT':'production',
+            'EXTENSION_ORIGIN':'chrome-extension://fgfjajofkapebgphfidblngcjomkbdaj',
+            'MAIL_FROM':'Reply Copilot <no-reply@x-reply-helper.top>',
+            'MK99_AMOUNT_CONTRACT':'CNY_EXACT_BUYER_TOTAL',
+            'MK99_BASE_URL':'https://mk99.cn',
+            'MK99_CASHIER_ORIGINS':'https://mk99.cn',
+            'MK99_NOTIFY_SIGN_TYPE':'RSA',
+            'MK99_PROTOCOL_CONFIRMED':'1',
+            'MK99_REQUEST_SIGN_TYPE':'RSA',
+            'PAYMENT_PROVIDER':'xiaodou',
+            'PAYMENTS_ENABLED':'1',
+            'SUBSCRIPTION_CHECKOUT_ENABLED':'1',
+            'SUBSCRIPTION_PURCHASES_ENABLED':'1',
+            'SUBSCRIPTIONS_ENABLED':'1',
+            'WEB_ORIGIN':'https://app.x-reply-helper.top',
+            'XIAODOU_RETURN_URL':'https://app.x-reply-helper.top/account/',
+            'XIAODOU_WEBHOOKS_ENABLED':'1',
+          }
+          assert state['vars']==expected,'Production variables changed from pre-release baseline'
+          assert len(state['secrets'])==9,'Production secret references drifted'
+          assert len(state['binding_names'])==33,'Production binding name/type inventory changed'
+          print('PASS: all 23 original vars, 9 secret names and original Production D1 identity retained.')
+          PY
+      - name: Verify live Worker health, subscription catalog, paid-only auth and active Pages SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          api=https://api.x-reply-helper.top
+          curl --fail --silent --show-error --retry 6 --retry-all-errors "$api/health" |
+            jq -e '.ok == true and .service == "reply-copilot-api"' >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-all-errors "$api/v1/subscriptions/plans" |
+            jq -e '(.plans|type=="array") and .autoRenew==false' >/dev/null
+          status=$(curl --silent --show-error --retry 6 --retry-all-errors \
+            --output "$RUNNER_TEMP/unauthorized-insights.json" --write-out '%{http_code}' \
+            "$api/v1/creator-momentum/insights")
+          test "$status" = 401
+          curl --fail --silent --show-error --retry 6 --retry-all-errors \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-production" |
+            jq -e --arg sha "$SOURCE_SHA" '
+              .success==true
+              and .result.canonical_deployment.latest_stage.status=="success"
+              and .result.canonical_deployment.deployment_trigger.metadata.commit_hash==$sha
+            ' >/dev/null
+          curl -L --fail --silent --show-error --retry 6 --retry-all-errors \
+            https://app.x-reply-helper.top/account/ > "$RUNNER_TEMP/account.html"
+          grep -q 'astro-island' "$RUNNER_TEMP/account.html"
+          echo 'PASS: both Production components are live and healthy, paid access enforced.'
+      - name: Publish read-only audit results
+        if: success()
+        run: |
+          echo '### Production Worker + Pages coordinated release: INDEPENDENT AUDIT PASSED' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Worker version: d26e3c36-44ad-4cbf-8f3d-286102f72292' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Pages deployment: cc8ca030-5e55-48db-90a8-943ddda653ff' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Original payment/subscription vars, secrets and D1: unchanged' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Live health, subscription plans, unauthorized CMI and account: passed' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Audit made no deployment, payment, D1 or Chrome changes' >> "$GITHUB_STEP_SUMMARY"
