@@ -205,7 +205,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd api && ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict)
+          # The accepted V1 rollback was performed via Cloudflare's script API.
+          # Wrangler --strict would reject this known, already pinned API-side change.
+          # Re-check the exact deployment immediately before the non-strict upload.
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS --retry 3 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$root/workers/scripts/reply-copilot-api-staging/deployments" \
+            > "$RUNNER_TEMP/worker-immediately-before-upload.json"
+          if ! jq -e --arg deployment "$EXPECTED_WORKER_DEPLOYMENT" --arg version "$EXPECTED_WORKER_VERSION" '
+            .success and .result.deployments[0].id==$deployment and
+            ([.result.deployments[0].versions[] | select(.version_id==$version and .percentage==100)] | length)==1
+          ' "$RUNNER_TEMP/worker-immediately-before-upload.json" >/dev/null; then
+            echo "::error::Staging Worker changed after preflight. Refusing upload until reconciled."
+            exit 1
+          fi
+          # --keep-vars retains remote dashboard vars; ordinary deploys preserve secrets.
+          (cd api && ./node_modules/.bin/wrangler deploy --env staging --keep-vars)
           echo "Worker rollout command completed."
 
       - name: Verify Worker health and keep MK99 as the actual Staging merchant
