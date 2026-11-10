@@ -103,7 +103,8 @@
       // Matching a verified post ID permits harmless X presentation changes
       // (Show translation / media labels). Without ID evidence, keep the
       // original exact-text check and reject ambiguous multi-post modals.
-      const contextMatches=matching.length===1?Boolean(normalized(text))
+      const contextMatches=!candidates.length?null
+        :matching.length===1?Boolean(normalized(text))
         :matching.length>1?false
         :candidates.length===1&&!statusId?(normalized(text)?sameContext(post,text):null)
         :false;
