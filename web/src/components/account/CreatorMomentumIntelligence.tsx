@@ -9,7 +9,7 @@ type Stage={stage:number;referenceState:"before_reference_window"|"inside_refere
 type Cycle={stage:number;percent:number;referenceCrossings:number;windowStage:number;stages:Stage[]};
 type Observation={hour:number;score:number;cycleProgress:number;cycleStage:number;referenceCrossings:number};
 type Insights={eligible:boolean;available:boolean;day?:string;timezone?:string;policyVersion?:string;
-  score?:number;totalConfirmed?:number;cycle?:Cycle;curve?:Observation[];observedHours?:number};
+  score?:number;cycle?:Cycle;curve?:Observation[];observedHours?:number};
 type PanelState="loading"|"ready"|"locked"|"off"|"error";
 const numerals=["I","II","III"];
 
@@ -152,7 +152,7 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
      </div>)}
     </div>
     <details data-cmi-details className="cmi-detail group">
-     <summary>{t("查看势能曲线、计算依据与研究解释","Explore momentum curves, data sources and methodology")}<ChevronDown size={16} aria-hidden="true" className="transition-transform group-open:rotate-180"/></summary>
+     <summary>{t("查看势能曲线与研究解读","Explore momentum curves and research insights")}<ChevronDown size={16} aria-hidden="true" className="transition-transform group-open:rotate-180"/></summary>
      <div className="space-y-5 px-1 pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><div>
        <h3 className="font-semibold">{t("全天势能演化","Momentum evolution")}</h3><p className="text-xs text-muted-foreground">{t("整体势能持续观察 · 阶段进度分段归零","Daily cumulative index · Per-stage progress resets")}</p></div>
@@ -165,18 +165,6 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
        <p>{t("我认为，原创帖的传播机会，并不只取决于发布的那一刻。持续参与高质量讨论，可能让账号建立话题关联、受众连接与行为信号。","I believe an original post's distribution opportunity is shaped by more than its publish time. Meaningful discussions may build topic relevance, audience links and behavioral signals.")}</p>
        <p>{t("我将互动积累过程中可能出现传播条件非线性变化的关键节点定义为「互动势能临界值」。","I define the point where accumulated engagement may correspond to nonlinear distribution changes as the Creator Momentum Threshold.")}</p>
       </div>
-      <div data-cmi-data-source className="cmi-data-source">
-       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h4 className="font-semibold text-sm">{t("数据来源与计算依据","Data source and calculation basis")}</h4>
-         <p className="mt-1 text-xs text-muted-foreground">{t("仅用于解释势能研究模型，不参与 X 官方互动统计。","For understanding the research model, not an official X engagement statistic.")}</p></div>
-        <div className="text-right"><span className="block text-xs text-muted-foreground">{t("今日已确认交付的 AI 生成结果","AI generations confirmed delivered today")}</span>
-         <strong className="mt-1 block text-lg tabular-nums">{insights.totalConfirmed??0}</strong></div>
-       </div>
-       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t("这是插件收到 AI 回复结果的次数，不代表用户已在 X 实际发送回复、获得互动或曝光。模型结合后台当前三段触发区间进行指数转换。","These are AI results delivered to the extension—not replies actually posted on X, engagement or impressions. The model maps this input through the admin's current three-stage ranges.")}</p>
-      </div>
-      <p data-testid="cmi-methodology" className="text-xs leading-relaxed text-muted-foreground">
-       {t("CMI 使用后台最新三段区间与已确认交付事件生成自研参考指数；它不等于 X 官方分发权重，也不代表已发布 X 评论。参考节点不是实际已弹提醒；真实触发、每日冻结阈值和展示记录由插件本机判定。","CMI is a proprietary research index based on current admin ranges and confirmed AI deliveries, not an official X rank or published-reply count. Reference crossings are not verified reminders; actual triggers and frozen daily thresholds are owned by the extension.")}
-      </p>
      </div>
     </details>
     <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">

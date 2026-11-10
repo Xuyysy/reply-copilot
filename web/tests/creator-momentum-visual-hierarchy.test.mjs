@@ -23,16 +23,19 @@ test("CMI index and threshold signal, not raw AI reply counts, lead the account 
   assert.match(preview,/原创释放机会/);
   assert.doesNotMatch(preview,/insights\.totalConfirmed|今日已确认交付事件|Confirmed delivery events/);
 });
-test("raw generation-event count is confined to collapsed data-source and methodology disclosure",()=>{
-  assert.match(details,/data-cmi-data-source/);
-  assert.match(details,/insights\.totalConfirmed\?\?0/);
-  assert.match(details,/今日已确认交付的 AI 生成结果/);
-  assert.match(details,/不代表用户已在 X 实际发送回复/);
-  assert.match(details,/not replies actually posted on X/);
-  assert.match(details,/data-testid="cmi-methodology"/);
-  assert.ok(panel.indexOf('data-cmi-data-source')>panel.indexOf('<details data-cmi-details'));
-  assert.equal((panel.match(/insights\.totalConfirmed/g)||[]).length,1,"Never feature raw count as a headline");
+test("full research view contains no raw generation counter or internal methodology panel",()=>{
+  for(const page of [preview,details,panel]){
+    assert.doesNotMatch(page,/data-cmi-data-source|data-testid="cmi-methodology"/);
+    assert.doesNotMatch(page,/insights\.totalConfirmed|今日已确认交付|AI 生成结果|AI generations confirmed delivered today/);
+    assert.doesNotMatch(page,/数据来源与计算依据|Data source and calculation basis/);
+  }
+  assert.match(details,/全天势能演化/);
+  assert.match(details,/原创建议 · 阶段性释放/);
+  assert.match(details,/互动是蓄势，临界是信号，原创是释放/);
+  assert.match(panel,/查看势能曲线与研究解读/);
+  assert.match(panel,/Explore momentum curves and research insights/);
 });
+
 test("three release stages remain distinct references, never falsely claim actual reminders",()=>{
   assert.match(preview,/cmi-stage-grid/);
   assert.match(preview,/cycle\.stages/);
@@ -54,7 +57,7 @@ test("paid-only, locked account UI and compact responsive design remain intact",
   assert.match(css,/\.cmi-cycle-fill/);
   assert.match(css,/@media\(max-width:680px\)/);
   assert.match(css,/\.cmi-overview-grid \{grid-template-columns:1fr/);
-  assert.match(panel,/Explore momentum curves, data sources and methodology/);
+  assert.match(panel,/Explore momentum curves and research insights/);
   assert.match(panel,/data-cmi-learn-more href="\/#momentum-framework"/);
   assert.match(panel,/详细了解互动势能临界值理论/);
   assert.match(panel,/Learn more about the Creator Momentum Threshold theory/);
