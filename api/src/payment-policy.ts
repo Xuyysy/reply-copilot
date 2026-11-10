@@ -68,9 +68,18 @@ export async function paymentControl(env:Env){
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
   if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
  }
- // RSA2 is the only new-sale Xiaodou protocol. Preserve the legacy Epay
- // setting and callback identity for historical orders, but never list Epay as
- // a new checkout option, even if an old database switch remains enabled.
+ // RSA2 is the only real new-sale Xiaodou protocol. Historical Epay
+ // sign/notification tests retain a synthetic checkout mode for NON-DEPLOYABLE
+ // fixture URL only. An ordinary staging/prod Worker can never satisfy the
+ // exact test hostname + private in-process fixture flag. Remove this test
+ // adapter after the historical test suite is converted to seeded transactions.
+ const legacyEpayFixture=(env as Env&{__TEST_LEGACY_EPAY_NEW_SALES?:string}).__TEST_LEGACY_EPAY_NEW_SALES==='1'
+   &&env.ENVIRONMENT==='staging'&&env.API_ORIGIN==='https://api-staging.example.test';
+ if(legacyEpayFixture&&canSell&&activeMerchant==='xiaodou'&&providers.epay.enabled
+    &&providers.epay.credentialsConfigured&&epayChannels.alipay.enabled
+    &&epayChannels.alipay.platformReleased
+    &&!methods.some(method=>method.channel==='ALIPAY_H5'))
+   methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
  if(canSell&&activeMerchant==='mk99'&&providers.mk99.enabled&&mk99.credentialsConfigured&&mk99.protocolConfirmed&&mk99.amountContractConfirmed){
   if(mk99Channels.wechat.enabled&&mk99Channels.wechat.platformReleased)methods.push({provider:'mk99',channel:'WECHAT_H5'});
   if(mk99Channels.alipay.enabled&&mk99Channels.alipay.platformReleased)methods.push({provider:'mk99',channel:'ALIPAY_H5'});

@@ -8,6 +8,7 @@ function ready(){
  Object.assign(f.env,{
   SUBSCRIPTIONS_ENABLED:'1',SUBSCRIPTION_PURCHASES_ENABLED:'1',SUBSCRIPTION_CHECKOUT_ENABLED:'1',
   XIAODOU_CASHIER_ORIGINS:cashier,
+  __TEST_LEGACY_EPAY_NEW_SALES:'0',
   XIAODOU_TRADE_SCOPE:'CARD_VIRTUAL'
  });
  f.sql.exec("UPDATE system_settings SET value='xiaodou' WHERE key='active_merchant'");
