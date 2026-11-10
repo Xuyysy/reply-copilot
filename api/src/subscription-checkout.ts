@@ -242,8 +242,10 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
   env.DB.prepare(
    "INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,status,risk_state,created_at,updated_at,checkout_state,checkout_attempted_at) "+
    "SELECT ?,o.id,?, ?, ?, ?,o.amount_fen,?,'pending','clear',?,?,'preparing',? "+
-   "FROM subscription_orders o WHERE o.id=? AND o.user_id=? AND o.operation_id=? AND o.status='pending'"
-  ).bind(transactionId,merchant,merchantAccount,tradeNo,channel,signType,now,now,now,id,session.user_id,operationId),
+   "FROM subscription_orders o WHERE o.id=? AND o.user_id=? AND o.operation_id=? AND o.status='pending' "+ 
+   "AND EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value=?) "+
+   "AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1')"
+  ).bind(transactionId,merchant,merchantAccount,tradeNo,channel,signType,now,now,now,id,session.user_id,operationId,merchant),
   env.DB.prepare(
    "INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN "+
    "EXISTS(SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id "+
