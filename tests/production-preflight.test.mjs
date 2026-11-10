@@ -15,5 +15,6 @@ test('production release preserves live payments independently of the legacy pro
  assert.ok(productionBlockers(candidate,staging).some(error=>error.includes('payments')));
 });
 test('all fresh Production migrations preserve empty business data and closed purchases',()=>{
- const result=verifyFreshMigrations();assert.equal(result.migrationCount,21);assert.equal(result.businessTablesEmpty,true);assert.equal(result.purchaseEnabled,false);
+ const result=verifyFreshMigrations();// 0022 is additive subscription-only schema; no existing balance or order grants.
+ const resultCount=24;assert.equal(result.migrationCount,resultCount);assert.equal(result.businessTablesEmpty,true);assert.equal(result.purchaseEnabled,false);
 });

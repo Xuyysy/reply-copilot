@@ -2,6 +2,8 @@
 import "../styles/global.css";
 const { title = "x-Reply-Helper", titleEn = title, description = "x-Reply-Helper 让每条 X 回复更像你自己。" } = Astro.props;
 const pageTitle = `${title} · x-Reply-Helper`;
+const isAdminPage = Astro.url.pathname.startsWith("/admin");
+const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
 ---
 <!doctype html>
 <html lang="zh-CN" data-title-zh={title} data-title-en={titleEn}>
@@ -16,28 +18,60 @@ const pageTitle = `${title} · x-Reply-Helper`;
     <meta name="color-scheme" content="light" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{pageTitle}</title>
-    <script is:inline>try{document.documentElement.lang=localStorage.getItem("replyCopilotLanguage")==="en"?"en":"zh-CN"}catch{}</script>
+    <style is:inline>
+      /* Static HTML contains English fallbacks: hide the page until synchronous language hydration. */
+      html:not([data-language-ready]) body { visibility: hidden; }
+    </style>
+    <noscript><style is:inline>html:not([data-language-ready]) body { visibility: visible; }</style></noscript>
+    <script is:inline>
+      try { document.documentElement.lang = localStorage.getItem("replyCopilotLanguage") === "en" ? "en" : "zh-CN"; } catch {}
+      // Fail open if the pre-paint script below cannot run for any reason.
+      document.addEventListener("DOMContentLoaded", () => document.documentElement.setAttribute("data-language-ready", "true"), { once: true });
+    </script>
   </head>
-  <body class="site-shell">
+  <body class:list={["site-shell", { "public-refresh": !isAdminPage }]}>
+    {!isAdminPage && <a href="#site-main" class="skip-link">跳转到主要内容 / Skip to content</a>}
     <header class="site-header">
       <div class="container header-inner">
         <a class="brand" href="/" aria-label="x-Reply-Helper home"><img class="brand-mark" src="/favicon.svg" alt="" />x-Reply-Helper</a>
         <nav data-site-navigation class="nav" aria-label="Main navigation">
           <a data-nav-id="x" data-site-link="xProfileUrl" aria-disabled="true"><span data-zh="我的 X">My X</span></a>
           <a data-nav-id="install" data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install</span></a>
-          <a data-nav-id="guide" href="/guide"><span data-zh="使用指南">Guide</span></a>
-          <a data-nav-id="pricing" href="/pricing"><span data-zh="价格">Pricing</span></a>
-          <a data-nav-id="faq" href="/faq">FAQ</a>
+          {!isAdminPage && <a class="momentum-nav-link" href="/#creator-momentum"><span data-zh="互动势能">Creator Momentum</span><span aria-hidden="true">⚡</span></a>}
+          <a data-nav-id="guide" href="/guide" data-astro-prefetch="hover"><span data-zh="使用指南">Guide</span></a>
+          <a data-nav-id="pricing" href="/pricing" data-astro-prefetch="hover"><span data-zh="价格">Pricing</span></a>
+          <a data-nav-id="faq" href="/faq" data-astro-prefetch="hover">FAQ</a>
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
+          <span id="account-loading" class="account-status-loading" role="status" aria-live="polite"><span class="account-loading-dot" aria-hidden="true"></span><span data-zh="正在确认账户">Checking account</span></span>
           <a class="button secondary" id="account-entry" href="/account" hidden><span data-zh="我的账户">My account</span></a><button class="button secondary" id="account-retry" type="button" hidden><span data-zh="重试账户状态">Retry account</span></button>
         </div>
+        {!isAdminPage && (
+          <details class="mobile-nav">
+            <summary class="mobile-nav-trigger" aria-label="打开导航菜单 / Open navigation menu">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+              <span data-zh="菜单">Menu</span>
+            </summary>
+            <nav class="mobile-nav-list" aria-label="Mobile navigation">
+              <a href="/" data-zh="首页">Home</a>
+              <a href="/#creator-momentum" data-zh="互动势能临界值">Creator Momentum</a>
+              <a data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install extension</span></a>
+              <a href="/guide" data-astro-prefetch="hover" data-zh="使用指南">Guide</a>
+              <a href="/pricing" data-astro-prefetch="hover" data-zh="价格与套餐">Pricing</a>
+              <a href="/faq" data-astro-prefetch="hover">FAQ</a>
+              <span id="mobile-account-loading" class="mobile-account-loading" role="status" data-zh="正在确认账户…">Checking account…</span>
+              <a id="mobile-account-entry" href="/login" hidden><span data-zh="登录 / 账户">Sign in / Account</span></a>
+              <a href="/feedback" data-zh="反馈与支持">Feedback</a>
+            </nav>
+          </details>
+        )}
       </div>
     </header>
-    <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>
+    {/* Routine onboarding notes belong in the guide, not on every account refresh. */}
+    {isGuidePage && <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>}
     <div class="container notice" data-site-text="maintenance" hidden style="white-space:pre-wrap"></div>
-    <main><slot /></main>
+    <main id="site-main"><slot /></main>
     <footer class="footer">
       <div class="container footer-inner">
         <span>© {new Date().getFullYear()} x-Reply-Helper · <span data-site-text="footerText" data-zh="AI 回复草稿，由你决定是否发送">AI drafts. You decide what to send.</span></span>
@@ -50,8 +84,29 @@ const pageTitle = `${title} · x-Reply-Helper`;
         </div>
       </div>
     </footer>
+    <script is:inline data-language-bootstrap>
+      // Parse-time, synchronous localization: complete before the hidden HTML is painted.
+      (() => {
+        const root = document.documentElement;
+        try {
+          const language = root.lang === "en" ? "en" : "zh";
+          document.querySelectorAll("[data-zh]").forEach((element) => {
+            if (element.closest("astro-island")) return; // React owns hydrated islands.
+            if (!element.dataset.en) element.dataset.en = element.textContent || "";
+            element.textContent = language === "zh" ? element.dataset.zh || "" : element.dataset.en;
+          });
+          const title = language === "zh" ? root.dataset.titleZh : root.dataset.titleEn;
+          if (title) document.title = title + " · x-Reply-Helper";
+          const button = document.getElementById("language-toggle");
+          if (button) button.textContent = language === "zh" ? "English" : "中文";
+        } finally {
+          // Never leave the page blank when localStorage or localization fails.
+          root.setAttribute("data-language-ready", "true");
+        }
+      })();
+    </script>
     <script>
-      import { api } from "../lib/api";
+      import { api, ApiError } from "../lib/api";
       import { createSiteContentLoader, applySiteContent, shouldHideAccountCta } from "../lib/site-content.mjs";
       const loadSiteContent = createSiteContentLoader(() => api("/v1/site"));
       let siteContent = {};
@@ -65,6 +120,7 @@ const pageTitle = `${title} · x-Reply-Helper`;
         document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
         document.title = `${lang === "zh" ? document.documentElement.dataset.titleZh : document.documentElement.dataset.titleEn} · x-Reply-Helper`;
         document.querySelectorAll<HTMLElement>("[data-zh]").forEach((element) => {
+          if (element.closest("astro-island")) return; // React islands translate via useLanguage.
           if (!element.dataset.en) element.dataset.en = element.textContent || "";
           element.textContent = lang === "zh" ? element.dataset.zh || "" : element.dataset.en;
         });
@@ -77,28 +133,62 @@ const pageTitle = `${title} · x-Reply-Helper`;
       document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
       let accountState: "loading"|"guest"|"pending"|"ready"|"empty"|"error"="loading";
       let lastAccountCheck=0;
+      let accountRequestId=0;
       function updateAccountLinks(){
         const en=document.documentElement.lang==="en";
         const entry=document.getElementById("account-entry") as HTMLAnchorElement;
         const retry=document.getElementById("account-retry")!;
-        entry.hidden=false;
+        const checking=accountState==="loading";
+        const loading=document.getElementById("account-loading")!;
+        loading.hidden=!checking;
+        entry.hidden=checking||accountState==="error";
         retry.hidden=accountState!=="error";
-        entry.href=["guest","loading","error"].includes(accountState)?"/login":"/account";
+        entry.href=accountState==="guest"?"/login":"/account";
         const label=entry.querySelector("span")!;
-        label.textContent=["guest","loading","error"].includes(accountState)?(en?"Sign in / Account":"登录 / 账户"):(en?"My account":"我的账户");
+        label.textContent=accountState==="guest"?(en?"Sign in / Account":"登录 / 账户"):(en?"My account":"我的账户");
+        const mobileEntry=document.getElementById("mobile-account-entry") as HTMLAnchorElement|null;
+        const mobileLoading=document.getElementById("mobile-account-loading");
+        if(mobileLoading)mobileLoading.hidden=!checking;
+        if(mobileEntry){
+          mobileEntry.hidden=checking;
+          mobileEntry.href=accountState==="error"?"/account":entry.href;
+          const mobileLabel=mobileEntry.querySelector("span");
+          if(mobileLabel)mobileLabel.textContent=accountState==="error"?(en?"Check account status":"检查账户状态"):label.textContent;
+        }
         document.querySelectorAll<HTMLAnchorElement>("[data-account-cta]").forEach((link)=>{
           link.hidden=shouldHideAccountCta(accountState,link.dataset.sitePrimaryOverride);
           link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
           const text=link.querySelector("span")||link;
           text.textContent=accountState==="guest"?(en?"Register and link to claim 200":"注册并绑定后领取 200 次"):accountState==="pending"?(en?"Link extension to claim 200":"绑定插件领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
         });
-        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="pending"?(en?"Welcome credits are pending. Sign in and connect the extension to your account.":"新人额度待领取：请登录 Chrome 插件并连接账户。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email, then connect your account in the extension to receive welcome credits.":"验证邮箱后，请在插件中连接账户以领取新人额度。");});
+        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{
+          element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="loading"?(en?"Checking your account…":"正在确认账户状态…"):accountState==="pending"?(en?"Welcome credits are pending. Sign in and connect the extension to your account.":"新人额度待领取：请登录 Chrome 插件并连接账户。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email, then connect your account in the extension to receive welcome credits.":"验证邮箱后，请在插件中连接账户以领取新人额度。");
+        });
       }
       async function loadAccountLinks(){
-        lastAccountCheck=Date.now(); accountState="loading";updateAccountLinks();
-        try{const {api,ApiError}=await import("../lib/api");await api("/v1/me");const result=await api<{quota:{totalRemaining:number};signupBenefit?:{status:"pending"|"granted"}|null}>("/v1/usage");accountState=result.signupBenefit?.status==="pending"?"pending":result.quota.totalRemaining<=0?"empty":"ready";}
-        catch(error){const {ApiError}=await import("../lib/api");accountState=error instanceof ApiError&&error.status===401?"guest":"error";}
-        updateAccountLinks();
+        // Never replace a verified account label with a guest label during refresh.
+        const requestId=++accountRequestId;
+        lastAccountCheck=Date.now();
+        if(accountState==="loading")updateAccountLinks();
+        try{
+          await api("/v1/me");
+          if(requestId!==accountRequestId)return;
+          // Identity is confirmed: show the account immediately, not after quota loading.
+          accountState="ready";updateAccountLinks();
+          try{
+            const result=await api<{quota:{totalRemaining:number};signupBenefit?:{status:"pending"|"granted"}|null}>("/v1/usage");
+            if(requestId!==accountRequestId)return;
+            accountState=result.signupBenefit?.status==="pending"?"pending":result.quota.totalRemaining<=0?"empty":"ready";
+          }catch(error){
+            if(requestId!==accountRequestId)return;
+            // A transient quota error is not evidence that the user signed out.
+            if(error instanceof ApiError&&error.status===401)accountState="guest";
+          }
+        }catch(error){
+          if(requestId!==accountRequestId)return;
+          accountState=error instanceof ApiError&&error.status===401?"guest":"error";
+        }
+        if(requestId===accountRequestId)updateAccountLinks();
       }
       document.getElementById("account-retry")?.addEventListener("click",()=>void loadAccountLinks());
       window.addEventListener("reply-copilot-language",updateAccountLinks);

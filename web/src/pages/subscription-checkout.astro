@@ -1,0 +1,8 @@
+---
+import Base from '../layouts/Base.astro';
+import SubscriptionCheckout from '../components/account/SubscriptionCheckout';
+---
+<Base title="订阅结账" titleEn="Subscription checkout">
+ <div class="container page-hero"><h1 data-zh="订阅结账">Subscription checkout</h1></div>
+ <section class="container app-shell"><SubscriptionCheckout client:only="react" /></section>
+</Base>

@@ -1,16 +1,104 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="价格与充值" titleEn="Pricing and credits">
-  <div class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
-  <section class="container section" style="padding-top:20px"><div class="grid-3"><div class="pricing-card featured"><h3 id="free-title" data-zh="免费赠送">Free grant</h3><div class="price">$0</div><p id="free-detail" data-zh="正在确认账户状态…">Checking account status…</p><a id="free-action" class="button" href="/login?mode=register" hidden data-zh="免费注册领取">Register for free</a><button id="free-retry" class="button secondary" type="button" hidden data-zh="重试">Retry</button></div><div class="pricing-card grid-span-2"><div class="eyebrow" data-zh="充值套餐">Top-up packages</div><div id="packages" class="grid-3" style="margin-top:20px"><p data-zh="正在读取套餐…">Loading packages…</p></div><p id="payment-status" class="notice" style="margin-top:20px" data-zh="付款尚未开放。当前可查看套餐，不能完成真实购买。">Checkout is not open. You can view packages, but cannot pay yet.</p></div></div></section>
+<Base title="订阅与永久额度包" titleEn="Subscriptions and permanent credits">
+  <section id="subscription-section" class="container section" hidden aria-labelledby="subscription-title" style="padding-top:36px">
+    <div class="section-heading">
+      <p class="eyebrow" id="subscription-eyebrow"></p>
+      <h1 id="subscription-title"></h1>
+      <p class="lead" id="subscription-description"></p>
+    </div>
+    <div id="subscription-cards" class="subscription-card-grid" aria-live="polite"></div>
+    <div class="quota-rules" aria-labelledby="quota-rules-title">
+      <div class="quota-rule">
+        <h2 id="quota-rules-title" data-zh="订阅制：每天重置" >Subscription: daily allowance</h2>
+        <p data-zh="按 30 天订阅，每 24 小时重置每日次数，未使用的日额度不累计，到期后订阅日额度结束。">A 30-day subscription provides daily generations that reset every 24 hours. Unused daily allowance does not roll over; the subscription ends after 30 days.</p>
+      </div>
+      <div class="quota-rule">
+        <h2 data-zh="永久额度包：按次使用">Permanent credits: pay as you go</h2>
+        <p data-zh="一次购买，次数不主动过期，也不按天清零。订阅当天额度用完后，先使用剩余免费额度，免费额度也用完后才使用永久付费额度；未订阅也能单独购买。">One-time purchase: permanent purchased credits do not expire automatically or reset each day. When an active subscription reaches its daily limit, free credits are used first, then separately purchased permanent credits. Packs can also be purchased without subscribing.</p>
+      </div>
+    </div>
+    <p id="subscription-disclosure" class="fineprint" style="margin-top:20px"></p>
+  </section>
+  <div id="legacy-pricing-hero" class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
+  <section class="container section" aria-labelledby="credit-packs-title" style="padding-top:20px">
+    <div class="section-heading">
+      <p class="eyebrow" data-zh="独立购买 · 超量补充">Buy separately · Extra generations</p>
+      <h2 id="credit-packs-title" data-zh="永久额度包：不用订阅，也能随买随用">Permanent credit packs: no subscription required</h2>
+      <p class="lead" data-zh="一次购买，按次扣除，不主动过期，也不按天清零。订阅当天额度用完后，先扣免费额度，免费额度也用完才扣永久付费额度；未订阅也能单独购买。三类额度分别计算。">Buy once and use generations whenever you need them. Permanent purchased credits do not expire automatically or reset daily. After the daily subscription allowance runs out, free credits are used first, followed by permanent paid credits. Packs can be bought independently; the three balances stay separate.</p>
+    </div>
+    <div class="grid-3">
+      <div class="pricing-card featured">
+        <h3 id="free-title" data-zh="新人免费额度">Welcome credits</h3>
+        <div class="price">$0</div>
+        <p id="free-detail" data-zh="正在确认账户状态…">Checking account status…</p>
+        <a id="free-action" class="button" href="/login?mode=register" hidden data-zh="免费注册领取">Register for free</a>
+        <button id="free-retry" class="button secondary" type="button" hidden data-zh="重试">Retry</button>
+      </div>
+      <div class="pricing-card grid-span-2" id="permanent-credits">
+        <div class="eyebrow" data-zh="永久额度包 · 购买后不主动过期">Permanent credit packs · No automatic expiration</div>
+        <p class="fineprint" data-zh="下方是一次性充值次数包，不是 30 天订阅；没有每日使用上限，也不会每天重置。">These are one-time top-up packs, not 30-day subscriptions. Purchased credits do not reset each day.</p>
+        <div id="packages" class="grid-3" style="margin-top:20px"><p data-zh="正在读取额度包…">Loading credit packs…</p></div>
+        <p id="payment-status" class="notice" style="margin-top:20px" data-zh="永久额度包付款尚未开放。当前可查看额度包，不能完成真实购买。">Credit-pack checkout is not open. You can view packs but cannot pay yet.</p>
+      </div>
+    </div>
+  </section>
   <script>
     import {api, ApiError} from "../lib/api";
     import {packageSummary} from "../lib/package-summary.mjs";
+    type SubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;description_zh:string;description_en:string};
+    let checkoutAvailable=false;
+    let subscriptionPlans:SubscriptionPlan[]|null=null;
+    const subscriptionNames=new Set(['basic','pro','max','ultra']);
+    function renderSubscriptions(){
+      if(!subscriptionPlans)return;
+      const en=document.documentElement.lang==='en';
+      const txt=(zh:string,english:string)=>en?english:zh;
+      const text=(id:string,value:string)=>{const element=document.getElementById(id);if(element)element.textContent=value;};
+      text('subscription-eyebrow',txt('30 天订阅 · 适合每天高频生成','30-day subscriptions · For daily use'));
+      text('subscription-title',txt('30 天订阅，每天都有固定生成次数。','30-day subscriptions with a daily generation allowance.'));
+      text('subscription-description',txt('每天重置订阅次数，未用不累计。订阅当天额度用完后，先使用免费额度，再使用永久额度包；也可在符合条件时升级订阅，按剩余周期补差价（最后 24 小时不可升级）。永久额度不主动过期。','Subscription generations reset each day without rollover. After the daily limit, use free credits before permanent paid credits; you can also upgrade an eligible subscription at a prorated price (not in its final 24 hours). Permanent packs do not expire automatically.'));
+      text('subscription-disclosure',txt('订阅不自动续费 · 每 24 小时重置 · 未使用的日额度不累计 · 永久额度包不按天清零 · 一次成功生成三条候选计 1 次。','No auto-renewal · Daily subscription allowances reset every 24h · Unused daily allowance does not roll over · Permanent credits never reset daily · Three suggestions count as one generation.'));
+      const box=document.getElementById('subscription-cards')!;
+      box.replaceChildren();
+      for(const p of subscriptionPlans){
+        const card=document.createElement('div');
+        card.className='pricing-card'+(p.plan_code==='pro'?' featured subscription-featured':'');
+        const label=document.createElement('p');label.className='eyebrow';label.textContent=p.plan_code==='pro'?txt('推荐方案','Recommended'):p.plan_code.toUpperCase();
+        const heading=document.createElement('h3');heading.textContent=en?p.name_en:p.name_zh;
+        const price=document.createElement('div');price.className='price';price.textContent='¥'+(p.price_fen/100).toFixed(2);
+        const period=document.createElement('p');period.textContent=txt('30 天订阅 · 每 24 小时重置','30-day subscription · Resets every 24h');
+        const allowance=document.createElement('p');allowance.className='subscription-limit';allowance.textContent=p.daily_limit.toLocaleString()+' '+txt('次/天','generations/day');
+        const description=document.createElement('p');description.textContent=(en?p.description_en:p.description_zh)||txt('每次生成三个候选回复','Three reply suggestions per generation');
+        const unavailable=document.createElement('p');unavailable.className='notice';unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
+        if(checkoutAvailable){
+          const buy=document.createElement('a');buy.className='button';buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
+          buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
+        }
+        card.append(label,heading,price,period,allowance,description,unavailable);
+        box.append(card);
+      }
+    }
+    async function loadSubscriptions(){
+      try{
+        const result=await api<{plans:SubscriptionPlan[];autoRenew:boolean;checkoutAvailable:boolean}>('/v1/subscriptions/plans');
+        // Fail closed: do not advertise non-purchasable or malformed server catalogs.
+        if(result.autoRenew!==false||!result.plans.length||result.plans.length>4||result.plans.some(p=>!subscriptionNames.has(p.plan_code)||!Number.isSafeInteger(p.price_fen)||p.price_fen<1||!Number.isSafeInteger(p.daily_limit)||p.daily_limit<1||p.duration_days!==30))return;
+        checkoutAvailable=result.checkoutAvailable===true;
+        subscriptionPlans=result.plans;
+        document.getElementById('subscription-section')!.hidden=false;
+        document.getElementById('legacy-pricing-hero')!.hidden=true;
+        renderSubscriptions();
+      }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
+    }
+    void loadSubscriptions();
+    window.addEventListener('reply-copilot-language',renderSubscriptions);
+
     type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;fee_rate_bps:number;total_payment_fen?:number|null;merchant_pricing?:{feeBearer:string;rateBps:number;status:string};description_zh?:string;description_en?:string;featured?:boolean;recommended_label_zh?:string;recommended_label_en?:string};
     let packages:Package[]|null=null;
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
-    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看套餐","View package");card.append(heading,price,detail,description,cny,fee,link);box.append(card);}}
+    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);box.append(card);}}
     async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;document.getElementById("payment-status")!.hidden=data.paymentAvailable;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
     let refreshTimer:ReturnType<typeof setTimeout>|undefined;
     window.addEventListener("focus",()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void load(),250);});
@@ -26,5 +114,15 @@ import Base from "../layouts/Base.astro";
     async function loadFree(){freeState="loading";renderFree();try{await api("/v1/me");const data=await api<Quota>("/v1/usage");freeQuota=data.quota;freeState=data.signupBenefit?.status==="pending"?"pending":data.quota.totalRemaining<=0?"empty":"ready";}catch(error){freeQuota=null;freeState=error instanceof ApiError&&error.status===401?"guest":"error";}renderFree();}
     document.getElementById("free-retry")?.addEventListener("click",()=>void loadFree());void loadFree();window.addEventListener("reply-copilot-language",renderFree);
   </script>
-  <style>:global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}:global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}</style>
+  <style>
+  :global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}
+  :global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}
+  .subscription-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
+  .subscription-featured{border:2px solid #2663ac}
+  .subscription-limit{font-size:1.35rem;font-weight:700}
+  .quota-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin-top:18px}
+  .quota-rule{border:1px solid #dbe4ef;border-radius:16px;padding:16px;background:#f7f9fd}
+  .quota-rule h2{font-size:1.05rem;margin:0}
+  .quota-rule p{margin:8px 0 0}
+  </style>
 </Base>

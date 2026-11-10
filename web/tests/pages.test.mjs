@@ -43,8 +43,12 @@ test("signup copy gives concise account-connection guidance without exposing cla
   const auth=readFileSync(path.join(root,"src/components/auth/AuthPanel.tsx"),"utf8");
   const layout=readFileSync(path.join(root,"src/layouts/Base.astro"),"utf8");
   const pricingSource=readFileSync(path.join(root,"src/pages/pricing.astro"),"utf8");
-  assert.match(login,/验证邮箱后，请在插件中连接账户以领取新人额度/);
-  assert.match(login,/connect your account in the extension to receive welcome credits/);
+  // The marketing hero was intentionally removed; verify the real registration form copy instead.
+  assert.doesNotMatch(login,/public-inner-hero|auth-hero-visual/);
+  assert.match(auth,/验证邮箱后即可创建账户。首次连接插件后，新人免费额度将发放到账户/);
+  assert.match(auth,/Verify your email to create an account\. Your welcome credits will be added after you connect the extension/);
+  assert.match(auth,/垃圾邮箱或广告邮件文件夹/);
+  assert.match(auth,/spam or promotions folder/);
   assert.match(auth,/t\("验证邮箱", "Verify email"\)/);
   assert.doesNotMatch([auth,layout,home,pricingSource].join("\n"),/每个安装实例|One welcome grant per installation|Each installation can claim once|eligible extension installation/);
   assert.match(layout,/signupBenefit\?\.status==="pending"\?"pending"/);
@@ -74,8 +78,11 @@ test("language switch and responsive layout are present", () => {
 });
 test("account page requests protected data from the API", () => {
   const source = readFileSync(path.join(root, "src/components/account/AccountDashboard.tsx"), "utf8");
-  for (const endpoint of ["/v1/me", "/v1/usage", "/v1/activity", "/v1/extension/device-code/status", "/v1/extension/approve"]) assert.ok(source.includes(endpoint));
-  assert.match(source, /error\.status === 401/);
+  const loader = readFileSync(path.join(root, "src/lib/account-load.mjs"), "utf8");
+  assert.match(source, /loadAccountSnapshot\(api\)/);
+  for (const endpoint of ["/v1/me", "/v1/usage", "/v1/activity"]) assert.ok(loader.includes(endpoint), endpoint);
+  for (const endpoint of ["/v1/extension/device-code/status", "/v1/extension/approve"]) assert.ok(source.includes(endpoint), endpoint);
+  assert.match(source, /error\.status\s*===\s*401/);
   assert.match(source, /<Dialog open=/);
 });
 test("account orders expose provider refresh for unresolved supported merchant payments", () => {

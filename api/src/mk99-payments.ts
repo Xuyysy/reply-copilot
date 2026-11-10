@@ -9,7 +9,7 @@ import {nowMs,uuid} from './security';
 
 function client(env:Env){try{return new Mk99Client(mk99Config(env));}catch{throw new ApiFailure(503,'MK99_NOT_READY','支付协议或金额规则尚未确认，暂不可付款。');}}
 function safeProviderError(error:unknown):never{throw new ApiFailure(502,error instanceof Mk99Error?error.code:'MK99_UNCONFIRMED','支付平台暂时无法确认订单，请保留原订单并稍后核对。');}
-async function readMk99Body(body:ReadableStream<Uint8Array>|null,limit:number):Promise<Uint8Array>{
+export async function readMk99Body(body:ReadableStream<Uint8Array>|null,limit:number):Promise<Uint8Array>{
  if(!body)throw new Error('Missing body');const reader=body.getReader(),chunks:Uint8Array[]=[];let size=0;
  while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit){await reader.cancel();throw new Error('Body too large');}chunks.push(value);}
  const result=new Uint8Array(size);let offset=0;for(const chunk of chunks){result.set(chunk,offset);offset+=chunk.byteLength;}return result;
@@ -66,14 +66,14 @@ export async function refreshMk99Order(request:Request,env:Env,t:PaymentTransact
 }
 type Mk99NotifyStage='received'|'content_type'|'body_read'|'utf8_decode'|'form_parse'|'canonicalize'|'configuration'|'signature_verify'|'signed_fields'|'order_lookup'|'reconcile'|'acknowledged';
 type Mk99NotifyReason='content_type_rejected'|'body_read_failed'|'utf8_invalid'|'form_invalid'|'canonicalization_failed'|'configuration_unavailable'|'signature_invalid'|'signed_event_invalid'|'order_not_found'|'identity_or_amount_mismatch'|'event_conflict'|'internal_error';
-function notifyContentTypeClass(value:string|null):'missing'|'form_urlencoded'|'json'|'multipart'|'other'{
+export function notifyContentTypeClass(value:string|null):'missing'|'form_urlencoded'|'json'|'multipart'|'other'{
  if(!value)return 'missing';const mediaType=value.split(';',1)[0].trim().toLowerCase();
  if(mediaType==='application/x-www-form-urlencoded')return 'form_urlencoded';
  if(mediaType==='application/json'||mediaType.endsWith('+json'))return 'json';
  if(mediaType==='multipart/form-data')return 'multipart';
  return 'other';
 }
-async function parseMk99MultipartForm(body:Uint8Array,contentType:string,requestUrl:string):Promise<Record<string,string>>{
+export async function parseMk99MultipartForm(body:Uint8Array,contentType:string,requestUrl:string):Promise<Record<string,string>>{
  const copy=new ArrayBuffer(body.byteLength);new Uint8Array(copy).set(body);
  const replay=new Request(requestUrl,{method:'POST',headers:{'Content-Type':contentType},body:copy});
  const form=await replay.formData(),result=Object.create(null) as Record<string,string>;let count=0;

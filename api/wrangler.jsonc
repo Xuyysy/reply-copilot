@@ -80,7 +80,10 @@
         "PAYMENTS_ENABLED": "0",
         "XIAODOU_WEBHOOKS_ENABLED": "1",
         "PAYMENT_PROVIDER": "xiaodou",
-        "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com"
+        "DISPOSABLE_EMAIL_DOMAINS": "mailinator.com,guerrillamail.com,tempmail.com",
+        "SUBSCRIPTIONS_ENABLED": "0",
+        "SUBSCRIPTION_PURCHASES_ENABLED": "0",
+        "SUBSCRIPTION_CHECKOUT_ENABLED": "0"
       },
       "d1_databases": [
         {

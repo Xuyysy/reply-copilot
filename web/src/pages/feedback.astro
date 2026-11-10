@@ -2,7 +2,20 @@
 import Base from "../layouts/Base.astro";
 ---
 <Base title="反馈" titleEn="Feedback">
-  <div class="container page-hero" style="text-align:center;margin:auto;padding-bottom:0"><div class="eyebrow" data-zh="反馈">Feedback</div><h1 data-zh="告诉我们哪里需要改进。">Tell us what needs work.</h1><p class="lead" style="margin:auto" data-zh="反馈表单需要登录。未登录用户或无法登录时，可直接发送邮件至客服邮箱。请勿填写 API Key 或其他秘密。">The feedback form requires sign-in. Users who are not signed in, or cannot sign in, may email our support address. Do not include API keys or other secrets.</p><p style="margin:1rem auto"><a href="mailto:zake6678@outlook.com">zake6678@outlook.com</a></p></div><div class="form-card"><form id="feedback-form"><label class="field"><span data-zh="反馈内容">Your feedback</span><textarea id="message" required maxlength="2000" rows="7" style="border:1px solid #cfd6df;border-radius:10px;padding:13px;resize:vertical"></textarea></label><button class="button" type="submit" data-zh="提交反馈">Send feedback</button></form><p id="feedback-status" class="status" role="status" hidden></p></div>
+  <section class="container public-inner-hero feedback-hero" aria-labelledby="feedback-heading">
+    <div class="public-hero-copy">
+      <div class="public-kicker"><span class="public-kicker-dot" aria-hidden="true"></span><span data-zh="反馈与支持">FEEDBACK & SUPPORT</span></div>
+      <h1 id="feedback-heading" data-zh="告诉我们哪里需要改进。">Tell us what needs work.</h1>
+      <p class="lead" data-zh="反馈表单需要登录。未登录用户或无法登录时，可直接发送邮件至客服邮箱。请勿填写 API Key 或其他秘密。">The feedback form requires sign-in. Users who are not signed in, or cannot sign in, may email our support address. Do not include API keys or other secrets.</p>
+      <a class="public-support-email" href="mailto:zake6678@outlook.com"><span aria-hidden="true">✉</span> zake6678@outlook.com</a>
+    </div>
+    <aside class="public-hero-visual feedback-hero-visual" aria-label="Support message illustration">
+      <div class="mini-panel-head"><img src="/favicon.svg" width="30" height="30" alt="" /><div><strong>x-Reply-Helper</strong><span data-zh="用户反馈">User feedback</span></div><span class="mini-panel-pro">SUPPORT</span></div>
+      <div class="feedback-art" aria-hidden="true"><div class="feedback-bubble"><span>✦</span><span> · · · </span></div><div class="feedback-bubble-reply">✓</div></div>
+      <p data-zh="每一条建议，都能帮助产品变得更好。">Every useful note helps shape a better product.</p>
+    </aside>
+  </section>
+  <div class="form-card public-feedback-form"><form id="feedback-form"><label class="field"><span data-zh="反馈内容">Your feedback</span><textarea id="message" required maxlength="2000" rows="7" style="border:1px solid #cfd6df;border-radius:10px;padding:13px;resize:vertical"></textarea></label><button class="button" type="submit" data-zh="提交反馈">Send feedback</button></form><p id="feedback-status" class="status" role="status" hidden></p></div>
   <script>
     import { api } from "../lib/api";
     document.querySelector<HTMLFormElement>("#feedback-form")!.addEventListener("submit", async (event) => { event.preventDefault(); const message = document.querySelector<HTMLTextAreaElement>("#message")!.value.trim(); const status = document.getElementById("feedback-status")!; status.hidden = false; try { await api("/v1/feedback",{method:"POST",headers:{"X-Reply-Copilot-Action":"feedback"},body:JSON.stringify({message})}); status.textContent = document.documentElement.lang === "zh-CN" ? "已收到，谢谢。" : "Received. Thank you."; document.querySelector<HTMLFormElement>("#feedback-form")!.reset(); } catch(error) { status.textContent = error instanceof Error ? error.message : "Unable to send feedback."; } });
