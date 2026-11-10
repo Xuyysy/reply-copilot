@@ -64,16 +64,13 @@ export async function paymentControl(env:Env){
  const canSell=environmentReady&&operatorEnabled;
  const methods:PaymentMethod[]=[];
  if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
-  // Prefer WeChat for new RSA2 checkouts while the Alipay path is being
-  // investigated. The platform-release gate remains mandatory for both.
-  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
+  // Alipay first. WeChat remains gated until this merchant is approved.
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
+  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
  }
- // Epay has its own Alipay controls and release confirmation. RSA2 and Epay
- // never borrow each other's release state. If RSA2 Alipay is ready it wins;
- // Epay is only the separately configured fallback when its own gates pass.
- if(canSell&&activeMerchant==='xiaodou'&&providers.epay.enabled&&providers.epay.credentialsConfigured&&epayChannels.alipay.enabled&&epayChannels.alipay.platformReleased
-   &&!methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
+ // RSA2 is the only new-sale Xiaodou protocol. Preserve the legacy Epay
+ // setting and callback identity for historical orders, but never list Epay as
+ // a new checkout option, even if an old database switch remains enabled.
  if(canSell&&activeMerchant==='mk99'&&providers.mk99.enabled&&mk99.credentialsConfigured&&mk99.protocolConfirmed&&mk99.amountContractConfirmed){
   if(mk99Channels.wechat.enabled&&mk99Channels.wechat.platformReleased)methods.push({provider:'mk99',channel:'WECHAT_H5'});
   if(mk99Channels.alipay.enabled&&mk99Channels.alipay.platformReleased)methods.push({provider:'mk99',channel:'ALIPAY_H5'});

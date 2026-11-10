@@ -57,6 +57,11 @@ const SAFE_PROVIDER_BUSINESS_CODES = new Set([
   "OPEN_API_IDEMPOTENCY_CONFLICT", "OPEN_API_RESOURCE_NOT_FOUND", "OPEN_API_STATE_INVALID",
   "OPEN_API_CHANNEL_UNAVAILABLE", "OPEN_API_CHANNEL_UNSUPPORTED", "OPEN_API_SCOPE_CHANNEL_MISMATCH",
   "OPEN_API_LIMIT_EXCEEDED", "OPEN_API_RATE_LIMITED", "OPEN_API_PROVIDER_REJECTED", "OPEN_API_GUARD_UNAVAILABLE",
+  "OPEN_API_MERCHANT_DEPOSIT_BLOCKED", "OPEN_API_MERCHANT_COMPLAINT_HOLD",
+  "OPEN_API_MERCHANT_CHANNEL_UNAVAILABLE", "OPEN_API_MERCHANT_SUB_OPENID_INVALID",
+  "OPEN_API_MERCHANT_APPID_UNAVAILABLE", "OPEN_API_MERCHANT_APPID_INVALID",
+  "OPEN_API_MERCHANT_RISK_BLOCKED", "OPEN_API_MERCHANT_BUYER_ID_INVALID",
+  "OPEN_API_MERCHANT_BUYER_ID_REQUIRED", "OPEN_API_FEE_BEARER_DISABLED",
 ]);
 const RESPONSE_FORMATS = new Set(["business_json", "other_json", "html", "other"]);
 const SIGNATURE_STATES = new Set(["absent", "incomplete", "invalid", "verified"]);
@@ -394,7 +399,10 @@ export class XiaodouClient {
     validateOutId(input.outTradeNo, "outTradeNo");
     if (!Number.isSafeInteger(input.amountFen) || input.amountFen < 1 || input.currency !== "CNY" || !["ALIPAY_H5", "WECHAT_H5"].includes(input.channel) || !validatePublicIp(input.payerClientIp) || typeof input.subject !== "string" || !input.subject || input.subject.length > 128) throw new TypeError("Payment request is invalid");
     if (input.returnUrl) { const target = new URL(input.returnUrl); if (target.protocol !== "https:" || target.username || target.password || target.search || target.hash || input.returnUrl.length > 512) throw new TypeError("Payment return URL is invalid"); }
-    const body = JSON.stringify({ outTradeNo: input.outTradeNo, channel: input.channel, amountFen: input.amountFen, currency: "CNY", subject: input.subject, payerClientIp: input.payerClientIp, ...(input.description ? { description: input.description } : {}), ...(input.attach ? { attach: input.attach } : {}), ...(input.returnUrl ? { returnUrl: input.returnUrl } : {}) });
+    // Preserve seller-borne prices; BUYER surcharges need separate pricing approval.
+    if (input.feeBearer !== undefined && input.feeBearer !== "SELLER") throw new TypeError("Unsupported buyer fee contract");
+    if (input.tradeScope !== undefined && !["CARD_VIRTUAL", "PHYSICAL_FACE_TO_FACE"].includes(input.tradeScope)) throw new TypeError("Invalid declared trade scope");
+    const body = JSON.stringify({ outTradeNo: input.outTradeNo, channel: input.channel, amountFen: input.amountFen, currency: "CNY", subject: input.subject, payerClientIp: input.payerClientIp, ...(input.tradeScope ? { tradeScope: input.tradeScope } : {}), ...(input.description ? { description: input.description } : {}), ...(input.attach ? { attach: input.attach } : {}), ...(input.returnUrl ? { returnUrl: input.returnUrl } : {}) });
     return this.#request("POST", "/api/open/v1/payments", { ...options, body, contentType: "application/json" });
   }
   async queryPayment(outTradeNo, options = {}) { validateOutId(outTradeNo, "outTradeNo"); return this.#request("GET", `/api/open/v1/payments/${encodeURIComponent(outTradeNo)}`, options); }
