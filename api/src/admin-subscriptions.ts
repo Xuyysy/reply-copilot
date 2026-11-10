@@ -23,7 +23,7 @@ export async function publicSubscriptionPlans(request: Request, env: Env): Promi
     description_zh,description_en FROM subscription_plan_versions
     WHERE current=1 AND active=1 ORDER BY daily_limit`).all();
   const control=checkoutEnabled(env)?await paymentControl(env):null;
-  const paymentMethods=control?.activeMerchant==='mk99'?control.methods.filter(method=>method.provider==='mk99').map(method=>method.channel):[];
+  const paymentMethods=control&&['mk99','xiaodou'].includes(control.activeMerchant)?control.methods.filter(method=>method.provider===control.activeMerchant&&!(control.activeMerchant==='xiaodou'&&method.channel!=='ALIPAY_H5')).map(method=>method.channel):[];
   return response({plans:rows.results,autoRenew:false,checkoutAvailable:paymentMethods.length>0,paymentMethods},200,env,request);
 }
 
