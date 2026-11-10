@@ -1,4 +1,49 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="常见问题" titleEn="FAQ"><div class="container page-hero"><div class="eyebrow" data-zh="常见问题">FAQ</div><h1 data-zh="你可能想知道这些。">What you may want to know.</h1><p class="lead" data-site-text="faq" style="white-space:pre-wrap" hidden></p></div><section data-site-faq-default class="container legal" style="padding-top:0"><div class="faq-item"><h3 data-zh="免费额度何时领取？">When do I receive free credits?</h3><p data-zh="验证邮箱并首次在插件中连接账户后，200 次新人免费额度会发放到账户。额度不按天或月重置，也不主动过期。">After verifying your email and connecting your account in the extension for the first time, 200 welcome credits are added to your account. Credits do not reset daily or monthly and do not have a scheduled expiry.</p></div><div class="faq-item"><h3 data-zh="一次生成三种风格扣几次？">How many credits do three styles use?</h3><p data-zh="一次请求生成自然、幽默、观点三种候选，只扣一次。切换、复制或填入草稿不会再扣。">One request returns natural, playful, and thoughtful drafts and uses one credit. Switching, copying, or filling a draft costs no extra credits.</p></div><div class="faq-item"><h3 data-zh="需要自己的 AI API Key 吗？">Do I need my own AI API key?</h3><p data-zh="不需要。AI 由 x-Reply-Helper 云端服务提供。">No. x-Reply-Helper provides the hosted AI service.</p></div><div class="faq-item"><h3 data-zh="会自动发送 X 回复吗？">Will it post on X?</h3><p data-zh="不会。你检查草稿后决定是否点击发送。">No. You review the draft and decide whether to send it.</p></div><div class="faq-item"><h3 data-zh="如何充值？">How do I top up?</h3><p data-zh="请在价格页查看当前套餐和支付方式。支付确认后，额度会计入账户。">Visit pricing for current packages and payment options. Credits are added after payment is confirmed.</p></div><div class="faq-item"><h3 data-zh="在哪里反馈问题？">How can I send feedback?</h3><p><a href="/feedback" data-zh="使用反馈表单。">Use the feedback form.</a></p></div></section></Base>
+<Base title="常见问题" titleEn="FAQ">
+  <section class="container public-inner-hero faq-hero" aria-labelledby="faq-heading">
+    <div class="public-hero-copy">
+      <div class="public-kicker"><span class="public-kicker-dot" aria-hidden="true"></span><span data-zh="答疑中心">HELP CENTER</span></div>
+      <h1 id="faq-heading" data-zh="你可能想知道这些。">What you may want to know.</h1>
+      <p class="lead" data-zh="从第一条 AI 回复，到额度、付款与账户连接，在这里找到答案。">From your first AI reply to credits, billing and connecting your account.</p>
+      <p class="lead public-cms-faq" data-site-text="faq" style="white-space:pre-wrap" hidden></p>
+      <div class="guide-actions"><a href="/guide" class="button secondary"><span data-zh="查看使用指南">Browse the guide</span><span aria-hidden="true">↗</span></a></div>
+    </div>
+    <aside class="public-hero-visual faq-hero-visual" aria-label="Help center illustration">
+      <div class="mini-panel-head"><img src="/favicon.svg" width="30" height="30" alt="" /><div><strong>x-Reply-Helper</strong><span data-zh="帮助与支持">Help & support</span></div><span class="mini-panel-pro">FAQ</span></div>
+      <div class="faq-illustration-mark" aria-hidden="true">?</div>
+      <p data-zh="你的问题，我们认真回答。">Answers that make your next step easier.</p>
+    </aside>
+  </section>
+  <section class="container public-content-section faq-section" aria-labelledby="faq-section-title">
+    <div class="public-section-header"><div><div class="eyebrow" data-zh="常见疑问">MOST ASKED</div><h2 id="faq-section-title" data-zh="问题与答案">Questions & answers</h2></div><p data-zh="点击问题展开或收起答案。">Select a question to expand or collapse the answer.</p></div>
+    <div data-site-faq-default class="public-faq-list">
+      <details class="faq-item public-faq-item" open>
+        <summary><span class="faq-number">01</span><h3 data-zh="免费额度何时领取？">When do I receive free credits?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p data-zh="验证邮箱并首次在插件中连接账户后，200 次新人免费额度会发放到账户。额度不按天或月重置，也不主动过期。">After verifying your email and connecting your account in the extension for the first time, 200 welcome credits are added to your account. Credits do not reset daily or monthly and do not have a scheduled expiry.</p>
+      </details>
+      <details class="faq-item public-faq-item">
+        <summary><span class="faq-number">02</span><h3 data-zh="一次生成三种风格扣几次？">How many credits do three styles use?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p data-zh="一次请求生成自然、幽默、观点三种候选，只扣一次。切换、复制或填入草稿不会再扣。">One request returns natural, playful, and thoughtful drafts and uses one credit. Switching, copying, or filling a draft costs no extra credits.</p>
+      </details>
+      <details class="faq-item public-faq-item">
+        <summary><span class="faq-number">03</span><h3 data-zh="需要自己的 AI API Key 吗？">Do I need my own AI API key?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p data-zh="不需要。AI 由 x-Reply-Helper 云端服务提供。">No. x-Reply-Helper provides the hosted AI service.</p>
+      </details>
+      <details class="faq-item public-faq-item">
+        <summary><span class="faq-number">04</span><h3 data-zh="会自动发送 X 回复吗？">Will it post on X?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p data-zh="不会。你检查草稿后决定是否点击发送。">No. You review the draft and decide whether to send it.</p>
+      </details>
+      <details class="faq-item public-faq-item">
+        <summary><span class="faq-number">05</span><h3 data-zh="如何充值？">How do I top up?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p data-zh="请在价格页查看当前套餐和支付方式。支付确认后，额度会计入账户。">Visit pricing for current packages and payment options. Credits are added after payment is confirmed.</p>
+      </details>
+      <details class="faq-item public-faq-item">
+        <summary><span class="faq-number">06</span><h3 data-zh="在哪里反馈问题？">How can I send feedback?</h3><span class="faq-expand" aria-hidden="true">+</span></summary>
+        <p><a href="/feedback" data-zh="使用反馈表单。">Use the feedback form.</a></p>
+      </details>
+    </div>
+    <div class="public-faq-contact"><div><h3 data-zh="还有其他问题？">Need more help?</h3><p data-zh="也可以直接给我们发送反馈。">Send us feedback about anything else.</p></div><a href="/feedback" class="button secondary"><span data-zh="联系支持">Contact support</span><span aria-hidden="true">↗</span></a></div>
+  </section>
+</Base>
