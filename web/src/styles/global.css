@@ -1164,3 +1164,49 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 @media (prefers-reduced-motion: reduce) {
   .account-loading-dot { animation: none; }
 }
+
+/* Creator Momentum Intelligence: compact paid research terminal, three independent cycles. */
+.public-refresh .cmi-terminal {border:1px solid #d8e3f5;background:linear-gradient(140deg,#fff 0%,#f8faff 100%);box-shadow:0 14px 34px rgba(37,69,129,.065)}
+.cmi-symbol {width:43px;height:43px;flex:none;display:grid;place-items:center;border-radius:14px;background:#e9f0ff;color:#315be8;border:1px solid #d4dffa}
+.cmi-overline {font-size:10px;font-weight:800;letter-spacing:.12em;color:#6b7e9d}
+.cmi-pill {display:inline-flex;align-items:center;padding:5px 10px;border:1px solid #d7e4ff;border-radius:999px;background:#eef4ff;color:#38548a;font-size:10px;font-weight:800;letter-spacing:.06em}
+.cmi-placeholder {background:#f1f5fc;border:1px solid #e0e9f6;border-radius:14px;padding:20px;min-height:82px}
+.cmi-hero {border-radius:17px;border:1px solid #dce7fc;background:linear-gradient(112deg,#edf4ff 0%,#f9fcff 100%);display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:20px;align-items:center;padding:22px}
+.cmi-primary-number {display:inline-block;color:#1e4c91;font-size:clamp(40px,5vw,61px);line-height:1.02;letter-spacing:-.055em;font-weight:800}
+.cmi-gauge {position:relative;width:128px;height:128px;flex:none;display:grid;place-items:center}
+.cmi-gauge svg {width:100%;height:100%}
+.cmi-gauge span {position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;font-size:29px;font-weight:800;color:#315be8}
+.cmi-gauge small {font-size:10px;font-weight:600;letter-spacing:.07em;color:#75829b}
+.cmi-overview-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cmi-overview-grid>div {min-width:0;padding:16px;border:1px solid #e2e9f5;background:#fff;border-radius:13px;display:flex;flex-direction:column;gap:8px}
+.cmi-overview-grid small {color:#657890;font-size:11px;line-height:1.4}
+.cmi-overview-grid strong {font-size:23px;color:#1b3d69;line-height:1.2;font-weight:750}
+.cmi-overview-grid em {font-size:11px;font-style:normal;font-weight:500;color:#7a899f}
+.cmi-stage-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cmi-stage {min-width:0;border:1px solid #e0e7f6;background:#f8faff;border-radius:13px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.cmi-stage div {color:#506b9b}
+.cmi-stage strong {font-size:11px;font-weight:800;letter-spacing:.04em}
+.cmi-stage span {font-size:13px;color:#274365;font-weight:700}
+.cmi-stage small {font-size:11px;color:#7787a0}
+.cmi-stage-inside_reference_window {border-color:#9ebaf7;background:#ecf2ff}
+.cmi-stage-past_reference_window {border-color:#a4d5cc;background:#edf9f7}
+.cmi-detail>summary {display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none;background:#eef3ff;border:1px solid #dbe6fb;color:#234676;padding:14px 17px;border-radius:12px;font-size:13px;font-weight:700}
+.cmi-detail>summary::-webkit-details-marker {display:none}
+.cmi-detail>summary:focus-visible {outline:2px solid #4278df;outline-offset:2px}
+.cmi-legend-line {display:inline-block;width:20px;height:3px;border-radius:4px}
+.cmi-blue {background:#3565db}
+.cmi-teal {background:repeating-linear-gradient(90deg,#0f9a9b 0,#0f9a9b 6px,transparent 6px,transparent 10px)}
+.cmi-chart-scroll {border:1px solid #e4eaf5;border-radius:14px;padding:12px;overflow:hidden;background:linear-gradient(#fafcff,#fff)}
+.cmi-advice {display:flex;flex-direction:column;gap:10px;padding:17px;border-radius:14px;border:1px solid #cddfff;background:#edf4ff;color:#244673}
+@media(max-width:680px) {
+ .cmi-hero {grid-template-columns:minmax(0,1fr) 92px;padding:15px;gap:10px}
+ .cmi-gauge {width:92px;height:92px}
+ .cmi-gauge span {font-size:20px}
+ .cmi-overview-grid {grid-template-columns:1fr;gap:7px}
+ .cmi-overview-grid>div {flex-direction:row;align-items:center;justify-content:space-between;padding:12px}
+ .cmi-overview-grid strong {font-size:21px}
+ .cmi-stage-grid {grid-template-columns:1fr;gap:7px}
+ .cmi-stage {gap:5px}
+ .cmi-overline {font-size:9px;letter-spacing:.05em}
+}
+@media(prefers-reduced-motion:reduce){.cmi-detail *{scroll-behavior:auto;transition:none!important}}
