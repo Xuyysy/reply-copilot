@@ -17,7 +17,16 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
     <meta name="color-scheme" content="light" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>{pageTitle}</title>
-    <script is:inline>try{document.documentElement.lang=localStorage.getItem("replyCopilotLanguage")==="en"?"en":"zh-CN"}catch{}</script>
+    <style is:inline>
+      /* Static HTML contains English fallbacks: hide the page until synchronous language hydration. */
+      html:not([data-language-ready]) body { visibility: hidden; }
+    </style>
+    <noscript><style is:inline>html:not([data-language-ready]) body { visibility: visible; }</style></noscript>
+    <script is:inline>
+      try { document.documentElement.lang = localStorage.getItem("replyCopilotLanguage") === "en" ? "en" : "zh-CN"; } catch {}
+      // Fail open if the pre-paint script below cannot run for any reason.
+      document.addEventListener("DOMContentLoaded", () => document.documentElement.setAttribute("data-language-ready", "true"), { once: true });
+    </script>
   </head>
   <body class:list={["site-shell", { "public-refresh": !isAdminPage }]}>
     {!isAdminPage && <a href="#site-main" class="skip-link">跳转到主要内容 / Skip to content</a>}
@@ -73,6 +82,27 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
         </div>
       </div>
     </footer>
+    <script is:inline data-language-bootstrap>
+      // Parse-time, synchronous localization: complete before the hidden HTML is painted.
+      (() => {
+        const root = document.documentElement;
+        try {
+          const language = root.lang === "en" ? "en" : "zh";
+          document.querySelectorAll("[data-zh]").forEach((element) => {
+            if (element.closest("astro-island")) return; // React owns hydrated islands.
+            if (!element.dataset.en) element.dataset.en = element.textContent || "";
+            element.textContent = language === "zh" ? element.dataset.zh || "" : element.dataset.en;
+          });
+          const title = language === "zh" ? root.dataset.titleZh : root.dataset.titleEn;
+          if (title) document.title = title + " · x-Reply-Helper";
+          const button = document.getElementById("language-toggle");
+          if (button) button.textContent = language === "zh" ? "English" : "中文";
+        } finally {
+          // Never leave the page blank when localStorage or localization fails.
+          root.setAttribute("data-language-ready", "true");
+        }
+      })();
+    </script>
     <script>
       import { api, ApiError } from "../lib/api";
       import { createSiteContentLoader, applySiteContent, shouldHideAccountCta } from "../lib/site-content.mjs";
@@ -88,6 +118,7 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
         document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
         document.title = `${lang === "zh" ? document.documentElement.dataset.titleZh : document.documentElement.dataset.titleEn} · x-Reply-Helper`;
         document.querySelectorAll<HTMLElement>("[data-zh]").forEach((element) => {
+          if (element.closest("astro-island")) return; // React islands translate via useLanguage.
           if (!element.dataset.en) element.dataset.en = element.textContent || "";
           element.textContent = lang === "zh" ? element.dataset.zh || "" : element.dataset.en;
         });
