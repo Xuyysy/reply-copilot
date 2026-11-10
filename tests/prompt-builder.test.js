@@ -32,7 +32,27 @@ test("default X replies sound offhand instead of like a dutiful AI assistant", (
   assert.match(prompts.system, /Avoid hollow replies/i);
   assert.match(prompts.system, /not the same observation in three levels of formality/i);
   assert.match(prompts.system, /Never invent.*firsthand tests/i);
-  assert.match(prompts.user, /Favor the feel of a casually typed X comment/i);
+  assert.match(prompts.user, /Three different instincts should sound like one human/i);
   assert.match(prompts.system, /Return JSON only/i);
   for (const style of ["natural", "light_humor", "thoughtful"]) assert.ok(prompts.system.includes(style));
+});
+
+
+test("V2 puts real human reactions before manufactured punchlines", () => {
+  const prompts = buildPrompts({ postContext: { text: "Just found the bug" }, voiceProfile: DEFAULT_VOICE_PROFILE, replyStyle: "natural-friendly" });
+  assert.match(prompts.system, /HUMANNESS COMES FIRST/i);
+  assert.match(prompts.system, /the first real reaction/i);
+  assert.match(prompts.system, /a few words/i);
+  assert.match(prompts.system, /three different instincts/i);
+  assert.match(prompts.system, /'bold' permits sharper takes/i);
+});
+
+test("V2 explicitly recognizes X memes without forcing humor into serious posts", () => {
+  const prompts = buildPrompts({ postContext: { text: "公司是我家，老板是我爹？" }, voiceProfile: DEFAULT_VOICE_PROFILE });
+  assert.match(prompts.system, /UNDERSTAND X HUMOR AND MEMES/);
+  assert.match(prompts.system, /double meanings, absurdist humor/);
+  assert.match(prompts.system, /JOIN the existing joke/);
+  assert.match(prompts.system, /genuinely asking for help/);
+  assert.match(prompts.system, /Do not pretend to recognize unfamiliar references/);
+  assert.ok(prompts.user.includes("公司是我家"));
 });
