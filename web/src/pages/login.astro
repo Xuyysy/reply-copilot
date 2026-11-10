@@ -5,23 +5,6 @@ const localVerification = import.meta.env.DEV;
 const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_KEY || "");
 ---
 <Base title="注册与登录" titleEn="Sign in or register">
-  <section class="container public-inner-hero auth-hero" aria-labelledby="auth-page-heading">
-    <div class="public-hero-copy">
-      <div class="public-kicker"><span class="public-kicker-dot" aria-hidden="true"></span><span data-zh="你的创作者工作台">YOUR CREATOR WORKSPACE</span></div>
-      <h1 id="auth-page-heading" data-zh="欢迎使用 x-Reply-Helper">Welcome to x-Reply-Helper</h1>
-      <p class="lead" data-zh="验证邮箱后，请在插件中连接账户以领取新人额度。">Verify your email, then connect your account in the extension to receive welcome credits.</p>
-      <div class="public-hero-points">
-        <div><span aria-hidden="true">✓</span><span data-zh="三种回复风格，保持你的声音">Three draft styles. Still your voice.</span></div>
-        <div><span aria-hidden="true">✓</span><span data-zh="无需自行配置 API Key">No personal API key required</span></div>
-        <div><span aria-hidden="true">✓</span><span data-zh="每条回复由你决定是否发送">You choose whether to send each reply</span></div>
-      </div>
-    </div>
-    <aside class="public-hero-visual auth-hero-visual" aria-label="x-Reply-Helper account illustration">
-      <div class="mini-panel-head"><img src="/favicon.svg" width="32" height="32" alt="" /><div><strong>x-Reply-Helper</strong><span data-zh="个人创作者空间">Creator workspace</span></div><span class="mini-panel-pro">PRO</span></div>
-      <div class="auth-visual-orbit" aria-hidden="true"><span class="orbit-a">✦</span><span class="orbit-b">↗</span><span class="orbit-c">⚡</span><div class="orbit-core"><img src="/favicon.svg" width="65" height="65" alt="" /></div></div>
-      <p class="auth-visual-caption" data-zh="让创作工具回到你的掌控中。">Your creative workflow. Your decisions.</p>
-    </aside>
-  </section>
   <section class="container public-auth-panel-wrap app-shell" aria-label="Account authentication"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} /></section>
   <div id="auth-load-error" class="container notice" role="alert" hidden style="max-width:540px;margin:-80px auto 80px">
     <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>

@@ -34,6 +34,7 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
         </nav>
         <div class="header-actions">
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
+          <span id="account-loading" class="account-status-loading" role="status" aria-live="polite"><span class="account-loading-dot" aria-hidden="true"></span><span data-zh="正在确认账户">Checking account</span></span>
           <a class="button secondary" id="account-entry" href="/account" hidden><span data-zh="我的账户">My account</span></a><button class="button secondary" id="account-retry" type="button" hidden><span data-zh="重试账户状态">Retry account</span></button>
         </div>
         {!isAdminPage && (
@@ -49,7 +50,8 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
               <a href="/guide" data-astro-prefetch="hover" data-zh="使用指南">Guide</a>
               <a href="/pricing" data-astro-prefetch="hover" data-zh="价格与套餐">Pricing</a>
               <a href="/faq" data-astro-prefetch="hover">FAQ</a>
-              <a id="mobile-account-entry" href="/login"><span data-zh="登录 / 账户">Sign in / Account</span></a>
+              <span id="mobile-account-loading" class="mobile-account-loading" role="status" data-zh="正在确认账户…">Checking account…</span>
+              <a id="mobile-account-entry" href="/login" hidden><span data-zh="登录 / 账户">Sign in / Account</span></a>
               <a href="/feedback" data-zh="反馈与支持">Feedback</a>
             </nav>
           </details>
@@ -72,7 +74,7 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
       </div>
     </footer>
     <script>
-      import { api } from "../lib/api";
+      import { api, ApiError } from "../lib/api";
       import { createSiteContentLoader, applySiteContent, shouldHideAccountCta } from "../lib/site-content.mjs";
       const loadSiteContent = createSiteContentLoader(() => api("/v1/site"));
       let siteContent = {};
@@ -98,30 +100,62 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
       document.getElementById("language-toggle")?.addEventListener("click", () => setLanguage(document.documentElement.lang === "en" ? "zh" : "en"));
       let accountState: "loading"|"guest"|"pending"|"ready"|"empty"|"error"="loading";
       let lastAccountCheck=0;
+      let accountRequestId=0;
       function updateAccountLinks(){
         const en=document.documentElement.lang==="en";
         const entry=document.getElementById("account-entry") as HTMLAnchorElement;
         const retry=document.getElementById("account-retry")!;
-        entry.hidden=false;
+        const checking=accountState==="loading";
+        const loading=document.getElementById("account-loading")!;
+        loading.hidden=!checking;
+        entry.hidden=checking||accountState==="error";
         retry.hidden=accountState!=="error";
-        entry.href=["guest","loading","error"].includes(accountState)?"/login":"/account";
+        entry.href=accountState==="guest"?"/login":"/account";
         const label=entry.querySelector("span")!;
-        label.textContent=["guest","loading","error"].includes(accountState)?(en?"Sign in / Account":"登录 / 账户"):(en?"My account":"我的账户");
+        label.textContent=accountState==="guest"?(en?"Sign in / Account":"登录 / 账户"):(en?"My account":"我的账户");
         const mobileEntry=document.getElementById("mobile-account-entry") as HTMLAnchorElement|null;
-        if(mobileEntry){mobileEntry.href=entry.href;const mobileLabel=mobileEntry.querySelector("span");if(mobileLabel)mobileLabel.textContent=label.textContent;}
+        const mobileLoading=document.getElementById("mobile-account-loading");
+        if(mobileLoading)mobileLoading.hidden=!checking;
+        if(mobileEntry){
+          mobileEntry.hidden=checking;
+          mobileEntry.href=accountState==="error"?"/account":entry.href;
+          const mobileLabel=mobileEntry.querySelector("span");
+          if(mobileLabel)mobileLabel.textContent=accountState==="error"?(en?"Check account status":"检查账户状态"):label.textContent;
+        }
         document.querySelectorAll<HTMLAnchorElement>("[data-account-cta]").forEach((link)=>{
           link.hidden=shouldHideAccountCta(accountState,link.dataset.sitePrimaryOverride);
           link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
           const text=link.querySelector("span")||link;
           text.textContent=accountState==="guest"?(en?"Register and link to claim 200":"注册并绑定后领取 200 次"):accountState==="pending"?(en?"Link extension to claim 200":"绑定插件领取 200 次"):accountState==="empty"?(en?"View credit packs":"查看充值套餐"):(en?"View my account":"查看我的账户");
         });
-        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="pending"?(en?"Welcome credits are pending. Sign in and connect the extension to your account.":"新人额度待领取：请登录 Chrome 插件并连接账户。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email, then connect your account in the extension to receive welcome credits.":"验证邮箱后，请在插件中连接账户以领取新人额度。");});
+        document.querySelectorAll<HTMLElement>("[data-account-status]").forEach((element)=>{
+          element.textContent=accountState==="error"?(en?"Account status unavailable. Retry above.":"暂时无法确认账户状态，请点击上方重试。"):accountState==="loading"?(en?"Checking your account…":"正在确认账户状态…"):accountState==="pending"?(en?"Welcome credits are pending. Sign in and connect the extension to your account.":"新人额度待领取：请登录 Chrome 插件并连接账户。"):accountState==="ready"?(en?"Free credits already claimed.":"免费额度已领取。"):accountState==="empty"?(en?"Generations used up.":"生成次数已用完。"):(en?"Verify your email, then connect your account in the extension to receive welcome credits.":"验证邮箱后，请在插件中连接账户以领取新人额度。");
+        });
       }
       async function loadAccountLinks(){
-        lastAccountCheck=Date.now(); accountState="loading";updateAccountLinks();
-        try{const {api,ApiError}=await import("../lib/api");await api("/v1/me");const result=await api<{quota:{totalRemaining:number};signupBenefit?:{status:"pending"|"granted"}|null}>("/v1/usage");accountState=result.signupBenefit?.status==="pending"?"pending":result.quota.totalRemaining<=0?"empty":"ready";}
-        catch(error){const {ApiError}=await import("../lib/api");accountState=error instanceof ApiError&&error.status===401?"guest":"error";}
-        updateAccountLinks();
+        // Never replace a verified account label with a guest label during refresh.
+        const requestId=++accountRequestId;
+        lastAccountCheck=Date.now();
+        if(accountState==="loading")updateAccountLinks();
+        try{
+          await api("/v1/me");
+          if(requestId!==accountRequestId)return;
+          // Identity is confirmed: show the account immediately, not after quota loading.
+          accountState="ready";updateAccountLinks();
+          try{
+            const result=await api<{quota:{totalRemaining:number};signupBenefit?:{status:"pending"|"granted"}|null}>("/v1/usage");
+            if(requestId!==accountRequestId)return;
+            accountState=result.signupBenefit?.status==="pending"?"pending":result.quota.totalRemaining<=0?"empty":"ready";
+          }catch(error){
+            if(requestId!==accountRequestId)return;
+            // A transient quota error is not evidence that the user signed out.
+            if(error instanceof ApiError&&error.status===401)accountState="guest";
+          }
+        }catch(error){
+          if(requestId!==accountRequestId)return;
+          accountState=error instanceof ApiError&&error.status===401?"guest":"error";
+        }
+        if(requestId===accountRequestId)updateAccountLinks();
       }
       document.getElementById("account-retry")?.addEventListener("click",()=>void loadAccountLinks());
       window.addEventListener("reply-copilot-language",updateAccountLinks);
