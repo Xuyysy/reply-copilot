@@ -4,7 +4,7 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
-export type SubscriptionOrder={id:string;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
+export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
 type Refresh={orderStatus:string;providerStatus?:string;paymentConfirmed:boolean;entitlementApplied?:boolean};
@@ -21,6 +21,7 @@ export default function SubscriptionCheckout(){
  const [catalog,setCatalog]=useState<Catalog>();
  const [order,setOrder]=useState<SubscriptionOrder>();
  const [payUrl,setPayUrl]=useState<string|null>(null);
+ const [paymentNote,setPaymentNote]=useState('');
  const [channel,setChannel]=useState('');
  const [quote,setQuote]=useState<Quote>();
  const [error,setError]=useState<unknown>();
@@ -32,7 +33,7 @@ export default function SubscriptionCheckout(){
  useEffect(()=>{
   let active=true;
   const read=id
-   ? (orderPattern.test(id)?api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id).then(result=>{if(active)setOrder(result.order);}):Promise.reject(new ApiError('订单编号无效。','INVALID_ORDER_ID',400)))
+   ? (orderPattern.test(id)?api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id).then(result=>{if(active){setOrder(result.order);setPayUrl(result.order.status==='pending'&&!result.order.checkout.paymentConfirmed?result.order.checkout.paymentUrl:null);}}):Promise.reject(new ApiError('订单编号无效。','INVALID_ORDER_ID',400)))
    : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api('/v1/usage')]).then(([result])=>{
      if(active){setCatalog(result);setChannel(result.paymentMethods[0]??'');}
    });
@@ -40,9 +41,9 @@ export default function SubscriptionCheckout(){
   return()=>{active=false;};
  },[id]);
 
- async function act(action:'quote'|'create'|'refresh'){
+ async function act(action:'quote'|'create'|'refresh'|'relaunch'){
   if(operation.current)return;
-  operation.current=true;setBusy(true);setError(undefined);
+  operation.current=true;setBusy(true);setError(undefined);setPaymentNote('');
   try{
    if(action==='quote'){
     setQuote((await api<{quote:Quote}>('/v1/subscriptions/upgrade-quote',{method:'POST',body:JSON.stringify({planCode:target})})).quote);
@@ -51,13 +52,26 @@ export default function SubscriptionCheckout(){
     const result=await api<{order:SubscriptionOrder;resumed:boolean}>('/v1/subscriptions/orders',{method:'POST',
       body:JSON.stringify({planCode:target,channel,idempotencyKey:key.current,...(upgrade?{quoteId:quote?.id}:{})})});
     showOrder(result.order);
-    if(!result.resumed)setPayUrl(result.order.checkout.paymentUrl);
-   }else{
-    setPayUrl(null);
+    setPayUrl(result.order.status==='pending'?result.order.checkout.paymentUrl:null);
+   }else if(action==='refresh'){
     const result=await api<Refresh>('/v1/subscriptions/orders/'+id+'/refresh',{method:'POST'});
     const detail=(await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id)).order;
     setOrder(detail);
-    if(result.providerStatus==='WAIT_BUYER_PAY')setPayUrl(detail.checkout.paymentUrl);
+    const pending=['WAIT_BUYER_PAY','CREATED','PAYING'].includes(result.providerStatus??'');
+    const url=pending&&detail.status==='pending'&&!detail.checkout.paymentConfirmed?detail.checkout.paymentUrl:null;
+    setPayUrl(url);
+    setPaymentNote(result.paymentConfirmed
+     ?t('支付已核验，请查看账户权益。','Payment verified. Check your account entitlements.')
+     :pending?(url?t('仍待付款，可继续打开原订单收银台。','Still awaiting payment. You can reopen the original cashier.')
+      :t('仍待付款，但付款入口可能已失效，可重新生成二维码。','Still awaiting payment, but the cashier may have expired. You can request a new QR code.'))
+     :t('平台暂未确认支付结果，请保留原订单，不要重复付款。','Payment is not confirmed. Keep the original order and avoid paying twice.'));
+   }else{
+    const result=await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id+'/attempts',{method:'POST',body:JSON.stringify({})});
+    setOrder(result.order);
+    setPayUrl(result.order.status==='pending'?result.order.checkout.paymentUrl:null);
+    setPaymentNote(result.order.status==='pending'
+     ?t('已生成新的付款入口，旧二维码请勿再使用。','Fresh cashier generated. Do not reuse the previous QR code.')
+     :t('原订单已更新，请查看支付状态。','Original order updated. Check its payment status.'));
    }
   }catch(cause){
    if(cause instanceof ApiError&&cause.order&&typeof cause.order==='object'&&'id' in cause.order&&typeof cause.order.id==='string'&&orderPattern.test(cause.order.id)){
@@ -79,9 +93,12 @@ export default function SubscriptionCheckout(){
    <p className="break-all">{t('订单号','Order')}: {order.id}</p>
    <p className="uppercase">{order.planCode} · {price(order.amountFen)}</p>
    <p>{subscriptionStatus(order,language)}</p>
+   {paymentNote?<p role="status">{paymentNote}</p>:null}
    {payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer">{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
+   {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
+    <button className="button secondary" disabled={busy} onClick={()=>void act('relaunch')}>{t('重新生成原订单二维码','Generate new QR code for this order')}</button>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>
   </section>:null}
   {!id&&!loading&&plan&&catalog?.checkoutAvailable?<section className="pricing-card space-y-3">
