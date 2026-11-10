@@ -2,7 +2,7 @@ import {adminCreator} from './creator-momentum';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
-import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOrders} from './subscription-checkout';
+import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOrders,relaunchSubscriptionCheckout} from './subscription-checkout';
 import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans,publishSubscriptionPlan,holdSubscriptionOrder,adminSubscriptionFinance,reviewSubscriptionPayment} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
@@ -55,6 +55,7 @@ export default {
       if(request.method==="POST"&&path==="/v1/subscriptions/orders")return await createSubscriptionCheckout(request,env);
       if(request.method==="POST"&&path==="/v1/payments/mk99/subscriptions/notify")return await subscriptionMk99Notify(request,env);
       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/refresh$/.test(path))return await refreshSubscriptionMk99Payment(request,env,path.split("/")[4]);
+      if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/attempts$/.test(path))return await relaunchSubscriptionCheckout(request,env,path.split("/")[4]);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/finance")return await adminSubscriptionFinance(request,env);
       if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/plans\/(basic|pro|max|ultra)$/.test(path))return await publishSubscriptionPlan(request,env,path.split("/")[5]);
       if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/verify$/.test(path))return await reviewSubscriptionPayment(request,env,path.split("/")[5]);
