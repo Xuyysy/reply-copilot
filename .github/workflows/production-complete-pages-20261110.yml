@@ -1,0 +1,170 @@
+name: Complete approved Production coordinated release after guarded Worker verification (2026-11-10)
+
+# Completion of the ONE user-authorized Worker+Pages release. The Worker was
+# published by the first protected run, but the immediate postflight failed
+# closed before Pages. Only this immutable continuation may activate Pages.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/production-complete-pages-20261110.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-production-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Verify exact recovery trigger, completed Worker handoff and signed build
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      startsWith(github.event.head_commit.message, 'ops(production): finish approved Worker and Pages release')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify main parent and that ONLY this one-off workflow changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git rev-parse HEAD^)" = 'ad56dacc896934569704fd21fe98318386fd7e51'
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/production-complete-pages-20261110.yml'
+          git diff --check HEAD^ HEAD
+          echo 'PASS: exact recovery source, one workflow only.'
+      - name: Verify successful CI, Production artifact, original preflight and Worker-first stopped run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=9bcaf78d290771af3a775862938b0b4291621501
+          for pair in '42773302460:.github/workflows/ci.yml' '42773302749:.github/workflows/production-build.yml'; do
+            id="${pair%%:*}"; path="${pair#*:}"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" |
+              jq -e --arg sha "$sha" --arg path "$path" --arg repo "$GITHUB_REPOSITORY" '
+                .head_sha==$sha and .head_repository.full_name==$repo
+                and .head_branch=="release/production" and .event=="push"
+                and .conclusion=="success" and .status=="completed" and .path==$path
+              ' >/dev/null
+          done
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/42774324175" |
+            jq -e '.event=="workflow_dispatch" and .status=="completed" and .conclusion=="success"
+              and .actor.login=="Xuyysy" and .path==".github/workflows/production-deploy.yml"' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/42775918747" |
+            jq -e '.event=="push" and .status=="completed" and .conclusion=="failure"
+              and .actor.login=="Xuyysy"
+              and .head_sha=="ad56dacc896934569704fd21fe98318386fd7e51"
+              and .path==".github/workflows/production-one-shot-20261110.yml"' >/dev/null
+          echo 'PASS: exact approved build and interrupted Worker-first release provenance.'
+      - name: Independently smoke-check currently active Production Worker before permitting Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          api=https://api.x-reply-helper.top
+          curl --fail --silent --show-error --retry 6 --retry-all-errors "$api/health" |
+            jq -e '.ok == true and .service == "reply-copilot-api"' >/dev/null
+          curl --fail --silent --show-error --retry 6 --retry-all-errors "$api/v1/subscriptions/plans" |
+            jq -e '(.plans | type == "array") and .autoRenew == false' >/dev/null
+          status=$(curl --silent --show-error --retry 6 --retry-all-errors \
+            --output "$RUNNER_TEMP/insights-auth.json" --write-out '%{http_code}' \
+            "$api/v1/creator-momentum/insights")
+          test "$status" = 401 || { echo "Refusing Pages: authenticated CMI endpoint returned $status"; exit 1; }
+          echo 'PASS: Worker health, subscription catalog and paid-only authorization live.'
+
+  release:
+    name: Verify new Worker and finish matching Production Pages with binding protections
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: production
+      url: https://app.x-reply-helper.top
+    env:
+      SOURCE_SHA: 9bcaf78d290771af3a775862938b0b4291621501
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TARGET: pages
+      EXPECTED_CURRENT: e4edc11d-7cac-4dc6-bf68-9978e1475ed3
+    steps:
+      - name: Verify protected Production credentials
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Retrieve original immutable verified Production Worker and Pages artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build-9bcaf78d290771af3a775862938b0b4291621501
+          run-id: 42773302749
+          github-token: ${{ github.token }}
+          path: release
+      - name: Check source integrity and Production target identifiers
+        run: python3 scripts/verify-production-artifact.py release "$SOURCE_SHA"
+      - name: Verify new Production Worker version and stable original bindings
+        env:
+          TARGET: worker
+          EXPECTED_CURRENT: d26e3c36-44ad-4cbf-8f3d-286102f72292
+        run: python3 scripts/guard-production-release.py before
+      - name: Verify original Pages release point is still active
+        run: python3 scripts/guard-production-release.py before
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned Wrangler without modifying production source or credentials
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/production-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+      - name: Publish ONLY matching immutable Production Pages; Worker already verified
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" pages deploy release/pages \
+            --project-name x-reply-helper-production --branch main \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved coordinated Production Worker+Pages $SOURCE_SHA"
+      - name: Verify Pages changed and secrets, payment, subscriptions and D1 stayed unchanged
+        run: python3 scripts/guard-production-release.py after
+      - name: Verify canonical deployed Production Pages SHA and live account page
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 6 --retry-all-errors \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-production" |
+            jq -e --arg sha "$SOURCE_SHA" '
+              .success==true and .result.canonical_deployment.latest_stage.status=="success"
+              and .result.canonical_deployment.deployment_trigger.metadata.commit_hash==$sha
+            ' >/dev/null
+          curl -L --fail --silent --show-error --retry 6 --retry-all-errors \
+            https://app.x-reply-helper.top/account/ > "$RUNNER_TEMP/account.html"
+          grep -q 'astro-island' "$RUNNER_TEMP/account.html"
+      - name: Final independent live Worker binding and version check
+        env:
+          TARGET: worker
+          EXPECTED_CURRENT: d26e3c36-44ad-4cbf-8f3d-286102f72292
+        run: python3 scripts/guard-production-release.py before
+      - name: Record successful completion
+        if: success()
+        shell: bash
+        run: |
+          echo '### Production Worker and Pages coordinated release COMPLETE' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Worker version: d26e3c36-44ad-4cbf-8f3d-286102f72292' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Production Pages: same immutable SHA, postflight successful' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Subscriptions, payment bindings, D1 and existing secrets: unchanged' >> "$GITHUB_STEP_SUMMARY"
+          echo '- No SQL/migration, Chrome extension release or payment configuration writes' >> "$GITHUB_STEP_SUMMARY"
