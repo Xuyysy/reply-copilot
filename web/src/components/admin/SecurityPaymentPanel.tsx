@@ -100,6 +100,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      <Button disabled={locked} onClick={confirmChannelRelease}>{t('我已核实，确认并启用通道','Verified — confirm and enable')}</Button><Button variant="outline" disabled={locked} onClick={()=>setPendingRelease(null)}>{t('取消','Cancel')}</Button>
     </div>}
     <div className="space-y-2 border-t pt-3">
+     <Label htmlFor="rsa2-settings-reason">{t('变更原因（保存 RSA2 配置时需要）','Reason for RSA2 changes')}</Label><Input id="rsa2-settings-reason" value={reason} onChange={e=>setReason(e.target.value)} maxLength={500}/>
      <p className="text-xs text-muted-foreground">{t('可先配置 RSA2 支付宝，再切换商家；保存接口设置不会改变当前 MK99 收款。','Configure RSA2 Alipay before changing merchants. Saving provider settings does not change the current MK99 merchant.')}</p>
      <Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存 RSA2 接口设置','Save RSA2 settings')}</Button>
     </div>
@@ -113,7 +114,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
     <p className="text-xs text-muted-foreground">{t('平台放行状态按支付接口分别保存；关闭新单开关不影响历史订单通知与查询。','Platform release is stored separately per provider. Disabling new sales does not stop historical order notifications or queries.')}</p>
    </>}
   </CardContent></Card>
-  <Card><CardHeader><CardTitle>{t('账户安全','Account security')}</CardTitle></CardHeader><CardContent className="space-y-3"><details><summary className="cursor-pointer text-sm font-medium">{t('密码与登录会话管理（展开）','Manage password and sessions (expand)')}</summary><div className="space-y-3 pt-3"><p>{t('修改密码后其他网页登录和扩展会话将退出，当前会话保留；敏感操作需重新验证。','Changing your password signs out other web and extension sessions. This session stays active and sensitive actions require re-verification.')}</p>
+  <Card><CardHeader><CardTitle>{t('账户安全','Account security')}</CardTitle></CardHeader><CardContent className="space-y-3"><details><summary className="cursor-pointer text-sm font-medium">{t('密码与登录会话管理（展开）','Manage password and sessions (expand)')}</summary><div className="space-y-3 pt-3"><Label htmlFor="account-security-reason">{t('账户安全操作原因（至少 8 字）','Reason for account security changes (8+ characters)')}</Label><Input id="account-security-reason" value={reason} onChange={e=>setReason(e.target.value)} maxLength={500}/><p>{t('修改密码后其他网页登录和扩展会话将退出，当前会话保留；敏感操作需重新验证。','Changing your password signs out other web and extension sessions. This session stays active and sensitive actions require re-verification.')}</p>
    <Label htmlFor="admin-old-password">{t('原密码','Current password')}</Label><Input id="admin-old-password" type="password" autoComplete="current-password" disabled={locked} value={oldPassword} onChange={e=>setOld(e.target.value)}/>
    <Label htmlFor="admin-new-password">{t('新密码（至少12位，字母、数字、符号中至少两类）','New password (12+ characters, two character types)')}</Label><Input id="admin-new-password" type="password" autoComplete="new-password" disabled={locked} value={newPassword} onChange={e=>setNew(e.target.value)}/>
    <Label htmlFor="admin-confirm-password">{t('确认新密码','Confirm new password')}</Label><Input id="admin-confirm-password" type="password" autoComplete="new-password" disabled={locked} value={confirmPassword} onChange={e=>setConfirm(e.target.value)}/>
