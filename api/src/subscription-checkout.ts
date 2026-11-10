@@ -26,9 +26,9 @@ type Pending={
  status:string;transaction_status:string;risk_state:string;checkout_state:string;
  cashier_url:string|null;provider_trade_id:string;provider_payment_id:string|null;
  merchant_account:string|null;notification_sign_type:string|null;merchant_provider:string;paid_at:number|null;
- verified_paid:number;quote_id:string|null;
+ verified_paid:number;quote_id:string|null;period_status:string|null;
 };
-const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
+const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,(SELECT p.status FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id LIMIT 1) period_status,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
    o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
    AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
    AND t.merchant_provider IN ('mk99','xiaodou') AND t.currency='CNY' AND t.amount_fen=o.amount_fen
@@ -60,7 +60,7 @@ function snapshot(row:Pending,config:Mk99Config|null){
  else if(row.merchant_provider==='xiaodou'&&row.checkout_state==='ready'&&row.status==='pending'&&row.transaction_status==='pending'&&row.risk_state==='clear'&&row.cashier_url){
    try{const url=new URL(row.cashier_url);if(url.protocol==='https:'&&!url.username&&!url.password&&row.cashier_url.length<=8192)paymentUrl=row.cashier_url;}catch{/* Ignore invalid historical URL. */}
  }
- return {id:row.id,planCode:row.plan_code,kind:row.kind,merchantProvider:row.merchant_provider,amountFen:row.amount_fen,currency:'CNY',
+ return {id:row.id,planCode:row.plan_code,kind:row.kind,merchantProvider:row.merchant_provider,periodStatus:row.verified_paid===1?row.period_status:null,amountFen:row.amount_fen,currency:'CNY',
   channel:row.payment_channel,status:row.status,riskState:row.risk_state,checkout:{
    outcome:paymentUrl?'ready':row.verified_paid===1?'confirmed':'unknown',paymentUrl,
    // MK99 cashier creation is never a payment fact.

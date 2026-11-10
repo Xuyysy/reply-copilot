@@ -438,7 +438,8 @@ export default function AccountDashboard() {
           <div className="space-y-3 border-t border-border px-4 py-3">
             {subscriptionOrders.length ? subscriptionOrders.map(order=><div key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0">
               <p className="min-w-0 break-words text-sm"><strong className="uppercase">{order.planCode}</strong> · ¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")} · {subscriptionStatus(order,language)}</p>
-              <a className="button secondary" href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("查看原订单","View original order")}</a>
+              {order.status==='paid'&&order.periodStatus==='queued'&&<span className="text-sm text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</span>}
+              <a className="button secondary" href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{['pending','unknown'].includes(order.status)?t("继续或查验原订单","Continue or verify order"):t("查看原订单","View original order")}</a>
             </div>) : <p className="text-sm text-muted-foreground">{t("暂无订阅订单。", "No subscription orders yet.")}</p>}
           </div>
         </details>

@@ -4,7 +4,7 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
-export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';planCode:string;kind:string;amountFen:number;status:string;riskState:string;
+export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
 type Refresh={orderStatus:string;providerStatus?:string;paymentConfirmed:boolean;entitlementApplied?:boolean};
@@ -22,6 +22,7 @@ export default function SubscriptionCheckout(){
  const [order,setOrder]=useState<SubscriptionOrder>();
  const [payUrl,setPayUrl]=useState<string|null>(null);
  const [paymentNote,setPaymentNote]=useState('');
+ const [blockingOrder,setBlockingOrder]=useState<SubscriptionOrder|null>(null);
  const [channel,setChannel]=useState('');
  const [quote,setQuote]=useState<Quote>();
  const [error,setError]=useState<unknown>();
@@ -77,6 +78,14 @@ export default function SubscriptionCheckout(){
    if(cause instanceof ApiError&&cause.order&&typeof cause.order==='object'&&'id' in cause.order&&typeof cause.order.id==='string'&&orderPattern.test(cause.order.id)){
     showOrder(cause.order as SubscriptionOrder);
    }
+   if(action==='create'&&cause instanceof ApiError&&['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_RENEWAL_QUEUED','SUBSCRIPTION_ORDER_CONFLICT'].includes(cause.code)){
+    try{
+     const result=await api<{orders:SubscriptionOrder[]}>('/v1/subscriptions/orders');
+     const unresolved=result.orders.find(item=>['pending','unknown','manual_review','refund_pending'].includes(item.status))
+       ??result.orders.find(item=>item.periodStatus==='queued'&&item.status==='paid');
+     setBlockingOrder(unresolved??null);
+    }catch{setBlockingOrder(null);}
+   }
    setError(cause);
   }finally{operation.current=false;setBusy(false);}
  }
@@ -88,13 +97,18 @@ export default function SubscriptionCheckout(){
  return <div className="space-y-5">
   {loading?<p role="status">{t('正在读取订阅…','Loading subscription…')}</p>:null}
   {error?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
+  {blockingOrder?<p role="status">{blockingOrder.periodStatus==='queued'
+   ?t('你已有付款成功、等待生效的下一期订阅。','You already have a paid renewal queued for the next period.')
+   :t('检测到一笔需要先处理的原订单。','An earlier order needs your attention.')}
+   {' '}<a className="underline" href={'/subscription-checkout/?order='+encodeURIComponent(blockingOrder.id)}>{t('查看并继续原订单','Open the original order')}</a>
+  </p>:null}
   {signedOut?<a className="button" href="/login/">{t('登录后返回购买','Sign in, then return to checkout')}</a>:null}
   {order?<section className="pricing-card space-y-3">
    <p className="break-all">{t('订单号','Order')}: {order.id}</p>
    <p className="uppercase">{order.planCode} · {price(order.amountFen)}</p>
    <p>{subscriptionStatus(order,language)}</p>
    {paymentNote?<p role="status">{paymentNote}</p>:null}
-   {payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer">{t('打开原订单收银台','Open original checkout')}</a>:null}
+   {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer">{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
    {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
@@ -124,7 +138,7 @@ export default function SubscriptionCheckout(){
 export function subscriptionStatus(order:SubscriptionOrder,language:'zh'|'en'){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  switch(order.status){
-  case 'paid': return order.checkout.paymentConfirmed?t('付款已核验，权益已处理。','Payment verified and entitlement processed.'):t('权益待核验。','Entitlement verification pending.');
+  case 'paid': return order.checkout.paymentConfirmed?(order.periodStatus==='queued'?t('付款已核验，下一期订阅已排队，将在当前订阅期满后生效。','Payment verified. Your next period is queued and starts after the current subscription ends.'):t('付款已核验，权益已处理。','Payment verified and entitlement processed.')):t('权益待核验。','Entitlement verification pending.');
   case 'pending': return t('待付款。付款后请查验原单。','Awaiting payment. Verify the original order after paying.');
   case 'unknown': return t('付款结果未确认，请勿重复付款。','Payment is unconfirmed. Do not pay again.');
   case 'refund_pending': return t('退款或风控审核中。','Refund or risk review in progress.');

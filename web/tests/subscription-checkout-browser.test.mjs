@@ -51,7 +51,7 @@ test('subscription checkout restores a recoverable cashier on first order read a
   assert.equal(await evaluate('window.__calls.filter(([,path])=>path.endsWith("/refresh")).length'),1);
   await evaluate('window.__status="TRADE_SUCCESS";document.querySelector("button").click();document.documentElement.lang="en";window.dispatchEvent(new Event("reply-copilot-language"))');
   await until('document.body.textContent.includes("Payment verified and entitlement processed")');
-  assert.equal(await evaluate('document.querySelector("a[target]")===null'),true);
+  await until('document.querySelector("a[target]")===null');
   assert.equal(await evaluate('window.__calls.some(([method,path])=>method==="POST"&&path==="/v1/subscriptions/orders")'),false);
  });
 });

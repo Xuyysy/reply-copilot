@@ -321,3 +321,18 @@ test('Xiaodou UNKNOWN prevents QR relaunch and any new provider attempt',async()
   assert.deepEqual(metrics(f),{subscriptionOrders:1,events:0,periods:0,credits:0,packageOrders:0});
  }finally{f.sql.close();}
 });
+
+
+test('a paid Xiaodou subscription exposes a verified period and never restores its cashier',async()=>{
+ const f=ready();
+ try{
+  const created=await create(f,req('xd-paid-period-view-0001'));assert.equal(created.status,201);
+  const id=created.body.order.id;
+  const settled=await query(f,id);assert.equal(settled.status,200);
+  const detail=await f.call('/v1/subscriptions/orders/'+id,{method:'GET'});
+  assert.equal(detail.status,200);
+  assert.equal(detail.body.order.periodStatus,'active');
+  assert.equal(detail.body.order.checkout.paymentConfirmed,true);
+  assert.equal(detail.body.order.checkout.paymentUrl,null);
+ }finally{f.sql.close();}
+});
