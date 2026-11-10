@@ -23,7 +23,7 @@ export async function publicSubscriptionPlans(request: Request, env: Env): Promi
     description_zh,description_en FROM subscription_plan_versions
     WHERE current=1 AND active=1 ORDER BY daily_limit`).all();
   const control=checkoutEnabled(env)?await paymentControl(env):null;
-  const paymentMethods=control?.activeMerchant==='mk99'?control.methods.filter(method=>method.provider==='mk99').map(method=>method.channel):[];
+  const paymentMethods=control&&['mk99','xiaodou'].includes(control.activeMerchant)?control.methods.filter(method=>method.provider===control.activeMerchant).map(method=>method.channel):[];
   return response({plans:rows.results,autoRenew:false,checkoutAvailable:paymentMethods.length>0,paymentMethods},200,env,request);
 }
 
@@ -78,7 +78,7 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
       row.payment_status==='paid'&&row.transaction_paid_at!=null&&row.risk_state==='clear'&&
       row.verified_paid_event===1&&row.account_status==='active'&&row.account_archived_at==null&&
       row.payment_currency==='CNY'&&row.payment_amount_fen===row.amount_fen&&
-      (env.ENVIRONMENT!=='production'||row.merchant_provider==='mk99');
+      (env.ENVIRONMENT!=='production'||['mk99','xiaodou'].includes(String(row.merchant_provider)));
     const used=Number(row.used_today)||0,reserved=Number(row.reserved_today)||0;
     const effectiveStatus=row.order_status==='refunded'?'revoked':
       ['refund_pending','manual_review'].includes(String(row.order_status))?'refund_pending':
@@ -192,7 +192,7 @@ export async function adminSubscriptionFinance(request:Request,env:Env):Promise<
     SUM(CASE WHEN o.status='refunded' THEN o.amount_fen ELSE 0 END) full_refunded_fen,
     SUM(CASE WHEN o.status IN ('manual_review','refund_pending') THEN 1 ELSE 0 END) held_orders
    FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id
-   WHERE o.paid_at>=? AND t.merchant_provider='mk99'
+   WHERE o.paid_at>=? AND t.merchant_provider IN ('mk99','xiaodou')
      AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=o.amount_fen AND e.body_sha256 IS NOT NULL)
    GROUP BY o.kind`).bind(from).all(),
   env.DB.prepare(`SELECT

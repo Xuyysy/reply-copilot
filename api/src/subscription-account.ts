@@ -55,8 +55,8 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
       AND u.status='active' AND u.archived_at IS NULL
       AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
       AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
-      AND t.currency='CNY' AND t.amount_fen=o.amount_fen AND t.merchant_provider IN ('mk99','local_mock')
-      AND (?<>'production' OR t.merchant_provider='mk99')
+      AND t.currency='CNY' AND t.amount_fen=o.amount_fen AND t.merchant_provider IN ('mk99','xiaodou','local_mock')
+      AND (?<>'production' OR t.merchant_provider IN ('mk99','xiaodou'))
       AND EXISTS (
         SELECT 1 FROM subscription_payment_events e
         WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
