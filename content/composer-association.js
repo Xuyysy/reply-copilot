@@ -62,8 +62,8 @@
       if(anchor.closest?.('article')!==article)continue;
       try{
         const url=new URL(anchor.href);
-        const match=url.pathname.match(/^\\/[^/]+\\/status\\/(\\d+)\\/?$/);
-        if(url.protocol==='https:' && /^(?:www\\.)?(?:x\\.com|twitter\\.com)$/.test(url.hostname) && match)ids.add(match[1]);
+        const match=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);
+        if(url.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(url.hostname) && match)ids.add(match[1]);
       }catch{}
     }
     return ids.size>1?'conflicting_status_links':null;
