@@ -1177,7 +1177,7 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .cmi-gauge svg {width:100%;height:100%}
 .cmi-gauge span {position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;font-size:29px;font-weight:800;color:#315be8}
 .cmi-gauge small {font-size:10px;font-weight:600;letter-spacing:.07em;color:#75829b}
-.cmi-overview-grid {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cmi-overview-grid {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .cmi-overview-grid>div {min-width:0;padding:16px;border:1px solid #e2e9f5;background:#fff;border-radius:13px;display:flex;flex-direction:column;gap:8px}
 .cmi-overview-grid small {color:#657890;font-size:11px;line-height:1.4}
 .cmi-overview-grid strong {font-size:23px;color:#1b3d69;line-height:1.2;font-weight:750}
@@ -1198,6 +1198,13 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .cmi-teal {background:repeating-linear-gradient(90deg,#0f9a9b 0,#0f9a9b 6px,transparent 6px,transparent 10px)}
 .cmi-chart-scroll {border:1px solid #e4eaf5;border-radius:14px;padding:12px;overflow:hidden;background:linear-gradient(#fafcff,#fff)}
 .cmi-advice {display:flex;flex-direction:column;gap:10px;padding:17px;border-radius:14px;border:1px solid #cddfff;background:#edf4ff;color:#244673}
+
+.cmi-overview-grid .cmi-overview-state {font-size:clamp(15px,2.3vw,19px);font-weight:750;line-height:1.35;letter-spacing:-.02em;color:#224976;overflow-wrap:anywhere}
+.cmi-fine-print {color:#667a94;font-size:11px;line-height:1.65}
+.cmi-cycle-progress {padding:15px 17px;background:#fff;border:1px solid #e1eaf8;border-radius:13px;display:flex;flex-direction:column;gap:10px}
+.cmi-cycle-track {height:8px;width:100%;border-radius:999px;background:#ebf1fb;overflow:hidden}
+.cmi-cycle-fill {height:100%;background:linear-gradient(90deg,#80a7f0,#315be8);border-radius:999px;transition:width .2s ease}
+.cmi-data-source {border:1px solid #e0e8f3;background:#f8faff;border-radius:13px;padding:16px}
 @media(max-width:680px) {
  .cmi-hero {grid-template-columns:minmax(0,1fr) 92px;padding:15px;gap:10px}
  .cmi-gauge {width:92px;height:92px}
@@ -1209,4 +1216,4 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
  .cmi-stage {gap:5px}
  .cmi-overline {font-size:9px;letter-spacing:.05em}
 }
-@media(prefers-reduced-motion:reduce){.cmi-detail *{scroll-behavior:auto;transition:none!important}}
+@media(prefers-reduced-motion:reduce){.cmi-detail *, .cmi-cycle-fill{scroll-behavior:auto;transition:none!important}}

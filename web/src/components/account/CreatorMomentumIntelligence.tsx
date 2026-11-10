@@ -63,15 +63,26 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
  const score=insights?.score??0;
  const stageLabel=finished===3?t("今日三个参考节点均已越过","All three reference nodes crossed"):
    t(`阶段 ${numerals[current-1]} · 蓄势进行中`,`Stage ${numerals[current-1]} · Building momentum`);
- const message=finished===3
-   ?t("今日三次临界机会均已有相应的研究参考信号；正式提醒记录以插件本机为准。","All three research reference nodes have been crossed; actual reminders are confirmed by the extension.")
-   :t("每个阶段独立积累、到达其实际阈值后产生一次原创发布提醒机会，下一阶段重新开始蓄势。","Each stage builds independently. Its actual threshold enables one original-post reminder; the next stage begins a new accumulation cycle.");
+ const signalLabel=finished===3
+   ?t("今日三段参考积累完成","All reference stages crossed")
+   :cycle?.windowStage===current
+     ?t(`阶段 ${numerals[current-1]} · 临界参考区间`,`Stage ${numerals[current-1]} · Reference window`)
+     :t(`阶段 ${numerals[current-1]} · 势能积累中`,`Stage ${numerals[current-1]} · Building momentum`);
+ const signalDescription=t("该状态依据当前后台区间推算，并非插件已弹出的提醒记录。","This is a research projection from current admin ranges, not a confirmed extension reminder.");
+ const message=t("三个阶段各有一次原创发布提醒机会。达到插件当天的实际阈值后，在下一次原生回复操作时提醒。","Each of the three stages can prompt one original post, on the next native reply after the extension's actual daily threshold is met.");
  return <Card data-testid="creator-momentum-intelligence" className="cmi-terminal min-w-0 overflow-hidden">
   <CardHeader className="flex-row flex-wrap items-start justify-between gap-4">
    <div className="flex min-w-0 items-center gap-3"><span className="cmi-symbol"><Zap size={22}/></span>
     <div className="min-w-0"><p className="cmi-overline">CREATOR MOMENTUM INTELLIGENCE</p>
     <CardTitle className="mt-1">{t("互动势能智能分析终端","Creator Momentum Intelligence")}</CardTitle></div></div>
-   <span className="cmi-pill">{t("付费专属","PAID ACCESS")}</span>
+   <div className="flex flex-wrap items-center gap-2">
+    <span className="cmi-pill">{t("付费专属","PAID ACCESS")}</span>
+    <Button variant="outline" size="sm" asChild>
+     <a data-cmi-learn-more href="/#momentum-framework" aria-label={t("详细了解互动势能临界值理论","Learn more about the Creator Momentum Threshold theory")}>
+      {t("详细了解","Learn more")}<ArrowRight size={14} aria-hidden="true"/>
+     </a>
+    </Button>
+   </div>
   </CardHeader>
   <CardContent className="space-y-4">
    {state==="loading"&&<div role="status" className="cmi-placeholder">{t("正在读取今日势能分析…","Loading today's momentum analysis…")}</div>}
@@ -90,24 +101,46 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
     <Button variant="outline" size="sm" onClick={()=>setRevision(v=>v+1)}><RefreshCw size={14}/>{t("重试","Retry")}</Button>
    </div>}
    {state==="ready"&&insights&&cycle&&<>
-    <div className="cmi-hero">
+    <div className="cmi-hero" data-cmi-overview>
      <div className="min-w-0 space-y-3">
-      <p className="cmi-overline">{t("今日临界循环 / CURRENT CYCLE","DAILY THRESHOLD CYCLE")}</p>
-      <div className="flex flex-wrap items-baseline gap-2"><strong className="cmi-primary-number tabular-nums">{percent}<span className="text-base font-medium">%</span></strong>
-       <span className="text-sm text-muted-foreground">{t("本阶段参考进度","Current reference-stage progress")}</span></div>
-      <h3 className="text-base font-bold">{stageLabel}</h3>
-      <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{message}</p>
+      <p className="cmi-overline">CMI · {t("今日互动势能指数","Daily Creator Momentum Index")}</p>
+      <div className="flex flex-wrap items-baseline gap-2">
+       <strong data-cmi-score className="cmi-primary-number tabular-nums">{score.toFixed(1)}</strong>
+       <span className="text-sm text-muted-foreground">/ 100 · {t("自研参考指数","Proprietary research index")}</span>
+      </div>
+      <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{t("将三阶段互动积累映射为连续的势能参考信号，帮助识别下一次原创释放机会。","Converts three-stage activity accumulation into a continuous momentum reference signal for the next original-post opportunity.")}</p>
      </div>
      <div className="cmi-gauge" aria-label={t(`当前阶段参考进度 ${percent}%`,`Reference stage progress ${percent}%`)}>
       <svg viewBox="0 0 120 120" aria-hidden="true"><circle cx="60" cy="60" r="45" stroke="currentColor" strokeOpacity=".12" strokeWidth="9" fill="none"/>
        <circle cx="60" cy="60" r="45" stroke="#2578e4" strokeWidth="9" fill="none" strokeLinecap="round" strokeDasharray={`${percent*2.827} 282.7`} transform="rotate(-90 60 60)"/></svg>
-      <span>{finished===3?"III":numerals[current-1]}<small>{t("阶段","STAGE")}</small></span>
+      <span>{finished===3?"III":numerals[current-1]}<small>{percent}% · {t("本阶段","CYCLE")}</small></span>
      </div>
     </div>
-    <div className="cmi-overview-grid">
-     <div><small>CMI · {t("全日势能指数","Daily index")}</small><strong className="tabular-nums">{score.toFixed(1)}<em> / 100</em></strong></div>
-     <div><small>{t("今日已确认交付事件","Confirmed delivery events")}</small><strong className="tabular-nums">{insights.totalConfirmed??0}</strong></div>
-     <div><small>{t("已越过的研究参考节点","Reference nodes crossed")}</small><strong className="tabular-nums">{finished}<em> / 3</em></strong></div>
+    <div className="cmi-overview-grid" data-cmi-signal-summary>
+     <div>
+      <small>{t("今日临界信号","Today's threshold signal")}</small>
+      <strong className="cmi-overview-state">{signalLabel}</strong>
+      <p className="cmi-fine-print">{signalDescription}</p>
+     </div>
+     <div>
+      <small>{t("原创释放机会 · 研究参考节点","Original-post opportunities · Research nodes")}</small>
+      <strong className="tabular-nums">{finished}<em> / 3</em></strong>
+      <p className="cmi-fine-print">{t("三个阶段分别积累、分别识别；不代表实际提醒已展示。","Three independent stages; this count does not confirm any reminder was shown.")}</p>
+     </div>
+    </div>
+    <div className="cmi-cycle-progress" data-cmi-cycle-progress>
+     <div className="flex flex-wrap justify-between gap-2 text-sm">
+      <span className="font-semibold">{stageLabel}</span>
+      <span className="tabular-nums text-muted-foreground">{t("本阶段参考进度","Current stage")} · {percent}%</span>
+     </div>
+     <div role="progressbar" aria-label={t("本阶段势能参考进度","Current stage reference momentum")} aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100} className="cmi-cycle-track">
+      <div className="cmi-cycle-fill" style={{width:`${percent}%`}} />
+     </div>
+     <p className="cmi-fine-print">{message}</p>
+    </div>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+     <h3 className="font-semibold text-sm">{t("三次原创释放机会","Three original-post opportunities")}</h3>
+     <span className="text-xs text-muted-foreground">{t("参考信号 · 非实际提醒记录","Research signals · Not verified reminders")}</span>
     </div>
     <div className="cmi-stage-grid" aria-label={t("今日三阶段参考状态","Three-stage daily reference status")}>
      {(cycle.stages??[]).map(s=><div key={s.stage} className={`cmi-stage cmi-stage-${s.referenceState}`}>
@@ -119,7 +152,7 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
      </div>)}
     </div>
     <details data-cmi-details className="cmi-detail group">
-     <summary>{t("查看 CMI 趋势与阶段循环分析","Explore CMI trend and stage cycles")}<ChevronDown size={16} aria-hidden="true" className="transition-transform group-open:rotate-180"/></summary>
+     <summary>{t("查看势能曲线、计算依据与研究解释","Explore momentum curves, data sources and methodology")}<ChevronDown size={16} aria-hidden="true" className="transition-transform group-open:rotate-180"/></summary>
      <div className="space-y-5 px-1 pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><div>
        <h3 className="font-semibold">{t("全天势能演化","Momentum evolution")}</h3><p className="text-xs text-muted-foreground">{t("整体势能持续观察 · 阶段进度分段归零","Daily cumulative index · Per-stage progress resets")}</p></div>
@@ -131,6 +164,15 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
       <div className="space-y-2 text-sm leading-relaxed text-muted-foreground">
        <p>{t("我认为，原创帖的传播机会，并不只取决于发布的那一刻。持续参与高质量讨论，可能让账号建立话题关联、受众连接与行为信号。","I believe an original post's distribution opportunity is shaped by more than its publish time. Meaningful discussions may build topic relevance, audience links and behavioral signals.")}</p>
        <p>{t("我将互动积累过程中可能出现传播条件非线性变化的关键节点定义为「互动势能临界值」。","I define the point where accumulated engagement may correspond to nonlinear distribution changes as the Creator Momentum Threshold.")}</p>
+      </div>
+      <div data-cmi-data-source className="cmi-data-source">
+       <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h4 className="font-semibold text-sm">{t("数据来源与计算依据","Data source and calculation basis")}</h4>
+         <p className="mt-1 text-xs text-muted-foreground">{t("仅用于解释势能研究模型，不参与 X 官方互动统计。","For understanding the research model, not an official X engagement statistic.")}</p></div>
+        <div className="text-right"><span className="block text-xs text-muted-foreground">{t("今日已确认交付的 AI 生成结果","AI generations confirmed delivered today")}</span>
+         <strong className="mt-1 block text-lg tabular-nums">{insights.totalConfirmed??0}</strong></div>
+       </div>
+       <p className="mt-2 text-xs leading-relaxed text-muted-foreground">{t("这是插件收到 AI 回复结果的次数，不代表用户已在 X 实际发送回复、获得互动或曝光。模型结合后台当前三段触发区间进行指数转换。","These are AI results delivered to the extension—not replies actually posted on X, engagement or impressions. The model maps this input through the admin's current three-stage ranges.")}</p>
       </div>
       <p data-testid="cmi-methodology" className="text-xs leading-relaxed text-muted-foreground">
        {t("CMI 使用后台最新三段区间与已确认交付事件生成自研参考指数；它不等于 X 官方分发权重，也不代表已发布 X 评论。参考节点不是实际已弹提醒；真实触发、每日冻结阈值和展示记录由插件本机判定。","CMI is a proprietary research index based on current admin ranges and confirmed AI deliveries, not an official X rank or published-reply count. Reference crossings are not verified reminders; actual triggers and frozen daily thresholds are owned by the extension.")}

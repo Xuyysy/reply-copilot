@@ -13,7 +13,7 @@ test("account page includes a single paid-only momentum terminal before the comp
   assert.match(dashboard,/data-credit-orders/);
 });
 test("three stages independently cycle, not one permanent progress bar or false triggered labels",()=>{
-  assert.match(panel,/CURRENT CYCLE/);
+  assert.match(panel,/data-cmi-cycle-progress/);
   assert.match(panel,/cycle\?\.percent/);
   assert.match(panel,/cmi-primary-number/);
   assert.match(panel,/cycleProgress/);
