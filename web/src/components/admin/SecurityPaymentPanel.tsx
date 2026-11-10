@@ -22,7 +22,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
  const mutationGuard=useRef(false),[pending,setPending]=useState(false),[notice,setNotice]=useState(''),[confirmEnable,setConfirmEnable]=useState(false);
  const locked=busy||pending;
  const status=(enabled:boolean)=>enabled?t('已开启','Enabled'):t('已关闭','Disabled');
- const unavailableReason=(reason:string)=>({environment_protection:t('环境保护开关关闭','Environment safety switch is off'),purchase_paused:t('全站收款已暂停','Global purchases are paused'),interface_disabled:t('支付接口未启用','Payment interface is disabled'),credentials_missing:t('支付凭证未配置或格式无效','Payment credentials are missing or invalid'),channel_disabled:t('该接口下的支付渠道未启用','This interface channel is disabled'),platform_release_unconfirmed:t('尚未确认小豆已放行该通道和交易形态','Xiaodou release for this channel and trade scope is unconfirmed'),channel_not_supported:t('该接口不支持此支付渠道','This interface does not support this channel')} as Record<string,string>)[reason]??reason;
+ const unavailableReason=(reason:string)=>({merchant_not_selected:t('小豆尚未成为当前收款商家；可以先预配置通道','Xiaodou is not selected; you can preconfigure its channels'),environment_protection:t('环境保护开关关闭','Environment safety switch is off'),purchase_paused:t('全站收款已暂停','Global purchases are paused'),interface_disabled:t('支付接口未启用','Payment interface is disabled'),credentials_missing:t('支付凭证未配置或格式无效','Payment credentials are missing or invalid'),channel_disabled:t('该接口下的支付渠道未启用','This interface channel is disabled'),platform_release_unconfirmed:t('尚未确认小豆已放行该通道和交易形态','Xiaodou release for this channel and trade scope is unconfirmed'),channel_not_supported:t('该接口不支持此支付渠道','This interface does not support this channel')} as Record<string,string>)[reason]??reason;
  const availabilityText=(availability:Availability)=>availability.available?t('当前可用','Available now'):availability.reasons.map(unavailableReason).join('；');
  const setChannel=(channel:'wechat'|'rsa2Alipay'|'epayAlipay',provider:'rsa2'|'epay',enabled:boolean)=>{
   const enabledKey=channel==='wechat'?'rsa2WechatEnabled':channel==='rsa2Alipay'?'rsa2AlipayEnabled':'epayAlipayEnabled';
@@ -58,7 +58,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      ].join('；')}</p>}
     </div>
     <MerchantPaymentSettings control={control} language={language} locked={locked} reason={reason} write={write} reload={load}/>
-    {control.activeMerchant==='xiaodou'&&<>
+    {<>
     <section className="space-y-3 rounded-lg border p-4" aria-labelledby="rsa2-settings-title">
      <h3 id="rsa2-settings-title" className="font-semibold">RSA2 Open API</h3>
      <p className="text-sm text-muted-foreground">{t('凭证','Credentials')}: {status(control.providers.rsa2.credentialsConfigured===true)} · {control.providers.rsa2.credentialsConfigured?t('服务端格式与密钥可导入检查通过','Server-side format and key import checks passed'):t('缺失或无效（不显示密钥内容）','Missing or invalid (values hidden)')}</p>
@@ -78,7 +78,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
     </div>}
     </>}
     <p>{t('当前实际可用的付款方式','Currently available payment methods')}: {control.methods.length?control.methods.map(x=>`${x.provider==='mk99'?'MK99':x.provider==='xiaodou'?'RSA2':'Epay'} / ${x.channel}`).join('、'):'无'}</p>
-    {control.activeMerchant==='xiaodou'&&<Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存支付接口设置','Save payment settings')}</Button>}
+    <Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存 RSA2 通道预配置','Save RSA2 channel preparation')}</Button>
     <div className="space-y-2 border-t pt-4"><p>{t('全站收款总开关','Global purchase switch')}</p><Button disabled={locked||reason.trim().length<8||(!control.operatorEnabled&&!control.environmentReady)} onClick={()=>control.operatorEnabled?void togglePurchase(false):setConfirmEnable(true)}>{control.operatorEnabled?t('暂停全站收款','Pause all sales'):t('开启全站收款','Enable all sales')}</Button>
      {confirmEnable&&!control.operatorEnabled&&<div role="alert" className="space-y-2"><p>{t('确认开启全站收款？只有接口、凭证、通道及平台放行条件全部满足的付款方式才会展示。','Enable global sales? Only methods passing interface, credentials, channel, and platform release gates will be shown.')}</p><Button disabled={locked||reason.trim().length<8} onClick={()=>void togglePurchase(true)}>{t('确认开启','Confirm')}</Button><Button variant="outline" disabled={locked} onClick={()=>setConfirmEnable(false)}>{t('取消','Cancel')}</Button></div>}
     </div>
