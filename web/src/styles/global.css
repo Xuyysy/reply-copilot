@@ -1204,7 +1204,6 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .cmi-cycle-progress {padding:15px 17px;background:#fff;border:1px solid #e1eaf8;border-radius:13px;display:flex;flex-direction:column;gap:10px}
 .cmi-cycle-track {height:8px;width:100%;border-radius:999px;background:#ebf1fb;overflow:hidden}
 .cmi-cycle-fill {height:100%;background:linear-gradient(90deg,#80a7f0,#315be8);border-radius:999px;transition:width .2s ease}
-.cmi-data-source {border:1px solid #e0e8f3;background:#f8faff;border-radius:13px;padding:16px}
 @media(max-width:680px) {
  .cmi-hero {grid-template-columns:minmax(0,1fr) 92px;padding:15px;gap:10px}
  .cmi-gauge {width:92px;height:92px}

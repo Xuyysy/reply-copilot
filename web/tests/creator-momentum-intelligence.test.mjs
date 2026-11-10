@@ -19,7 +19,7 @@ test("three stages independently cycle, not one permanent progress bar or false 
   assert.match(panel,/cycleProgress/);
   assert.match(panel,/研究参考节点已越过/);
   assert.match(panel,/下一次点击 X 原生回复时提示发布原创/);
-  assert.match(panel,/参考节点不是实际已弹提醒/);
+  assert.match(panel,/参考信号 · 非实际提醒记录/);
   assert.doesNotMatch(panel,/500[–-]650|850[–-]1100|1350[–-]1700/);
 });
 test("gating stays on the authenticated API; no paid status from free balance",()=>{
