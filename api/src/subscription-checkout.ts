@@ -9,6 +9,7 @@ import { configuredXiaodouMerchant } from './xiaodou-merchant';
 import { inspectCheckoutResponse } from './payment-checkout';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
+import { orderById, querySubscriptionPayment } from './subscription-settlement';
 
 // Explicit third switch: the subscription catalog and existing-order paid
 // reconciliation can be tested WITHOUT allowing a single new real checkout.
@@ -25,9 +26,9 @@ type Pending={
  status:string;transaction_status:string;risk_state:string;checkout_state:string;
  cashier_url:string|null;provider_trade_id:string;provider_payment_id:string|null;
  merchant_account:string|null;notification_sign_type:string|null;merchant_provider:string;paid_at:number|null;
- verified_paid:number;quote_id:string|null;
+ verified_paid:number;quote_id:string|null;period_status:string|null;
 };
-const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
+const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,(SELECT p.status FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id LIMIT 1) period_status,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
    o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
    AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
    AND t.merchant_provider IN ('mk99','xiaodou') AND t.currency='CNY' AND t.amount_fen=o.amount_fen
@@ -59,7 +60,7 @@ function snapshot(row:Pending,config:Mk99Config|null){
  else if(row.merchant_provider==='xiaodou'&&row.checkout_state==='ready'&&row.status==='pending'&&row.transaction_status==='pending'&&row.risk_state==='clear'&&row.cashier_url){
    try{const url=new URL(row.cashier_url);if(url.protocol==='https:'&&!url.username&&!url.password&&row.cashier_url.length<=8192)paymentUrl=row.cashier_url;}catch{/* Ignore invalid historical URL. */}
  }
- return {id:row.id,planCode:row.plan_code,kind:row.kind,amountFen:row.amount_fen,currency:'CNY',
+ return {id:row.id,planCode:row.plan_code,kind:row.kind,merchantProvider:row.merchant_provider,periodStatus:row.verified_paid===1?row.period_status:null,amountFen:row.amount_fen,currency:'CNY',
   channel:row.payment_channel,status:row.status,riskState:row.risk_state,checkout:{
    outcome:paymentUrl?'ready':row.verified_paid===1?'confirmed':'unknown',paymentUrl,
    // MK99 cashier creation is never a payment fact.
@@ -300,3 +301,73 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    return response({ok:true,order:result,resumed:false},201,env,request);
  return response({ok:false,order:result,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED',message:'原订单创建结果待确认，请先查询原订单，不要重复付款。',providerIssue:problem},502,env,request);
 }
+
+
+/**
+ * Explicitly replace the payment attempt on the original Xiaodou subscription.
+ * Every call first verifies an unpaid provider state via a signed GET. The
+ * existing D1 "preparing" state is used as a single-writer claim, and any
+ * ambiguous relaunch fails closed without retrying upstream.
+ */
+export async function relaunchSubscriptionCheckout(request:Request,env:Env,orderId:string):Promise<Response>{
+ if(!checkoutEnabled(env))throw new ApiFailure(404,'NOT_FOUND','接口不存在。');
+ const {session,token}=await sessionFor(request,env);
+ if(session.kind!=='web')throw new ApiFailure(403,'WEB_SESSION_REQUIRED','请在官网登录后操作。');
+ requireWebOrigin(request,env);
+ await requireCsrf(request,env,token);
+ if(!/^[a-zA-Z0-9_-]{1,80}$/.test(orderId))throw new ApiFailure(400,'INVALID_ORDER_ID','订单号无效。');
+ const row=await orderFor(env,orderId);
+ if(!row||row.user_id!==session.user_id)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ if(row.merchant_provider!=='xiaodou'||row.status!=='pending'||row.transaction_status!=='pending'||
+    row.risk_state!=='clear'||row.checkout_state!=='ready'||row.payment_channel!=='ALIPAY_H5'||
+    row.merchant_account!==env.XIAODOU_APP_ID||row.notification_sign_type!==env.XIAODOU_KEY_ID)
+   throw new ApiFailure(409,'SUBSCRIPTION_ORDER_NOT_RELAUNCHABLE','原订单当前不可重新拉起付款，请先查验支付状态。');
+ if(!await takeRate(env,'subscription-relaunch:'+session.user_id,3,60_000,nowMs()))
+   throw new ApiFailure(429,'TOO_MANY_REQUESTS','重新拉起付款太频繁，请稍后再试。');
+ const original=await orderById(env,orderId);
+ if(!original)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ const checked=await querySubscriptionPayment(env,original);
+ if(checked.paymentConfirmed){
+   const settled=await orderFor(env,orderId);
+   if(!settled)throw new ApiFailure(503,'SUBSCRIPTION_ORDER_UNCONFIRMED','原订单状态暂不可用。');
+   return response({ok:true,order:snapshot(settled,null)},200,env,request);
+ }
+ if(!('providerStatus' in checked)||!['CREATED','PAYING'].includes(String(checked.providerStatus??'')))
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_UNCONFIRMED','平台尚未确认订单可继续付款，请保留原订单。');
+ // One in-flight request at a time. "preparing" is an allowed value in the
+ // deployed D1 schema; no migration or direct remote D1 operation is needed.
+ const now=nowMs();
+ const claimed=await env.DB.prepare(
+   "UPDATE subscription_payment_transactions SET checkout_state='preparing',cashier_url=NULL,checkout_attempted_at=?,updated_at=? "+
+   "WHERE order_id=? AND merchant_provider='xiaodou' AND checkout_state='ready' AND status='pending' AND risk_state='clear' "+
+   "AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=subscription_payment_transactions.order_id AND o.user_id=? AND o.status='pending')"
+ ).bind(now,now,orderId,session.user_id).run();
+ if(Number(claimed.meta?.changes??0)!==1)
+   throw new ApiFailure(409,'SUBSCRIPTION_CHECKOUT_UNCONFIRMED','原订单状态已变化，请先查验订单。');
+ let paymentUrl:string;
+ try{
+   const signed=await configuredXiaodouMerchant(env).relaunchPayment(row.provider_trade_id,{requestId:'xrh-sub-relaunch-'+uuid()});
+   const result=inspectCheckoutResponse(signed,{outTradeNo:row.provider_trade_id,amountFen:row.amount_fen});
+   if(signed.channel!=='ALIPAY_H5'||signed.openOrderId!==row.provider_payment_id||
+      result.outcome!=='ready'||!result.paymentUrl)
+     throw new Error('UNCONFIRMED_RELAUNCH_RESPONSE');
+   paymentUrl=result.paymentUrl;
+ }catch{
+   await env.DB.prepare(
+     "UPDATE subscription_payment_transactions SET checkout_state='unknown',updated_at=? "+
+     "WHERE order_id=? AND checkout_state='preparing' AND merchant_provider='xiaodou'"
+   ).bind(nowMs(),orderId).run();
+   throw new ApiFailure(502,'XIAODOU_RELAUNCH_UNCONFIRMED','重新拉起结果暂无法核实，请查验原订单，勿重复创建或付款。');
+ }
+ const saved=await env.DB.prepare(
+   "UPDATE subscription_payment_transactions SET checkout_state='ready',cashier_url=?,cashier_ready_at=?,updated_at=? "+
+   "WHERE order_id=? AND merchant_provider='xiaodou' AND checkout_state='preparing' AND status='pending' AND risk_state='clear' "+
+   "AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=subscription_payment_transactions.order_id AND o.user_id=? AND o.status='pending')"
+ ).bind(paymentUrl,nowMs(),nowMs(),orderId,session.user_id).run();
+ if(Number(saved.meta?.changes??0)!==1)
+   throw new ApiFailure(503,'SUBSCRIPTION_CHECKOUT_UNCONFIRMED','新付款入口无法确认已保存，请查验原订单。');
+ const updated=await orderFor(env,orderId);
+ if(!updated)throw new ApiFailure(503,'SUBSCRIPTION_ORDER_UNCONFIRMED','原订单状态暂不可用。');
+ return response({ok:true,order:snapshot(updated,null)},200,env,request);
+}
+
