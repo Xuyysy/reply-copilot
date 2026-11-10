@@ -12,9 +12,10 @@ test('both order groups surface the original checkout actions without creating f
   assert.match(component,/href=\{"\/subscription-checkout\/\?order="\+encodeURIComponent\(order\.id\)\}/);
   assert.match(component,/href=\{"\/checkout\/\?order="\+encodeURIComponent\(order\.id\)\}/);
   assert.match(component,/order\.status==='pending'&&order\.riskState==='clear'&&!order\.checkout\.paymentConfirmed/);
-  assert.match(component,/\["rsa2","epay"\]\.includes\(order\.payment_protocol\|\|""\)/);
+  assert.match(component,/order\.payment_protocol==="rsa2"\|\|order\.payment_protocol==="epay"/);
   assert.match(component,/order\.payment_status==="pending"&&order\.risk_state==="clear"/);
-  assert.match(component,/data-credit-orders open=\{/);
-  assert.match(component,/data-subscription-orders open=\{/);
+  assert.match(component,/data-unresolved-order-shortcut/);
+  assert.match(component,/data-credit-orders className=/);
+  assert.match(component,/data-subscription-orders className=/);
   assert.doesNotMatch(component,/onClick=\{\(\)=>.*\/v1\/orders.*POST/);
 });
