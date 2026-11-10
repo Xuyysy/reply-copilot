@@ -97,7 +97,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: staging-pages-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
-          run-id: 42781310250
+          run-id: 42774902604
           github-token: ${{ github.token }}
           path: web/dist
 
@@ -105,7 +105,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: staging-extension-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
-          run-id: 42781310250
+          run-id: 42774902604
           github-token: ${{ github.token }}
           path: dist/ci
 
@@ -280,8 +280,8 @@ jobs:
         run: |
           echo "### Staging RSA2 release (no Production)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Pinned accepted Staging V1 Worker version: $EXPECTED_WORKER_VERSION"
-          echo "- Pinned accepted V1 rollback deployment: $EXPECTED_WORKER_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pinned accepted Staging V1 Worker version: $EXPECTED_WORKER_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pinned accepted V1 rollback deployment: $EXPECTED_WORKER_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned Staging Pages previous deployment: $EXPECTED_PAGES_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
           echo "- Staging migration 0025 was applied earlier; no remote D1 mutations by this workflow" >> "$GITHUB_STEP_SUMMARY"
           echo "- MK99 active merchant and Production secrets/config remain untouched" >> "$GITHUB_STEP_SUMMARY"
