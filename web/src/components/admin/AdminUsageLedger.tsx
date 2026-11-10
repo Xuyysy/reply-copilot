@@ -110,7 +110,7 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
     </form>
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     {loading?<p role="status" className="py-6 text-sm">{t('正在读取消费记录…','Loading usage…')}</p>:
-     <div className="max-h-[38rem] overflow-auto rounded-md border" role="region" tabIndex={0} aria-label={t('AI 消费记录','AI usage records')}>
+     <div className="data-table-wrap admin-list-scroll" role="region" tabIndex={0} aria-label={t('AI 消费记录','AI usage records')}>
       <Table className="min-w-[1020px]">
        <TableHeader><TableRow>
         {[t('交付时间','Delivered'),t('用户','User'),t('扣次来源','Source'),t('模型','Model'),t('Token','Tokens'),t('估算成本 USD','Est. cost USD'),t('请求 ID','Request ID')].map(label=><TableHead key={label}>{label}</TableHead>)}
