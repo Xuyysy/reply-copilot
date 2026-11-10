@@ -52,7 +52,18 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      const result=await write('/v1/admin/payment-platform-check',{reason:'Xiaodou RSA2 read-only connectivity diagnostic'});
      setPlatformCheck(result);
      setNotice(result.ok?t('RSA2 只读接口响应已验签；这不代表具体支付通道已获准。','The RSA2 read-only response signature verified. This does not confirm any payment channel is released.'):t('RSA2 只读检查未通过；请查看安全错误码。','RSA2 read-only check did not pass. Review the safe error code.'));
-    }catch(e){setPlatformCheckError(e instanceof Error?e.message:String(e));}
+    }catch(e){
+     const issue=e&&typeof e==='object'?e as {message?:unknown;code?:unknown;requestId?:unknown;diagnostic?:{upstreamHttpStatus?:unknown}}:null;
+     const safeCode=typeof issue?.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(issue.code)?issue.code:null;
+     const safeId=typeof issue?.requestId==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(issue.requestId)?issue.requestId:null;
+     const http=issue?.diagnostic?.upstreamHttpStatus;
+     const safeHttp=typeof http==='number'&&Number.isInteger(http)&&http>=100&&http<=599?http:null;
+     const hint=safeCode==='OPEN_API_SOURCE_IP_REJECTED'
+       ?t('小豆拒绝当前服务器来源 IP，请核对平台与应用白名单。','Xiaodou rejected the server source IP. Check platform and app allowlists.')
+       :safeCode==='PROVIDER_CONFIG_ERROR'?t('小豆 RSA2 凭据未配置齐全。','Xiaodou RSA2 credentials are incomplete.'):null;
+     setPlatformCheckError([hint??(e instanceof Error?e.message:t('连接检查失败','Connection check failed')),
+       safeCode,safeHttp?'HTTP '+safeHttp:null,safeId?'requestId '+safeId:null].filter(Boolean).join(' · '));
+    }
    });
   }finally{setPlatformChecking(false);}
  }

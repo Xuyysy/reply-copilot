@@ -28,3 +28,12 @@ test('RSA2 read-only check supplies its own audit reason and reports errors next
  assert.match(panel,/disabled=\{locked\} aria-busy=\{platformChecking\}/);
  assert.doesNotMatch(panel,/disabled=\{locked\|\|!control\.providers\.rsa2\.credentialsConfigured\}/);
 });
+
+test('RSA2 diagnostic failures retain safe provider code, source-IP hint and request ID',async()=>{
+ const client=await readFile(new URL('../src/lib/api.ts',import.meta.url),'utf8');
+ assert.match(client,/path==="\/v1\/admin\/payment-platform-check"/);
+ assert.match(client,/body\.errorCode/);
+ assert.match(panel,/OPEN_API_SOURCE_IP_REJECTED/);
+ assert.match(panel,/小豆拒绝当前服务器来源 IP/);
+ assert.match(panel,/requestId '\+safeId/);
+});
