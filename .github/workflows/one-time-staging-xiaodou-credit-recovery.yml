@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_SHA: 'c17528912b78848847350944489a62954ff9c223'
-      CI_RUN_ID: '42821456914'
+      SOURCE_SHA: '0634d3b9052e8ae695bb24bf450c3ed6f78f8132'
+      CI_RUN_ID: '42822489741'
       BASE_SHA: 'c7517715fc414f293150c1596fce56a5cc554088'
       EXPECTED_WORKER_VERSION: 'c145d62c-4a39-45ee-a84b-22216629f4f7'
       EXPECTED_WORKER_DEPLOYMENT: 'f6a161d1-3982-43ca-a8d6-f2a8f540acd8'
@@ -39,11 +39,11 @@ jobs:
       - name: Checkout exact Staging fix candidate
         uses: actions/checkout@v4
         with:
-          ref: c17528912b78848847350944489a62954ff9c223
+          ref: 0634d3b9052e8ae695bb24bf450c3ed6f78f8132
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify successful immutable CI and exactly three authorized changed files
+      - name: Verify successful immutable CI and exactly five authorized changed files
         shell: bash
         run: |
           set -euo pipefail
@@ -58,8 +58,10 @@ jobs:
           git diff --name-only "$BASE_SHA" "$SOURCE_SHA" | sort > "$RUNNER_TEMP/changed-files"
           cat > "$RUNNER_TEMP/allowed-files" <<'FILES'
           api/src/payments.ts
+          api/tests/payment-provider-policy.test.mjs
           api/tests/payment-v2.test.mjs
           web/src/pages/checkout.astro
+          web/tests/checkout-resume.test.mjs
           FILES
           diff -u "$RUNNER_TEMP/allowed-files" "$RUNNER_TEMP/changed-files"
           git diff --exit-code "$BASE_SHA" "$SOURCE_SHA" -- api/wrangler.jsonc api/deploy api/migrations .github
@@ -89,16 +91,16 @@ jobs:
       - name: Download immutable Staging Pages build from same successful CI run
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-c17528912b78848847350944489a62954ff9c223
-          run-id: 42821456914
+          name: staging-pages-0634d3b9052e8ae695bb24bf450c3ed6f78f8132
+          run-id: 42822489741
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download independently generated artifact hashes and provenance
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-c17528912b78848847350944489a62954ff9c223
-          run-id: 42821456914
+          name: staging-extension-0634d3b9052e8ae695bb24bf450c3ed6f78f8132
+          run-id: 42822489741
           github-token: ${{ github.token }}
           path: dist/ci
 
