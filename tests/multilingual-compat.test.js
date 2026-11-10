@@ -52,17 +52,17 @@ test("all selectable reply locales survive Voice Profile without affecting UI la
   }
   assert.equal(normalizeReplyLanguage("ja-JP"),"ja-JP");
   assert.equal(normalizeReplyLanguage("ko-KR"),"ko-KR");
-  assert.equal(normalizeReplyLanguage("pt-BR"),null);
-  assert.equal(normalizeReplyLanguage("fr"),null);
+  assert.equal(normalizeReplyLanguage("pt-BR"),"pt-BR");
+  assert.equal(normalizeReplyLanguage("fr"),"fr");
   assert.equal(normalizeReplyLanguage("zh-Hant-TW"),"zh-Hant-TW");
   assert.equal(normalizeReplyLanguage("xx"),null);
 });
 
 test("hosted and extension output contract keeps Japanese, Korean, European and RTL locales",()=>{
-  for(const language of ["ja","ja-JP","ko","ko-KR","zh-TW","en-US"]){
+  for(const language of ["ja","ja-JP","ko","ko-KR","zh-TW","en-US","es","fr","pt-BR","ru","ar"]){
     assert.equal(parseAIOutput(payload(language)).language,language);
   }
-  for(const bad of ["Japanese","jp","ja<script>","xx","es","fr","pt-BR","ru","ar","",null]){
+  for(const bad of ["Japanese","jp","ja<script>","xx","",null]){
     assert.throws(()=>parseAIOutput(payload(bad)),String(bad));
   }
   assert.equal(parseAIOutput(payload("auto")).language,"auto");
@@ -129,4 +129,11 @@ test("speed-first language policy stays small and skips unsupported locales",()=
   assert.ok(policy.length < 440,"language policy should stay compact");
   assert.match(policy,/fall back to English/i);
   assert.ok(!policy.includes("Spanish, French, Portuguese"));
+});
+
+
+test("legacy model language tags remain parseable even when manual menu is small",()=>{
+  assert.equal(REPLY_LANGUAGES.includes("fr"),false);
+  assert.equal(parseAIOutput(payload("fr")).language,"fr");
+  assert.equal(parseAIOutput(payload("pt-BR")).language,"pt-BR");
 });
