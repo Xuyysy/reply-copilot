@@ -332,7 +332,7 @@ export async function relaunchSubscriptionCheckout(request:Request,env:Env,order
    if(!settled)throw new ApiFailure(503,'SUBSCRIPTION_ORDER_UNCONFIRMED','原订单状态暂不可用。');
    return response({ok:true,order:snapshot(settled,null)},200,env,request);
  }
- if(!['CREATED','PAYING'].includes(checked.providerStatus??''))
+ if(!('providerStatus' in checked)||!['CREATED','PAYING'].includes(String(checked.providerStatus??'')))
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_UNCONFIRMED','平台尚未确认订单可继续付款，请保留原订单。');
  // One in-flight request at a time. "preparing" is an allowed value in the
  // deployed D1 schema; no migration or direct remote D1 operation is needed.
