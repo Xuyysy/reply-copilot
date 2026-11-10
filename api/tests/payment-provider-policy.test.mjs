@@ -79,7 +79,7 @@ test('legacy Epay release flags do not enable new checkout orders',async()=>{
   assert.deepEqual(r.body.paymentMethods,[]);
   f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_epay_alipay_released'");
   r=await f.call('/v1/packages',{method:'GET'});
-  assert.equal(r.body.paymentAvailable,true);
+  assert.equal(r.body.paymentAvailable,false);
   assert.deepEqual(r.body.paymentMethods,[]);
  } finally { f.sql.close(); }
 });
