@@ -48,6 +48,8 @@ export interface Env {
   /** Operator-approved prerequisites; absent = reject new Xiaodou merchant selection. */
   XIAODOU_SOURCE_IP_CONFIRMED?: string;
   XIAODOU_RSA2_SUBSCRIPTIONS_READY?: string;
+  XIAODOU_WECHAT_MERCHANT_APPROVED?: string;
+  XIAODOU_TRADE_SCOPE?: string;
 }
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };

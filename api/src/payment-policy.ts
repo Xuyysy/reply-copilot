@@ -66,7 +66,9 @@ export async function paymentControl(env:Env){
  if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
   // Prefer WeChat for new RSA2 checkouts while the Alipay path is being
   // investigated. The platform-release gate remains mandatory for both.
-  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
+  // Xiaodou WeChat is not approved for this merchant; a manual dashboard
+  // release checkbox cannot bypass this server-side merchant-approval gate.
+ if(env.XIAODOU_WECHAT_MERCHANT_APPROVED==='1'&&rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
  }
  // New orders use Xiaodou RSA2 only; Epay is retained solely for historical signed callbacks.

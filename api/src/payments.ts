@@ -1,4 +1,5 @@
 import {createMk99Checkout,refreshMk99Order,mk99Notify,adminMk99Check} from './mk99-payments';
+import {orderById,querySubscriptionPayment} from './subscription-settlement';
 export {mk99Notify,adminMk99Check};
 import {mk99Config} from './mk99';
 import { paymentControl, type PaymentChannel, type PaymentProvider } from "./payment-policy";
@@ -375,7 +376,24 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   const outTradeNo=String(event.outTradeNo??"");
   if(type.startsWith("PAYMENT_")){
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.merchant_provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
-    if(!transaction||transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+    if(!transaction){
+      // The vendor application-level notify URL is shared by credit packages
+      // and subscriptions. A signed callback for a subscription is only a
+      // trigger for a second, separately authenticated provider status query.
+      // No browser-supplied or webhook-only data can grant a subscription.
+      const subscription=await env.DB.prepare("SELECT t.order_id,t.amount_fen,t.payment_channel,t.merchant_account FROM subscription_payment_transactions t WHERE t.merchant_provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<{order_id:string;amount_fen:number;payment_channel:string;merchant_account:string}>();
+      if(!subscription)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+      if(subscription.merchant_account!==env.XIAODOU_APP_ID||subscription.payment_channel!=='ALIPAY_H5'||
+        event.grossAmountFen!==subscription.amount_fen||(type==='PAYMENT_SUCCEEDED'&&event.eventAmountFen!==subscription.amount_fen)||
+        (type!=='PAYMENT_SUCCEEDED'&&event.eventAmountFen!==0))
+        throw new ApiFailure(409,"PAYMENT_MISMATCH","小豆订阅通知金额或身份不一致。");
+      const order=await orderById(env,subscription.order_id);
+      if(!order||order.merchant_provider!=='xiaodou')throw new ApiFailure(404,"ORDER_NOT_FOUND","订阅订单不存在。");
+      const confirmed=await querySubscriptionPayment(env,order);
+      if(type==='PAYMENT_SUCCEEDED'&&!confirmed.paymentConfirmed)throw new ApiFailure(502,"SUBSCRIPTION_PAYMENT_UNCONFIRMED","小豆付款仍待签名查单确认。");
+      return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
+    }
+    if(transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
     const amount=event.eventAmountFen as number,gross=event.grossAmountFen;
     if(!Number.isSafeInteger(gross)||gross!==transaction.amount_fen||(type==="PAYMENT_SUCCEEDED"&&amount!==transaction.amount_fen)||(type!=="PAYMENT_SUCCEEDED"&&amount!==0))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付事件金额不匹配。");
     await recordProviderFeeProjection(env,transaction,event.feeProjection);
