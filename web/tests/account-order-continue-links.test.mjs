@@ -1,0 +1,20 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+
+const component=readFileSync(fileURLToPath(new URL('../src/components/account/AccountDashboard.tsx',import.meta.url)),'utf8');
+test('both order groups surface the original checkout actions without creating fresh orders',()=>{
+  assert.match(component,/data-subscription-continue/);
+  assert.match(component,/data-subscription-verify/);
+  assert.match(component,/data-credit-continue/);
+  assert.match(component,/t\("继续支付","Continue payment"\)/);
+  assert.match(component,/href=\{"\/subscription-checkout\/\?order="\+encodeURIComponent\(order\.id\)\}/);
+  assert.match(component,/href=\{"\/checkout\/\?order="\+encodeURIComponent\(order\.id\)\}/);
+  assert.match(component,/order\.status==='pending'&&order\.riskState==='clear'&&!order\.checkout\.paymentConfirmed/);
+  assert.match(component,/\["rsa2","epay"\]\.includes\(order\.payment_protocol\|\|""\)/);
+  assert.match(component,/order\.payment_status==="pending"&&order\.risk_state==="clear"/);
+  assert.match(component,/data-credit-orders open=\{/);
+  assert.match(component,/data-subscription-orders open=\{/);
+  assert.doesNotMatch(component,/onClick=\{\(\)=>.*\/v1\/orders.*POST/);
+});
