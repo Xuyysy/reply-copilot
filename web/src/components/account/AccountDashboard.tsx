@@ -142,6 +142,53 @@ export default function AccountDashboard() {
     }catch(error){if(notices.current!.isOwner(owner)){setOrderRefreshFeedback({orderId,message:error instanceof ApiError?readableError(error,language):paymentResumeMessage(error,language)});void load(true);}}
     finally{setContinuingOrderId(null);}
   }
+  // Explicit user action: resume the SAME Xiaodou credit order, never create a
+  // second recharge order. The API authenticates ownership and either returns
+  // a validated stored cashier or performs a signed-query-guarded reattempt.
+  async function continueXiaodouCredit(orderId:string){
+    if(refreshInFlight.current.has(orderId)||busy)return;
+    const owner=paymentOwner;
+    if(!owner)return;
+    refreshInFlight.current.add(orderId);
+    setContinuingOrderId(orderId);setOrderRefreshFeedback(null);
+    try{
+      const path="/v1/orders/"+encodeURIComponent(orderId);
+      type CreditCheckout={id:string;status:string;paymentProtocol?:string;paymentUrl?:string|null;paymentCashierOrigin?:string|null;paidAt?:number|null;creditedAt?:number|null};
+      const read=async()=>{
+        const result=await api<{order:CreditCheckout}>(path,{method:"GET"});
+        if(!notices.current!.isOwner(owner)||result.order.id!==orderId)throw new Error("ACCOUNT_CHANGED");
+        return result.order;
+      };
+      let current=await read();
+      if(current.paymentProtocol!=="rsa2"||current.status!=="pending"||current.paidAt!=null||current.creditedAt!=null)
+        throw new Error("ORDER_NOT_PAYABLE");
+      if(!current.paymentUrl){
+        // Never auto-run on mount/refresh: this call may create a NEW payment
+        // attempt under the original transaction but cannot create a new order.
+        const attempt=await api<{ok:boolean;orderStatus:string}>(path+"/attempts",{method:"POST",body:"{}"});
+        if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");
+        if(!attempt.ok||attempt.orderStatus!=="pending")throw new Error("PAYMENT_CASHIER_UNCONFIRMED");
+        current=await read();
+      }
+      if(current.status!=="pending"||current.paymentProtocol!=="rsa2"||current.paidAt!=null||current.creditedAt!=null
+        ||!current.paymentUrl||!current.paymentCashierOrigin)
+        throw new Error("PAYMENT_CASHIER_UNCONFIRMED");
+      if(!notices.current!.isOwner(owner))throw new Error("ACCOUNT_CHANGED");
+      rememberPayment(orderId);
+      navigateVerifiedCashier(current.paymentUrl,{allowedOrigin:current.paymentCashierOrigin});
+    }catch(error){
+      if(notices.current!.isOwner(owner)){
+        const message=error instanceof ApiError?readableError(error,language):
+          error instanceof Error&&error.message==="ACCOUNT_CHANGED"
+            ?t("当前账户已变化，请重新打开订单。","Account changed. Reopen the original order.")
+            :t("付款入口暂不可用，请先查验原订单，不要重复下单。","The cashier is unavailable. Verify the original order; do not place a second order.");
+        setOrderRefreshFeedback({orderId,message,code:error instanceof ApiError?error.code:undefined});
+        void load(true);
+      }
+    }finally{
+      refreshInFlight.current.delete(orderId);setContinuingOrderId(null);
+    }
+  }
   const checkAuthorization = useCallback(async () => {
     if (!validCode) { setAuthorization(code ? "invalid" : "none"); return; }
     setAuthorization("checking");
@@ -430,6 +477,8 @@ export default function AccountDashboard() {
     <Card data-orders-card className="min-w-0">
       <CardHeader><CardTitle>{t("订单记录", "Order history")}</CardTitle></CardHeader>
       <CardContent className="min-w-0 space-y-3">
+        {subscriptionOrders.filter(order=>order.status==='pending'&&order.riskState==='clear'&&!order.checkout.paymentConfirmed).slice(0,1).map(order=><div data-unresolved-order-shortcut key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm"><span>{t("有一笔订阅订单待付款","You have a subscription awaiting payment")} · {order.planCode.toUpperCase()}</span><Button size="sm" asChild><a href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button></div>)}
+        {activity?.orders.filter(order=>order.status==='awaiting_payment'&&order.payment_status==='pending'&&order.risk_state==='clear'&&(order.payment_protocol==='rsa2'||order.payment_protocol==='epay')).slice(0,1).map(order=><div data-unresolved-order-shortcut key={order.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm"><span>{t("有一笔额度包订单待付款","You have a credit pack awaiting payment")} · {order.package_name}</span>{order.payment_protocol==="rsa2"?<Button size="sm" type="button" disabled={busy||continuingOrderId===order.id||refreshingOrderId===order.id} onClick={()=>void continueXiaodouCredit(order.id)}>{continuingOrderId===order.id?t("正在恢复付款…","Restoring payment…"):t("继续支付","Continue payment")}</Button>:<Button size="sm" asChild><a href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button>}</div>)}
         <details data-subscription-orders className="group min-w-0 rounded-xl border border-border bg-card">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
             <span className="min-w-0"><strong className="block">{t("订阅订单", "Subscription orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{subscriptionOrders.length ? t(`共 ${subscriptionOrders.length} 条记录 · 点击展开`, `${subscriptionOrders.length} orders · Expand to view`) : t("暂无订阅订单", "No subscription orders")}</span></span>
@@ -439,7 +488,11 @@ export default function AccountDashboard() {
             {subscriptionOrders.length ? subscriptionOrders.map(order=><div key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0">
               <p className="min-w-0 break-words text-sm"><strong className="uppercase">{order.planCode}</strong> · ¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")} · {subscriptionStatus(order,language)}</p>
               {order.status==='paid'&&order.periodStatus==='queued'&&<span className="text-sm text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</span>}
-              <a className="button secondary" href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{['pending','unknown'].includes(order.status)?t("继续或查验原订单","Continue or verify order"):t("查看原订单","View original order")}</a>
+              {order.status==='pending'&&order.riskState==='clear'&&!order.checkout.paymentConfirmed
+                ? <Button size="sm" asChild><a data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button>
+                : ['pending','unknown','manual_review','refund_pending'].includes(order.status)
+                  ? <Button size="sm" variant="outline" asChild><a data-subscription-verify href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("查验付款状态","Check payment status")}</a></Button>
+                  : <Button size="sm" variant="outline" asChild><a href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("查看原订单","View original order")}</a></Button>}
             </div>) : <p className="text-sm text-muted-foreground">{t("暂无订阅订单。", "No subscription orders yet.")}</p>}
           </div>
         </details>
@@ -448,7 +501,10 @@ export default function AccountDashboard() {
             <span className="min-w-0"><strong className="block">{t("充值订单", "Top-up orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{activity === null ? t("暂时无法读取订单", "Orders unavailable") : activity.orders.length ? t(`共 ${activity.orders.length} 条记录 · 点击展开`, `${activity.orders.length} orders · Expand to view`) : t("暂无充值订单", "No top-up orders")}</span></span>
             <span aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
           </summary>
-          <div className="min-w-0 border-t border-border px-4 py-3">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="epay"&&order.payment_status==="pending"&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue this order")}</a>}{order.payment_protocol==="rsa2"&&["pending","unknown"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续或查验小豆原订单","Continue or verify Xiaodou order")}</a>}{order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</div>
+          <div className="min-w-0 border-t border-border px-4 py-3">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{order.payment_protocol==="rsa2"&&order.payment_status==="pending"&&order.risk_state==="clear"&&order.status==="awaiting_payment"
+  ?<Button type="button" data-credit-continue size="sm" aria-label={t("继续或查验小豆原订单","Continue or verify Xiaodou order")} disabled={busy||continuingOrderId===order.id||refreshingOrderId===order.id} onClick={()=>void continueXiaodouCredit(order.id)}>{continuingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:null}{continuingOrderId===order.id?t("正在恢复付款…","Restoring payment…"):t("继续支付","Continue payment")}</Button>
+  :(order.payment_protocol==="rsa2"||order.payment_protocol==="epay")&&["pending","unknown"].includes(order.payment_status||"")&&order.status==="awaiting_payment"
+   ?<Button size="sm" variant="outline" asChild><a data-credit-continue href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("查验原订单","Verify original order")}</a></Button>:null}{canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</div>
         </details>
       </CardContent>
     </Card>
