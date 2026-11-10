@@ -1,6 +1,8 @@
+import { REPLY_LANGUAGES } from "./language-support.js";
+
 export const VOICE_PROFILE_SCHEMA_VERSION = 1;
 export const VOICE_TONES = Object.freeze(["relaxed_friendly", "balanced_thoughtful", "confident_direct"]);
-export const VOICE_LANGUAGES = Object.freeze(["auto", "zh", "en"]);
+export const VOICE_LANGUAGES = REPLY_LANGUAGES;
 export const REPLY_LENGTHS = Object.freeze(["short", "medium", "adaptive"]);
 export const HUMOR_LEVELS = Object.freeze(["low", "medium", "high"]);
 
