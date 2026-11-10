@@ -25,11 +25,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_SHA: 9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
-      CI_RUN_ID: '42774902604'
+      SOURCE_SHA: 26e93b1006714f147605beabcae892ff87cadf2d
+      CI_RUN_ID: '42781310250'
       EXPECTED_PAGES_SOURCE: e2a64f5b9cf722cc6fa277f949d6bebb675c75ce
       EXPECTED_PAGES_DEPLOYMENT: 2ae576d5-c167-46ee-ad0a-e3a415b3b0d1
-      EXPECTED_WORKER_VERSION: b284a16d-31b2-41c0-b419-2c92aaeb1739
+      EXPECTED_WORKER_VERSION: c78996aa-be17-462c-b64b-7d76a5c6089b
+      EXPECTED_WORKER_COMMIT: 993fae6754fa1fdca157115491b59e22d126f0a6
       STAGING_D1_ID: cd44bb44-b525-42c4-b286-2cc84dae7fdb
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -48,7 +49,7 @@ jobs:
       - name: Checkout exact candidate SHA without GitHub credentials
         uses: actions/checkout@v4
         with:
-          ref: 9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
+          ref: 26e93b1006714f147605beabcae892ff87cadf2d
           fetch-depth: 0
           persist-credentials: false
 
@@ -91,16 +92,16 @@ jobs:
       - name: Download immutable Pages output from successful Push CI
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
-          run-id: 42774902604
+          name: staging-pages-26e93b1006714f147605beabcae892ff87cadf2d
+          run-id: 42781310250
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download signed provenance and SHA-256 inventory
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
-          run-id: 42774902604
+          name: staging-extension-26e93b1006714f147605beabcae892ff87cadf2d
+          run-id: 42781310250
           github-token: ${{ github.token }}
           path: dist/ci
 
@@ -149,9 +150,18 @@ jobs:
           root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-before.json"
-          jq -e --arg id "$EXPECTED_WORKER_VERSION" '
+          if ! jq -e --arg id "$EXPECTED_WORKER_VERSION" '
             .success and (([.result.deployments[0].versions[] | select(.version_id==$id and .percentage==100)] | length)==1)
-          ' "$RUNNER_TEMP/worker-before.json"
+          ' "$RUNNER_TEMP/worker-before.json" >/dev/null; then
+            current="$(jq -r '.result.deployments[0].versions[0].version_id // "unknown"' "$RUNNER_TEMP/worker-before.json")"
+            echo "::error::Staging Worker version changed since approval. Expected $EXPECTED_WORKER_VERSION; actual $current. Reconcile concurrent deployment before proceeding."
+            exit 1
+          fi
+          curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/versions/$EXPECTED_WORKER_VERSION" > "$RUNNER_TEMP/worker-annotated-version.json"
+          if ! jq -e --arg sha "$EXPECTED_WORKER_COMMIT" '.success and .result.annotations["workers/commit_sha"]==$sha' "$RUNNER_TEMP/worker-annotated-version.json" >/dev/null; then
+            echo "::error::Staging Worker source provenance no longer matches approved Prompt V2 commit."
+            exit 1
+          fi
           curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/staging-bindings-before.json"
           jq -e --arg db "$STAGING_D1_ID" '
             .success and
