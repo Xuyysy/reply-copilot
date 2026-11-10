@@ -22,6 +22,9 @@ export interface Env {
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
+  SUBSCRIPTIONS_ENABLED?: string;
+  SUBSCRIPTION_PURCHASES_ENABLED?: string;
+  SUBSCRIPTION_CHECKOUT_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;
   PAYMENT_PROVIDER?: string;
   MK99_BASE_URL?: string;
@@ -45,7 +48,6 @@ export interface Env {
   XIAODOU_EPAY_PID?: string;
   XIAODOU_EPAY_KEY?: string;
   XIAODOU_NETWORK_DIAGNOSTIC_ENABLED?: string;
-  /** Operator-approved prerequisites; absent = reject new Xiaodou merchant selection. */
   XIAODOU_SOURCE_IP_CONFIRMED?: string;
   XIAODOU_RSA2_SUBSCRIPTIONS_READY?: string;
   XIAODOU_WECHAT_MERCHANT_APPROVED?: string;
