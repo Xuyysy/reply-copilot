@@ -4,6 +4,8 @@ import { sessionFor, requireCsrf, takeRate } from './auth';
 import { requireWebOrigin, nowMs, uuid, sha256 } from './security';
 import { response } from './http';
 import { Mk99Client, mk99Config, Mk99Error, type Mk99PaymentEvent } from './mk99';
+import { XiaodouProviderError } from './xiaodou.js';
+import { configuredXiaodouMerchant } from './xiaodou-merchant';
 import { SUBSCRIPTION_PERIOD_MS } from '../../domain/subscription-policy.js';
 import { recordSubscriptionRisk } from './subscription-risk';
 import { subscriptionsEnabled } from './subscription-account';
@@ -13,6 +15,8 @@ import { subscriptionsEnabled } from './subscription-account';
 // subscription metrics are enabled. Historical order refresh may later be
 // enabled independently of new sales, after a migration is approved.
 const purchasesReady = (env:Env) => subscriptionsEnabled(env) && env.SUBSCRIPTION_PURCHASES_ENABLED==='1';
+
+export type VerifiedSubscriptionEvent=Omit<Mk99PaymentEvent,'provider'>&{provider:'mk99'|'xiaodou'};
 
 type Order = {
   id:string;user_id:string;kind:string;plan_version_id:string;status:string;
@@ -34,24 +38,24 @@ export async function orderById(env:Env,id:string):Promise<Order|null>{
    .bind(id).first<Order>();
 }
 
-function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
- const config=mk99Config(env);
+function validateOrder(env:Env,o:Order,event:VerifiedSubscriptionEvent):void{
+ const xiaodou=o.merchant_provider==='xiaodou',config=xiaodou?null:mk99Config(env);
  if(!['purchase','renewal','upgrade'].includes(o.kind))
    throw new ApiFailure(409,'SUBSCRIPTION_UPGRADE_NOT_READY','升级支付暂时不可结算。');
- if(o.status==='closed'||o.status==='refunded'||o.status==='failed'||o.status==='refund_pending'||o.status==='manual_review' ||
-    !['pending','unknown','paid'].includes(o.status) ||
-    !['pending','unknown','paid'].includes(o.payment_status)||o.risk_state!=='clear')
+ if(o.status==='closed'||o.status==='refunded'||o.status==='failed'||o.status==='refund_pending'||o.status==='manual_review'||
+    !['pending','unknown','paid'].includes(o.status)||!['pending','unknown','paid'].includes(o.payment_status)||o.risk_state!=='clear')
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_HELD','该订单当前不可结算，请人工核对。');
- if(o.merchant_provider!=='mk99'||o.merchant_account!==config.pid||o.notification_sign_type!==config.notifySignType||
-    o.payment_currency!=='CNY'||o.payment_amount_fen!==o.amount_fen||
+ const matchMerchant=xiaodou
+  ?o.merchant_account===env.XIAODOU_APP_ID&&/^mkid_[0-9a-f]{16}$/.test(o.notification_sign_type??'')
+  :o.merchant_provider==='mk99'&&o.merchant_account===config!.pid&&o.notification_sign_type===config!.notifySignType;
+ if(!matchMerchant||o.payment_currency!=='CNY'||o.payment_amount_fen!==o.amount_fen||
     (o.kind!=='upgrade'&&o.amount_fen!==o.price_fen)||o.duration_days!==30||
-    !['ALIPAY_H5','WECHAT_H5'].includes(o.payment_channel)||
-    o.provider_trade_id!==event.outTradeNo||
-    (o.provider_payment_id!=null&&o.provider_payment_id!==event.tradeNo)||
-    event.provider!=='mk99'||event.verification!=='authenticated_query'||
+    (xiaodou?o.payment_channel!=='ALIPAY_H5':!['ALIPAY_H5','WECHAT_H5'].includes(o.payment_channel))||
+    o.provider_trade_id!==event.outTradeNo||(o.provider_payment_id!=null&&o.provider_payment_id!==event.tradeNo)||
+    event.provider!==o.merchant_provider||event.verification!=='authenticated_query'||
     event.tradeStatus!=='TRADE_SUCCESS'||event.amountFen!==o.amount_fen||
     (event.currency!==undefined&&event.currency!=='CNY')||
-    (event.merchantId!==undefined&&event.merchantId!==config.pid)||
+    (event.merchantId!==undefined&&event.merchantId!==o.merchant_account)||
     (event.paytypeCode!==undefined&&event.paytypeCode!==(o.payment_channel==='WECHAT_H5'?'wxpay':'alipay'))||
     !/^[A-Za-z0-9_-]{1,128}$/.test(event.tradeNo))
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付结果与订阅订单不符。');
@@ -59,26 +63,27 @@ function validateOrder(env:Env,o:Order,event:Mk99PaymentEvent):void{
 
 // Record the authenticated money fact even when an expired or held period
 // cannot accept the amendment. Support can then reconcile the original charge.
-async function settleUpgrade(env:Env,o:Order,event:Mk99PaymentEvent,now:number){
- const eventKey='mk99-sub-paid:'+event.tradeNo;
- const evidence=await sha256(`authenticated_mk99_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
+async function settleUpgrade(env:Env,o:Order,event:VerifiedSubscriptionEvent,now:number){
+ const providerSql=o.merchant_provider==='xiaodou'?'xiaodou':'mk99';
+ const eventKey=o.merchant_provider+'-sub-paid:'+event.tradeNo;
+ const evidence=await sha256(`authenticated_${o.merchant_provider}_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
  const quote=await env.DB.prepare(`SELECT id FROM subscription_upgrade_quotes
    WHERE order_id=? AND user_id=? AND period_id=? AND to_version_id=? AND amount_fen=?`)
    .bind(o.id,o.user_id,o.target_period_id,o.plan_version_id,o.amount_fen).first();
  if(!quote)throw new ApiFailure(409,'SUBSCRIPTION_UPGRADE_NOT_READY','升级付款缺少有效报价记录。');
  const proof=`EXISTS(SELECT 1 FROM subscription_payment_events
-    WHERE transaction_id=? AND merchant_provider='mk99' AND provider_event_id=?
+    WHERE transaction_id=? AND merchant_provider='${providerSql}' AND provider_event_id=?
       AND event_type='PAYMENT_SUCCEEDED' AND amount_fen=? AND body_sha256=?)`;
  const proofParams=[o.transaction_id,eventKey,event.amountFen,evidence] as const;
  const claim=uuid();
  try{await env.DB.batch([
   env.DB.prepare(`INSERT INTO subscription_payment_events
      (id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at)
-    SELECT ?,t.id,'mk99',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,?
+    SELECT ?,t.id,'${providerSql}',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,?
     FROM subscription_payment_transactions t JOIN subscription_orders x ON x.id=t.order_id
     WHERE t.id=? AND x.id=? AND x.user_id=? AND x.kind='upgrade'
       AND x.status IN ('pending','unknown','paid') AND t.status IN ('pending','unknown','paid') AND t.risk_state='clear'
-      AND t.merchant_provider='mk99' AND t.provider_trade_id=?
+      AND t.merchant_provider='${providerSql}' AND t.provider_trade_id=?
       AND (t.provider_payment_id IS NULL OR t.provider_payment_id=?)
       AND t.amount_fen=? AND t.amount_fen=x.amount_fen
     ON CONFLICT(merchant_provider,provider_event_id) DO NOTHING`)
@@ -153,14 +158,15 @@ async function settleUpgrade(env:Env,o:Order,event:Mk99PaymentEvent,now:number){
  * D1 batch is an atomic SQLite transaction; the final assertions deliberately
  * abort it if any statement becomes a no-op due to a concurrent state change.
  */
-export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,event:Mk99PaymentEvent,now=nowMs()){
+export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,event:VerifiedSubscriptionEvent,now=nowMs()){
  validateOrder(env,o,event);
+ const providerSql=o.merchant_provider==='xiaodou'?'xiaodou':'mk99';
  if(o.kind==='upgrade')return settleUpgrade(env,o,event,now);
- const eventKey='mk99-sub-paid:'+event.tradeNo;
- const evidence=await sha256(`authenticated_mk99_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
+ const eventKey=o.merchant_provider+'-sub-paid:'+event.tradeNo;
+ const evidence=await sha256(`authenticated_${o.merchant_provider}_query:${o.provider_trade_id}:${event.tradeNo}:${event.amountFen}:TRADE_SUCCESS`);
  const claim=uuid(),periodId=uuid();
  const proof=`EXISTS(SELECT 1 FROM subscription_payment_events e
-    WHERE e.transaction_id=? AND e.merchant_provider='mk99'
+    WHERE e.transaction_id=? AND e.merchant_provider='${providerSql}'
       AND e.provider_event_id=? AND e.event_type='PAYMENT_SUCCEEDED'
       AND e.amount_fen=? AND e.body_sha256=?)`;
  const predecessor=`EXISTS(SELECT 1 FROM subscription_periods existing WHERE existing.user_id=x.user_id
@@ -172,10 +178,10 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
     WHERE user_id=? AND status='active' AND end_at<=?`).bind(now,o.user_id,now),
   env.DB.prepare(`INSERT INTO subscription_payment_events
     (id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at)
-    SELECT ? ,t.id,'mk99',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,?
+    SELECT ? ,t.id,'${providerSql}',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,?
     FROM subscription_payment_transactions t JOIN subscription_orders x ON x.id=t.order_id
     WHERE t.id=? AND x.id=? AND x.user_id=? AND x.status IN ('pending','unknown','paid')
-      AND t.status IN ('pending','unknown','paid') AND t.risk_state='clear' AND t.merchant_provider='mk99'
+      AND t.status IN ('pending','unknown','paid') AND t.risk_state='clear' AND t.merchant_provider='${providerSql}'
       AND t.provider_trade_id=? AND (t.provider_payment_id IS NULL OR t.provider_payment_id=?)
       AND t.amount_fen=? AND t.amount_fen=x.amount_fen
       AND x.amount_fen=(SELECT price_fen FROM subscription_plan_versions WHERE id=x.plan_version_id)
@@ -184,7 +190,7 @@ export async function reconcileVerifiedSubscriptionPurchase(env:Env,o:Order,even
     .bind(uuid(),eventKey,evidence,now,o.transaction_id,o.id,o.user_id,o.provider_trade_id,event.tradeNo,event.amountFen),
   env.DB.prepare(`UPDATE subscription_payment_transactions SET status='paid',paid_at=COALESCE(paid_at,?),
       provider_payment_id=COALESCE(provider_payment_id,?),updated_at=?
-    WHERE id=? AND merchant_provider='mk99' AND status IN ('pending','unknown','paid')
+    WHERE id=? AND merchant_provider='${providerSql}' AND status IN ('pending','unknown','paid')
       AND risk_state='clear' AND (provider_payment_id IS NULL OR provider_payment_id=?)
       AND ${proof}`)
     .bind(now,event.tradeNo,now,o.transaction_id,event.tradeNo,o.transaction_id,eventKey,event.amountFen,evidence),
@@ -256,6 +262,7 @@ export async function refreshSubscriptionMk99Payment(request:Request,env:Env,ord
 
 /** Same provider trust boundary for customer refresh and reauthenticated review. */
 export async function querySubscriptionPayment(env:Env,row:Order){
+ if(row.merchant_provider==='xiaodou')return queryXiaodouSubscriptionPayment(env,row);
  const config=mk99Config(env);
  if(row.merchant_provider!=='mk99'||row.merchant_account!==config.pid||row.notification_sign_type!==config.notifySignType)
    throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付平台与原订单不匹配。');
@@ -294,4 +301,43 @@ export async function querySubscriptionPayment(env:Env,row:Order){
  const settled=await reconcileVerifiedSubscriptionPurchase(env,row,event);
  return {ok:true,orderStatus:settled.status,verificationSource:'authenticated_https_query',
    paymentConfirmed:true,entitlementApplied:settled.status==='paid',period:settled.period};
+}
+
+/** A signed Xiaodou GET (not a browser return or checkout creation) is the
+ * financial truth for subscriptions. All original MK99 orders use their
+ * unchanged authenticated MK99 query and settlement path above. */
+async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
+ if(row.merchant_account!==env.XIAODOU_APP_ID||row.payment_channel!=='ALIPAY_H5'||
+    !/^mkid_[0-9a-f]{16}$/.test(row.notification_sign_type??''))
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','原订单与小豆商户身份不匹配。');
+ let client:ReturnType<typeof configuredXiaodouMerchant>;
+ try{client=configuredXiaodouMerchant(env);}catch{throw new ApiFailure(503,'XIAODOU_CONFIG_ERROR','小豆原订单暂无法查询，请稍后重试。');}
+ let result:Record<string,unknown>;
+ try{result=await client.queryPayment(row.provider_trade_id,{requestId:'xrh-sub-q-'+uuid()});}
+ catch(error){throw new ApiFailure(502,error instanceof XiaodouProviderError?error.code:'XIAODOU_QUERY_UNAVAILABLE','小豆暂时无法可信确认付款，请保留原订单。');}
+ if(result.outTradeNo!==row.provider_trade_id||result.currency!=='CNY'||result.amountFen!==row.amount_fen||result.channel!==row.payment_channel)
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆查单与原始订阅金额或渠道不一致。');
+ const status=result.status;
+ if(!['CREATED','PAYING','SUCCEEDED','FAILED','CLOSED','UNKNOWN'].includes(String(status)))
+   throw new ApiFailure(502,'XIAODOU_QUERY_INVALID','小豆返回了无法识别的支付状态。');
+ if(status!=='SUCCEEDED'){
+   // Xiaodou may later report a trustworthy paid fact for an old CLOSED/FAILED
+   // attempt. Never irrevocably mark the subscription failed or closed here.
+   return {ok:true,orderStatus:row.status,verificationSource:'xiaodou_signed_query',
+     paymentConfirmed:false,providerStatus:String(status)};
+ }
+ const tradeNo=result.openOrderId;
+ if(typeof tradeNo!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(tradeNo))
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆平台订单标识不符合约定。');
+ const verified:VerifiedSubscriptionEvent={provider:'xiaodou',verification:'authenticated_query',
+   outTradeNo:row.provider_trade_id,tradeNo,amountFen:row.amount_fen,tradeStatus:'TRADE_SUCCESS',
+   merchantId:env.XIAODOU_APP_ID,paytypeCode:'alipay',currency:'CNY'};
+ if(row.risk_state!=='clear'||['refund_pending','manual_review','refunded'].includes(row.status)){
+   validateOrder(env,{...row,status:'paid',payment_status:'paid',risk_state:'clear'},verified);
+   return {ok:true,orderStatus:row.status,verificationSource:'xiaodou_signed_query',
+     paymentConfirmed:true,entitlementApplied:false,providerStatus:'SUCCEEDED'};
+ }
+ const settled=await reconcileVerifiedSubscriptionPurchase(env,row,verified);
+ return {ok:true,orderStatus:settled.status,verificationSource:'xiaodou_signed_query',
+   paymentConfirmed:true,entitlementApplied:settled.status==='paid',period:settled.period,providerStatus:'SUCCEEDED'};
 }
