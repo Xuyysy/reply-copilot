@@ -546,7 +546,7 @@
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
-    if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
+    if (!live.ok || live.statusId!==activation.post.statusId) {
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
