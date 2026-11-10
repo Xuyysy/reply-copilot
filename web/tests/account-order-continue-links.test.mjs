@@ -19,3 +19,14 @@ test('both order groups surface the original checkout actions without creating f
   assert.match(component,/data-subscription-orders className=/);
   assert.doesNotMatch(component,/onClick=\{\(\)=>.*\/v1\/orders.*POST/);
 });
+
+test('Xiaodou credit resume button reads the original order, then safely reissues a new attempt only on explicit click',()=>{
+  assert.match(component,/async function continueXiaodouCredit\(orderId:string\)/);
+  assert.match(component,/path\+"\/attempts"/);
+  assert.match(component,/!current\.paymentUrl/);
+  assert.match(component,/attempt\.orderStatus!=="pending"/);
+  assert.match(component,/!notices\.current!\.isOwner\(owner\)/);
+  assert.match(component,/navigateVerifiedCashier\(current\.paymentUrl,\{allowedOrigin:current\.paymentCashierOrigin\}\)/);
+  assert.match(component,/onClick=\{\(\)=>void continueXiaodouCredit\(order\.id\)\}/);
+  assert.doesNotMatch(component,/continueXiaodouCredit\([^)]*\)\s*;\s*\}\s*,\s*\[\]/);
+});
