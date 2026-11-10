@@ -2,6 +2,7 @@ import {mk99Readiness} from './mk99';
 import type { Env } from './types';
 import { epayCheckout } from './epay.js';
 import { XiaodouClient } from './xiaodou.js';
+import {validateXiaodouCashierUrl} from './xiaodou-client';
 
 export type PaymentChannel = 'ALIPAY_H5' | 'WECHAT_H5';
 export type PaymentProvider = 'xiaodou' | 'xiaodou_epay' | 'mk99';
@@ -47,11 +48,13 @@ export async function paymentControl(env:Env){
   paymentProviderCredentialsConfigured(env,'xiaodou'),paymentProviderCredentialsConfigured(env,'xiaodou_epay'),
  ]);
  const mk99=await mk99Readiness(env);
+ const rsa2CashierOriginsConfigured=Array.isArray(env.XIAODOU_CASHIER_ORIGINS?.split(','))&&
+   env.XIAODOU_CASHIER_ORIGINS!.split(',').some(host=>validateXiaodouCashierUrl(host.trim()+'/checkout',env));
  const activeMerchant=['xiaodou','mk99','none'].includes(values.active_merchant??'xiaodou')?(values.active_merchant??'xiaodou'):'none';
  const mk99Channels={alipay:{enabled:enabled(values.payment_mk99_alipay_enabled),platformReleased:enabled(values.payment_mk99_alipay_released)},wechat:{enabled:enabled(values.payment_mk99_wechat_enabled),platformReleased:enabled(values.payment_mk99_wechat_released)}};
  const providers={
   mk99:{enabled:enabled(values.payment_mk99_enabled),...mk99},
-  rsa2:{enabled:enabled(values.payment_rsa2_enabled),credentialsConfigured:rsa2Credentials},
+  rsa2:{enabled:enabled(values.payment_rsa2_enabled),credentialsConfigured:rsa2Credentials,cashierOriginsConfigured:rsa2CashierOriginsConfigured},
   epay:{enabled:enabled(values.payment_epay_enabled),credentialsConfigured:epayCredentials},
  };
  const rsa2Channels={
@@ -63,7 +66,7 @@ export async function paymentControl(env:Env){
  };
  const canSell=environmentReady&&operatorEnabled;
  const methods:PaymentMethod[]=[];
- if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
+ if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured&&rsa2CashierOriginsConfigured){
   // Alipay first. WeChat remains gated until this merchant is approved.
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
   if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
@@ -95,6 +98,7 @@ export async function paymentControl(env:Env){
   if(!operatorEnabled)reasons.push('purchase_paused');
   if(!providerState.enabled)reasons.push('interface_disabled');
   if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
+  if(provider==='xiaodou'&&!rsa2CashierOriginsConfigured)reasons.push('cashier_origin_unconfigured');
   if(!channelState)reasons.push('channel_not_supported');
   else{
    if(!channelState.enabled)reasons.push('channel_disabled');
