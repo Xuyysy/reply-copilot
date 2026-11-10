@@ -52,9 +52,21 @@
       baselineEditors:editors};
   }
   function contextId(article) {
-    // Canonical ID from the target article's timestamp, not every status
-    // permalink (quoted cards may carry their own unrelated status IDs).
-    return globalThis.ZaneReplyCopilotContent.postExtractor.postIdentity?.(article)?.statusId || null;
+    // Canonical ID from the author's timestamp, never a random quote link.
+    const identity=globalThis.ZaneReplyCopilotContent.postExtractor.postIdentity?.(article);
+    if (identity?.statusId) return identity.statusId;
+    // Preserve fail-closed behavior for a modal with conflicting post links.
+    // An unknown parent can use verified text; conflicting IDs cannot.
+    const ids=new Set();
+    for(const anchor of article?.querySelectorAll?.('a[href*="/status/"]')||[]) {
+      if(anchor.closest?.('article')!==article)continue;
+      try{
+        const url=new URL(anchor.href);
+        const match=url.pathname.match(/^\\/[^/]+\\/status\\/(\\d+)\\/?$/);
+        if(url.protocol==='https:' && /^(?:www\\.)?(?:x\\.com|twitter\\.com)$/.test(url.hostname) && match)ids.add(match[1]);
+      }catch{}
+    }
+    return ids.size>1?'conflicting_status_links':null;
   }
   const normalized=text=>(text||'').replace(/\s+/g,' ').trim();
   function capturePost(post) {
