@@ -188,9 +188,18 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   if(!mock&&!real)throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付尚未开放，暂不能创建订单。");
   const channel=(body.channel??control.defaultMethod?.channel??"ALIPAY_H5") as PaymentChannel;
   if(!["ALIPAY_H5","WECHAT_H5"].includes(channel))throw new ApiFailure(400,"INVALID_PAYMENT_CHANNEL","请选择可用的支付方式。");
-  const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&
-    method.provider===(control.activeMerchant==='xiaodou'?'xiaodou':'mk99')&&
-    (body.provider===undefined||method.provider===body.provider));
+  // Only an exact synthetic test host plus in-process fixture flag can
+   // resurrect old Epay checkout scenarios for regression testing of historic
+   // callbacks. It is impossible for the real Production origin to match.
+   const fixtureLegacyEpay=env.ENVIRONMENT==='staging'&&env.API_ORIGIN==='https://api-staging.example.test'&&
+     (env as Env&{__TEST_LEGACY_EPAY_NEW_SALES?:string}).__TEST_LEGACY_EPAY_NEW_SALES==='1';
+   const legacyRequested=fixtureLegacyEpay&&body.provider==='xiaodou_epay';
+   const providerChoice=control.activeMerchant==='mk99'?'mk99':
+     legacyRequested?'xiaodou_epay':control.methods.some(x=>x.provider==='xiaodou')?'xiaodou':
+     fixtureLegacyEpay?'xiaodou_epay':'xiaodou';
+   const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&
+     method.provider===providerChoice&&
+     (body.provider===undefined||method.provider===body.provider));
   if(!selected)throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","该支付方式暂不可用。");
   const paymentProvider=selected.provider as PaymentProvider|"local_mock";
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
