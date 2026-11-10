@@ -1,21 +1,32 @@
 import {useEffect,useState,useRef} from 'react';
 import {Button} from '../ui/button';
+import {Input} from '../ui/input';
+import {Label} from '../ui/label';
 import type {Language} from '../../lib/language';
 type Settings={activeMerchant:'xiaodou'|'mk99'|'none';enabled:boolean;alipayEnabled:boolean;wechatEnabled:boolean;alipayReleased:boolean;wechatReleased:boolean};
-export default function MerchantPaymentSettings({control,language,locked,reason,write,reload}:{control:any;language:Language;locked:boolean;reason:string;write:(path:string,body:Record<string,unknown>)=>Promise<any>;reload:()=>Promise<any>}){
+export default function MerchantPaymentSettings({control,language,locked,reason,onReasonChange,write,reload}:{control:any;language:Language;locked:boolean;reason:string;onReasonChange:(next:string)=>void;write:(path:string,body:Record<string,unknown>)=>Promise<any>;reload:()=>Promise<any>}){
  const t=(zh:string,en:string)=>language==='zh'?zh:en;
  const safeCheckCodes=new Set(['MK99_CONFIG_ERROR','MK99_CONTRACT_UNCONFIRMED','MK99_HTTP_ERROR','MK99_NETWORK_UNCERTAIN','MK99_REQUEST_REJECTED','MK99_RESPONSE_INVALID','MK99_TIMEOUT']);
  const [settings,setSettings]=useState<Settings>({activeMerchant:'none',enabled:false,alipayEnabled:false,wechatEnabled:false,alipayReleased:false,wechatReleased:false}),[pending,setPending]=useState(false),[message,setMessage]=useState(''),[confirm,setConfirm]=useState<'alipay'|'wechat'|null>(null),guard=useRef(false);
  useEffect(()=>{if(control?.providers.mk99)setSettings({activeMerchant:control.activeMerchant,enabled:control.providers.mk99.enabled,alipayEnabled:control.channels.mk99.alipay.enabled,wechatEnabled:control.channels.mk99.wechat.enabled,alipayReleased:control.channels.mk99.alipay.platformReleased,wechatReleased:control.channels.mk99.wechat.platformReleased});},[control]);
  const busy=locked||pending;
+ const changed=settings.activeMerchant!==control.activeMerchant||settings.enabled!==control.providers.mk99.enabled||settings.alipayEnabled!==control.channels.mk99.alipay.enabled||settings.wechatEnabled!==control.channels.mk99.wechat.enabled||settings.alipayReleased!==control.channels.mk99.alipay.platformReleased||settings.wechatReleased!==control.channels.mk99.wechat.platformReleased;
  async function mutate(fn:()=>Promise<void>){if(busy||guard.current)return;guard.current=true;setPending(true);setMessage('');try{await fn();}catch(e){setMessage(e instanceof Error?e.message:t('操作失败','Action failed'));}finally{guard.current=false;setPending(false);}}
  const names:Record<string,string>={merchant_not_selected:t('当前未选择 MK99','MK99 is not selected'),environment_protection:t('环境支付保护关闭','Environment ceiling is off'),purchase_paused:t('全站收款暂停','Global purchases paused'),interface_disabled:t('接口未启用','Interface disabled'),credentials_missing:t('凭证缺失或无效','Credentials missing or invalid'),protocol_unconfirmed:t('签名与回调协议未确认','Signing and notification contract unconfirmed'),amount_contract_unconfirmed:t('币种及买家实付金额规则未确认','Currency and buyer total contract unconfirmed'),channel_disabled:t('渠道未启用','Channel disabled'),platform_release_unconfirmed:t('商户渠道许可未确认','Merchant channel approval unconfirmed')};
  const checkDisabledReason=!control.providers.mk99.credentialsConfigured?t('MK99 凭证缺失或无法导入，请检查服务端配置。','MK99 credentials are missing or could not be imported; check server configuration.'):!control.providers.mk99.protocolConfirmed?t('请先确认 MK99 请求与通知协议。','Confirm the MK99 request and notification contracts first.'):!control.providers.mk99.amountContractConfirmed?t('请先确认买家实付金额合同。','Confirm the buyer payment amount contract first.'):'';
- return <section className="space-y-3 rounded-lg border p-4" aria-labelledby="merchant-settings-title">
-  <h3 id="merchant-settings-title" className="font-semibold">{t('当前收款商家','Active payment merchant')}</h3>
-  <select className="w-full rounded border p-2" aria-label={t('当前收款商家','Active payment merchant')} disabled={busy} value={settings.activeMerchant} onChange={e=>setSettings(s=>({...s,activeMerchant:e.target.value as Settings['activeMerchant']}))}><option value="mk99">MK99</option><option value="xiaodou">{t('小豆','Xiaodou')}</option><option value="none">{t('暂停全部新收款','Pause all new payments')}</option></select>
-  <p className="text-sm text-muted-foreground">{t('保存后仅影响新订单。选择的商家不可用时暂停购买，不会自动切换至其他商家。','Saving affects new orders only. An unavailable merchant pauses purchases without falling back to another merchant.')}</p>
+ return <section className="space-y-4 rounded-xl border bg-card p-4 sm:p-5" aria-labelledby="merchant-settings-title">
+  <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="merchant-settings-title" className="text-base font-semibold">{t('选择收款商家','Choose payment merchant')}</h3><span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{t('额度包 + 四档订阅一起切换','Credit packs + all subscriptions')}</span></div>
+  <select className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium" aria-label={t('当前收款商家','Active payment merchant')} disabled={busy} value={settings.activeMerchant} onChange={e=>setSettings(s=>({...s,activeMerchant:e.target.value as Settings['activeMerchant']}))}><option value="mk99">MK99</option><option value="xiaodou">{t('小豆','Xiaodou')}</option>{control.activeMerchant==='none'&&<option value="none">{t('已暂停（当前配置）','Paused (current setting)')}</option>}</select>
+  <p className="text-xs leading-5 text-muted-foreground">{t('仅影响新订单，旧订单仍由原商家验签结算。切换小豆前必须通过 RSA2 支付宝、订阅与来源 IP 验收。','Only new orders follow the selection. Old orders settle with their original merchant. Xiaodou needs RSA2 Alipay, subscription and source-IP verification before switching.')}</p>
+  {changed&&<p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('你选择了新的配置，尚未保存；当前收款仍按原商家运行。','Your selection is a draft and is not saved; live payments still use the current merchant.')}</p>}
   {settings.activeMerchant==='mk99'&&<div className="space-y-3">
+   <div className="grid gap-2 sm:grid-cols-2">
+    {(['alipay','wechat'] as const).map(channel=><div key={channel} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-3 text-sm">
+     <span className="font-medium">{channel==='alipay'?t('支付宝','Alipay'):t('微信支付','WeChat Pay')}</span>
+     <span className={control.activeMerchant==='mk99'&&control.availability.mk99[channel].available?'text-emerald-700':'text-muted-foreground'}>{control.activeMerchant==='mk99'&&control.availability.mk99[channel].available?t('已可用','Available'):t('未就绪或未选中','Not active')}</span>
+    </div>)}
+   </div>
+   <details className="rounded-lg border bg-muted/20 p-3"><summary className="cursor-pointer text-sm font-medium">{t('管理 MK99 渠道与许可（高级）','Manage MK99 channels and approval (advanced)')}</summary><div className="space-y-3 pt-3">
    <p>MK99 · {t('凭证状态','Credentials')}: {control.providers.mk99.credentialsConfigured?t('格式检查通过','Format checks passed'):t('未就绪','Not ready')}</p>
    <p className="text-xs text-muted-foreground">{t('凭证存在不代表通道可用。商户许可、通知验签及实付金额合同分别校验。','Credential presence does not confirm channel availability. Merchant approval, notification verification, and the paid amount contract are checked separately.')}</p>
    <label className="flex gap-3"><input type="checkbox" checked={settings.enabled} disabled={busy} onChange={e=>setSettings(s=>({...s,enabled:e.target.checked}))}/>{t('启用 MK99 新订单','Enable MK99 new orders')}</label>
@@ -26,8 +37,19 @@ export default function MerchantPaymentSettings({control,language,locked,reason,
    </div>)}
    {confirm&&<div role="alert" className="rounded border p-3 space-y-2"><p>{t('请仅在 MK99 商户后台明确获准该渠道及当前业务后确认。公开文档中的渠道列表不能作为许可依据。','Confirm only after MK99 has approved this channel for this merchant and business. The public channel list is not approval.')}</p><Button disabled={busy} onClick={()=>{setSettings(s=>({...s,[confirm==='wechat'?'wechatReleased':'alipayReleased']:true}));setConfirm(null);}}>{t('我已核实','I have verified')}</Button><Button variant="outline" onClick={()=>setConfirm(null)}>{t('取消','Cancel')}</Button></div>}
    <details><summary>{t('MK99 高级设置','MK99 advanced settings')}</summary><div className="space-y-2 pt-2"><p>{t('协议确认','Protocol confirmed')}: {String(control.providers.mk99.protocolConfirmed)} · {t('实付金额合同确认','Paid total contract confirmed')}: {String(control.providers.mk99.amountContractConfirmed)}</p>{checkDisabledReason&&<p role="alert" className="text-sm text-amber-700">{checkDisabledReason}</p>}<Button variant="outline" disabled={busy||Boolean(checkDisabledReason)} onClick={()=>void mutate(async()=>{const r=await write('/v1/admin/mk99-platform-check',{reason:'MK99 read-only balance connectivity check'});if(r.ok)setMessage(t('余额只读接口已响应；这不代表支付渠道已开通。','Read-only balance endpoint responded; this does not confirm payment channel approval.'));else{const code=typeof r.code==='string'&&safeCheckCodes.has(r.code)?r.code:'MK99_NOT_READY';setMessage(`${t('只读余额检查失败','Read-only balance check failed')} · ${code}`);}})}>{pending?t('正在检测…','Checking…'):t('检测 API 连通性（只读余额）','Check API connectivity (read-only balance)')}</Button>{message&&<p role={message.includes('失败')||message.includes('failed')?'alert':'status'} className="text-sm">{message}</p>}</div></details>
+   </div></details>
   </div>}
-  <Button disabled={busy||reason.trim().length<8} onClick={()=>void mutate(async()=>{await write('/v1/admin/payment-control',{merchantSettings:settings,reason});await reload();setMessage(t('收款商家已保存并重新读取；最终可用方式以服务端结果为准。','Merchant saved and reloaded. Effective methods follow the server result.'));})}>{t('保存收款商家','Save payment merchant')}</Button>
+  {settings.activeMerchant==='xiaodou'&&<div className="rounded-lg border bg-muted/20 p-3 text-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2"><strong>{t('小豆 · RSA2 支付宝','Xiaodou · RSA2 Alipay')}</strong><span className="text-muted-foreground">{control.activeMerchant==='xiaodou'&&control.availability.rsa2.alipay.available?t('当前可用','Available now'):t('待验证','Pending verification')}</span></div>
+    <p className="mt-2 text-xs leading-5 text-muted-foreground">{t('微信支付尚未开通；易支付不再处理新订单。若 RSA2 订阅或来源 IP 尚未通过验收，保存时服务器会拒绝切换。','WeChat is not yet approved and Epay is retired for new sales. The server blocks switching until RSA2 subscription and source-IP checks pass.')}</p>
+  </div>}
+  {settings.activeMerchant==='none'&&<p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{t('停止创建所有新支付订单，历史订单仍可继续回调和对账。','Stops all new checkout orders. Historical payments can still be verified and reconciled.')}</p>}
+  <div className="space-y-2 border-t pt-4">
+   <Label htmlFor="admin-security-reason">{t('变更原因（保存配置时需要，至少 8 字）','Reason for changes (8+ characters when saving)')}</Label>
+   <Input id="admin-security-reason" value={reason} onChange={e=>onReasonChange(e.target.value)} placeholder={t('例如：切换至已验收的收款商家','e.g. Switching to the verified payment merchant')} maxLength={500}/>
+   <p className="text-xs text-muted-foreground">{t('单纯查看状态或检查 API 无需填写原因。','Viewing status and read-only API checks need no typed reason.')}</p>
+  </div>
+  <Button disabled={busy||!changed||reason.trim().length<8} onClick={()=>void mutate(async()=>{await write('/v1/admin/payment-control',{merchantSettings:settings,reason});await reload();setMessage(t('收款商家已保存并重新读取；最终可用方式以服务端结果为准。','Merchant saved and reloaded. Effective methods follow the server result.'));})}>{pending?t('正在保存…','Saving…'):t('保存收款商家','Save payment merchant')}</Button>
   {message&&<p role="status">{message}</p>}
  </section>;
 }
