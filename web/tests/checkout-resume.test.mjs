@@ -32,7 +32,7 @@ test('Xiaodou credit checkout exposes original-order resume without generating a
  const {fileURLToPath}=await import('node:url');
  const source=readFileSync(fileURLToPath(new URL('../src/pages/checkout.astro',import.meta.url)),'utf8');
  assert.match(source,/id="relaunch-rsa2"/);
- assert.match(source,/paymentProtocol==="rsa2"&&next.status==="pending"/);
+ assert.match(source,/paymentProtocol==="rsa2"&&\["pending","unknown"\]\.includes\(next\.status\)/);
  assert.match(source,/\/v1\/orders\/.*\/attempts/);
  const account=readFileSync(fileURLToPath(new URL('../src/components/account/AccountDashboard.tsx',import.meta.url)),'utf8');
  assert.match(account,/payment_protocol==="rsa2"/);
