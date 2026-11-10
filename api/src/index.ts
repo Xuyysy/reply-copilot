@@ -1,4 +1,5 @@
 import {adminCreator} from './creator-momentum';
+import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
 import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOrders} from './subscription-checkout';
@@ -91,6 +92,7 @@ export default {
       if (request.method === "POST" && path === "/v1/auth/logout") return await logout(request, env);
       if (request.method === "GET" && path === "/v1/me") return await me(request, env);
       if (request.method === "GET" && path === "/v1/entitlements") return await entitlements(request, env);
+      if (request.method === "GET" && path === "/v1/creator-momentum/insights") return await creatorMomentumInsights(request,env);
       if (request.method === "GET" && path === "/v1/usage") return await usage(request, env);
       if (request.method === "GET" && path === "/v1/activity") return await activity(request,env);
       if (request.method === "GET" && path === "/v1/packages") return await packages(request,env);

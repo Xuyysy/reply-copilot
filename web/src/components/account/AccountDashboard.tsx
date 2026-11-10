@@ -1,4 +1,5 @@
 import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
+import CreatorMomentumIntelligence from './CreatorMomentumIntelligence';
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
@@ -401,6 +402,7 @@ export default function AccountDashboard() {
       </DialogContent>
     </Dialog>
 
+    <CreatorMomentumIntelligence userId={account.user.userId} />
     <Card data-orders-card className="min-w-0">
       <CardHeader><CardTitle>{t("订单记录", "Order history")}</CardTitle></CardHeader>
       <CardContent className="min-w-0 space-y-3">
