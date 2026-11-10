@@ -7,6 +7,10 @@ on:
         description: Type STAGING-ONLY to confirm Worker + Pages release
         type: string
         required: true
+      d1_read_approval:
+        description: Type APPROVE-STAGING-D1-READ to separately authorize the existing read-only Staging D1 SQL preflight
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -18,19 +22,19 @@ concurrency:
 
 jobs:
   staging-rsa2:
-    if: github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/main' && github.actor == 'Xuyysy' && inputs.confirmation == 'STAGING-ONLY'
+    if: github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/main' && github.actor == 'Xuyysy' && inputs.confirmation == 'STAGING-ONLY' && inputs.d1_read_approval == 'APPROVE-STAGING-D1-READ'
     environment:
       name: staging
       url: https://staging.x-reply-helper.top
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
-      SOURCE_SHA: 26e93b1006714f147605beabcae892ff87cadf2d
-      CI_RUN_ID: '42781310250'
+      SOURCE_SHA: 9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
+      CI_RUN_ID: '42774902604'
       EXPECTED_PAGES_SOURCE: e2a64f5b9cf722cc6fa277f949d6bebb675c75ce
       EXPECTED_PAGES_DEPLOYMENT: 2ae576d5-c167-46ee-ad0a-e3a415b3b0d1
-      EXPECTED_WORKER_VERSION: c78996aa-be17-462c-b64b-7d76a5c6089b
-      EXPECTED_WORKER_COMMIT: 993fae6754fa1fdca157115491b59e22d126f0a6
+      EXPECTED_WORKER_VERSION: b284a16d-31b2-41c0-b419-2c92aaeb1739
+      EXPECTED_WORKER_DEPLOYMENT: 771537fa-e01d-4033-a834-59029275b3a0
       STAGING_D1_ID: cd44bb44-b525-42c4-b286-2cc84dae7fdb
       GH_TOKEN: ${{ github.token }}
     steps:
@@ -49,7 +53,7 @@ jobs:
       - name: Checkout exact candidate SHA without GitHub credentials
         uses: actions/checkout@v4
         with:
-          ref: 26e93b1006714f147605beabcae892ff87cadf2d
+          ref: 9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
           fetch-depth: 0
           persist-credentials: false
 
@@ -92,7 +96,7 @@ jobs:
       - name: Download immutable Pages output from successful Push CI
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-26e93b1006714f147605beabcae892ff87cadf2d
+          name: staging-pages-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
           run-id: 42781310250
           github-token: ${{ github.token }}
           path: web/dist
@@ -100,7 +104,7 @@ jobs:
       - name: Download signed provenance and SHA-256 inventory
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-26e93b1006714f147605beabcae892ff87cadf2d
+          name: staging-extension-9c5906f556b1ad22a2c47eb644c58ad7c0fe9315
           run-id: 42781310250
           github-token: ${{ github.token }}
           path: dist/ci
@@ -157,9 +161,13 @@ jobs:
             echo "::error::Staging Worker version changed since approval. Expected $EXPECTED_WORKER_VERSION; actual $current. Reconcile concurrent deployment before proceeding."
             exit 1
           fi
-          curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/versions/$EXPECTED_WORKER_VERSION" > "$RUNNER_TEMP/worker-annotated-version.json"
-          if ! jq -e --arg sha "$EXPECTED_WORKER_COMMIT" '.success and .result.annotations["workers/commit_sha"]==$sha' "$RUNNER_TEMP/worker-annotated-version.json" >/dev/null; then
-            echo "::error::Staging Worker source provenance no longer matches approved Prompt V2 commit."
+          if ! jq -e --arg id "$EXPECTED_WORKER_DEPLOYMENT" '.success and .result.deployments[0].id==$id' "$RUNNER_TEMP/worker-before.json" >/dev/null; then
+            echo "::error::Staging deployment changed after the owner's accepted-V1 rollback. Stop; reconcile before any deployment."
+            exit 1
+          fi
+          curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/deployments/$EXPECTED_WORKER_DEPLOYMENT" > "$RUNNER_TEMP/worker-rollback-deployment.json"
+          if ! jq -e '.success and .result.annotations["workers/message"]=="User-requested rollback from Prompt V2 to accepted Staging V1; keep previous runtime and bindings, no D1 or Production change"' "$RUNNER_TEMP/worker-rollback-deployment.json" >/dev/null; then
+            echo "::error::Expected user-approved Staging V1 rollback evidence not found; do not restore Prompt V2."
             exit 1
           fi
           curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/staging-bindings-before.json"
@@ -187,7 +195,7 @@ jobs:
             .result[0].results[0].tx==.result[0].results[0].backup_tx and
             .result[0].results[0].events==.result[0].results[0].backup_events
           ' "$RUNNER_TEMP/d1-preflight.json"
-          echo "PASS: pinned Staging Worker/Pages, safe MK99 routing, D1 0025 and preserved snapshots."
+          echo "PASS: accepted Staging V1 rollback pinned, Pages matched, MK99 active, D1 0025 preserved after separately authorized read."
 
       - name: Deploy pinned RSA2 Staging Worker while retaining existing vars and secrets
         id: worker_release
@@ -272,7 +280,8 @@ jobs:
         run: |
           echo "### Staging RSA2 release (no Production)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Pinned Staging Worker previous version: $EXPECTED_WORKER_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pinned accepted Staging V1 Worker version: $EXPECTED_WORKER_VERSION"
+          echo "- Pinned accepted V1 rollback deployment: $EXPECTED_WORKER_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
           echo "- Pinned Staging Pages previous deployment: $EXPECTED_PAGES_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
           echo "- Staging migration 0025 was applied earlier; no remote D1 mutations by this workflow" >> "$GITHUB_STEP_SUMMARY"
           echo "- MK99 active merchant and Production secrets/config remain untouched" >> "$GITHUB_STEP_SUMMARY"
