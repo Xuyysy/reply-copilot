@@ -14,7 +14,7 @@ test("explicit Zane Voice Profile influences prompt only when selected", () => {
   const profile = createZaneVoiceProfile();
   const prompts = buildPrompts({ postContext: { text: "A casual post" }, voiceProfile: profile });
   assert.ok(prompts.system.includes('"name":"Zane"'));
-  assert.ok(prompts.system.includes("Writing samples are style references only"));
+  assert.ok(prompts.system.includes("do not copy distinctive phrases from Voice Profile samples"));
 });
 
 test("post and sample prompt injection are framed as untrusted style/content", () => {
