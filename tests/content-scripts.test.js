@@ -167,4 +167,5 @@ test("reply activation keeps canonical ID across translation without relaxing ta
   const source=await readFile(new URL("../content/content-script.js",import.meta.url),"utf8");
   assert.match(source,/live.statusId!==activation.post.statusId/);
   assert.doesNotMatch(source,/live.sourceText!==activation.post.sourceText/);
+  assert.doesNotMatch(source,/activation\.control!==control/); // React may replace the action button between down/click.
 });
