@@ -68,13 +68,9 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      {switchRow('rsa2AlipayEnabled',t('支付宝 · ALIPAY_H5','Alipay · ALIPAY_H5'),control.availability.rsa2.alipay,'rsa2','rsa2Alipay')}
      <p className="pl-8 text-sm">{t('平台放行','Platform release')}: {status(settings.rsa2AlipayReleased)}{settings.rsa2AlipayReleased&&<Button className="ml-2" variant="outline" size="sm" disabled={locked} onClick={()=>revokePlatformRelease('rsa2AlipayReleased')}>{t('撤销确认','Revoke confirmation')}</Button>}</p>
     </section>
-    <section className="space-y-3 rounded-lg border p-4" aria-labelledby="epay-settings-title">
-     <h3 id="epay-settings-title" className="font-semibold">易支付 Epay</h3>
-     <p className="text-sm text-muted-foreground">{t('凭证','Credentials')}: {status(control.providers.epay.credentialsConfigured===true)} · {control.providers.epay.credentialsConfigured?t('已配置','Configured'):t('缺失或无效（不显示密钥内容）','Missing or invalid (values hidden)')}</p>
-     {switchRow('epayEnabled',t('启用易支付新订单','Enable Epay for new orders'))}
-     {switchRow('epayAlipayEnabled',t('支付宝','Alipay'),control.availability.epay.alipay,'epay','epayAlipay')}
-     <p className="pl-8 text-sm">{t('平台放行','Platform release')}: {status(settings.epayAlipayReleased)}{settings.epayAlipayReleased&&<Button className="ml-2" variant="outline" size="sm" disabled={locked} onClick={()=>revokePlatformRelease('epayAlipayReleased')}>{t('撤销确认','Revoke confirmation')}</Button>}</p>
-     <p className="text-xs text-muted-foreground">{t('易支付目前只支持支付宝新订单；历史通知仍按原协议验签。','Epay supports Alipay only for new orders. Historical notifications continue using their original verification protocol.')}</p>
+    <section className="space-y-2 rounded-lg border p-4" aria-labelledby="epay-settings-title">
+      <h3 id="epay-settings-title" className="font-semibold">{t('易支付：历史协议（不再支持新收款）','Epay: historical only (no new checkouts)')}</h3>
+      <p className="text-sm text-muted-foreground">{t('新订单已统一使用小豆 RSA2。保留旧易支付密钥及签名回调，仅用于历史订单核对；本面板不再提供易支付收款开关。','All new Xiaodou checkouts use RSA2. Keep legacy Epay credentials and signed callbacks for existing orders only; no Epay sales toggles are offered here.')}</p>
     </section>
     {pendingRelease&&<div role="alert" className="space-y-3 rounded-lg border border-amber-400 bg-amber-50 p-4">
      <p>{t('请先确认你已在小豆商户后台核实该支付接口、通道和当前申报交易形态已获准。此勾选只记录人工确认，不会查询或改变小豆权限。','Confirm that the provider, channel, and declared trade scope are approved in Xiaodou merchant settings. This records your confirmation only; it does not query or change Xiaodou permissions.')}</p>
