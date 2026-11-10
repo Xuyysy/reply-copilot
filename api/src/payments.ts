@@ -15,6 +15,7 @@ import { response } from "./http";
 import { balance } from "./quota";
 import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, reconcileFeeProjection, webhookEventMatchesStatus, XiaodouClient, XiaodouProviderError, safeProviderResponseDiagnostic, xiaodouWebhookIsEnabled } from "./xiaodou.js";
 import {createConfiguredXiaodouClient,validateXiaodouCashierUrl} from './xiaodou-client';
+import {settleXiaodouSubscriptionWebhook} from './subscription-xiaodou-notify';
 
 export type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number;provider_fee_projection_status?:string;provider_fee_projection_json?:string|null;provider_fee_projection_issue?:string|null;payment_protocol?:"rsa2"|"epay";payment_channel?:"ALIPAY_H5"|"WECHAT_H5"|null;epay_pid?:string|null;epay_trade_no?:string|null;merchant_provider?:string;merchant_account?:string|null;notification_sign_type?:string|null;provider_payment_id?:string|null;amount_contract?:string|null;risk_state?:string };
 type PaymentEvent = { eventId:string;eventType:string;amountFen:number;currency:string;bodySha256?:string;epayTradeNo?:string };
@@ -375,6 +376,13 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   if(!webhookEventMatchesStatus(event))throw new ApiFailure(409,"PAYMENT_EVENT_STATUS_MISMATCH","支付事件类型、状态或金额格式不匹配。");
   if(event.currency!==undefined&&event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   const outTradeNo=String(event.outTradeNo??"");
+  // Route all native RSA2 events by the immutable order namespace. Both
+  // product types share the app-level notifyUrl; NEVER grant permanent credits
+  // for a paid subscription. Legacy Epay still has its separate signed callback.
+  if(outTradeNo.startsWith("XRHS_")){
+    await settleXiaodouSubscriptionWebhook(env,outTradeNo,event,verified);
+    return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
+  }
   if(type.startsWith("PAYMENT_")){
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.merchant_provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
     if(!transaction||transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
