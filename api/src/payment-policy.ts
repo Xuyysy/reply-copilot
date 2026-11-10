@@ -69,16 +69,12 @@ export async function paymentControl(env:Env){
   if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
  }
- // Epay has its own Alipay controls and release confirmation. RSA2 and Epay
- // never borrow each other's release state. If RSA2 Alipay is ready it wins;
- // Epay is only the separately configured fallback when its own gates pass.
- if(canSell&&activeMerchant==='xiaodou'&&providers.epay.enabled&&providers.epay.credentialsConfigured&&epayChannels.alipay.enabled&&epayChannels.alipay.platformReleased
-   &&!methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
+ // New orders use Xiaodou RSA2 only; Epay is retained solely for historical signed callbacks.
  if(canSell&&activeMerchant==='mk99'&&providers.mk99.enabled&&mk99.credentialsConfigured&&mk99.protocolConfirmed&&mk99.amountContractConfirmed){
   if(mk99Channels.wechat.enabled&&mk99Channels.wechat.platformReleased)methods.push({provider:'mk99',channel:'WECHAT_H5'});
   if(mk99Channels.alipay.enabled&&mk99Channels.alipay.platformReleased)methods.push({provider:'mk99',channel:'ALIPAY_H5'});
  }
- const defaultMethod=methods.find(method=>method.provider==='xiaodou')??methods[0]??null;
+ const defaultMethod=methods[0]??null;
  const gateReasons=(provider:PaymentProvider,channel:'alipay'|'wechat')=>{
   const providerState=providers[provider==='mk99'?'mk99':provider==='xiaodou'?'rsa2':'epay'],channelState=provider==='mk99'?mk99Channels[channel]:provider==='xiaodou'?rsa2Channels[channel]:channel==='alipay'?epayChannels.alipay:null;
   const reasons:string[]=[];
@@ -87,6 +83,7 @@ export async function paymentControl(env:Env){
   if(provider==='mk99'&&!mk99.amountContractConfirmed)reasons.push('amount_contract_unconfirmed');
   if(!environmentReady)reasons.push('environment_protection');
   if(!operatorEnabled)reasons.push('purchase_paused');
+  if(provider==='xiaodou_epay')reasons.push('legacy_protocol_not_for_new_orders');
   if(!providerState.enabled)reasons.push('interface_disabled');
   if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
   if(!channelState)reasons.push('channel_not_supported');

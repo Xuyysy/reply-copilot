@@ -71,10 +71,10 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
     <section className="space-y-3 rounded-lg border p-4" aria-labelledby="epay-settings-title">
      <h3 id="epay-settings-title" className="font-semibold">易支付 Epay</h3>
      <p className="text-sm text-muted-foreground">{t('凭证','Credentials')}: {status(control.providers.epay.credentialsConfigured===true)} · {control.providers.epay.credentialsConfigured?t('已配置','Configured'):t('缺失或无效（不显示密钥内容）','Missing or invalid (values hidden)')}</p>
-     {switchRow('epayEnabled',t('启用易支付新订单','Enable Epay for new orders'))}
+     <p role="status" className="text-sm">{t('易支付已退出新订单路由，仅保留旧订单的签名通知与历史核对；旧配置不能开启新收款。','Epay is retired for new sales. Historical signed callbacks and reconciliation remain; legacy settings cannot enable sales.')}</p>
      {switchRow('epayAlipayEnabled',t('支付宝','Alipay'),control.availability.epay.alipay,'epay','epayAlipay')}
      <p className="pl-8 text-sm">{t('平台放行','Platform release')}: {status(settings.epayAlipayReleased)}{settings.epayAlipayReleased&&<Button className="ml-2" variant="outline" size="sm" disabled={locked} onClick={()=>revokePlatformRelease('epayAlipayReleased')}>{t('撤销确认','Revoke confirmation')}</Button>}</p>
-     <p className="text-xs text-muted-foreground">{t('易支付目前只支持支付宝新订单；历史通知仍按原协议验签。','Epay supports Alipay only for new orders. Historical notifications continue using their original verification protocol.')}</p>
+     <p className="text-xs text-muted-foreground">{t('新订单只使用小豆 RSA2；易支付历史通知仍按原协议验签。','New Xiaodou orders use RSA2 only. Historical Epay notifications continue to use their original protocol.')}</p>
     </section>
     {pendingRelease&&<div role="alert" className="space-y-3 rounded-lg border border-amber-400 bg-amber-50 p-4">
      <p>{t('请先确认你已在小豆商户后台核实该支付接口、通道和当前申报交易形态已获准。此勾选只记录人工确认，不会查询或改变小豆权限。','Confirm that the provider, channel, and declared trade scope are approved in Xiaodou merchant settings. This records your confirmation only; it does not query or change Xiaodou permissions.')}</p>

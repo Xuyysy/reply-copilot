@@ -14,7 +14,7 @@ export default function MerchantPaymentSettings({control,language,locked,reason,
  return <section className="space-y-3 rounded-lg border p-4" aria-labelledby="merchant-settings-title">
   <h3 id="merchant-settings-title" className="font-semibold">{t('当前收款商家','Active payment merchant')}</h3>
   <select className="w-full rounded border p-2" aria-label={t('当前收款商家','Active payment merchant')} disabled={busy} value={settings.activeMerchant} onChange={e=>setSettings(s=>({...s,activeMerchant:e.target.value as Settings['activeMerchant']}))}><option value="mk99">MK99</option><option value="xiaodou">{t('小豆','Xiaodou')}</option><option value="none">{t('暂停全部新收款','Pause all new payments')}</option></select>
-  <p className="text-sm text-muted-foreground">{t('保存后仅影响新订单。选择的商家不可用时暂停购买，不会自动切换至其他商家。','Saving affects new orders only. An unavailable merchant pauses purchases without falling back to another merchant.')}</p>
+  <p className="text-sm text-muted-foreground">{t('此商家开关同时决定额度包和订阅的新订单；旧订单继续使用原商家。小豆 RSA2 订阅结算尚未验收，后台会阻止切换。','One switch controls new credit-package and subscription orders. Old orders remain with their original merchant. Switching to Xiaodou is blocked until RSA2 subscription settlement is verified.')}</p>
   {settings.activeMerchant==='mk99'&&<div className="space-y-3">
    <p>MK99 · {t('凭证状态','Credentials')}: {control.providers.mk99.credentialsConfigured?t('格式检查通过','Format checks passed'):t('未就绪','Not ready')}</p>
    <p className="text-xs text-muted-foreground">{t('凭证存在不代表通道可用。商户许可、通知验签及实付金额合同分别校验。','Credential presence does not confirm channel availability. Merchant approval, notification verification, and the paid amount contract are checked separately.')}</p>

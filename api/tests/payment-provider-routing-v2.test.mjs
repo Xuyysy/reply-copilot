@@ -43,7 +43,7 @@ test('RSA2-only WeChat method is exposed only when its interface, channel, crede
  }finally{f.sql.close();}
 });
 
-test('RSA2 and Epay Alipay enablement and release gates are independent; RSA2 takes priority',async()=>{
+test('new Xiaodou orders are RSA2-only even when Epay legacy settings are enabled',async()=>{
  const f=fixture({released:false});epayCredentials(f);
  try{
   set(f,{payment_rsa2_enabled:true,payment_rsa2_alipay_enabled:true,payment_rsa2_alipay_released:true,payment_epay_enabled:true,payment_epay_alipay_enabled:true,payment_epay_alipay_released:false});
@@ -51,10 +51,10 @@ test('RSA2 and Epay Alipay enablement and release gates are independent; RSA2 ta
   assert.deepEqual(result.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
   set(f,{payment_rsa2_alipay_released:false,payment_epay_alipay_released:true});
   result=await f.call('/v1/packages',{method:'GET'});
-  assert.deepEqual(result.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(result.body.paymentMethods,[]);
   set(f,{payment_rsa2_enabled:false});
   result=await f.call('/v1/packages',{method:'GET'});
-  assert.deepEqual(result.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(result.body.paymentMethods,[]);
  }finally{f.sql.close();}
 });
 
@@ -63,7 +63,7 @@ test('Epay supports Alipay only; explicit WeChat order request is rejected witho
  try{
   set(f,{payment_epay_alipay_enabled:true,payment_epay_alipay_released:true,payment_rsa2_enabled:false});
   const available=await f.call('/v1/packages',{method:'GET'});
-  assert.deepEqual(available.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(available.body.paymentMethods,[]);
   const rejected=await f.call('/v1/orders',{body:{packageId:'starter',channel:'WECHAT_H5'}});
   assert.equal(rejected.status,503);
   assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,0);

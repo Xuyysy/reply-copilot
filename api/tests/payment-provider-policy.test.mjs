@@ -68,7 +68,7 @@ test('WeChat is the preferred RSA2 channel when both channels are enabled and pl
  f.sql.close();
 });
 
-test('legacy Epay Alipay sales require only their own channel and release gates',async()=>{
+test('legacy Epay release flags do not enable new checkout orders',async()=>{
  const f=enableEpaySales(fixture({released:false}));
  f.env.XIAODOU_EPAY_GATEWAY='https://gateway.example.test/submit.php';
  f.env.XIAODOU_EPAY_PID='12345';
@@ -80,7 +80,7 @@ test('legacy Epay Alipay sales require only their own channel and release gates'
   f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_epay_alipay_released'");
   r=await f.call('/v1/packages',{method:'GET'});
   assert.equal(r.body.paymentAvailable,true);
-  assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(r.body.paymentMethods,[]);
  } finally { f.sql.close(); }
 });
 
