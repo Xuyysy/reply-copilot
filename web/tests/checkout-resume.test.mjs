@@ -25,3 +25,16 @@ test('explicit unknown-state refresh preserves trusted provider reconciliation w
  const calls=[];let reads=0;const r=await resume.loadOrderCheckout(id,async(path,opts)=>{calls.push([path,opts.method]);if(opts.method==='POST')return {ok:true,orderStatus:'paid',verificationSource:'authenticated_https_query'};reads++;return {order:{...order,status:reads===1?'unknown':'paid',creditedAt:reads===1?null:123}};},{queryUnknown:true});
  assert.deepEqual(calls.map(c=>c[1]),['GET','POST','GET']);assert.equal(r.order.status,'paid');assert.equal(r.verified,false);
 });
+
+
+test('Xiaodou credit checkout exposes original-order resume without generating another order',()=>{
+ const {readFileSync}=require('node:fs');
+ const {fileURLToPath}=require('node:url');
+ const source=readFileSync(fileURLToPath(new URL('../src/pages/checkout.astro',import.meta.url)),'utf8');
+ assert.match(source,/id="relaunch-rsa2"/);
+ assert.match(source,/paymentProtocol==="rsa2"&&next.status==="pending"/);
+ assert.match(source,/\/v1\/orders\/.*\/attempts/);
+ const account=readFileSync(fileURLToPath(new URL('../src/components/account/AccountDashboard.tsx',import.meta.url)),'utf8');
+ assert.match(account,/payment_protocol==="rsa2"/);
+ assert.match(account,/Continue or verify Xiaodou order/);
+});
