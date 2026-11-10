@@ -5,6 +5,7 @@ import {subscriptionMk99Notify} from './subscription-notify';
 import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOrders} from './subscription-checkout';
 import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans,publishSubscriptionPlan,holdSubscriptionOrder,adminSubscriptionFinance,reviewSubscriptionPayment} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
+import {adminUnifiedUsage} from './admin-unified-usage';
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminReauth,siteContent,updateContent,contentHistory,restoreContent} from "./admin-operations";
@@ -134,6 +135,7 @@ export default {
       if (request.method === "GET" && path === "/v1/admin/orders") return await filteredOrders(request,env);
       if (request.method === "GET" && path === "/v1/admin/settings") return await adminSettings(request,env);
       if (request.method === "GET" && path === "/v1/admin/ledger") return await adminLedger(request,env);
+      if (request.method === "GET" && path === "/v1/admin/usage-ledger") return await adminUnifiedUsage(request,env);
       if(request.method==="POST"&&path==="/v1/admin/users/bulk-status")return await adminBulkStatus(request,env);
       if(request.method==="POST"&&path==="/v1/admin/packages")return await adminPackageCreate(request,env);
       if(request.method==="GET"&&path==="/v1/admin/audits")return await adminAudits(request,env);
