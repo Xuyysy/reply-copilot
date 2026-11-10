@@ -31,6 +31,19 @@ async function checkoutAllowedFor(env:Env,transaction:PaymentTransaction):Promis
   // Historical rows may not have a channel snapshot. Before channel-aware
   // orders existed, the only supported channel was Alipay H5.
   const channel=transaction.payment_channel??"ALIPAY_H5";
+  // Creating another pay attempt is forbidden when purchases are paused.
+  // An old RSA2 order still belongs to its original Xiaodou merchant even
+  // after NEW orders have been switched back to MK99. Checking methods alone
+  // would mistakenly strand it under the new merchant selection.
+  if(provider==="xiaodou"){
+    const channelSettings=control.channels.rsa2[channel==="WECHAT_H5"?"wechat":"alipay"];
+    return control.environmentReady&&control.operatorEnabled&&control.providers.rsa2.enabled
+      &&control.providers.rsa2.credentialsConfigured&&channelSettings.enabled&&channelSettings.platformReleased
+      &&env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==="1"&&env.XIAODOU_SOURCE_IP_CONFIRMED==="1"
+      &&env.XIAODOU_WEBHOOKS_ENABLED==="1"
+      &&(channel!=="WECHAT_H5"||env.XIAODOU_WECHAT_MERCHANT_APPROVED==="1")
+      &&(!transaction.merchant_account||transaction.merchant_account===env.XIAODOU_APP_ID);
+  }
   return control.methods.some(method=>method.provider===provider&&method.channel===channel);
 }
 function epayConfig(env:Env){
@@ -214,7 +227,7 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   const creationGate=" AND (?=1 OR (EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value=?) AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1') AND (SELECT count(*) FROM system_settings WHERE key IN (?,?,?) AND value='1')=3))";
   const created=await env.DB.batch([
     env.DB.prepare(`INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND (?=1 OR NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND package_id=? AND status IN ('pending','awaiting_payment')${unresolvedProtocol}))${creationGate}`).bind(id,session.user_id,pkg.id,pkg.name_zh,pkg.credits,amountCents,mk99?"mk99":provider,outTradeNo,now,session.user_id,restart?1:0,session.user_id,pkg.id,paymentProtocol,mk99?"mk99":mock?"local_mock":"xiaodou",mock?1:0,merchant,...gateKeys),
-    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,epay_pid,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,merchant_pricing_snapshot) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,epay?"epay":mk99?"mk99":provider,outTradeNo,now,now,paymentProtocol,channel,epay?env.XIAODOU_EPAY_PID:null,feeSnapshot.settlementMode,feeSnapshot.exchangeRateMicros,mk99?"mk99":mock?"local_mock":"xiaodou",mkConfig?.pid??null,mkConfig?.notifySignType??null,mk99?"CNY_EXACT_BUYER_TOTAL":null,mk99?amountFen:null,mk99?JSON.stringify((feeSnapshot as ReturnType<typeof projectMk99Pricing>).merchantPricing):null,id,session.user_id),
+    env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,epay_pid,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,merchant_pricing_snapshot) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,epay?"epay":mk99?"mk99":provider,outTradeNo,now,now,paymentProtocol,channel,epay?env.XIAODOU_EPAY_PID:null,feeSnapshot.settlementMode,feeSnapshot.exchangeRateMicros,mk99?"mk99":mock?"local_mock":"xiaodou",mk99?mkConfig!.pid:(!epay&&!mock?env.XIAODOU_APP_ID??null:null),mk99?mkConfig!.notifySignType:(!epay&&!mock?env.XIAODOU_KEY_ID??null:null),mk99?"CNY_EXACT_BUYER_TOTAL":null,mk99?amountFen:null,mk99?JSON.stringify((feeSnapshot as ReturnType<typeof projectMk99Pricing>).merchantPricing):null,id,session.user_id),
     env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,1,?,'prepared',?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?)").bind(attemptId,transactionId,requestId,now,now,transactionId),
   ]);
   if(created[0].meta.changes!==1){
@@ -302,6 +315,8 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
     if(error instanceof ApiFailure&&error.code==="PAYMENT_UNAVAILABLE")throw new RefreshDiagnosticFailure("PROVIDER_CONFIG_ERROR","provider_config",requestId,503,"支付配置暂时无法用于查单。");
     throw error;
   }
+  if(transaction.merchant_provider==='xiaodou'&&transaction.merchant_account&&transaction.merchant_account!==env.XIAODOU_APP_ID)
+    throw new ApiFailure(409,'PAYMENT_MERCHANT_MISMATCH','原订单的小豆商户配置已变化，请联系客服核对。');
   let result:Awaited<ReturnType<typeof client.queryPayment>>;
   try { result=await client.queryPayment(transaction.provider_trade_id!,{requestId}); }
   catch(error) { throw refreshProviderFailure(error,requestId); }
@@ -394,6 +409,7 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
       return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
     }
     if(transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
+    if(transaction.merchant_account&&transaction.merchant_account!==env.XIAODOU_APP_ID)throw new ApiFailure(409,'PAYMENT_MERCHANT_MISMATCH','原始订单商户身份不匹配。');
     const amount=event.eventAmountFen as number,gross=event.grossAmountFen;
     if(!Number.isSafeInteger(gross)||gross!==transaction.amount_fen||(type==="PAYMENT_SUCCEEDED"&&amount!==transaction.amount_fen)||(type!=="PAYMENT_SUCCEEDED"&&amount!==0))throw new ApiFailure(409,"PAYMENT_MISMATCH","支付事件金额不匹配。");
     await recordProviderFeeProjection(env,transaction,event.feeProjection);

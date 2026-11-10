@@ -158,3 +158,44 @@ test('admin read-only RSA2 reachability check verifies the platform response and
  });
  assert.equal(called,1);f.sql.close();
 });
+
+
+test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch after merchant switch',async()=>{
+ const f=fixture({released:false});
+ try{
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
+  const created=await withProvider(req=>providerResponse(req,{channel:'ALIPAY_H5'}),()=>f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const before=f.sql.prepare('SELECT merchant_provider,merchant_account,notification_sign_type,payment_protocol,provider_trade_id FROM payment_transactions WHERE order_id=?').get(id);
+  assert.equal(before.merchant_provider,'xiaodou');
+  assert.equal(before.payment_protocol,'rsa2');
+  assert.equal(before.merchant_account,f.env.XIAODOU_APP_ID);
+  assert.equal(before.notification_sign_type,f.env.XIAODOU_KEY_ID);
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  let calls=0;
+  const relaunched=await withProvider(req=>{calls++;assert.match(new URL(req.url).pathname,/\/attempts$/);return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5'},{status:200});},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(relaunched.status,201,JSON.stringify(relaunched.body));
+  assert.equal(calls,1);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+ }finally{f.sql.close();}
+});
+
+test('historical RSA2 credit-package cannot relaunch with a different appId or while global purchases are stopped',async()=>{
+ const f=fixture({released:false});
+ try{
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
+  const created=await withProvider(req=>providerResponse(req,{channel:'ALIPAY_H5'}),()=>f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  f.env.XIAODOU_APP_ID='xdop_abcdef0123456789';
+  const wrong=await withProvider(()=>{throw Error('must not fetch when merchant differs');},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(wrong.status,409,JSON.stringify(wrong.body));
+  f.env.XIAODOU_APP_ID='xdop_1234567890abcdef';
+  f.sql.exec("UPDATE system_settings SET value='0' WHERE key='purchase_enabled'");
+  const stopped=await withProvider(()=>{throw Error('must not fetch if purchases paused');},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(stopped.status,409,JSON.stringify(stopped.body));
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM payment_attempts').get().n,1);
+ }finally{f.sql.close();}
+});
