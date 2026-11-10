@@ -150,7 +150,7 @@ jobs:
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
           curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-before.json"
           jq -e --arg id "$EXPECTED_WORKER_VERSION" '
-            .success and [.result.deployments[0].versions[] | select(.version_id==$id and .percentage==100)] | length==1
+            .success and (([.result.deployments[0].versions[] | select(.version_id==$id and .percentage==100)] | length)==1)
           ' "$RUNNER_TEMP/worker-before.json"
           curl -fsS --retry 3 -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/staging-bindings-before.json"
           jq -e --arg db "$STAGING_D1_ID" '
@@ -201,7 +201,7 @@ jobs:
           curl -fsS --retry 3 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-after.json"
           jq -e --arg old "$EXPECTED_WORKER_VERSION" '
-            .success and [.result.deployments[0].versions[]|select(.percentage==100 and .version_id!=$old)]|length==1
+            .success and (([.result.deployments[0].versions[]|select(.percentage==100 and .version_id!=$old)]|length)==1)
           ' "$RUNNER_TEMP/worker-after.json"
           for n in 1 2 3 4 5; do
             if curl --fail --silent --show-error --max-time 12 \
