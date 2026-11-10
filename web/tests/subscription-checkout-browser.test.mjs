@@ -59,7 +59,7 @@ test('subscription checkout restores a recoverable cashier on first order read a
 
 test('Xiaodou pending statuses remain visible and relaunch the same original subscription in Chrome', {timeout:30000},async()=>{
  const bundle=await build({
-  stdin:{resolveDir:web,loader:'tsx',contents:\`
+  stdin:{resolveDir:web,loader:'tsx',contents:`
    import React from 'react';
    import {createRoot} from 'react-dom/client';
    import SubscriptionCheckout from './src/components/account/SubscriptionCheckout';
@@ -81,7 +81,7 @@ test('Xiaodou pending statuses remain visible and relaunch the same original sub
    };
    createRoot(document.querySelector('#root')).render(<SubscriptionCheckout/>);
    window.momentumReady=true;
-  \`},
+  `},
   bundle:true,platform:'browser',format:'iife',write:false,
   define:{'import.meta.env.PUBLIC_API_BASE_URL':'"https://subscription.fixture.invalid"','import.meta.env.DEV':'false'}
  });
