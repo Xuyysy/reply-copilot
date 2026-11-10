@@ -1,5 +1,6 @@
 import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
 import CreatorMomentumIntelligence from './CreatorMomentumIntelligence';
+import {loadAccountSnapshot} from "../../lib/account-load.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
@@ -29,6 +30,8 @@ type OrderRefreshFeedback = { orderId: string; message: string; code?: string; r
 export default function AccountDashboard() {
   const bindingTitle = useRef<HTMLHeadingElement>(null);
   const language = useLanguage();
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
   const [subscriptionPlans,setSubscriptionPlans]=useState<string[]>([]);
@@ -62,18 +65,31 @@ export default function AccountDashboard() {
   const validCode = code && /^[A-F0-9]{8}$/.test(code) ? code : null;
 
   const load = useCallback((silent=false,fresh=false):Promise<boolean> => accountRefresh.current!(async()=>{
-    if(!silent){setState("loading");setMessage("");}
-      try {
-        const [account, usage, activity] = await Promise.all([api<Account>("/v1/me"), api<Usage>("/v1/usage"), api<Activity>("/v1/activity").catch(error => { if (error instanceof ApiError && error.status === 401) throw error; return null; })]);
-        const sameAccount=accountOwner.current===null||accountOwner.current===account.user.userId;
-        accountOwner.current=account.user.userId;
-        notices.current!.setOwner(account.user.userId);setPaymentNotice(notices.current!.current());
-        // Retain the monitored order until its watcher confirms a terminal result.
-        // A concurrent account refresh must not cancel the paid notification.
-        setPaymentHint(previous=>(sameAccount?previous:null)||pendingPaymentOrder(activity?.orders)||null);
-        setData({ account, usage, activity }); setState("ready");return true;
-      } catch(error){if(error instanceof ApiError&&error.status===401){notices.current!.setOwner(null);setPaymentNotice(null);setData(null);setState("signed-out");}else if(!silent)setState("error");setMessage(readableError(error,language));return false;}
-  },{fresh}), [language]);
+    // A refresh must never throw away a previously verified account, including
+    // during language changes and payment/order updates.
+    if(!silent){if(accountOwner.current===null)setState("loading");setMessage("");}
+    try {
+      const {account,usage,activity}=await loadAccountSnapshot(api) as {account:Account;usage:Usage;activity:Activity|null};
+      const sameAccount=accountOwner.current===null||accountOwner.current===account.user.userId;
+      accountOwner.current=account.user.userId;
+      notices.current!.setOwner(account.user.userId);setPaymentNotice(notices.current!.current());
+      // Retain the monitored order until its watcher confirms a terminal result.
+      // A concurrent account refresh must not cancel the paid notification.
+      setPaymentHint(previous=>(sameAccount?previous:null)||pendingPaymentOrder(activity?.orders)||null);
+      setData(previous=>({account,usage,activity:activity??(previous?.account.user.userId===account.user.userId?previous.activity:null)}));setState("ready");setMessage("");return true;
+    } catch(error){
+      if(error instanceof ApiError&&error.status===401){
+        // Only an actual invalid session may clear the verified identity.
+        accountOwner.current=null;
+        notices.current!.setOwner(null);setPaymentNotice(null);setData(null);setState("signed-out");
+      }else if(!silent&&accountOwner.current===null){
+        // Initial-load failures get a quiet recovery card, not a red alarm.
+        setState("error");
+      }
+      setMessage(readableError(error,languageRef.current));
+      return false;
+    }
+  },{fresh}), []);
   useEffect(()=>{const clean=cleanPaymentReturn(location.href);if(clean!==location.href)history.replaceState(history.state,"",clean);},[]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?30000:0}), [load,state]);
@@ -306,7 +322,15 @@ export default function AccountDashboard() {
   );
   if (code && !validCode) return <Alert variant="destructive" role="alert"><AlertDescription>{t("设备码格式无效，请返回插件重新发起绑定。", "Invalid device code. Start again in the extension.")}</AlertDescription></Alert>;
   if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{code ? t("登录或免费注册后，将自动返回插件授权确认。", "Sign in or register and you will return to extension approval automatically.") : t("登录后即可查看余额、订单和插件绑定。", "Sign in to see credits, orders and extension connection.")}</p><div className="flex gap-3"><Button asChild><a href={signInHref}>{t("登录", "Sign in")}</a></Button><Button variant="outline" asChild><a href={registerHref}>{t("免费注册", "Register for free")}<ArrowRight /></a></Button></div></CardContent></Card>;
-  if (state === "error" || !data) return <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-5">{message || t("账户暂时无法读取。", "Account unavailable.")}<Button variant="outline" onClick={() => void load()}>{t("重试", "Retry")}</Button></AlertDescription></Alert>;
+  if (state === "error" || !data) return <Card data-account-recovery className="border-border/70 shadow-none">
+     <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+       <div className="space-y-1">
+         <p className="font-semibold">{t("账户内容暂未加载","Account details could not load")}</p>
+         <p className="text-sm text-muted-foreground">{t("网络可能短暂中断。重新加载即可继续查看账户。","A brief connection issue may have interrupted the page. Reload to view your account.")}</p>
+       </div>
+       <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15}/>{t("重新加载","Reload")}</Button>
+     </CardContent>
+   </Card>;
   const { account, usage, activity } = data;
   const date = (value: number) => new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US");
   return <div className="space-y-5">

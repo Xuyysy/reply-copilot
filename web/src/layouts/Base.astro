@@ -3,6 +3,7 @@ import "../styles/global.css";
 const { title = "x-Reply-Helper", titleEn = title, description = "x-Reply-Helper 让每条 X 回复更像你自己。" } = Astro.props;
 const pageTitle = `${title} · x-Reply-Helper`;
 const isAdminPage = Astro.url.pathname.startsWith("/admin");
+const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
 ---
 <!doctype html>
 <html lang="zh-CN" data-title-zh={title} data-title-en={titleEn}>
@@ -67,7 +68,8 @@ const isAdminPage = Astro.url.pathname.startsWith("/admin");
         )}
       </div>
     </header>
-    <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>
+    {/* Routine onboarding notes belong in the guide, not on every account refresh. */}
+    {isGuidePage && <div class="container notice" data-site-text="announcement" hidden style="white-space:pre-wrap"></div>}
     <div class="container notice" data-site-text="maintenance" hidden style="white-space:pre-wrap"></div>
     <main id="site-main"><slot /></main>
     <footer class="footer">
