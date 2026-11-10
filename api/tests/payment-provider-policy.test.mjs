@@ -37,7 +37,7 @@ test('RSA2 Alipay is not exposed until its own channel and release gates are ena
 });
 
 test('WeChat is not exposed until its own platform-release gate is enabled',async()=>{
- const f=fixture({released:false});
+ const f=fixture({released:false});f.env.XIAODOU_WECHAT_MERCHANT_APPROVED='1';
  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_wechat_enabled'");
  let r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,false);assert.deepEqual(r.body.paymentMethods,[]);
@@ -48,7 +48,7 @@ test('WeChat is not exposed until its own platform-release gate is enabled',asyn
 });
 
 test('WeChat is the preferred RSA2 channel when both channels are enabled and platform-released',async()=>{
- const f=fixture();
+ const f=fixture();f.env.XIAODOU_WECHAT_MERCHANT_APPROVED='1';
  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released','payment_rsa2_wechat_enabled','payment_rsa2_wechat_released')");
  const r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);
@@ -69,7 +69,7 @@ test('WeChat is the preferred RSA2 channel when both channels are enabled and pl
 });
 
 test('legacy Epay release flags do not enable new checkout orders',async()=>{
- const f=enableEpaySales(fixture({released:false}));
+ const f=enableEpaySales(fixture({released:false}));f.env.XIAODOU_EPAY_TEST_COMPAT='0';
  f.env.XIAODOU_EPAY_GATEWAY='https://gateway.example.test/submit.php';
  f.env.XIAODOU_EPAY_PID='12345';
  f.env.XIAODOU_EPAY_KEY='local-test-key';

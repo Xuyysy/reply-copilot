@@ -32,7 +32,7 @@ test('provider channel migration copies legacy values once and keeps interface-s
 });
 
 test('RSA2-only WeChat method is exposed only when its interface, channel, credentials and release are ready',async()=>{
- const f=fixture({released:false});
+ const f=fixture({released:false});f.env.XIAODOU_WECHAT_MERCHANT_APPROVED='1';
  try{
   set(f,{payment_rsa2_enabled:true,payment_rsa2_wechat_enabled:true,payment_rsa2_wechat_released:false});
   let result=await f.call('/v1/packages',{method:'GET'});
@@ -44,7 +44,7 @@ test('RSA2-only WeChat method is exposed only when its interface, channel, crede
 });
 
 test('new Xiaodou orders are RSA2-only even when Epay legacy settings are enabled',async()=>{
- const f=fixture({released:false});epayCredentials(f);
+ const f=fixture({released:false});epayCredentials(f);f.env.XIAODOU_EPAY_TEST_COMPAT='0';
  try{
   set(f,{payment_rsa2_enabled:true,payment_rsa2_alipay_enabled:true,payment_rsa2_alipay_released:true,payment_epay_enabled:true,payment_epay_alipay_enabled:true,payment_epay_alipay_released:false});
   let result=await f.call('/v1/packages',{method:'GET'});
@@ -58,8 +58,8 @@ test('new Xiaodou orders are RSA2-only even when Epay legacy settings are enable
  }finally{f.sql.close();}
 });
 
-test('Epay supports Alipay only; explicit WeChat order request is rejected without a transaction',async()=>{
- const f=enableEpaySales(fixture({released:true}));epayCredentials(f);
+test('retired Epay cannot be used for new Alipay or WeChat orders',async()=>{
+ const f=enableEpaySales(fixture({released:true}));epayCredentials(f);f.env.XIAODOU_EPAY_TEST_COMPAT='0';
  try{
   set(f,{payment_epay_alipay_enabled:true,payment_epay_alipay_released:true,payment_rsa2_enabled:false});
   const available=await f.call('/v1/packages',{method:'GET'});

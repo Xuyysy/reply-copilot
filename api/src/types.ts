@@ -52,6 +52,8 @@ export interface Env {
   XIAODOU_RSA2_SUBSCRIPTIONS_READY?: string;
   XIAODOU_WECHAT_MERCHANT_APPROVED?: string;
   XIAODOU_TRADE_SCOPE?: string;
+  /** Only exercised with the reserved api-staging.example.test fixture hostname. */
+  XIAODOU_EPAY_TEST_COMPAT?: string;
 }
 
 export type Session = { id: string; user_id: string; email: string; kind: "web" | "extension"; device_id: string | null; csrf_token_hash: string | null; expires_at: number };
