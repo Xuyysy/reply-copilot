@@ -262,6 +262,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
      const client=configuredXiaodouMerchant(env);
      const result=await client.createPayment({outTradeNo:tradeNo,amountFen,channel:'ALIPAY_H5',currency:'CNY',
        subject:'Reply Copilot '+planCode.toUpperCase()+(quote?' upgrade':' 30 days'),payerClientIp:clientIp,
+       ...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),
        returnUrl:new URL('/subscription-checkout/',env.WEB_ORIGIN).href},
        {requestId:'xrh-sub-create-'+uuid()});
      const checked=inspectCheckoutResponse(result,{outTradeNo:tradeNo,amountFen});

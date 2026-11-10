@@ -231,7 +231,7 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   }
   let checkout:CheckoutResult,providerError:unknown;
   try {
-    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
+    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
     checkout=inspectCheckoutResponse(result,{outTradeNo,amountFen});
     const projection=await recordProviderFeeProjection(env,(await transactionForOrder(env,id))!,result.feeProjection);
     if(checkout.outcome==="ready"&&projection.status!=="verified")

@@ -394,7 +394,8 @@ export class XiaodouClient {
     validateOutId(input.outTradeNo, "outTradeNo");
     if (!Number.isSafeInteger(input.amountFen) || input.amountFen < 1 || input.currency !== "CNY" || !["ALIPAY_H5", "WECHAT_H5"].includes(input.channel) || !validatePublicIp(input.payerClientIp) || typeof input.subject !== "string" || !input.subject || input.subject.length > 128) throw new TypeError("Payment request is invalid");
     if (input.returnUrl) { const target = new URL(input.returnUrl); if (target.protocol !== "https:" || target.username || target.password || target.search || target.hash || input.returnUrl.length > 512) throw new TypeError("Payment return URL is invalid"); }
-    const body = JSON.stringify({ outTradeNo: input.outTradeNo, channel: input.channel, amountFen: input.amountFen, currency: "CNY", subject: input.subject, payerClientIp: input.payerClientIp, ...(input.description ? { description: input.description } : {}), ...(input.attach ? { attach: input.attach } : {}), ...(input.returnUrl ? { returnUrl: input.returnUrl } : {}) });
+    if(input.tradeScope!==undefined&&!["PHYSICAL_FACE_TO_FACE","CARD_VIRTUAL"].includes(input.tradeScope))throw new TypeError("Invalid Xiaodou trade scope");
+    const body = JSON.stringify({ outTradeNo: input.outTradeNo, channel: input.channel, amountFen: input.amountFen, currency: "CNY", subject: input.subject, payerClientIp: input.payerClientIp, ...(input.tradeScope?{tradeScope:input.tradeScope}:{}), ...(input.description ? { description: input.description } : {}), ...(input.attach ? { attach: input.attach } : {}), ...(input.returnUrl ? { returnUrl: input.returnUrl } : {}) });
     return this.#request("POST", "/api/open/v1/payments", { ...options, body, contentType: "application/json" });
   }
   async queryPayment(outTradeNo, options = {}) { validateOutId(outTradeNo, "outTradeNo"); return this.#request("GET", `/api/open/v1/payments/${encodeURIComponent(outTradeNo)}`, options); }

@@ -94,6 +94,7 @@ export async function paymentControl(env:Env){
   if(!environmentReady)reasons.push('environment_protection');
   if(!operatorEnabled)reasons.push('purchase_paused');
   if(provider==='xiaodou_epay')reasons.push('legacy_protocol_not_for_new_orders');
+  if(provider==='xiaodou'&&channel==='wechat'&&env.XIAODOU_WECHAT_MERCHANT_APPROVED!=='1')reasons.push('wechat_merchant_not_approved');
   if(!providerState.enabled)reasons.push('interface_disabled');
   if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
   if(!channelState)reasons.push('channel_not_supported');
