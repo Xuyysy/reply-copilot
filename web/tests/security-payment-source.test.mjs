@@ -19,3 +19,21 @@ test('security mutations lock synchronously, clear password inputs, and show con
  assert.ok(panel.includes('已开启')&&panel.includes('已关闭'));
  assert.doesNotMatch(panel,/String\(control\./);
 });
+
+test('RSA2 read-only check supplies its own audit reason and reports errors next to the button',()=>{
+ assert.match(panel,/write\('\/v1\/admin\/payment-platform-check',\{reason:'Xiaodou RSA2 read-only connectivity diagnostic'\}\)/);
+ assert.match(panel,/platformChecking\?t\('正在检查小豆 RSA2/);
+ assert.match(panel,/platformCheckError&&<p role="alert"/);
+ assert.match(panel,/setPlatformCheck\(null\);setPlatformCheckError\(''\)/);
+ assert.match(panel,/disabled=\{locked\} aria-busy=\{platformChecking\}/);
+ assert.doesNotMatch(panel,/disabled=\{locked\|\|!control\.providers\.rsa2\.credentialsConfigured\}/);
+});
+
+test('RSA2 diagnostic failures retain safe provider code, source-IP hint and request ID',async()=>{
+ const client=await readFile(new URL('../src/lib/api.ts',import.meta.url),'utf8');
+ assert.match(client,/path==="\/v1\/admin\/payment-platform-check"/);
+ assert.match(client,/body\.errorCode/);
+ assert.match(panel,/OPEN_API_SOURCE_IP_REJECTED/);
+ assert.match(panel,/小豆拒绝当前服务器来源 IP/);
+ assert.match(panel,/requestId '\+safeId/);
+});
