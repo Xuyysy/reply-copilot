@@ -18,13 +18,15 @@ type Usage={
 type Result={items:Usage[];hasMore:boolean;nextCursor:string|null};
 type Source='all'|'subscription'|'free'|'paid'|'unknown';
 
-export default function AdminUsageLedger({active,language,legacyLedger}:{active:boolean;language:Language;legacyLedger:LegacyLedger[]}){
+export default function AdminUsageLedger({active,language}:{active:boolean;language:Language}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [mode,setMode]=useState<'usage'|'changes'>('usage');
  const [source,setSource]=useState<Source>('all');
  const [search,setSearch]=useState('');
  const [query,setQuery]=useState('');
  const [items,setItems]=useState<Usage[]>([]);
+ const [legacyLedger,setLegacyLedger]=useState<LegacyLedger[]>([]);
+ const [legacyLoading,setLegacyLoading]=useState(false);
  const [nextCursor,setNextCursor]=useState<string|null>(null);
  const [loading,setLoading]=useState(false);
  const [moreLoading,setMoreLoading]=useState(false);
@@ -48,6 +50,14 @@ export default function AdminUsageLedger({active,language,legacyLedger}:{active:
   }).finally(()=>{if(mounted)setLoading(false);});
   return()=>{mounted=false;};
  },[active,mode,source,query,nonce]);
+ useEffect(()=>{
+  if(!active||mode!=='changes')return;
+  let mounted=true;setLegacyLoading(true);setError('');
+  void api<{ledger:LegacyLedger[]}>('/v1/admin/ledger').then(data=>{if(mounted)setLegacyLedger(data.ledger);})
+   .catch(cause=>{if(mounted)setError(cause instanceof Error?cause.message:t('读取额度变动失败。','Unable to load credit changes.'));})
+   .finally(()=>{if(mounted)setLegacyLoading(false);});
+  return()=>{mounted=false;};
+ },[active,mode,nonce]);
  async function loadMore(){
   if(!nextCursor||loading||moreLoading)return;
   setMoreLoading(true);setError('');
@@ -123,6 +133,8 @@ export default function AdminUsageLedger({active,language,legacyLedger}:{active:
     {nextCursor&&<Button type="button" variant="outline" disabled={loading||moreLoading} onClick={()=>void loadMore()}>{moreLoading?t('加载中…','Loading…'):t('加载更多','Load more')}</Button>}
    </>:<>
     <p className="text-xs text-muted-foreground">{t('保留原信用账本的授予、扣减、返还、调整与退款审计。订阅不作为永久额度发放，此视图不会混入订阅消费。','Original credit grants, debits, reversals, refunds and adjustments remain auditable. Subscription usage is not a permanent credit grant.')}</p>
+    {legacyLoading&&<p role="status" className="text-sm">{t("正在读取原额度流水…","Loading credit history…")}</p>}
+    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     <div className="max-h-[36rem] overflow-auto rounded-md border" role="region" tabIndex={0}>
      <Table className="min-w-[800px]"><TableHeader><TableRow>
       {[t('时间','Time'),t('用户','User'),t('事件','Event'),t('免费变动','Free delta'),t('永久付费变动','Paid delta'),t('原因','Reason')].map(x=><TableHead key={x}>{x}</TableHead>)}
