@@ -60,21 +60,12 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
  async function revoke(){await mutate(async()=>{await write('/v1/admin/security/sessions/revoke-others',{reason});setNotice(t('其他所有会话已退出，当前会话保留。','All other sessions are signed out. This session stays active.'));});}
  const switchRow=(key:'rsa2Enabled'|'epayEnabled'|'rsa2WechatEnabled'|'rsa2AlipayEnabled'|'epayAlipayEnabled',label:string,availability?:Availability,provider?:'rsa2'|'epay',channel?:'wechat'|'rsa2Alipay'|'epayAlipay')=><label className="flex items-start gap-3 rounded-md border p-3"><input type="checkbox" disabled={locked} checked={settings[key]} onChange={e=>provider&&channel?setChannel(channel,provider,e.target.checked):setSettings(current=>({...current,[key]:e.target.checked}))}/><span className="min-w-0 flex-1"><strong>{label}</strong>{availability&&<small className="block text-muted-foreground">{availabilityText(availability)}</small>}</span></label>;
  return <div className="space-y-6">
-  <Label htmlFor="admin-security-reason">{t('操作原因（至少8字）','Reason for this action (8+ characters)')}</Label><Input id="admin-security-reason" value={reason} onChange={e=>setReason(e.target.value)}/>
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
-  <Card><CardHeader><CardTitle>{t('支付管理','Payment management')}</CardTitle></CardHeader><CardContent className="space-y-4">
+  <Card><CardHeader className="space-y-1"><CardTitle>{t('支付管理','Payment management')}</CardTitle><p className="text-sm text-muted-foreground">{t('当前状态、收款商家和支付方式一目了然。高级参数默认收起。','Current status, merchant and payment methods at a glance. Advanced settings stay collapsed.')}</p></CardHeader><CardContent className="space-y-5">
    {control&&<>
-    <div role="status" className="rounded-lg border p-4">
-     <strong>{!control.environmentReady?t('暂不可收款：环境保护未就绪','Unavailable: environment safety is not ready'):!control.operatorEnabled?t('已暂停收款：全站购买开关关闭','Sales paused: global purchase switch is off'):control.effectiveEnabled?t('可以正常收款','Ready to accept payments'):t('暂不可收款','Not ready to accept payments')}</strong>
-     {!control.effectiveEnabled&&control.operatorEnabled&&control.environmentReady&&control.activeMerchant==='xiaodou'&&<p className="mt-1">{t('原因：','Reason: ')}{[
-      ...(!control.providers.rsa2.credentialsConfigured&&!control.providers.epay.credentialsConfigured?[t('支付凭证未配置','Payment credentials are not ready')]:[]),
-      ...(!settings.rsa2WechatReleased?[t('RSA2 微信通道放行尚未确认','RSA2 WeChat release is unconfirmed')]:[]),
-      ...(!settings.rsa2AlipayReleased?[t('RSA2 支付宝通道放行尚未确认','RSA2 Alipay release is unconfirmed')]:[]),
-      ...(!settings.epayAlipayReleased?[t('易支付支付宝放行尚未确认','Epay Alipay release is unconfirmed')]:[]),
-     ].join('；')}</p>}
-    </div>
-    <MerchantPaymentSettings control={control} language={language} locked={locked} reason={reason} write={write} reload={load}/>
-    {control.activeMerchant==='xiaodou'&&<>
+    <section role="status" className="rounded-xl border bg-muted/20 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-xs text-muted-foreground">{t('当前收款商家','Current merchant')}</p><p className="text-xl font-semibold">{control.activeMerchant==='mk99'?'MK99':control.activeMerchant==='xiaodou'?t('小豆支付','Xiaodou'):t('未选择','None')}</p></div><span className={control.effectiveEnabled?'rounded-full bg-emerald-100 px-3 py-1 text-sm text-emerald-800':'rounded-full bg-amber-100 px-3 py-1 text-sm text-amber-900'}>{!control.environmentReady?t('环境未就绪','Environment not ready'):!control.operatorEnabled?t('暂停新订单','New sales paused'):control.effectiveEnabled?t('收款配置就绪','Checkout configured'):t('通道尚未就绪','Not ready')}</span></div><p className="mt-2 text-xs text-muted-foreground">{t('此状态仅代表配置检查结果，不等于真实支付验收。','This status only reflects configuration, not real payment acceptance.')}</p></section>
+    <MerchantPaymentSettings control={control} language={language} locked={locked} reason={reason} onReasonChange={setReason} write={write} reload={load}/>
+    <details className="rounded-xl border bg-muted/10 p-4"><summary className="cursor-pointer font-medium">{t('高级配置：小豆 RSA2 与历史易支付','Advanced: Xiaodou RSA2 and legacy Epay')}</summary><div className="space-y-4 pt-4">
     <section className="space-y-3 rounded-lg border p-4" aria-labelledby="rsa2-settings-title">
      <h3 id="rsa2-settings-title" className="font-semibold">RSA2 Open API</h3>
      <p className="text-sm text-muted-foreground">{t('凭证','Credentials')}: {status(control.providers.rsa2.credentialsConfigured===true)} · {control.providers.rsa2.credentialsConfigured?t('服务端格式与密钥可导入检查通过','Server-side format and key import checks passed'):t('缺失或无效（不显示密钥内容）','Missing or invalid (values hidden)')}</p>
@@ -96,21 +87,20 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      <p>{t('请先确认你已在小豆商户后台核实该支付接口、通道和当前申报交易形态已获准。此勾选只记录人工确认，不会查询或改变小豆权限。','Confirm that the provider, channel, and declared trade scope are approved in Xiaodou merchant settings. This records your confirmation only; it does not query or change Xiaodou permissions.')}</p>
      <Button disabled={locked} onClick={confirmChannelRelease}>{t('我已核实，确认并启用通道','Verified — confirm and enable')}</Button><Button variant="outline" disabled={locked} onClick={()=>setPendingRelease(null)}>{t('取消','Cancel')}</Button>
     </div>}
-    </>}
+    </div></details>
     <p>{t('当前实际可用的付款方式','Currently available payment methods')}: {control.methods.length?control.methods.map(x=>`${x.provider==='mk99'?'MK99':x.provider==='xiaodou'?'RSA2':'Epay'} / ${x.channel}`).join('、'):'无'}</p>
     {control.activeMerchant==='xiaodou'&&<Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存支付接口设置','Save payment settings')}</Button>}
     <div className="space-y-2 border-t pt-4"><p>{t('全站收款总开关','Global purchase switch')}</p><Button disabled={locked||reason.trim().length<8||(!control.operatorEnabled&&!control.environmentReady)} onClick={()=>control.operatorEnabled?void togglePurchase(false):setConfirmEnable(true)}>{control.operatorEnabled?t('暂停全站收款','Pause all sales'):t('开启全站收款','Enable all sales')}</Button>
      {confirmEnable&&!control.operatorEnabled&&<div role="alert" className="space-y-2"><p>{t('确认开启全站收款？只有接口、凭证、通道及平台放行条件全部满足的付款方式才会展示。','Enable global sales? Only methods passing interface, credentials, channel, and platform release gates will be shown.')}</p><Button disabled={locked||reason.trim().length<8} onClick={()=>void togglePurchase(true)}>{t('确认开启','Confirm')}</Button><Button variant="outline" disabled={locked} onClick={()=>setConfirmEnable(false)}>{t('取消','Cancel')}</Button></div>}
     </div>
-    <details className="border-t pt-3">
-     <summary className="cursor-pointer font-medium">{t('高级设置','Advanced settings')}</summary>
+    <section className="rounded-xl border p-4"><h3 className="font-semibold">{t('检查小豆 RSA2 连接（只读）','Check Xiaodou RSA2 (read-only)')}</h3><p className="mt-1 text-xs text-muted-foreground">{t('不创建订单，当前使用 MK99 也能检测。无需填写原因，可能需要管理员密码验证。','No payment created. Works while MK99 is active. No typed reason is needed; admin password verification may be required.')}</p>
      <div className="space-y-3 pt-3"><p>{t('环境支付保护','Environment safety ceiling')}: {status(control.environmentReady)} · {t('数据库购买设置','Database purchase setting')}: {status(control.operatorEnabled)}</p>
       <Button variant="outline" disabled={locked} aria-busy={platformChecking} onClick={()=>void checkPlatform()}>{platformChecking?t('正在检查小豆 RSA2…','Checking Xiaodou RSA2…'):t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
       {platformChecking&&<p role="status">{t('正在连接小豆接口并验证签名；无需切换当前收款商家。','Connecting to Xiaodou and verifying the signature; no merchant switch is needed.')}</p>}
       {platformCheckError&&<p role="alert" className="text-sm text-red-700">{t('检测失败：','Check failed: ')}{platformCheckError}</p>}
       {platformCheck&&<p role="status">{platformCheck.ok?t(`响应验签通过 · requestId ${platformCheck.requestId}`,'Response signature verified · requestId '+platformCheck.requestId):t(`未通过：${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'无响应'} · requestId ${platformCheck.requestId}`,`Not verified: ${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'no response'} · requestId ${platformCheck.requestId}`)}</p>}
      </div>
-    </details>
+    </section>
     <p className="text-xs text-muted-foreground">{t('平台放行状态按支付接口分别保存；关闭新单开关不影响历史订单通知与查询。','Platform release is stored separately per provider. Disabling new sales does not stop historical order notifications or queries.')}</p>
    </>}
   </CardContent></Card>
