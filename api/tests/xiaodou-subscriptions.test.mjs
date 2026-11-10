@@ -262,3 +262,22 @@ test('Xiaodou renewed subscription is queued for the next period and does not in
   assert.equal(metrics(f).credits,0);
  }finally{f.sql.close();}
 });
+
+
+test('server-side payment methods fail closed when Xiaodou source IP or subscription readiness is missing',async()=>{
+ const f=ready();
+ try{
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='0';
+  let p=await f.call('/v1/packages',{method:'GET'});
+  let s=await f.call('/v1/subscriptions/plans',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[]);
+  assert.deepEqual(s.body.paymentMethods,[]);
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='1';
+  f.env.XIAODOU_RSA2_SUBSCRIPTIONS_READY='0';
+  p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[]);
+  f.env.XIAODOU_RSA2_SUBSCRIPTIONS_READY='1';
+  p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
+ }finally{f.sql.close();}
+});
