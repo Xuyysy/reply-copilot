@@ -41,6 +41,16 @@ export async function updateAdminPaymentControl(request:Request,env:Env):Promise
  if(body.merchantSettings!==undefined){
   const input=body.merchantSettings as Record<string,unknown>,fields={enabled:'payment_mk99_enabled',alipayEnabled:'payment_mk99_alipay_enabled',wechatEnabled:'payment_mk99_wechat_enabled',alipayReleased:'payment_mk99_alipay_released',wechatReleased:'payment_mk99_wechat_released'};
   if(!input||typeof input!=='object'||Array.isArray(input)||!['mk99','xiaodou','none'].includes(String(input.activeMerchant))||!Object.keys(fields).every(key=>typeof input[key]==='boolean')||Object.keys(input).some(key=>key!=='activeMerchant'&&!(key in fields)))throw new ApiFailure(400,'INVALID_REQUEST','收款商家配置无效。');
+  // The selection affects BOTH credit packages and the four subscription
+  // tiers. A Xiaodou deployment must explicitly approve the completed local
+  // ledger, Staging real signed-query acceptance, and fixed egress/IP source.
+  if(input.activeMerchant==='xiaodou'&&before.activeMerchant!=='xiaodou'){
+    if(env.XIAODOU_RSA2_SUBSCRIPTIONS_READY!=='1'||env.XIAODOU_SOURCE_IP_CONFIRMED!=='1')
+      throw new ApiFailure(409,'XIAODOU_SUBSCRIPTION_SETTLEMENT_NOT_READY','小豆 RSA2 订阅验收与出口来源尚未双重确认，不允许全站切换。');
+    if(!before.providers.rsa2.credentialsConfigured||!before.providers.rsa2.enabled||
+      !before.channels.rsa2.alipay.enabled||!before.channels.rsa2.alipay.platformReleased)
+      throw new ApiFailure(409,'XIAODOU_RSA2_NOT_READY','小豆 RSA2 支付宝凭据、接口或平台放行未就绪。');
+  }
   const op=await operation(env,actor,body,'merchant_payment_settings','active_merchant');
   const statements=[env.DB.prepare("UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key='active_merchant'").bind(input.activeMerchant,now,actor.user_id),...Object.entries(fields).map(([field,key])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(input[field]?'1':'0',now,actor.user_id,key))];
   await commitOperation(env,op,statements,{activeMerchant:before.activeMerchant,mk99:before.providers.mk99,channels:before.channels.mk99},input);
