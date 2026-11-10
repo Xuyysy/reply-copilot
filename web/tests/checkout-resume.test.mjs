@@ -27,9 +27,9 @@ test('explicit unknown-state refresh preserves trusted provider reconciliation w
 });
 
 
-test('Xiaodou credit checkout exposes original-order resume without generating another order',()=>{
- const {readFileSync}=require('node:fs');
- const {fileURLToPath}=require('node:url');
+test('Xiaodou credit checkout exposes original-order resume without generating another order',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {fileURLToPath}=await import('node:url');
  const source=readFileSync(fileURLToPath(new URL('../src/pages/checkout.astro',import.meta.url)),'utf8');
  assert.match(source,/id="relaunch-rsa2"/);
  assert.match(source,/paymentProtocol==="rsa2"&&next.status==="pending"/);
