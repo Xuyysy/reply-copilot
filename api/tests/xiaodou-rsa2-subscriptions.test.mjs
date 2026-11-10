@@ -125,7 +125,7 @@ function signedNotice(env,event){
  const body=JSON.stringify(event),timestamp=String(Math.floor(Date.now()/1000));
  const nonce='callback-nonce-123456789',kid='test-platform';
  const lines=['XD-Webhook-v1',event.eventId,event.eventType,timestamp,nonce,kid,
-   createHash('sha256').update(body).digest('hex')].join('\\n');
+   createHash('sha256').update(body).digest('hex')].join('\n');
  const headers={'Content-Type':'application/json','X-XD-Webhook-Event-Id':event.eventId,
   'X-XD-Webhook-Event-Type':event.eventType,'X-XD-Webhook-Timestamp':timestamp,
   'X-XD-Webhook-Nonce':nonce,'X-XD-Webhook-Key-Id':kid,
@@ -148,8 +148,9 @@ test('repeated signed native Xiaodou subscription webhook grants exactly one sub
       amountFen:6990,currency:'CNY',status:'SUCCEEDED',
       feeProjection:projection(6990),payUrl:null
     },{status:200}),()=>worker.fetch(signedNotice(f.env,event),f.env));
-   assert.equal(notice.status,200,await notice.text());
-   if(i===0)assert.equal(await notice.text(),'success');
+   const bodyText=await notice.text();
+   assert.equal(notice.status,200,bodyText);
+   assert.equal(bodyText,'success');
   }
   assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_periods').get().n,1);
   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_payment_events WHERE merchant_provider='xiaodou'").get().n,2);
