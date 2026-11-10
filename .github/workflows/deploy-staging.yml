@@ -193,9 +193,9 @@ jobs:
           web/tests/creator-momentum-intelligence.test.mjs
           FILES
           diff -u "$RUNNER_TEMP/expected-pr39-files" "$RUNNER_TEMP/actual-pr39-files"
-          git diff --exit-code "$baseline" HEAD -- api/wrangler.jsonc api/src/creator-momentum.ts api/src/quotas.ts
+          git diff --exit-code "$baseline" HEAD -- api/wrangler.jsonc api/src/creator-momentum.ts api/src/quota.ts
           node - <<'NODE'
-          const c=require("./api/wrangler.jsonc");
+          const c=JSON.parse(require("node:fs").readFileSync("./api/wrangler.jsonc","utf8"));
           const stage=c.env?.staging;
           if (stage?.name!=="reply-copilot-api-staging" ||
               stage.vars?.ENVIRONMENT!=="staging" ||
