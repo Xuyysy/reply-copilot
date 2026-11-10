@@ -1,6 +1,8 @@
 // Four generated reply languages; no additional language-detection API calls.
 export const REPLY_LANGUAGES = Object.freeze(["auto", "zh", "en", "ja", "ko"]);
-const bases = new Set(REPLY_LANGUAGES.filter(code => code !== "auto"));
+// Keep parsing known legacy/model BCP-47 tags to avoid a paid-generation format error.
+// The visible manual language choices remain only the five REPLY_LANGUAGES.
+const bases = new Set(["zh","en","ja","ko","es","fr","de","pt","it","ru","ar","hi","id","th","vi","tr","uk","nl"]);
 export function normalizeReplyLanguage(value) {
   if (value === "auto") return "auto";
   if (typeof value !== "string" || value.length > 24 || !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$/.test(value)) return null;
