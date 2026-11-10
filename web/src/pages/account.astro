@@ -3,21 +3,5 @@ import Base from "../layouts/Base.astro";
 import AccountDashboard from "../components/account/AccountDashboard";
 ---
 <Base title="我的账户" titleEn="My account">
-  <section class="container public-inner-hero account-hero" aria-labelledby="account-page-heading">
-    <div class="public-hero-copy">
-      <div class="public-kicker"><span class="public-kicker-dot" aria-hidden="true"></span><span data-zh="创作者控制中心">CREATOR CONTROL CENTER</span></div>
-      <h1 id="account-page-heading" data-zh="你的生成额度，一目了然。">Your generation credits at a glance.</h1>
-      <p class="lead" data-zh="免费和付费额度均不主动过期；余额由服务端实时确认。">Free and paid credits do not expire. Balances come from the server.</p>
-      <div class="public-hero-points"><div><span aria-hidden="true">✓</span><span data-zh="额度与交易记录统一查看">Review your credits and history</span></div><div><span aria-hidden="true">✓</span><span data-zh="登录状态与余额实时同步">Account and balance verified by the service</span></div></div>
-    </div>
-    <aside class="public-hero-visual account-hero-visual" aria-label="Illustrative account overview">
-      <div class="mini-panel-head"><img src="/favicon.svg" width="30" height="30" alt="" /><div><strong>x-Reply-Helper</strong><span data-zh="账户状态概览">Account overview</span></div><span class="mini-panel-pro">ACCOUNT</span></div>
-      <div class="mini-account-visual">
-        <div class="mini-account-bar"><span data-zh="账户和额度管理">Account & credits</span><span class="mini-account-status" data-zh="服务端验证">Server verified</span></div>
-        <div class="mini-account-cards" aria-hidden="true"><div><span>AI</span><strong>✦</strong></div><div><span>PRO</span><strong>↗</strong></div><div><span>X</span><strong>⚡</strong></div></div>
-        <p data-zh="具体余额和权益，请查看下方实时账户信息。">Your live balance and benefits appear in the account section below.</p>
-      </div>
-    </aside>
-  </section>
-  <section class="container public-account-panel app-shell" aria-label="Account dashboard"><div class="public-panel-heading"><div class="eyebrow" data-zh="实时账户信息">LIVE ACCOUNT</div><h2 data-zh="账户总览">Account dashboard</h2></div><AccountDashboard client:load /></section>
+  <section class="container public-account-panel app-shell" aria-label="Account dashboard"><AccountDashboard client:load /></section>
 </Base>

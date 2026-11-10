@@ -7,7 +7,7 @@ const source = (file) => readFileSync(file, "utf8");
 test("public inner pages share the Chrome extension's branded responsive layout", () => {
   const css = source("web/src/styles/global.css");
   const layout = source("web/src/layouts/Base.astro");
-  for (const name of ["guide", "login", "account", "faq", "feedback"]) {
+  for (const name of ["guide", "faq", "feedback"]) {
     const page = source(`web/src/pages/${name}.astro`);
     assert.match(page, /class="container public-inner-hero /, `${name} needs the public hero`);
     assert.match(page, /public-hero-visual/, `${name} needs the branded supporting illustration`);
@@ -46,4 +46,17 @@ test("guide keeps CMS-controlled links and FAQ keeps CMS fallback", () => {
   assert.equal((faq.match(/<\/details>/g) || []).length, 6);
   assert.match(faq, /href="\/feedback"/);
   assert.match(faq, /data-zh="免费额度何时领取？"/);
+});
+
+test("auth and account pages go straight to functional panels without duplicate marketing heroes", () => {
+  const login = source("web/src/pages/login.astro");
+  const account = source("web/src/pages/account.astro");
+  assert.doesNotMatch(login, /public-inner-hero|auth-hero-visual|public-hero-points/);
+  assert.doesNotMatch(account, /public-inner-hero|account-hero-visual|public-hero-points|public-panel-heading/);
+  assert.match(login, /class="container public-auth-panel-wrap app-shell"/);
+  assert.match(account, /class="container public-account-panel app-shell"/);
+  const auth = source("web/src/components/auth/AuthPanel.tsx");
+  assert.equal((auth.match(/data-email-delivery-tip/g) || []).length, 2);
+  assert.match(auth, /垃圾邮箱或广告邮件文件夹/);
+  assert.match(auth, /spam or promotions folder/);
 });

@@ -43,8 +43,12 @@ test("signup copy gives concise account-connection guidance without exposing cla
   const auth=readFileSync(path.join(root,"src/components/auth/AuthPanel.tsx"),"utf8");
   const layout=readFileSync(path.join(root,"src/layouts/Base.astro"),"utf8");
   const pricingSource=readFileSync(path.join(root,"src/pages/pricing.astro"),"utf8");
-  assert.match(login,/验证邮箱后，请在插件中连接账户以领取新人额度/);
-  assert.match(login,/connect your account in the extension to receive welcome credits/);
+  // The marketing hero was intentionally removed; verify the real registration form copy instead.
+  assert.doesNotMatch(login,/public-inner-hero|auth-hero-visual/);
+  assert.match(auth,/验证邮箱后即可创建账户。首次连接插件后，新人免费额度将发放到账户/);
+  assert.match(auth,/Verify your email to create an account\. Your welcome credits will be added after you connect the extension/);
+  assert.match(auth,/垃圾邮箱或广告邮件文件夹/);
+  assert.match(auth,/spam or promotions folder/);
   assert.match(auth,/t\("验证邮箱", "Verify email"\)/);
   assert.doesNotMatch([auth,layout,home,pricingSource].join("\n"),/每个安装实例|One welcome grant per installation|Each installation can claim once|eligible extension installation/);
   assert.match(layout,/signupBenefit\?\.status==="pending"\?"pending"/);
