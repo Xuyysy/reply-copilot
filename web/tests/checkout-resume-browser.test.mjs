@@ -5,6 +5,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
  const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify(await evaluate('({notice:document.querySelector("[data-payment-notice]")?.textContent,reads:window.__reads,id:window.__id,status:window.__status})')));};
+ const navigate=async url=>{await call('Page.navigate',{url});await until(`location.href===${JSON.stringify(url)}&&document.readyState==="complete"&&Boolean(document.querySelector("#checkout-status"))`);};
  const click=async expr=>{const point=await evaluate(`(()=>{const e=${expr};e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});};
  const cashierRequests=[];
  try{
@@ -34,7 +35,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  const target=(await call('Target.createTarget',{url:'about:blank'},null)).result.targetId;session=(await call('Target.attachToTarget',{targetId:target,flatten:true},null)).result.sessionId;await call('Page.enable');await call('Fetch.enable',{patterns:[{urlPattern:'https://cashier.fixture.invalid/*'}]});
  const id='11111111-1111-4111-8111-111111111111',base=pathToFileURL(path.join(dir,'index.html')).href;
  for(const mode of ['pending','unknown','paid','closed','failed','refunded','risk','badurl','queryerror','unavailable','otheruser','epay']){
-  await call('Page.navigate',{url:base+'?order='+id+'&fixture='+mode});await until('window.__calls?.some(c=>c[0].startsWith("/v1/orders/"))');
+  await navigate(base+'?order='+id+'&fixture='+mode);await until('window.__calls?.some(c=>c[0].startsWith("/v1/orders/"))');
   if(mode==='otheruser'){await until('document.querySelector("#checkout-status").textContent.includes("无法读取原订单")');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);continue;}
   await until('document.querySelector("#package-cny").textContent.includes("10.43")');
   if(mode==='pending')await until('!document.querySelector("#cashier-link").hidden');
@@ -48,11 +49,11 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
   await evaluate('document.documentElement.lang="en";window.dispatchEvent(new Event("reply-copilot-language"))');assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   if(mode==='pending'){await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);}
  }
- await call('Page.navigate',{url:base+'?package=starter'});await until('!document.querySelector("#create-order").disabled');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
+ await navigate(base+'?package=starter');await until('document.querySelector("#create-order")?.disabled === false');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
  assert.equal(await evaluate('document.querySelectorAll("input[name=payment-channel]").length'),3);assert.equal(await evaluate('document.querySelector("#order-reference,#cashier-help,#replacement-purchase")===null'),true);
  await evaluate('document.querySelector("#create-order").click();document.querySelector("#create-order").click()');await until('document.querySelector("#checkout-status").textContent.includes("该套餐已有待付款")');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
  for(const mode of ['newsuccess','newsuccess-latest','newsuccess-paid']){
- await call('Page.navigate',{url:base+'?package=starter&fixture='+mode});await until('!document.querySelector("#create-order").disabled');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');
+ await navigate(base+'?package=starter&fixture='+mode);await until('document.querySelector("#create-order")?.disabled === false');await evaluate('document.querySelectorAll("input[name=payment-channel]")[1].click();document.querySelector("#create-order").click()');
  await until('window.__calls.some(c=>c[0]==="/v1/orders/22222222-2222-4222-8222-222222222222")');
  if(mode==='newsuccess-paid'){await until('document.querySelector("#cashier-link").hidden');continue;}
  await until('!document.querySelector("#cashier-link").hidden');assert.equal(await evaluate('window.__creates'),1);
@@ -62,6 +63,6 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  const nav=await evaluate('window.__navigation');assert.equal(nav.prevented,false,'ordinary purchase must retain native navigation');assert.equal(nav.target,'_blank');assert.equal(nav.rel,'noopener noreferrer');assert.equal(nav.url,'https://cashier.fixture.invalid/pay/'+(mode==='newsuccess-latest'?'latest':'example'));assert.equal(await evaluate('window.__calls.length'),before,'no asynchronous query inserted into normal cashier click');
  assert.equal(await evaluate('window.__creates'),1,'cashier click never creates a second transaction');
  }
- await call('Page.navigate',{url:base+'?order=bad'});await until('document.querySelector("#checkout-status").textContent.includes("订单编号无效")');assert.equal(await evaluate('window.__calls.length'),0);
+ await navigate(base+'?order=bad');await until('document.querySelector("#checkout-status").textContent.includes("订单编号无效")');assert.equal(await evaluate('window.__calls.length'),0);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });

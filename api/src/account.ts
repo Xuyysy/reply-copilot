@@ -3,14 +3,15 @@ import { checkoutFromAttempt } from "./payment-checkout";
 import type { Env, Session } from "./types";
 import { sessionFor } from "./auth";
 import { balance } from "./quota";
+import { subscriptionAccount, availableNow } from './subscription-account';
 import { signupBenefit } from "./signup-benefits";
 import { response } from "./http";
 
 export async function accountState(env: Env, session: Session) {
-  const quota = await balance(env,session.user_id);
+  const [quota,subscription] = await Promise.all([balance(env,session.user_id),subscriptionAccount(env,session.user_id)]);
   const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
-  const status = user?.status === "frozen" ? "frozen" : quota.totalRemaining>0 ? "credits_available" : "credits_exhausted";
-  return {status,quota};
+  const status = user?.status === "frozen" ? "frozen" : availableNow(quota,subscription)>0 ? "credits_available" : "credits_exhausted";
+  return {status,quota,subscription,availableNow:availableNow(quota,subscription)};
 }
 export async function me(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
@@ -24,12 +25,12 @@ export async function entitlements(request: Request, env: Env): Promise<Response
     return response({features:{interactionMomentum:feature&&{...feature,ownerId:session.user_id}}},200,env,request);
   }
   const state=await accountState(env,session);
-  return response({status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota},200,env,request);
+  return response({status:state.status,entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},quota:state.quota,subscription:state.subscription,availableNow:state.availableNow},200,env,request);
 }
 export async function usage(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
-  const [quota,benefit]=await Promise.all([balance(env,session.user_id),signupBenefit(env,session.user_id)]);
-  return response({quota,signupBenefit:benefit},200,env,request);
+  const [quota,benefit,subscription]=await Promise.all([balance(env,session.user_id),signupBenefit(env,session.user_id),subscriptionAccount(env,session.user_id)]);
+  return response({quota,signupBenefit:benefit,subscription,availableNow:availableNow(quota,subscription)},200,env,request);
 }
 export async function licenseDevices(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);

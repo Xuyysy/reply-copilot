@@ -208,7 +208,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           ? await cachedGatePromise.catch(() => ({})) : await chrome.storage.local.get(gateKey).catch(() => ({}));
         gateHint = Boolean(stored[gateKey]);
       }
-      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending, ...(fromXPage?{momentumGatePending:gateHint}:{}), ...(fromExtensionPage ? { user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
+      sendResponse({ ok: true, recoveryRequired, status: state.status, source: state.source, quota: state.quota, pending, ...(fromXPage?{momentumGatePending:gateHint}:{}), ...(fromExtensionPage ? { subscription: state.subscription ?? null, user: state.user ? { username: state.user.username, email: state.user.email } : null } : {}) });
     })().catch(() => sendResponse({ ok: false, status: "auth_unavailable" }));
     return true;
   }

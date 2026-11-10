@@ -1,3 +1,6 @@
+import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
+import CreatorMomentumIntelligence from './CreatorMomentumIntelligence';
+import {loadAccountSnapshot} from "../../lib/account-load.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
@@ -17,7 +20,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Skeleton } from "../ui/skeleton";
 
 type Account = { user: { userId: string; username: string | null; email: string; role: string; emailVerified: boolean } };
-type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null };
+type SubscriptionUsage = {status:"none"|"active";plan:"basic"|"pro"|"max"|"ultra"|null;dailyLimit:number;usedToday:number;reservedToday:number;remainingToday:number;resetAt:string|null;expiresAt:string|null;startAt:string|null};
+type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null; subscription?:SubscriptionUsage; availableNow?:number };
 type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_status?: string; risk_state?:string; credited_at?:number|null; paid_at?:number|null; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
@@ -26,7 +30,11 @@ type OrderRefreshFeedback = { orderId: string; message: string; code?: string; r
 export default function AccountDashboard() {
   const bindingTitle = useRef<HTMLHeadingElement>(null);
   const language = useLanguage();
+  const languageRef = useRef(language);
+  languageRef.current = language;
   const t = (zh: string, en: string) => phrase(language, zh, en);
+  const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
+  const [subscriptionPlans,setSubscriptionPlans]=useState<string[]>([]);
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "signed-out" | "error" | "ready">("loading");
   const [message, setMessage] = useState("");
@@ -57,18 +65,31 @@ export default function AccountDashboard() {
   const validCode = code && /^[A-F0-9]{8}$/.test(code) ? code : null;
 
   const load = useCallback((silent=false,fresh=false):Promise<boolean> => accountRefresh.current!(async()=>{
-    if(!silent){setState("loading");setMessage("");}
-      try {
-        const [account, usage, activity] = await Promise.all([api<Account>("/v1/me"), api<Usage>("/v1/usage"), api<Activity>("/v1/activity").catch(error => { if (error instanceof ApiError && error.status === 401) throw error; return null; })]);
-        const sameAccount=accountOwner.current===null||accountOwner.current===account.user.userId;
-        accountOwner.current=account.user.userId;
-        notices.current!.setOwner(account.user.userId);setPaymentNotice(notices.current!.current());
-        // Retain the monitored order until its watcher confirms a terminal result.
-        // A concurrent account refresh must not cancel the paid notification.
-        setPaymentHint(previous=>(sameAccount?previous:null)||pendingPaymentOrder(activity?.orders)||null);
-        setData({ account, usage, activity }); setState("ready");return true;
-      } catch(error){if(error instanceof ApiError&&error.status===401){notices.current!.setOwner(null);setPaymentNotice(null);setData(null);setState("signed-out");}else if(!silent)setState("error");setMessage(readableError(error,language));return false;}
-  },{fresh}), [language]);
+    // A refresh must never throw away a previously verified account, including
+    // during language changes and payment/order updates.
+    if(!silent){if(accountOwner.current===null)setState("loading");setMessage("");}
+    try {
+      const {account,usage,activity}=await loadAccountSnapshot(api) as {account:Account;usage:Usage;activity:Activity|null};
+      const sameAccount=accountOwner.current===null||accountOwner.current===account.user.userId;
+      accountOwner.current=account.user.userId;
+      notices.current!.setOwner(account.user.userId);setPaymentNotice(notices.current!.current());
+      // Retain the monitored order until its watcher confirms a terminal result.
+      // A concurrent account refresh must not cancel the paid notification.
+      setPaymentHint(previous=>(sameAccount?previous:null)||pendingPaymentOrder(activity?.orders)||null);
+      setData(previous=>({account,usage,activity:activity??(previous?.account.user.userId===account.user.userId?previous.activity:null)}));setState("ready");setMessage("");return true;
+    } catch(error){
+      if(error instanceof ApiError&&error.status===401){
+        // Only an actual invalid session may clear the verified identity.
+        accountOwner.current=null;
+        notices.current!.setOwner(null);setPaymentNotice(null);setData(null);setState("signed-out");
+      }else if(!silent&&accountOwner.current===null){
+        // Initial-load failures get a quiet recovery card, not a red alarm.
+        setState("error");
+      }
+      setMessage(readableError(error,languageRef.current));
+      return false;
+    }
+  },{fresh}), []);
   useEffect(()=>{const clean=cleanPaymentReturn(location.href);if(clean!==location.href)history.replaceState(history.state,"",clean);},[]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?30000:0}), [load,state]);
@@ -133,7 +154,7 @@ export default function AccountDashboard() {
   useEffect(() => { if (state === "ready" && code) void checkAuthorization(); }, [state, code, checkAuthorization]);
 
   // Only a matching local extension opens the automatic path. Keep a short
-  // window to switch accounts before the existing CSRF-protected POST.
+  // window to switch accounts or cancel before the existing CSRF-protected POST.
   useEffect(() => {
     if (authorization !== "pending" || !validCode || !proof || !data?.account.user.userId || bindingStopped.current) return;
     const owner = data.account.user.userId;
@@ -265,6 +286,19 @@ export default function AccountDashboard() {
       setRefreshingOrderId(null);
     }
   }
+  const userId=data?.account.user.userId;
+  useEffect(()=>{
+    setSubscriptionOrders([]);setSubscriptionPlans([]);
+    if(state!=="ready"||!userId||validCode)return;
+    let active=true;
+    void api<{orders:SubscriptionOrder[]}>("/v1/subscriptions/orders").then(result=>{
+      if(active)setSubscriptionOrders(result.orders);
+    }).catch(()=>{});
+    void api<{plans:{plan_code:string}[];checkoutAvailable:boolean}>("/v1/subscriptions/plans").then(result=>{
+      if(active&&result.checkoutAvailable)setSubscriptionPlans(result.plans.map(plan=>plan.plan_code));
+    }).catch(()=>{});
+    return()=>{active=false;};
+  },[state,userId,validCode]);
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
@@ -287,16 +321,61 @@ export default function AccountDashboard() {
     "Binding request approved. Waiting for the extension to finish connecting. Return to the extension to check its status.",
   );
   if (code && !validCode) return <Alert variant="destructive" role="alert"><AlertDescription>{t("设备码格式无效，请返回插件重新发起绑定。", "Invalid device code. Start again in the extension.")}</AlertDescription></Alert>;
-  if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{code ? t("登录或免费注册后，将自动返回插件授权确认。", "Sign in or register and you will return to extension approval automatically.") : t("登录后即可查看余额、额度流水和插件绑定。", "Sign in to see your credits, activity and extension connection.")}</p><div className="flex gap-3"><Button asChild><a href={signInHref}>{t("登录", "Sign in")}</a></Button><Button variant="outline" asChild><a href={registerHref}>{t("免费注册", "Register for free")}<ArrowRight /></a></Button></div></CardContent></Card>;
-  if (state === "error" || !data) return <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-5">{message || t("账户暂时无法读取。", "Account unavailable.")}<Button variant="outline" onClick={() => void load()}>{t("重试", "Retry")}</Button></AlertDescription></Alert>;
+  if (state === "signed-out") return <Card><CardHeader><CardTitle>{t("请先登录", "Please sign in")}</CardTitle></CardHeader><CardContent className="space-y-5"><p className="text-muted-foreground">{code ? t("登录或免费注册后，将自动返回插件授权确认。", "Sign in or register and you will return to extension approval automatically.") : t("登录后即可查看余额、订单和插件绑定。", "Sign in to see credits, orders and extension connection.")}</p><div className="flex gap-3"><Button asChild><a href={signInHref}>{t("登录", "Sign in")}</a></Button><Button variant="outline" asChild><a href={registerHref}>{t("免费注册", "Register for free")}<ArrowRight /></a></Button></div></CardContent></Card>;
+  if (state === "error" || !data) return <Card data-account-recovery className="border-border/70 shadow-none">
+     <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+       <div className="space-y-1">
+         <p className="font-semibold">{t("账户内容暂未加载","Account details could not load")}</p>
+         <p className="text-sm text-muted-foreground">{t("网络可能短暂中断。重新加载即可继续查看账户。","A brief connection issue may have interrupted the page. Reload to view your account.")}</p>
+       </div>
+       <Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15}/>{t("重新加载","Reload")}</Button>
+     </CardContent>
+   </Card>;
   const { account, usage, activity } = data;
   const date = (value: number) => new Date(value).toLocaleString(language === "zh" ? "zh-CN" : "en-US");
-  const labels: Record<string, [string, string]> = { signup_grant: ["注册赠送", "Welcome credits"], generation_debit: ["AI 生成", "AI generation"], generation_refund: ["失败返还", "Refund"], purchase_grant: ["充值到账", "Top-up"], admin_adjustment: ["人工调整", "Manual adjustment"] };
   return <div className="space-y-5">
     {paymentNotice&&<Alert role="status" data-payment-notice className="pr-12"><AlertDescription>{paymentNoticeText(paymentNotice)}</AlertDescription><Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1" aria-label={t("关闭支付提示","Dismiss payment notice")} onClick={dismissPaymentNotice}><X size={16} aria-hidden="true" /></Button></Alert>}
     <div className="flex flex-wrap items-center justify-between gap-5"><div className="min-w-0"><p className="section-kicker">{t("账户概览", "Overview")}</p><h2 className="mb-1 break-words text-3xl font-semibold tracking-tight">{account.user.username || t("我的账户", "My account")}</h2><p className="app-muted break-all">{account.user.email}</p></div><Button variant="outline" size="sm" onClick={() => void load()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div>
+    {usage.subscription?.status==="active"&&<Card data-testid="account-subscription-quota" className="border-primary/30"><CardHeader><CardTitle>{t("我的订阅 · 每日生成额度","My subscription · Daily generations")}</CardTitle></CardHeader><CardContent className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><strong className="text-xl uppercase">{usage.subscription.plan}</strong><p className="text-sm text-muted-foreground">{t("每 24 小时重置，未使用额度不累计","Resets every 24 hours; unused daily generations do not roll over")}</p></div>
+        <span className="text-2xl font-bold tabular-nums">{usage.subscription.remainingToday.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">/ {usage.subscription.dailyLimit.toLocaleString()}</span></span>
+      </div>
+      <div role="progressbar" aria-label={t("今日订阅额度使用进度","Daily subscription quota usage")} aria-valuenow={usage.subscription.usedToday+usage.subscription.reservedToday} aria-valuemin={0} aria-valuemax={usage.subscription.dailyLimit} className="h-3 overflow-hidden rounded-full bg-muted">
+        <div className="h-full rounded-full bg-primary" style={{width:`${Math.min(100,100*(usage.subscription.usedToday+usage.subscription.reservedToday)/Math.max(1,usage.subscription.dailyLimit))}%`}} />
+      </div>
+      <div className="grid gap-2 text-sm sm:grid-cols-3">
+        <p>{t("今日已用","Used today")}：<strong>{usage.subscription.usedToday}</strong></p>
+        <p>{t("生成中预留","In-flight reserved")}：<strong>{usage.subscription.reservedToday}</strong></p>
+        <p>{t("今日剩余","Remaining today")}：<strong>{usage.subscription.remainingToday}</strong></p>
+      </div>
+      <div className="grid gap-2 text-sm sm:grid-cols-2">
+        <p>{t("下次重置","Next reset")}：{usage.subscription.resetAt?new Date(usage.subscription.resetAt).toLocaleString(language==="zh"?"zh-CN":"en-US"):"—"}</p>
+        <p>{t("订阅到期","Expires")}：{usage.subscription.expiresAt?new Date(usage.subscription.expiresAt).toLocaleString(language==="zh"?"zh-CN":"en-US"):"—"}</p>
+      </div>
+      {subscriptionPlans.length>0&&<div className="flex flex-wrap gap-2">
+        <a className="button secondary" href="/pricing/">{t("购买下一期","Purchase next period")}</a>
+        {subscriptionPlans.filter(plan=>["basic","pro","max","ultra"].indexOf(plan)>["basic","pro","max","ultra"].indexOf(usage.subscription?.plan??"")).map(plan=>
+          <a className="button secondary" key={plan} href={"/subscription-checkout/?upgrade=1&plan="+encodeURIComponent(plan)}>{t("升档至","Upgrade to")} {plan.toUpperCase()}</a>)}
+      </div>}
+      <p className="text-sm text-muted-foreground">{t("订阅每天重置次数，未用不累计；订阅当天额度用完后先扣免费额度，免费额度用完后才使用永久付费额度。永久额度不主动过期，三类额度分开计算。","Subscriptions reset daily without rollover. Once the daily subscription allowance is exhausted, free credits are used before permanent paid credits. Permanent credits do not expire automatically, and all balances remain separate.")}</p>
+      {usage.subscription.remainingToday===0&&<Alert role="status" data-testid="account-subscription-overage"><AlertDescription className="space-y-2">
+        <p>{usage.quota.freeRemaining>0
+          ?t(`今日订阅额度已用完，已自动切换到免费额度（剩余 ${usage.quota.freeRemaining} 次），免费额度用完后才会扣永久付费额度。`,`Today's subscription allowance is exhausted. Free credits are being used (${usage.quota.freeRemaining} remaining), followed by permanent credits.`)
+          :usage.quota.paidRemaining>0
+          ?t(`今日订阅额度与免费额度已用完，正在使用永久付费额度（剩余 ${usage.quota.paidRemaining} 次）。`,`Daily subscription and free credits are exhausted. Permanent paid credits are now in use (${usage.quota.paidRemaining} left).`)
+          :t("今日订阅额度、免费额度和永久付费额度全部用完。可以购买永久额度包、升级订阅（若符合条件），或等待明天重置。","Your daily subscription, free and permanent credits are exhausted. Buy a permanent credit pack, upgrade your subscription if eligible, or wait for the next reset.")}</p>
+        <div className="flex flex-wrap gap-2">
+          {usage.subscription.expiresAt&&new Date(usage.subscription.expiresAt).getTime()-Date.now()>=24*60*60*1000&&
+            subscriptionPlans.filter(plan=>["basic","pro","max","ultra"].indexOf(plan)>["basic","pro","max","ultra"].indexOf(usage.subscription?.plan??"")).sort((a,b)=>["basic","pro","max","ultra"].indexOf(a)-["basic","pro","max","ultra"].indexOf(b)).slice(0,1).map(plan=>
+              <Button size="sm" key={plan} variant="outline" asChild><a data-testid="account-subscription-overage-upgrade" href={"/subscription-checkout/?upgrade=1&plan="+encodeURIComponent(plan)}>{t("升级订阅至","Upgrade subscription to")} {plan.toUpperCase()} · {t("按剩余时间补差价","Prorated price")}</a></Button>)}
+          {usage.quota.freeRemaining===0&&usage.quota.paidRemaining===0&&<Button size="sm" variant="outline" asChild><a href="/pricing/#permanent-credits">{t("购买永久额度包","Buy permanent credits")}<ArrowRight size={14}/></a></Button>}
+        </div>
+      </AlertDescription></Alert>}
+      <Button variant="outline" asChild><a href="/pricing">{t("查看订阅与永久额度包","View subscriptions and permanent credits")}<ArrowRight size={16}/></a></Button>
+    </CardContent></Card>}
     {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("付费额度", "Paid credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[usage.subscription?.status==="active"?t("原有免费及永久次数", "Welcome and permanent credits"):t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("永久付费额度", "Permanent purchased credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
     {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" && (connected || connectionProblem || autoBinding) ? waitingForExtension : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{connectionProblem && proof && <Button variant="outline" size="sm" onClick={retryConnection}>{t("重新检查连接", "Check connection again")}</Button>}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
     <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy && !autoBinding) dismissAuthorization(); }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onOpenAutoFocus={event => { if (bindingTitle.current) { event.preventDefault(); bindingTitle.current.focus({preventScroll:true}); } }} onEscapeKeyDown={event => { if (autoBinding || busy) event.preventDefault(); }} onInteractOutside={event => { if (autoBinding || busy) event.preventDefault(); }} showCloseButton={!busy && !autoBinding} closeLabel={t("关闭", "Close")}>
@@ -346,21 +425,32 @@ export default function AccountDashboard() {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-    <div className="grid grid-cols-1 items-start gap-5 md:grid-cols-2">
-      <Card className="min-w-0 self-start">
-        <CardHeader><CardTitle>{t("最近额度流水", "Recent activity")}</CardTitle></CardHeader>
-        <CardContent className="min-w-0">
-          {activity === null ? <div className="space-y-3 py-6 text-center text-sm text-muted-foreground"><p>{t("额度流水暂时无法读取。", "Activity is temporarily unavailable.")}</p><Button data-activity-retry variant="outline" size="sm" onClick={() => void load()}>{t("重试", "Retry")}</Button></div> :
-            <div data-activity-scroll role="region" aria-label={t("最近额度流水列表", "Recent activity list")} tabIndex={0} className="max-h-[400px] min-w-0 overflow-y-auto overscroll-contain focus-visible:outline-2 focus-visible:outline-primary">
-              {activity.ledger.length ? <ul className="divide-y divide-border">{activity.ledger.map((item, index) => <li data-created-at={item.created_at} className="flex items-center justify-between gap-4 py-3 text-sm" key={`${item.created_at}-${index}`}><div className="min-w-0"><strong>{phrase(language, ...(labels[item.kind] || [item.kind, item.kind]))}</strong><p className="text-muted-foreground">{date(item.created_at)}</p></div><span className={`shrink-0 ${item.free_delta + item.paid_delta >= 0 ? "text-emerald-700" : "text-foreground"}`}>{item.free_delta + item.paid_delta > 0 ? "+" : ""}{item.free_delta + item.paid_delta}</span></li>)}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无额度记录。", "No activity yet.")}</p>}
-            </div>}
-        </CardContent>
-      </Card>
-      <Card data-orders-card className="min-w-0 self-start">
-        <CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader>
-        <CardContent className="min-w-0">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="epay"&&order.payment_status==="pending"&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue this order")}</a>}{order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</CardContent>
-      </Card>
-    </div>
+
+    <CreatorMomentumIntelligence userId={account.user.userId} />
+    <Card data-orders-card className="min-w-0">
+      <CardHeader><CardTitle>{t("订单记录", "Order history")}</CardTitle></CardHeader>
+      <CardContent className="min-w-0 space-y-3">
+        <details data-subscription-orders className="group min-w-0 rounded-xl border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0"><strong className="block">{t("订阅订单", "Subscription orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{subscriptionOrders.length ? t(`共 ${subscriptionOrders.length} 条记录 · 点击展开`, `${subscriptionOrders.length} orders · Expand to view`) : t("暂无订阅订单", "No subscription orders")}</span></span>
+            <span aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="space-y-3 border-t border-border px-4 py-3">
+            {subscriptionOrders.length ? subscriptionOrders.map(order=><div key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0">
+              <p className="min-w-0 break-words text-sm"><strong className="uppercase">{order.planCode}</strong> · ¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")} · {subscriptionStatus(order,language)}</p>
+              <a className="button secondary" href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{t("查看原订单","View original order")}</a>
+            </div>) : <p className="text-sm text-muted-foreground">{t("暂无订阅订单。", "No subscription orders yet.")}</p>}
+          </div>
+        </details>
+        <details data-credit-orders className="group min-w-0 rounded-xl border border-border bg-card">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0"><strong className="block">{t("充值订单", "Top-up orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{activity === null ? t("暂时无法读取订单", "Orders unavailable") : activity.orders.length ? t(`共 ${activity.orders.length} 条记录 · 点击展开`, `${activity.orders.length} orders · Expand to view`) : t("暂无充值订单", "No top-up orders")}</span></span>
+            <span aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
+          </summary>
+          <div className="min-w-0 border-t border-border px-4 py-3">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="epay"&&order.payment_status==="pending"&&<a className="mt-2 inline-block underline" href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue this order")}</a>}{order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</div>
+        </details>
+      </CardContent>
+    </Card>
     <Card><CardContent className="flex items-center justify-between gap-5 p-6"><div><h3 className="mb-1 text-lg font-semibold">{t("按需充值", "Top up when needed")}</h3><p className="text-sm text-muted-foreground">{t("待付款订单不会增加额度，到账以服务端确认的支付记录为准。", "Pending orders do not grant credits. Credits are added only after server-confirmed payment.")}</p></div><Button variant="outline" asChild><a href="/pricing">{t("查看套餐", "View plans")}<ArrowRight /></a></Button></CardContent></Card>
     {message && !validCode && <Alert role="status"><AlertDescription>{message}</AlertDescription></Alert>}
     <div className="flex gap-3"><Button variant="outline" disabled={busy} onClick={() => void logout()}>{t("退出登录", "Sign out")}</Button>{account.user.role === "admin" && <Button variant="outline" asChild><a href="/admin">{t("管理后台", "Admin")}</a></Button>}</div>

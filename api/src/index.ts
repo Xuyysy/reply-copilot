@@ -1,4 +1,9 @@
 import {adminCreator} from './creator-momentum';
+import {creatorMomentumInsights} from './creator-momentum-insights';
+import {refreshSubscriptionMk99Payment} from './subscription-settlement';
+import {subscriptionMk99Notify} from './subscription-notify';
+import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOrders} from './subscription-checkout';
+import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans,publishSubscriptionPlan,holdSubscriptionOrder,adminSubscriptionFinance,reviewSubscriptionPayment} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
@@ -43,6 +48,20 @@ export default {
       if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
       if (request.method === "OPTIONS") return options(request, env);
       if(request.method==="GET"&&path==="/v1/site")return await siteContent(request,env);
+      if(request.method==="GET"&&path==="/v1/subscriptions/plans")return await publicSubscriptionPlans(request,env);
+      if(request.method==="POST"&&path==="/v1/subscriptions/upgrade-quote")return await createSubscriptionUpgradeQuote(request,env);
+      if(request.method==="GET"&&path==="/v1/subscriptions/orders")return await subscriptionOrders(request,env);
+      if(request.method==="GET"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}$/.test(path))return await subscriptionOrders(request,env,path.split("/")[4]);
+      if(request.method==="POST"&&path==="/v1/subscriptions/orders")return await createSubscriptionCheckout(request,env);
+      if(request.method==="POST"&&path==="/v1/payments/mk99/subscriptions/notify")return await subscriptionMk99Notify(request,env);
+      if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/refresh$/.test(path))return await refreshSubscriptionMk99Payment(request,env,path.split("/")[4]);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/finance")return await adminSubscriptionFinance(request,env);
+      if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/plans\/(basic|pro|max|ultra)$/.test(path))return await publishSubscriptionPlan(request,env,path.split("/")[5]);
+      if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/verify$/.test(path))return await reviewSubscriptionPayment(request,env,path.split("/")[5]);
+      if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/hold$/.test(path))return await holdSubscriptionOrder(request,env,path.split("/")[5]);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/plans")return await adminSubscriptionPlans(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/users")return await adminSubscriptionUsers(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/subscriptions/orders")return await adminSubscriptionOrders(request,env);
       if(path==="/v1/admin/creator-momentum"&&["GET","POST"].includes(request.method))return await adminCreator(request,env,request.method==="GET"?"read":"save");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/restore")return await adminCreator(request,env,"restore");
       if(request.method==="POST"&&path==="/v1/admin/creator-momentum/simulate")return await adminCreator(request,env,"simulate");
@@ -73,6 +92,7 @@ export default {
       if (request.method === "POST" && path === "/v1/auth/logout") return await logout(request, env);
       if (request.method === "GET" && path === "/v1/me") return await me(request, env);
       if (request.method === "GET" && path === "/v1/entitlements") return await entitlements(request, env);
+      if (request.method === "GET" && path === "/v1/creator-momentum/insights") return await creatorMomentumInsights(request,env);
       if (request.method === "GET" && path === "/v1/usage") return await usage(request, env);
       if (request.method === "GET" && path === "/v1/activity") return await activity(request,env);
       if (request.method === "GET" && path === "/v1/packages") return await packages(request,env);

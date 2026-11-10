@@ -10,14 +10,14 @@ manifest = json.loads((root / "manifest.json").read_text())
 source = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
 identity = json.loads(Path("config/extension-store-identity.json").read_text())
 assert identity["id"] == "fgfjajofkapebgphfidblngcjomkbdaj" and manifest["key"]
-assert manifest["version"] == "0.3.4"
+assert manifest["version"] == json.loads(Path("manifest.json").read_text())["version"]
 assert manifest["host_permissions"] == ["https://api.x-reply-helper.top/*"]
 assert manifest["externally_connectable"] == {"matches": ["https://app.x-reply-helper.top/*"]}
 assert set(manifest["permissions"]) == {"contextMenus", "storage", "sidePanel", "clipboardWrite"}
 assert not (root / "staging").exists()
 output = Path("dist/production-rc")
 output.mkdir(parents=True, exist_ok=True)
-archive = output / "reply-copilot-production-0.3.4.zip"
+archive = output / f'reply-copilot-production-{manifest["version"]}.zip'
 with ZipFile(archive, "w", ZIP_DEFLATED) as package:
     for file in sorted(root.rglob("*")):
         if file.is_file():

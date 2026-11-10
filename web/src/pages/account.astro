@@ -3,6 +3,5 @@ import Base from "../layouts/Base.astro";
 import AccountDashboard from "../components/account/AccountDashboard";
 ---
 <Base title="我的账户" titleEn="My account">
-  <div class="container page-hero"><div class="eyebrow" data-zh="账户中心">Account</div><h1 data-zh="你的生成额度，一目了然。">Your generation credits at a glance.</h1><p class="lead" data-zh="免费和付费额度均不主动过期；余额由服务端实时确认。">Free and paid credits do not expire. Balances come from the server.</p></div>
-  <section class="container app-shell" style="padding-top:0"><AccountDashboard client:load /></section>
+  <section class="container public-account-panel app-shell" aria-label="Account dashboard"><AccountDashboard client:load /></section>
 </Base>

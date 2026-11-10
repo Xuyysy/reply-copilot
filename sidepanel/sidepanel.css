@@ -68,3 +68,17 @@ main { padding:17px 15px 78px; }
 footer { background:var(--bg);border-color:var(--line); }
 @media (max-width:320px) { body { min-width:0; } main { padding:12px 9px 72px; } .dashboard-card { padding:12px; } }
 @media (prefers-reduced-motion:reduce) { .button,.icon-button,.quick-settings input,.quick-settings input::before,.dashboard-card>summary::after { transition:none!important; } }
+
+/* Daily subscription allowance stays distinct from lifetime purchased credits. */
+.subscription-quota { margin-top:14px;padding:13px;border-radius:12px;background:var(--xrh-pro-surface);border:1px solid var(--xrh-pro-line); }
+.subscription-heading {display:flex;justify-content:space-between;gap:8px;align-items:center;color:var(--xrh-brand-text);font-size:12px}
+.subscription-heading strong {font-size:14px}
+.subscription-remaining {margin:9px 0 8px}
+.subscription-remaining strong {font-size:26px;font-weight:800;font-variant-numeric:tabular-nums}
+.subscription-remaining span {font-size:11px;color:var(--muted)}
+.subscription-quota progress {display:block;width:100%;height:9px;accent-color:var(--xrh-brand);border:0;border-radius:12px}
+.subscription-breakdown {display:flex;justify-content:space-between;gap:8px;margin-top:7px;font-size:11px}
+.subscription-quota .muted-note {margin:8px 0 0}
+
+.subscription-overage{margin-top:10px;padding:11px 12px;border:1px solid var(--xrh-pro-line,var(--line));border-radius:10px;background:var(--xrh-pro-surface,var(--soft));color:var(--text)}
+.subscription-overage p{margin:0 0 8px;font-size:12px;line-height:1.5}.subscription-overage .button{margin-top:4px}
