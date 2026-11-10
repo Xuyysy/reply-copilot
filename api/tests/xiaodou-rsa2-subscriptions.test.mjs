@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {fixture,withProvider,providerResponse} from './helpers/payment-v2.mjs';
+import {fixture,withProvider,providerResponse,worker,platform} from './helpers/payment-v2.mjs';
+import {createHash,sign} from 'node:crypto';
 
 const cashier='https://cashier.example.test';
 function ready(){
@@ -117,5 +118,55 @@ test('merchant switch away never rewrites a pending Xiaodou subscription order',
    ()=>f.call('/v1/subscriptions/orders/'+created.body.order.id+'/refresh'));
   assert.equal(settled.status,200);
   assert.equal(settled.body.entitlementApplied,true);
+ }finally{f.sql.close();}
+});
+
+function signedNotice(env,event){
+ const body=JSON.stringify(event),timestamp=String(Math.floor(Date.now()/1000));
+ const nonce='callback-nonce-123456789',kid='test-platform';
+ const lines=['XD-Webhook-v1',event.eventId,event.eventType,timestamp,nonce,kid,
+   createHash('sha256').update(body).digest('hex')].join('\\n');
+ const headers={'Content-Type':'application/json','X-XD-Webhook-Event-Id':event.eventId,
+  'X-XD-Webhook-Event-Type':event.eventType,'X-XD-Webhook-Timestamp':timestamp,
+  'X-XD-Webhook-Nonce':nonce,'X-XD-Webhook-Key-Id':kid,
+  'X-XD-Webhook-Signature':sign('RSA-SHA256',Buffer.from(lines),platform.privateKey).toString('base64')};
+ return new Request(env.API_ORIGIN+'/v1/payments/xiaodou/webhook',{method:'POST',headers,body});
+}
+test('repeated signed native Xiaodou subscription webhook grants exactly one subscription, never permanent credits',async()=>{
+ const f=ready();
+ try{
+  const created=await create(f);
+  assert.equal(created.status,201);
+  const tx=f.sql.prepare('SELECT * FROM subscription_payment_transactions').get();
+  const event={appId:f.env.XIAODOU_APP_ID,outTradeNo:tx.provider_trade_id,
+    eventId:'xd-event-unique-2001',eventType:'PAYMENT_SUCCEEDED',status:'SUCCEEDED',
+    eventAmountFen:6990,grossAmountFen:6990,feeProjection:projection(6990),currency:'CNY',
+    occurredAt:Math.floor(Date.now()/1000),stateVersion:0};
+  for(let i=0;i<2;i++){
+   const notice=await withProvider(req=>providerResponse(req,{
+      outTradeNo:tx.provider_trade_id,openOrderId:'XD_ORDER_123456',channel:'ALIPAY_H5',
+      amountFen:6990,currency:'CNY',status:'SUCCEEDED',
+      feeProjection:projection(6990),payUrl:null
+    },{status:200}),()=>worker.fetch(signedNotice(f.env,event),f.env));
+   assert.equal(notice.status,200,await notice.text());
+   if(i===0)assert.equal(await notice.text(),'success');
+  }
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_periods').get().n,1);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_payment_events WHERE merchant_provider='xiaodou'").get().n,2);
+  assert.equal(f.sql.prepare("SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").get().paid_balance,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM recharge_orders").get().n,0);
+ }finally{f.sql.close();}
+});
+test('stale D1 WeChat release flags cannot turn on Xiaodou WeChat without explicit merchant approval',async()=>{
+ const f=ready();
+ try{
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_wechat_enabled','payment_rsa2_wechat_released')");
+  const c=await f.call('/v1/subscriptions/plans',{method:'GET'});
+  assert.deepEqual(c.body.paymentMethods,['ALIPAY_H5']);
+  const p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
+  const notAllowed=await f.call('/v1/subscriptions/orders',{body:{...request,channel:'WECHAT_H5'}});
+  assert.equal(notAllowed.status,503);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_orders').get().n,0);
  }finally{f.sql.close();}
 });
