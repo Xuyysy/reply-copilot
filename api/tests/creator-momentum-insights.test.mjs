@@ -41,13 +41,13 @@ test('CMI is based only on current user server-confirmed delivery ACK events; ad
   policy(f,[[5,7],[10,12],[15,17]]);
   let r=await f.call(url,{method:'GET'});
   assert.equal(r.status,200,JSON.stringify(r));assert.equal(r.body.totalConfirmed,2);
-  assert.equal(r.body.stage,0);assert.equal(r.body.curve.length,24);
+  assert.equal(r.body.cycle.referenceCrossings,0);assert.equal(r.body.cycle.stage,1);assert.equal(r.body.curve.length,24);
   assert.equal(r.body.eventSource,'server_confirmed_ai_delivery');
   const old=r.body.score;
   policy(f,[[1,1],[2,2],[3,3]]);
   r=await f.call(url,{method:'GET'});
   assert.equal(r.status,200);
-  assert.equal(r.body.stage,2);assert.ok(r.body.score>old);
+  assert.equal(r.body.cycle.referenceCrossings,2);assert.equal(r.body.cycle.stage,3);assert.ok(r.body.score>old);
   assert.equal(r.body.policyVersion,'test-1');
   const rangeFields=JSON.stringify(r.body);
   assert.equal(rangeFields.includes('ranges'),false,'do not return secret thresholds');

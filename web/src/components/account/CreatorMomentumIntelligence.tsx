@@ -112,7 +112,7 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
     <div className="cmi-stage-grid" aria-label={t("今日三阶段参考状态","Three-stage daily reference status")}>
      {(cycle.stages??[]).map(s=><div key={s.stage} className={`cmi-stage cmi-stage-${s.referenceState}`}>
       <div className="flex items-center justify-between gap-2"><strong>STAGE {numerals[s.stage-1]}</strong><Zap size={16}/></div>
-      <span>{s.referenceState==="past_reference_window"?t("已越过参考区间","Reference range crossed"):
+      <span>{s.referenceCrossed?t("研究参考节点已越过","Research reference node crossed"):
        s.referenceState==="inside_reference_window"?t("处于临界参考区间","Inside reference window"):
        t("继续积累","Building")}</span>
       <small>{t(`第 ${s.stage} 次原创机会`,`Original-post opportunity ${s.stage}`)}</small>

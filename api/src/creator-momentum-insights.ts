@@ -22,12 +22,12 @@ export async function creatorMomentumInsights(request:Request,env:Env):Promise<R
   const statement=env.DB.prepare(`SELECT CAST((delivery_confirmed_at-?)/3600000 AS INTEGER) AS hour,
       COUNT(*) AS total
     FROM ai_requests
-    WHERE user_id=? AND status='succeeded' AND consumed=1
+    WHERE user_id=? AND status='succeeded' AND consumed=1 AND created_at>=?
       AND delivery_confirmation_id IS NOT NULL AND delivery_confirmation_id<>''
       AND delivery_confirmed_at>=? AND delivery_confirmed_at<?
     GROUP BY CAST((delivery_confirmed_at-?)/3600000 AS INTEGER)
     ORDER BY hour`);
-  const rows=await statement.bind(start,session.user_id,start,Math.min(end,now+1),start).all<{hour:number;total:number}>();
+  const rows=await statement.bind(start,session.user_id,start-7*24*3600_000,start,Math.min(end,now+1),start).all<{hour:number;total:number}>();
   const hourly=Array(24).fill(0) as number[];
   for(const row of rows.results??[]){
     const h=Number(row.hour);

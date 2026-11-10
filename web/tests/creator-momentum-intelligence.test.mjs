@@ -14,10 +14,10 @@ test("account page includes a single paid-only momentum terminal before the comp
 });
 test("three stages independently cycle, not one permanent progress bar or false triggered labels",()=>{
   assert.match(panel,/CURRENT CYCLE/);
-  assert.match(panel,/cycle\.percent/);
+  assert.match(panel,/cycle\?\.percent/);
   assert.match(panel,/cmi-primary-number/);
   assert.match(panel,/cycleProgress/);
-  assert.match(panel,/已越过参考区间/);
+  assert.match(panel,/研究参考节点已越过/);
   assert.match(panel,/下一次点击 X 原生回复时提示发布原创/);
   assert.match(panel,/参考节点不是实际已弹提醒/);
   assert.doesNotMatch(panel,/500[–-]650|850[–-]1100|1350[–-]1700/);
