@@ -40,7 +40,7 @@ test("three release stages remain distinct references, never falsely claim actua
   assert.match(preview,/研究参考节点已越过/);
   assert.match(preview,/本阶段参考进度/);
   assert.match(preview,/参考信号 · 非实际提醒记录/);
-  assert.match(preview,/not a confirmed extension reminder/);
+  assert.match(panel,/not a confirmed extension reminder/);
   assert.match(preview,/data-cmi-cycle-progress/);
   assert.match(api,/creatorFeature\(env,session\.user_id\)/);
   assert.match(api,/policy\.ranges/);
