@@ -542,7 +542,7 @@
     if (control?.closest('[role="dialog"]')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
-    if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
+    if (!activation || activation.blocked || performance.now()-activation.at>1500) {
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
