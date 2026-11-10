@@ -99,9 +99,13 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
      <p>{t('请先确认你已在小豆商户后台核实该支付接口、通道和当前申报交易形态已获准。此勾选只记录人工确认，不会查询或改变小豆权限。','Confirm that the provider, channel, and declared trade scope are approved in Xiaodou merchant settings. This records your confirmation only; it does not query or change Xiaodou permissions.')}</p>
      <Button disabled={locked} onClick={confirmChannelRelease}>{t('我已核实，确认并启用通道','Verified — confirm and enable')}</Button><Button variant="outline" disabled={locked} onClick={()=>setPendingRelease(null)}>{t('取消','Cancel')}</Button>
     </div>}
+    <div className="space-y-2 border-t pt-3">
+     <p className="text-xs text-muted-foreground">{t('可先配置 RSA2 支付宝，再切换商家；保存接口设置不会改变当前 MK99 收款。','Configure RSA2 Alipay before changing merchants. Saving provider settings does not change the current MK99 merchant.')}</p>
+     <Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存 RSA2 接口设置','Save RSA2 settings')}</Button>
+    </div>
     </div></details>
     
-    {control.activeMerchant==='xiaodou'&&<Button disabled={locked||reason.trim().length<8} onClick={()=>void saveSettings()}>{t('保存支付接口设置','Save payment settings')}</Button>}
+
     <div className="space-y-2 rounded-xl border border-amber-200/70 bg-amber-50/40 p-4"><p className="font-medium">{t('全站收款总开关 · 紧急操作','Global sales switch · emergency control')}</p><p className="text-xs text-muted-foreground">{t('暂停只阻止新订单，历史回调和查单仍可继续。修改此设置需填写上方的变更原因。','Pausing blocks new orders only; old notifications and queries continue. Changing this setting requires a reason above.')}</p><Button disabled={locked||reason.trim().length<8||(!control.operatorEnabled&&!control.environmentReady)} onClick={()=>control.operatorEnabled?void togglePurchase(false):setConfirmEnable(true)}>{control.operatorEnabled?t('暂停全站收款','Pause all sales'):t('开启全站收款','Enable all sales')}</Button>
      {confirmEnable&&!control.operatorEnabled&&<div role="alert" className="space-y-2"><p>{t('确认开启全站收款？只有接口、凭证、通道及平台放行条件全部满足的付款方式才会展示。','Enable global sales? Only methods passing interface, credentials, channel, and platform release gates will be shown.')}</p><Button disabled={locked||reason.trim().length<8} onClick={()=>void togglePurchase(true)}>{t('确认开启','Confirm')}</Button><Button variant="outline" disabled={locked} onClick={()=>setConfirmEnable(false)}>{t('取消','Cancel')}</Button></div>}
     </div>
