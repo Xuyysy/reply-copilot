@@ -37,6 +37,7 @@ test('real admin tables scroll independently with sticky headers; controls, dial
       if(p==='/v1/admin/dashboard')data={users:window.__rows,aiService:{enabled:true,provider:'Qwen',model:'qwen3.7-flash',keyConfigured:true}};
       else if(p==='/v1/admin/users')data={users:users()};
       else if(p==='/v1/admin/orders')data={orders:orders()};
+      else if(p==='/v1/admin/usage-ledger')data={items:users().map((u,i)=>({request_id:'req-'+i,user_id:u.id,email:u.email,created_at:1793318400000,source:i%2?'subscription':'free',source_evidence:'credit_allocation',period_plan:'pro',model:'model-1',input_tokens:10,output_tokens:8,estimated_cost_micro_usd:4})),nextCursor:null,hasMore:false};
       else if(p==='/v1/admin/ledger')data={ledger:users().map((u,i)=>({id:'l'+i,email:u.email,kind:'generation_debit',free_delta:-1,paid_delta:0,reason:'Generation debit / 正常生成',created_at:1793318400000}))};
       else if(p==='/v1/admin/packages')data={packages:[{id:'starter',name_zh:'入门包',name_en:'Starter',credits:400,price_cents:149,price_cny_fen:990,active:1}]};
       else if(p==='/v1/admin/settings')data={settings:[]};else if(p==='/v1/admin/audits')data={audits:[]};else if(p==='/v1/admin/content')data={content:{}};
