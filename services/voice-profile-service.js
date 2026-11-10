@@ -8,7 +8,11 @@ export class VoiceProfileService {
   async get() {
     const stored = (await this.storage.get(VOICE_PROFILE_KEY))[VOICE_PROFILE_KEY];
     if (!stored) return structuredClone(DEFAULT_VOICE_PROFILE);
-    try { return validateVoiceProfile(stored); } catch { return structuredClone(DEFAULT_VOICE_PROFILE); }
+    try {
+      // A removed language option must not erase the saved personal voice.
+      const language = ["auto", "zh", "en", "ja", "ko"].includes(stored.language) ? stored.language : "auto";
+      return validateVoiceProfile({ ...stored, language });
+    } catch { return structuredClone(DEFAULT_VOICE_PROFILE); }
   }
   async save(profile) {
     const valid = validateVoiceProfile({ ...profile, updatedAt: this.clock() });
