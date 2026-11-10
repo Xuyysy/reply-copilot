@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixture,withProvider,providerResponse,platform,worker } from './helpers/payment-v2.mjs';
-import {createHash,sign} from 'node:crypto';
+import {createHash,sign,randomUUID} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync,readdirSync} from 'node:fs';
 
@@ -176,4 +176,89 @@ test('schema migration 0025 preserves MK99 subscription payment proofs and permi
    assert.equal(db.prepare("SELECT merchant_provider FROM subscription_payment_transactions WHERE id='tx-xd'").get().merchant_provider,'xiaodou');
    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
  }finally{db.close();}
+});
+
+
+test('admin switches both products to Xiaodou only after explicit subscription and IP readiness',async()=>{
+ const f=ready();
+ try{
+  f.env.ADMIN_PORTAL_ENABLED='1';
+  f.sql.exec("UPDATE users SET role='admin' WHERE id='test-user'");
+  f.sql.exec("INSERT INTO site_administrator VALUES(1,'test-user',1)");
+  f.sql.prepare("INSERT INTO admin_reauth_sessions VALUES(?,?)").run('test-session',Date.now()+600000);
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  const params=()=>({operationId:randomUUID(),reason:'Payment merchant switch integration readiness verified',
+   merchantSettings:{activeMerchant:'xiaodou',enabled:false,alipayEnabled:false,
+    wechatEnabled:false,alipayReleased:false,wechatReleased:false}});
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='0';
+  const rejected=await f.call('/v1/admin/payment-control',{body:params()});
+  assert.equal(rejected.status,409,JSON.stringify(rejected.body));
+  assert.equal(f.sql.prepare("SELECT value FROM system_settings WHERE key='active_merchant'").get().value,'mk99');
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='1';
+  const accepted=await f.call('/v1/admin/payment-control',{body:params()});
+  assert.equal(accepted.status,200,JSON.stringify(accepted.body));
+  assert.equal(accepted.body.activeMerchant,'xiaodou');
+  const packages=await f.call('/v1/packages',{method:'GET'});
+  const subscriptions=await f.call('/v1/subscriptions/plans',{method:'GET'});
+  assert.deepEqual(packages.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(subscriptions.body.paymentMethods,['ALIPAY_H5']);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou signed settlement handles a prorated tier upgrade without a second period or credit grant',async()=>{
+ const f=ready();
+ try{
+  const first=await create(f,req('xd-upgrade-origin-001'));
+  assert.equal(first.status,201,JSON.stringify(first.body));
+  assert.equal((await query(f,first.body.order.id)).status,200);
+  const periodBefore=f.sql.prepare('SELECT id,start_at,end_at,daily_limit FROM subscription_periods').get();
+  const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200,JSON.stringify(quote.body));
+  assert.equal(quote.body.quote.amountFen,5000);
+  const up=await withProvider(r=>{
+    const b=JSON.parse(r.body);
+    assert.equal(b.amountFen,5000);
+    assert.equal(b.channel,'ALIPAY_H5');
+    return providerResponse(r,{outTradeNo:b.outTradeNo,amountFen:5000,channel:'ALIPAY_H5',
+      openOrderId:'xd-upgrade-0002',payUrl:'https://cashier.example.test/pay/upgrade'});
+   },()=>f.call('/v1/subscriptions/orders',{body:{...req('xd-upgrade-0002','pro'),quoteId:quote.body.quote.id}}));
+  assert.equal(up.status,201,JSON.stringify(up.body));
+  assert.equal(up.body.order.kind,'upgrade');
+  const id=up.body.order.id;
+  const trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  const verify=()=>withProvider(r=>providerResponse(r,{outTradeNo:trade,amountFen:5000,currency:'CNY',
+    channel:'ALIPAY_H5',status:'SUCCEEDED',openOrderId:'xd-upgrade-0002',payUrl:null},{status:200}),
+    ()=>f.call('/v1/subscriptions/orders/'+id+'/refresh',{body:{}}));
+  const settled=await verify();
+  assert.equal(settled.status,200,JSON.stringify(settled.body));
+  assert.equal(settled.body.entitlementApplied,true);
+  assert.equal((await verify()).status,200);
+  const periodAfter=f.sql.prepare('SELECT id,start_at,end_at,daily_limit FROM subscription_periods').get();
+  assert.deepEqual([periodAfter.id,periodAfter.start_at,periodAfter.end_at,periodAfter.daily_limit],
+    [periodBefore.id,periodBefore.start_at,periodBefore.end_at,1000]);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_tier_changes').get().n,1);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM subscription_periods').get().n,1);
+  assert.equal(metrics(f).credits,0);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou renewed subscription is queued for the next period and does not increase permanent credits',async()=>{
+ const f=ready();
+ try{
+  const base=await create(f,req('xd-renew-initial-001'));
+  assert.equal(base.status,201,JSON.stringify(base.body));
+  assert.equal((await query(f,base.body.order.id)).status,200);
+  const renewal=await create(f,req('xd-renew-next-002'),{openOrderId:'xd-renew-open-0002'});
+  assert.equal(renewal.status,201,JSON.stringify(renewal.body));
+  assert.equal(renewal.body.order.kind,'renewal');
+  const id=renewal.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  const paid=await withProvider(r=>providerResponse(r,{outTradeNo:trade,amountFen:6990,currency:'CNY',
+    channel:'ALIPAY_H5',status:'SUCCEEDED',openOrderId:'xd-renew-open-0002',payUrl:null},{status:200}),
+    ()=>f.call('/v1/subscriptions/orders/'+id+'/refresh',{body:{}}));
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  assert.equal(paid.body.entitlementApplied,true);
+  assert.deepEqual(f.sql.prepare('SELECT status FROM subscription_periods ORDER BY created_at,id').all().map(x=>x.status).sort(),['active','queued']);
+  assert.equal(metrics(f).periods,2);
+  assert.equal(metrics(f).credits,0);
+ }finally{f.sql.close();}
 });
