@@ -46,7 +46,7 @@ export async function updateAdminPaymentControl(request:Request,env:Env):Promise
    if(input.activeMerchant==='xiaodou'&&!(
      before.providers.rsa2.credentialsConfigured&&before.providers.rsa2.cashierOriginsConfigured&&before.providers.rsa2.enabled&&
      ((before.channels.rsa2.alipay.enabled&&before.channels.rsa2.alipay.platformReleased)||
-       (before.channels.rsa2.wechat.enabled&&before.channels.rsa2.wechat.platformReleased))
+       (before.channels.rsa2.wechat.enabled&&before.channels.rsa2.wechat.platformReleased&&env.XIAODOU_WECHAT_APPROVED==='1'))
    ))throw new ApiFailure(409,'XIAODOU_RSA2_NOT_READY','小豆 RSA2 凭据、收银域名或商户渠道尚未就绪，不能切换收款商家。');
    const op=await operation(env,actor,body,'merchant_payment_settings','active_merchant');
   const statements=[env.DB.prepare("UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key='active_merchant'").bind(input.activeMerchant,now,actor.user_id),...Object.entries(fields).map(([field,key])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(input[field]?'1':'0',now,actor.user_id,key))];

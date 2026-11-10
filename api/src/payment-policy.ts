@@ -65,11 +65,14 @@ export async function paymentControl(env:Env){
   alipay:{enabled:enabled(values.payment_epay_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_epay_alipay_released)},
  };
  const canSell=environmentReady&&operatorEnabled;
+ // Explicit app-level lock: user has Alipay approval, NOT Xiaodou WeChat.
+ // Never infer account approval from platform-wide WeChat support or a stale D1 checkbox.
+ const xiaodouWechatApproved=env.XIAODOU_WECHAT_APPROVED==='1';
  const methods:PaymentMethod[]=[];
  if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured&&rsa2CashierOriginsConfigured){
   // Alipay first. WeChat remains gated until this merchant is approved.
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
-  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
+  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased&&xiaodouWechatApproved)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
  }
  // RSA2 is the only real new-sale Xiaodou protocol. Historical Epay
  // sign/notification tests retain a synthetic checkout mode for NON-DEPLOYABLE
@@ -99,6 +102,7 @@ export async function paymentControl(env:Env){
   if(!providerState.enabled)reasons.push('interface_disabled');
   if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
   if(provider==='xiaodou'&&!rsa2CashierOriginsConfigured)reasons.push('cashier_origin_unconfigured');
+  if(provider==='xiaodou'&&channel==='wechat'&&!xiaodouWechatApproved)reasons.push('xiaodou_wechat_not_approved');
   if(!channelState)reasons.push('channel_not_supported');
   else{
    if(!channelState.enabled)reasons.push('channel_disabled');
