@@ -78,8 +78,11 @@ test("language switch and responsive layout are present", () => {
 });
 test("account page requests protected data from the API", () => {
   const source = readFileSync(path.join(root, "src/components/account/AccountDashboard.tsx"), "utf8");
-  for (const endpoint of ["/v1/me", "/v1/usage", "/v1/activity", "/v1/extension/device-code/status", "/v1/extension/approve"]) assert.ok(source.includes(endpoint));
-  assert.match(source, /error\.status === 401/);
+  const loader = readFileSync(path.join(root, "src/lib/account-load.mjs"), "utf8");
+  assert.match(source, /loadAccountSnapshot\(api\)/);
+  for (const endpoint of ["/v1/me", "/v1/usage", "/v1/activity"]) assert.ok(loader.includes(endpoint), endpoint);
+  for (const endpoint of ["/v1/extension/device-code/status", "/v1/extension/approve"]) assert.ok(source.includes(endpoint), endpoint);
+  assert.match(source, /error\.status\s*===\s*401/);
   assert.match(source, /<Dialog open=/);
 });
 test("account orders expose provider refresh for unresolved supported merchant payments", () => {
