@@ -16,7 +16,7 @@ const initial:Settings={rsa2Enabled:true,rsa2WechatEnabled:false,rsa2AlipayEnabl
 export default function SecurityPaymentPanel({language,busy,read,write}:Props){
  const zh=language==='zh',t=(a:string,b:string)=>zh?a:b;
  const [control,setControl]=useState<Control|null>(null),[settings,setSettings]=useState<Settings>(initial),[error,setError]=useState(''),[oldPassword,setOld]=useState(''),[newPassword,setNew]=useState(''),[confirmPassword,setConfirm]=useState(''),[reason,setReason]=useState('');
- const [platformCheck,setPlatformCheck]=useState<any>(null),[pendingRelease,setPendingRelease]=useState<{channel:'wechat'|'rsa2Alipay'|'epayAlipay';provider:'rsa2'|'epay'}|null>(null);
+ const [platformCheck,setPlatformCheck]=useState<any>(null),[platformCheckError,setPlatformCheckError]=useState(''),[platformChecking,setPlatformChecking]=useState(false),[pendingRelease,setPendingRelease]=useState<{channel:'wechat'|'rsa2Alipay'|'epayAlipay';provider:'rsa2'|'epay'}|null>(null);
  const load=()=>read('/v1/admin/payment-control').then((data:Control)=>{setControl(data);setSettings({rsa2Enabled:data.providers.rsa2.enabled,epayEnabled:data.providers.epay.enabled,rsa2AlipayEnabled:data.channels.rsa2.alipay.enabled,rsa2WechatEnabled:data.channels.rsa2.wechat.enabled,rsa2AlipayReleased:Boolean(data.channels.rsa2.alipay.platformReleased),rsa2WechatReleased:Boolean(data.channels.rsa2.wechat.platformReleased),epayAlipayEnabled:data.channels.epay.alipay.enabled,epayAlipayReleased:Boolean(data.channels.epay.alipay.platformReleased)});}).catch((e:unknown)=>setError(e instanceof Error?e.message:String(e)));
  useEffect(()=>{void load();},[]);
  const mutationGuard=useRef(false),[pending,setPending]=useState(false),[notice,setNotice]=useState(''),[confirmEnable,setConfirmEnable]=useState(false);
@@ -39,7 +39,23 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
  async function mutate(action:()=>Promise<void>){if(busy||mutationGuard.current)return;mutationGuard.current=true;setPending(true);setError('');setNotice('');try{await action();}catch(e){setError(e instanceof Error?e.message:String(e));}finally{mutationGuard.current=false;setPending(false);}}
  async function saveSettings(){await mutate(async()=>{await write('/v1/admin/payment-control',{settings,reason});await load();setNotice(t('支付接口和通道设置已保存。平台开通确认是独立条件，未确认的通道不会显示给用户。','Payment provider and channel settings saved. Platform release is a separate gate; unconfirmed channels stay hidden.'));});}
  async function togglePurchase(enabled:boolean){await mutate(async()=>{await write('/v1/admin/payment-control',{enabled,reason});setConfirmEnable(false);await load();setNotice(enabled?t('全站购买开关已开启；实际可用方式仍取决于配置和平台放行。','Purchase switch enabled; available methods still depend on credentials and platform release.'):t('新订单购买已关闭，已有订单的回调与核对仍可处理。','New purchases are disabled; existing order callbacks and reconciliation remain available.'));});}
- async function checkPlatform(){await mutate(async()=>{const result=await write('/v1/admin/payment-platform-check',{});setPlatformCheck(result);setNotice(result.ok?t('RSA2 只读接口响应已验签；这不代表具体支付通道已获准。','The RSA2 read-only response signature verified. This does not confirm any payment channel is released.'):t('RSA2 只读检查未通过；请查看安全错误码。','RSA2 read-only check did not pass. Review the safe error code.'));});}
+ async function checkPlatform(){
+  if(busy||mutationGuard.current)return;
+  setPlatformChecking(true);
+  try{
+   await mutate(async()=>{
+    setPlatformCheck(null);setPlatformCheckError('');
+    try{
+     // The shared admin write adapter requires an audit reason for every POST.
+     // This read-only diagnostic has a stable, non-secret reason and still
+     // requires the backend's normal admin auth/CSRF/reauth checks.
+     const result=await write('/v1/admin/payment-platform-check',{reason:'Xiaodou RSA2 read-only connectivity diagnostic'});
+     setPlatformCheck(result);
+     setNotice(result.ok?t('RSA2 只读接口响应已验签；这不代表具体支付通道已获准。','The RSA2 read-only response signature verified. This does not confirm any payment channel is released.'):t('RSA2 只读检查未通过；请查看安全错误码。','RSA2 read-only check did not pass. Review the safe error code.'));
+    }catch(e){setPlatformCheckError(e instanceof Error?e.message:String(e));}
+   });
+  }finally{setPlatformChecking(false);}
+ }
  async function changePassword(){await mutate(async()=>{await write('/v1/admin/security/password',{oldPassword,newPassword,confirmPassword,reason});setOld('');setNew('');setConfirm('');setNotice(t('密码已修改，其他会话已退出。下次敏感操作需要重新验证。','Password changed. Other sessions are signed out; verify again for the next sensitive action.'));});}
  async function revoke(){await mutate(async()=>{await write('/v1/admin/security/sessions/revoke-others',{reason});setNotice(t('其他所有会话已退出，当前会话保留。','All other sessions are signed out. This session stays active.'));});}
  const switchRow=(key:'rsa2Enabled'|'epayEnabled'|'rsa2WechatEnabled'|'rsa2AlipayEnabled'|'epayAlipayEnabled',label:string,availability?:Availability,provider?:'rsa2'|'epay',channel?:'wechat'|'rsa2Alipay'|'epayAlipay')=><label className="flex items-start gap-3 rounded-md border p-3"><input type="checkbox" disabled={locked} checked={settings[key]} onChange={e=>provider&&channel?setChannel(channel,provider,e.target.checked):setSettings(current=>({...current,[key]:e.target.checked}))}/><span className="min-w-0 flex-1"><strong>{label}</strong>{availability&&<small className="block text-muted-foreground">{availabilityText(availability)}</small>}</span></label>;
@@ -89,7 +105,9 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
     <details className="border-t pt-3">
      <summary className="cursor-pointer font-medium">{t('高级设置','Advanced settings')}</summary>
      <div className="space-y-3 pt-3"><p>{t('环境支付保护','Environment safety ceiling')}: {status(control.environmentReady)} · {t('数据库购买设置','Database purchase setting')}: {status(control.operatorEnabled)}</p>
-      <Button variant="outline" disabled={locked||!control.providers.rsa2.credentialsConfigured} onClick={()=>void checkPlatform()}>{t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
+      <Button variant="outline" disabled={locked} aria-busy={platformChecking} onClick={()=>void checkPlatform()}>{platformChecking?t('正在检查小豆 RSA2…','Checking Xiaodou RSA2…'):t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
+      {platformChecking&&<p role="status">{t('正在连接小豆接口并验证签名；无需切换当前收款商家。','Connecting to Xiaodou and verifying the signature; no merchant switch is needed.')}</p>}
+      {platformCheckError&&<p role="alert" className="text-sm text-red-700">{t('检测失败：','Check failed: ')}{platformCheckError}</p>}
       {platformCheck&&<p role="status">{platformCheck.ok?t(`响应验签通过 · requestId ${platformCheck.requestId}`,'Response signature verified · requestId '+platformCheck.requestId):t(`未通过：${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'无响应'} · requestId ${platformCheck.requestId}`,`Not verified: ${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'no response'} · requestId ${platformCheck.requestId}`)}</p>}
      </div>
     </details>
