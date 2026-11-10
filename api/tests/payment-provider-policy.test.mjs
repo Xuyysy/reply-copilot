@@ -47,14 +47,14 @@ test('WeChat is not exposed until its own platform-release gate is enabled',asyn
  f.sql.close();
 });
 
-test('WeChat is the preferred RSA2 channel when both channels are enabled and platform-released',async()=>{
+test('Alipay is preferred first when both RSA2 channels are confirmed',async()=>{
  const f=fixture();
  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released','payment_rsa2_wechat_enabled','payment_rsa2_wechat_released')");
  const r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);
  assert.deepEqual(r.body.paymentMethods,[
-  {provider:'xiaodou',channel:'WECHAT_H5'},
   {provider:'xiaodou',channel:'ALIPAY_H5'},
+  {provider:'xiaodou',channel:'WECHAT_H5'},
  ]);
  let requestedChannel=null;
  await withProvider(captured=>{

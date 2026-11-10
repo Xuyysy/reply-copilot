@@ -44,6 +44,10 @@ export interface Env {
   XIAODOU_PRIVATE_KEY?: string;
   XIAODOU_PLATFORM_PUBLIC_KEYS?: string;
   XIAODOU_RETURN_URL?: string;
+  XIAODOU_TRADE_SCOPE?: string;
+  XIAODOU_CASHIER_ORIGINS?: string;
+  /** Distinct merchant-level confirmation. A generic platform channel release is insufficient. */
+  XIAODOU_WECHAT_APPROVED?: string;
   XIAODOU_EPAY_GATEWAY?: string;
   XIAODOU_EPAY_PID?: string;
   XIAODOU_EPAY_KEY?: string;

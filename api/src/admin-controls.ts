@@ -41,7 +41,14 @@ export async function updateAdminPaymentControl(request:Request,env:Env):Promise
  if(body.merchantSettings!==undefined){
   const input=body.merchantSettings as Record<string,unknown>,fields={enabled:'payment_mk99_enabled',alipayEnabled:'payment_mk99_alipay_enabled',wechatEnabled:'payment_mk99_wechat_enabled',alipayReleased:'payment_mk99_alipay_released',wechatReleased:'payment_mk99_wechat_released'};
   if(!input||typeof input!=='object'||Array.isArray(input)||!['mk99','xiaodou','none'].includes(String(input.activeMerchant))||!Object.keys(fields).every(key=>typeof input[key]==='boolean')||Object.keys(input).some(key=>key!=='activeMerchant'&&!(key in fields)))throw new ApiFailure(400,'INVALID_REQUEST','收款商家配置无效。');
-  const op=await operation(env,actor,body,'merchant_payment_settings','active_merchant');
+  // This single merchant switch now governs BOTH paid credit packs and subscriptions.
+   // Do not switch to a merchant that cannot create native RSA2 checkouts.
+   if(input.activeMerchant==='xiaodou'&&!(
+     before.providers.rsa2.credentialsConfigured&&before.providers.rsa2.cashierOriginsConfigured&&before.providers.rsa2.enabled&&
+     ((before.channels.rsa2.alipay.enabled&&before.channels.rsa2.alipay.platformReleased)||
+       (before.channels.rsa2.wechat.enabled&&before.channels.rsa2.wechat.platformReleased&&env.XIAODOU_WECHAT_APPROVED==='1'))
+   ))throw new ApiFailure(409,'XIAODOU_RSA2_NOT_READY','小豆 RSA2 凭据、收银域名或商户渠道尚未就绪，不能切换收款商家。');
+   const op=await operation(env,actor,body,'merchant_payment_settings','active_merchant');
   const statements=[env.DB.prepare("UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key='active_merchant'").bind(input.activeMerchant,now,actor.user_id),...Object.entries(fields).map(([field,key])=>env.DB.prepare('UPDATE system_settings SET value=?,updated_at=?,updated_by=? WHERE key=?').bind(input[field]?'1':'0',now,actor.user_id,key))];
   await commitOperation(env,op,statements,{activeMerchant:before.activeMerchant,mk99:before.providers.mk99,channels:before.channels.mk99},input);
   return response({ok:true,...await paymentControl(env)},200,env,request);

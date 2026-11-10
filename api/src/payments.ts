@@ -14,6 +14,8 @@ import { jsonBody, nowMs, uuid } from "./security";
 import { response } from "./http";
 import { balance } from "./quota";
 import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, reconcileFeeProjection, webhookEventMatchesStatus, XiaodouClient, XiaodouProviderError, safeProviderResponseDiagnostic, xiaodouWebhookIsEnabled } from "./xiaodou.js";
+import {createConfiguredXiaodouClient,validateXiaodouCashierUrl} from './xiaodou-client';
+import {settleXiaodouSubscriptionWebhook} from './subscription-xiaodou-notify';
 
 export type PaymentTransaction = { id:string;order_id:string;provider:"xiaodou"|"local_mock";amount_fen:number;currency:"CNY";status:string;provider_trade_id:string|null;order_user_id?:string;order_credits?:number;order_status?:string;credited_at?:number|null;base_amount_fen?:number;service_fee_fen?:number;fee_rate_bps?:number;principal_refunded_fen?:number;service_fee_refunded_fen?:number;provider_fee_projection_status?:string;provider_fee_projection_json?:string|null;provider_fee_projection_issue?:string|null;payment_protocol?:"rsa2"|"epay";payment_channel?:"ALIPAY_H5"|"WECHAT_H5"|null;epay_pid?:string|null;epay_trade_no?:string|null;merchant_provider?:string;merchant_account?:string|null;notification_sign_type?:string|null;provider_payment_id?:string|null;amount_contract?:string|null;risk_state?:string };
 type PaymentEvent = { eventId:string;eventType:string;amountFen:number;currency:string;bodySha256?:string;epayTradeNo?:string };
@@ -37,12 +39,9 @@ function epayConfig(env:Env){
   return {gateway:env.XIAODOU_EPAY_GATEWAY,pid:env.XIAODOU_EPAY_PID,key:env.XIAODOU_EPAY_KEY,apiOrigin:env.API_ORIGIN,webOrigin:env.WEB_ORIGIN};
 }
 function configuredXiaodouClient(env:Env):InstanceType<typeof XiaodouClient> {
-  if(!env.XIAODOU_BASE_URL||!env.XIAODOU_APP_ID||!env.XIAODOU_KEY_ID||!env.XIAODOU_PRIVATE_KEY||!env.XIAODOU_PLATFORM_PUBLIC_KEYS) throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。");
-  let keys:Record<string,string>;
-  try { keys=JSON.parse(env.XIAODOU_PLATFORM_PUBLIC_KEYS) as Record<string,string>; } catch { throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。"); }
-  try { return new XiaodouClient({baseUrl:env.XIAODOU_BASE_URL,ownApiOrigin:env.API_ORIGIN,appId:env.XIAODOU_APP_ID,keyId:env.XIAODOU_KEY_ID,privateKeyPem:env.XIAODOU_PRIVATE_KEY,platformPublicKeys:keys,environment:env.ENVIRONMENT}); }
-  catch { throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。"); }
+ return createConfiguredXiaodouClient(env);
 }
+
 function paymentClient(env:Env):InstanceType<typeof XiaodouClient> {
   if(!realPaymentsEnabled(env))throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付暂未开放。");
   return configuredXiaodouClient(env);
@@ -189,7 +188,18 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   if(!mock&&!real)throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付尚未开放，暂不能创建订单。");
   const channel=(body.channel??control.defaultMethod?.channel??"ALIPAY_H5") as PaymentChannel;
   if(!["ALIPAY_H5","WECHAT_H5"].includes(channel))throw new ApiFailure(400,"INVALID_PAYMENT_CHANNEL","请选择可用的支付方式。");
-  const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&(body.provider===undefined?control.activeMerchant==='xiaodou':method.provider===body.provider));
+  // Only an exact synthetic test host plus in-process fixture flag can
+   // resurrect old Epay checkout scenarios for regression testing of historic
+   // callbacks. It is impossible for the real Production origin to match.
+   const fixtureLegacyEpay=env.ENVIRONMENT==='staging'&&env.API_ORIGIN==='https://api-staging.example.test'&&
+     (env as Env&{__TEST_LEGACY_EPAY_NEW_SALES?:string}).__TEST_LEGACY_EPAY_NEW_SALES==='1';
+   const legacyRequested=fixtureLegacyEpay&&body.provider==='xiaodou_epay';
+   const providerChoice=control.activeMerchant==='mk99'?'mk99':
+     legacyRequested?'xiaodou_epay':control.methods.some(x=>x.provider==='xiaodou')?'xiaodou':
+     fixtureLegacyEpay?'xiaodou_epay':'xiaodou';
+   const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&
+     method.provider===providerChoice&&
+     (body.provider===undefined||method.provider===body.provider));
   if(!selected)throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","该支付方式暂不可用。");
   const paymentProvider=selected.provider as PaymentProvider|"local_mock";
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
@@ -230,11 +240,13 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   }
   let checkout:CheckoutResult,providerError:unknown;
   try {
-    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
+    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
     checkout=inspectCheckoutResponse(result,{outTradeNo,amountFen});
     const projection=await recordProviderFeeProjection(env,(await transactionForOrder(env,id))!,result.feeProjection);
     if(checkout.outcome==="ready"&&projection.status!=="verified")
       checkout={outcome:"unavailable",issue:"CHECKOUT_FEE_PROJECTION_REVIEW",paymentUrl:null,paymentStatus:"pending"};
+    if(checkout.outcome==="ready"&&!validateXiaodouCashierUrl(checkout.paymentUrl!,env))
+      checkout={outcome:"unavailable",issue:"CHECKOUT_CASHIER_ORIGIN_UNVERIFIED",paymentUrl:null,paymentStatus:"pending"};
   } catch(error) { providerError=error;checkout=classifyCheckoutFailure(error); }
   try { await persistCheckout(env,transactionId,attemptId,checkout); }
   catch { checkout={outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED",paymentUrl:null,paymentStatus:"unknown"}; }
@@ -373,6 +385,13 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   if(!webhookEventMatchesStatus(event))throw new ApiFailure(409,"PAYMENT_EVENT_STATUS_MISMATCH","支付事件类型、状态或金额格式不匹配。");
   if(event.currency!==undefined&&event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   const outTradeNo=String(event.outTradeNo??"");
+  // Route all native RSA2 events by the immutable order namespace. Both
+  // product types share the app-level notifyUrl; NEVER grant permanent credits
+  // for a paid subscription. Legacy Epay still has its separate signed callback.
+  if(outTradeNo.startsWith("XRHS_")){
+    await settleXiaodouSubscriptionWebhook(env,outTradeNo,event,verified);
+    return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
+  }
   if(type.startsWith("PAYMENT_")){
     const transaction=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.provider='xiaodou' AND t.merchant_provider='xiaodou' AND t.provider_trade_id=?").bind(outTradeNo).first<PaymentTransaction>();
     if(!transaction||transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
