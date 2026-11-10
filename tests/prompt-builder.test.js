@@ -36,3 +36,16 @@ test("default X replies sound offhand instead of like a dutiful AI assistant", (
   assert.match(prompts.system, /Return JSON only/i);
   for (const style of ["natural", "light_humor", "thoughtful"]) assert.ok(prompts.system.includes(style));
 });
+
+
+test("speed-first prompts bound history and writing-sample tokens without changing saved profile",()=>{
+ const samples=Array.from({length:10},(_,i)=>"sample_"+i+"_"+("x".repeat(400)));
+ const history=Array.from({length:20},(_,i)=>({style:"natural",reply:"recent_"+i+"_"+("y".repeat(300))}));
+ const prompt=buildPrompts({postContext:{text:"Hello"},voiceProfile:{...DEFAULT_VOICE_PROFILE,writingSamples:samples},recentHistory:history});
+ assert.ok(prompt.system.includes("sample_9_"));
+ assert.ok(!prompt.system.includes("sample_0_"));
+ assert.ok(!prompt.system.includes("x".repeat(400)));
+ assert.ok(prompt.user.includes("recent_7_"));
+ assert.ok(!prompt.user.includes("recent_8_"));
+ assert.ok(!prompt.user.includes("y".repeat(300)));
+});
