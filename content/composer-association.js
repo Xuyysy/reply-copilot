@@ -52,15 +52,9 @@
       baselineEditors:editors};
   }
   function contextId(article) {
-    if (!article) return null;
-    const ids=new Set();
-    for (const a of article.querySelectorAll('a[href*="/status/"]')) {
-      if (a.closest('article')!==article) continue;
-      try {const u=new URL(a.href);if (u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname)) {
-        const m=u.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);if(m)ids.add(m[1]);
-      }} catch {}
-    }
-    return ids.size>1?'conflicting_status_links':([...ids][0]||null);
+    // Canonical ID from the target article's timestamp, not every status
+    // permalink (quoted cards may carry their own unrelated status IDs).
+    return globalThis.ZaneReplyCopilotContent.postExtractor.postIdentity?.(article)?.statusId || null;
   }
   const normalized=text=>(text||'').replace(/\s+/g,' ').trim();
   function capturePost(post) {
@@ -94,20 +88,34 @@
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
       const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node));
-      const primary=articles[0];
-      const text=primary?[...primary.querySelectorAll('[data-testid="tweetText"]')].filter(n=>n.closest('article')===primary).map(n=>n.innerText).join('\n'):'';
-      const statusId=contextId(primary);
+      // Quoted posts/media can add extra article nodes in the modal.
+      // Identify the ONE article whose canonical status ID matches the
+      // clicked target; never equate the first article with the parent.
+      const candidates=articles.map(article=>({
+        article, id:contextId(article), text:api.postExtractor.postText(article)
+      }));
+      const matching=candidates.filter(item=>item.id===post.statusId);
+      const primary=matching.length===1?matching[0]:candidates.length===1?candidates[0]:null;
+      const text=primary?.text||'';
+      const statusId=primary?.id||null;
       const quarantinedContextMatch=Boolean(primary&&text&&quarantinedPosts.some(old=>
         old?.statusId!==post.statusId&&sameContext(old,text)&&statusId!==post.statusId));
+      // Matching a verified post ID permits harmless X presentation changes
+      // (Show translation / media labels). Without ID evidence, keep the
+      // original exact-text check and reject ambiguous multi-post modals.
+      const contextMatches=matching.length===1?Boolean(normalized(text))
+        :matching.length>1?false
+        :candidates.length===1&&!statusId?(normalized(text)?sameContext(post,text):null)
+        :false;
       return {node,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)),
         contextTextMatches:Boolean(primary&&sameContext(post,text)),
-        contextMatches:!primary||!normalized(text)?null:articles.length===1&&sameContext(post,text)};
+        contextMatches};
     });
     return {now,editors,visibleDialogCount:dialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
-      sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId&&original.sourceText===post.sourceText)};
+      sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
 })();
