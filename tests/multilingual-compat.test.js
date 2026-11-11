@@ -84,17 +84,17 @@ test("script detection supplies only high-confidence hints and leaves ambiguous 
 test("auto prompting follows source post rather than user-interface or saved Chinese examples",()=>{
   const post="今日は日本の開発者コミュニティで面白い議論がありました。";
   const prompts=buildPrompts({postContext:{text:post,url:"https://x.com/test/status/123"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"auto",writingSamples:["太牛了哈哈"]},outputSchemaVersion:2});
-  assert.match(prompts.system,/Automatic reply language/);
-  assert.match(prompts.system,/script hint: ja/);
-  assert.match(prompts.system,/all reply options/i);
-  assert.match(prompts.system,/Chinese\/Japanese Han-only text may be ambiguous/i);
-  assert.match(prompts.user,/Source script hint: ja/);
+  assert.match(prompts.system,/Reply in the original post.s language when Chinese/);
+  assert.match(prompts.system,/local script hint is ja/);
+  assert.match(prompts.system,/all three replies and any quoteCandidate/i);
+  assert.match(prompts.system,/Ignore the Chrome UI language and writing samples/i);
+  assert.match(prompts.user,/Requested language: auto/);
   assert.ok(prompts.user.includes(post));
   assert.match(prompts.system,/untrusted content/i);
 });
 test("manual language overrides post, with output language tag encoded for JSON",()=>{
   const prompts=buildPrompts({postContext:{text:"今日は素晴らしい天気です。"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"ko"},outputSchemaVersion:2});
-  assert.match(prompts.system,/in ko; return that language tag/i);
+  assert.match(prompts.system,/in ko and return that same language tag/i);
   assert.match(prompts.system,/Write all three replies and any quoteCandidate/i);
   assert.match(prompts.user,/Requested language: ko/);
 });
@@ -127,7 +127,7 @@ test("speed-first language policy stays small and skips unsupported locales",()=
   const prompts=buildPrompts({postContext:{text:"Bonjour"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:2});
   const policy=prompts.system.split("REPLY LANGUAGE POLICY")[1].split("VOICE PROFILE")[0];
   assert.ok(policy.length < 440,"language policy should stay compact");
-  assert.match(policy,/fall back to English/i);
+  assert.match(policy,/For other languages use English/i);
   assert.ok(!policy.includes("Spanish, French, Portuguese"));
 });
 
@@ -141,16 +141,16 @@ test("legacy model language tags remain parseable even when manual menu is small
 test("old v1 Chrome must never receive ja/ko JSON despite Japanese or Korean posts",()=>{
  for(const post of ["今日は日本語の投稿です","안녕하세요 오늘 한국어 게시물입니다"]){
    const v1=buildPrompts({postContext:{text:post},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:1});
-   assert.match(v1.system,/Legacy client: output all three replies/i);
-   assert.match(v1.system,/Return zh or en as the JSON language tag/i);
+   assert.match(v1.system,/Legacy client output supports zh or en only/i);
+   assert.match(v1.system,/Return only zh or en as the JSON language tag/i);
    assert.match(v1.user,/Requested language: auto/);
    assert.doesNotMatch(v1.system,/Automatic reply language: infer zh, en, ja or ko/);
    const v2=buildPrompts({postContext:{text:post},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:2});
-   assert.match(v2.system,/Automatic reply language: infer zh, en, ja or ko/);
+   assert.match(v2.system,/Reply in the original post.s language when Chinese/i);
  }
 });
 test("legacy v1 profile forced to Korean safely falls back to English rather than incompatible labels",()=>{
  const prompts=buildPrompts({postContext:{text:"오늘은 좋은 날"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"ko"},outputSchemaVersion:1});
- assert.match(prompts.user,/Requested language: en/);
- assert.match(prompts.system,/Return zh or en as the JSON language tag/i);
+ assert.match(prompts.user,/Requested language: ko/);
+ assert.match(prompts.system,/Return only zh or en as the JSON language tag/i);
 });
