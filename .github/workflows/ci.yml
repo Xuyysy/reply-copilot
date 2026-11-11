@@ -28,6 +28,7 @@ jobs:
       # Never honor the fast-path prefix on protected release/staging namespaces.
       # A fast push does NOT produce artifacts and cannot satisfy a deploy's
       # artifact verification. This flag only applies to the push head commit.
+      # A final unmarked commit remains subject to the original complete CI.
       CI_LITE_PUSH: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'ci-lite:') && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/heads/staging/') }}
     steps:
       - name: Checkout full history for regression baselines
