@@ -127,7 +127,7 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   repostSource.insertAdjacentHTML('afterbegin',repostBanner);
   const repostPost=api.composerAssociation.capturePost(api.postExtractor.extractPost(repostSource));
   results.push({name:'repost_banner_status_and_text_ignored',ok:repostPost.ok&&repostPost.statusId==='501'&&repostPost.sourceText==='same text'});
-  const repostEditor=modal();repostEditor.focus();
+  const repostEditor=modal('501');repostEditor.focus();
   const parentArticle=repostEditor.closest('[role="dialog"]').querySelector('article');
   parentArticle.insertAdjacentHTML('afterbegin',repostBanner);
   const repostFacts=api.composerAssociation.snapshot(document,repostPost,initial,initial,10);
