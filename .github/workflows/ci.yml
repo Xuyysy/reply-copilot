@@ -1,15 +1,12 @@
 name: Reply Copilot CI
 
 on:
-  # Keep every branch's push CI: Staging and Production release guards require
-  # a successful push run for the exact SHA and its immutable artifacts.
+  # Every branch push retains full tests and immutable SHA-pinned release artifacts.
   push:
     branches: ['**']
-  # Running the entire test/build/package pipeline again on every PR update
-  # doubles CI minutes. Push CI already validates each new commit. Retain PR
-  # merge-context testing on opening/reopening and at final review readiness.
+  # Always verify the latest PR merge context (including synchronize events),
+  # but avoid a second copy of the browser-heavy full suite and release builds.
   pull_request:
-    types: [opened, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -44,6 +41,7 @@ jobs:
             api/package-lock.json
 
       - name: Install Chrome for isolated browser tests
+        if: github.event_name != 'pull_request'
         id: chrome
         uses: browser-actions/setup-chrome@v2
         with:
@@ -52,6 +50,7 @@ jobs:
       # Temporary CI bridge for legacy tests that hard-code macOS paths.
       # Only modifies the disposable GitHub Linux runner, never any user machine.
       - name: Prepare isolated Linux Chrome test compatibility
+        if: github.event_name != 'pull_request'
         env:
           REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         shell: bash
@@ -74,7 +73,10 @@ jobs:
           npm --prefix api run check:staging
           npm --prefix api run typecheck
 
+      # The guarded deploy pipeline promotes only a successful exact-SHA PUSH run.
+      # Keep the full suite byte-for-byte intact on push and manual dispatch.
       - name: Run full suite and preserve the exit code
+        if: github.event_name != 'pull_request'
         env:
           CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
         shell: bash
@@ -85,6 +87,20 @@ jobs:
           echo "$result" > "$RUNNER_TEMP/npm-test.exit"
           echo "Full npm test exit code: $result"
           exit "$result"
+
+      # Pull-request refs contain the synthetic merge commit. Check that the
+      # proposed change compiles with its base and run representative browser-free
+      # security/commerce tests. Every branch push still runs the complete suite.
+      - name: Verify current PR merge context
+        if: github.event_name == 'pull_request'
+        run: |
+          (cd web && npx --no-install tsc --noEmit)
+          node --test --test-concurrency=1 \
+            tests/production-preflight.test.mjs \
+            tests/extension-identity.test.js \
+            api/tests/payment-config.test.mjs \
+            api/tests/subscription-policy.test.mjs \
+            api/tests/signup-device-claims.test.mjs
 
       - name: Build pinned Staging extension
         # Only push artifacts can be promoted by the guarded Staging release.
