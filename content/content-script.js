@@ -224,8 +224,8 @@
       if(active.assistant?.host && !active.assistant.host.isConnected && !active.assistantDetachedReported) {
         active.assistantDetachedReported=true;
       }
-      const removedEditor=Boolean(active.editor && records?.some(record=>
-        [...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor))));
+      const removedEditor=Boolean(active.editor && (active.editor.isConnected===false || records?.some(record=>
+        [...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))));
       if(removedEditor) {
         // A single observer tick with no visible reply UI is not proof the
         // user closed it: X can detach and remount it around rich media.
@@ -555,7 +555,17 @@
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
-    if (active?.editor && !active.cancelled) refreshAssociation();
+    if (active?.editor && !active.cancelled) {
+      // A new trusted Reply click is an explicit switch. If the old dialog
+      // has actually disappeared, release it synchronously instead of
+      // treating the new click as competition during the 350ms close grace.
+      // A visible editor/dialog still blocks concurrent reply targets.
+      if(control) {
+        const prior=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+        if(prior.editors.length===0&&prior.visibleDialogCount===0) endSession('reply_closed');
+        else refreshAssociation();
+      } else refreshAssociation();
+    }
     if (recoveryRequired && control) {pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
