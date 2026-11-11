@@ -28,9 +28,9 @@ test("Production prompt preserves old extension zh/en while opt-in v2 supports j
   const profile={...DEFAULT_VOICE_PROFILE,language};
   const v1=buildPrompts({postContext,voiceProfile:profile,outputSchemaVersion:1});
   const v2=buildPrompts({postContext,voiceProfile:profile,outputSchemaVersion:2});
-  assert.match(v1.system,/only in Chinese \(zh\) or English \(en\)/);
-  assert.match(v1.system,/never ja\/ko\/other tags/);
-  assert.match(v2.system,/Write all three replies|Automatic reply language/);
+  assert.match(v1.system,/Legacy client output supports zh or en only/);
+  assert.match(v1.system,/Return only zh or en as the JSON language tag/);
+  assert.match(v2.system,/Write all three replies|Reply in the original post.s language/);
   assert.match(v2.system,/OFFHAND HUMAN REPLY RULES/);
  }
 });
