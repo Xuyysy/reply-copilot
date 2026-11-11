@@ -5,7 +5,7 @@ import Base from "../layouts/Base.astro";
   <div class="container page-hero">
     <div class="eyebrow" data-zh="安全结账">Secure checkout</div>
     <h1 data-zh="永久额度包结账">Permanent credit pack checkout</h1>
-    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。美元标价与人民币实付金额将分别展示，付款前请核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Prices are shown in USD, with the final CNY payment shown before checkout.</p>
+    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。官网标价以人民币显示，结账实付金额与官网展示一致；请在付款前核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Website prices are shown in CNY, matching the final amount charged. Verify the amount before paying.</p>
   </div>
   <section class="container" style="padding-bottom:100px">
     <div class="content-card" style="max-width:680px">
@@ -141,7 +141,9 @@ import Base from "../layouts/Base.astro";
       if(!selected){byId("package-name").textContent=label("套餐不存在或已下架。","Package not found or unavailable.");return;}
       byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
-      byId("package-usd").textContent=label("美元价格：$"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2),"USD price: $"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2));
+      byId("package-usd").textContent=selected.total_payment_fen&&Number.isSafeInteger(selected.total_payment_fen)
+        ?label("官网标价：¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY","Website price: ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY")
+        :label("当前套餐暂未配置人民币价格。","CNY price is currently unavailable.");
       byId("package-description").textContent=(document.documentElement.lang==="en"?selected.description_en:selected.description_zh)||"";
       const pricingSummary=packageSummary(selected,document.documentElement.lang==="en"?"en":"zh");
       byId("package-fee").textContent=pricingSummary.fee;
