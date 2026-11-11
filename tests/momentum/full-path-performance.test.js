@@ -8,12 +8,17 @@ test('accepted V1 full-path alternating A/B includes binding, account preflight,
  try{
   const archive=execFileSync('git',['archive','3cebe3ecbee552ef5b0e68afc7882a2dfb3869fa'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',baseline],{input:archive});
   const priorArchive=execFileSync('git',['archive','2a1db4df49e84fb2b10110d8ea6070757c903acb'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
-  const before=[],originalCandidate=[],after=[];let promptHash=null;
+  const before=[],originalCandidate=[],after=[];const promptHashes=new Map();
   for(let i=0;i<14;i++)for(const [kind,sourceRoot]of (i%2?[['after',current],['originalCandidate',prior],['before',baseline]]:[['before',baseline],['originalCandidate',prior],['after',current]])){
    const r=await generationFixture({sourceRoot,options:{momentumFeature:{eligible:true,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:true}}}});
-   assert.deepEqual(r.calls,{generations:1,acks:1,debits:1,insertions:1});if(!promptHash)promptHash=r.promptHashes[0];assert.equal(r.promptHashes[0],promptHash,'personalized prompt body unchanged');assert.equal(r.requestPaths.length,5);assert.ok(r.marks.insert>=r.marks.ack_end);
+   assert.deepEqual(r.calls,{generations:1,acks:1,debits:1,insertions:1});if(!promptHashes.has(kind))promptHashes.set(kind,r.promptHashes[0]);assert.equal(r.promptHashes[0],promptHashes.get(kind),'prompt stable within each release');assert.equal(r.requestPaths.length,5);assert.ok(r.marks.insert>=r.marks.ack_end);
    if(i>=2)({before,originalCandidate,after}[kind]).push({display:r.marks.candidates,editor:r.elapsedMs,ack:r.report.metrics.ack.p50,editorBinding:r.report.metrics.editor_bound.p50,preflight:r.report.metrics.precheck_complete.p50,persist:r.report.metrics.delivery_persist.p50,http:r.requestPaths.length});
   }
+  // Archived V1 baselines must still match. New schema v2 intentionally
+  // APPENDS a language policy, making only the overall prompt hash change.
+  // tests/prompt-builder.test.js enforces the exact original V1 Git blob.
+  assert.equal(promptHashes.get('before'),promptHashes.get('originalCandidate'));
+  assert.notEqual(promptHashes.get('after'),promptHashes.get('before'));
   const summary=rows=>{const result={samples:rows.length,http:[...new Set(rows.map(r=>r.http))],normalExtraRecoveryHTTP:0};for(const key of ['display','editor','ack','editorBinding','preflight','persist']){const a=rows.map(r=>r[key]).sort((a,b)=>a-b);result[key]={mean:a.reduce((s,x)=>s+x,0)/a.length,p50:a[Math.ceil(a.length*.5)-1],p90:a[Math.ceil(a.length*.9)-1]};}return result;};
   const warm=[];
   for(let i=0;i<12;i++){
