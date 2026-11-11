@@ -416,6 +416,35 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
     ...(diagnostic?{diagnostic:{stage:diagnostic.stage,upstreamHttpStatus:diagnostic.upstreamHttpStatus,...(diagnostic.providerResponse?{providerResponse:diagnostic.providerResponse}:{})}}:{})},checkoutHttpStatus(checkout),env,request);
 }
 
+
+/**
+ * User-initiated, provider-confirmed cancellation of an unpaid Xiaodou order.
+ * Xiaodou's signed close endpoint verifies at the institution that the
+ * transaction has NOT succeeded; never infer nonpayment from age or 502.
+ */
+export async function cancelUnpaidXiaodouOrder(request:Request,env:Env,orderId:string):Promise<Response>{
+ const session=await webSession(request,env,true);
+ const transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
+ if(transaction.merchant_provider!=="xiaodou"||transaction.provider!=="xiaodou"||transaction.payment_protocol!=="rsa2"||
+    !["pending","unknown"].includes(transaction.status)||transaction.order_status!=="awaiting_payment"||
+    transaction.risk_state!=="clear"||transaction.credited_at!=null||!transaction.provider_trade_id||
+    transaction.merchant_account!==env.XIAODOU_APP_ID||transaction.notification_sign_type!==env.XIAODOU_KEY_ID)
+   throw new ApiFailure(409,"ORDER_NOT_CLOSABLE","原订单无法安全关闭，请先查验或联系支持。");
+ const requestId="xrh-close-"+uuid();
+ let result:Awaited<ReturnType<InstanceType<typeof XiaodouClient>["closePayment"]>>;
+ try{result=await configuredXiaodouClient(env).closePayment(transaction.provider_trade_id,{requestId});}
+ catch(error){throw refreshProviderFailure(error,requestId);}
+ if(result.outTradeNo!==transaction.provider_trade_id||result.amountFen!==transaction.amount_fen||
+    result.currency!=="CNY"||result.channel!==transaction.payment_channel)
+   throw new ApiFailure(409,"PAYMENT_MISMATCH","平台关单结果与原订单不符，原订单保持不变。");
+ if(!["CLOSE_REQUESTED","ALREADY_CLOSED"].includes(result.closeState)||result.status!=="CLOSED")
+   // UNKNOWN_KEPT / PROVIDER_PAID_CONFLICT / SUCCEEDED are NOT canceled.
+   throw new ApiFailure(409,"PAYMENT_CLOSE_UNCONFIRMED","平台未确认安全关闭原订单，请查验支付状态。");
+ const applied=await applyPaymentEvent(env,transaction,{eventId:"xrh-closed-"+transaction.id,eventType:"PAYMENT_CLOSED",amountFen:0,currency:"CNY"});
+ if(applied.status!=="closed")throw new ApiFailure(409,"PAYMENT_CLOSE_UNCONFIRMED","订单状态已变化，请先查验是否已经付款。");
+ return response({ok:true,orderStatus:"closed",quota:applied.quota},200,env,request);
+}
+
 export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
   if(!xiaodouWebhookIsEnabled(env))localOnlyError();
   let bytes:Uint8Array;try{bytes=await readLimitedBytes(request.body,64*1024);}catch(error){if(error instanceof PayloadTooLargeError)throw new ApiFailure(413,"PAYMENT_EVENT_TOO_LARGE","支付事件过大。");throw new ApiFailure(400,"INVALID_PAYMENT_EVENT","支付事件格式无效。");}
