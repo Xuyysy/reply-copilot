@@ -7,6 +7,7 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
+import { assertReplyLanguageConsistency } from "../../domain/reply-language-policy.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
@@ -128,6 +129,9 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     }
     // Validate the full shared contract for legacy and managed providers and
     // persist a wire representation accepted by both released client parsers.
+    // v2 only: reject clearly wrong-language content before settlement.
+    // Validation failure already refunds; no extra model request or v1 change.
+    if (input.outputSchemaVersion === 2) assertReplyLanguageConsistency(result.raw, { sourceText: input.post.text, selectedLanguage: input.profile?.language || "auto" });
     result.raw = serializeModelOutput(result.raw);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),

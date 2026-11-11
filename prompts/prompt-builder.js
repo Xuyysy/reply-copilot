@@ -1,5 +1,6 @@
 import { DEFAULT_VOICE_PROFILE } from "../domain/voice-profile.js";
 import { inferPostLanguageHint, normalizeReplyLanguage } from "../domain/language-support.js";
+import { resolveRequiredReplyLanguage } from "../domain/reply-language-policy.js";
 
 const schemaExample = `{
   "recommendation": "reply",
@@ -67,10 +68,14 @@ Local style preference counts (context only): ${JSON.stringify(styleStats)}`;
   // 0.3.7 opts into v2 to support Japanese/Korean without another AI request.
   const requestedLanguage = normalizeReplyLanguage(profile.language) || "auto";
   const scriptHint = inferPostLanguageHint(postText);
+  const targetLanguage = resolveRequiredReplyLanguage({ sourceText: postText, selectedLanguage: profile.language });
   const languagePolicy = outputSchemaVersion === 2
     ? requestedLanguage === "auto"
-      ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); the local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples when deciding the post's language. For other languages use English. Use one consistent language across all three replies and any quoteCandidate, and return its tag in JSON.`
-      : `Write all three replies and any quoteCandidate in ${requestedLanguage} and return that same language tag in JSON.`
+      ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples. For other languages use English. Use the same language for all three replies and any quoteCandidate; return its tag. Target: ${targetLanguage === "auto" ? "original post language" : targetLanguage}. Do not default to Chinese.`
+      : `Write all three replies and any quoteCandidate in ${requestedLanguage} and return that same language tag in JSON. Ignore conflicting Chinese writing samples or reply history.`
     : `Legacy client output supports zh or en only. Keep the original post's language when it is Chinese or English; otherwise use English. Return only zh or en as the JSON language tag for all three replies and any quoteCandidate.`;
-  return { system: `${system}\n\nREPLY LANGUAGE POLICY\n${languagePolicy}`, user };
+  const finalLanguageReminder = targetLanguage === "auto"
+    ? "Follow the original post language, not the UI language or saved writing examples."
+    : `Write every reply in ${targetLanguage}. Do not use Chinese unless the language is zh.`;
+  return { system: `${system}\n\nREPLY LANGUAGE POLICY\n${languagePolicy}`, user: outputSchemaVersion === 2 ? `${user}\n\nFINAL REPLY LANGUAGE: ${finalLanguageReminder}` : user };
 }
