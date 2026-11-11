@@ -5,7 +5,7 @@ const order={id:'31675569-ee63-4f32-bff8-ec0c0c64f919',package_id:'large',provid
 const props={packageId:'large',provider:'xiaodou',channel:'ALIPAY_H5'};
 test('finds existing payable credit order after browser exit and no new POST',async()=>{
  const found=await lookupUnresolvedCreditOrder({...props,request:async(path,opts)=>{
-  assert.equal(path,'/v1/activity');assert.equal(opts.method,'GET');return {orders:[order]};
+  assert.equal(path,'/v1/orders/unresolved?packageId=large&provider=xiaodou&channel=ALIPAY_H5');assert.equal(opts.method,'GET');return {order:{id:order.id,status:'pending'}};
  }});
  assert.equal(found.id,order.id);
 });

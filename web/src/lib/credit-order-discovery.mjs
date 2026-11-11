@@ -18,6 +18,8 @@ export function findUnresolvedCreditOrder(activity,{packageId,provider,channel})
 }
 
 export async function lookupUnresolvedCreditOrder({packageId,provider,channel,request}){
- const activity=await request('/v1/activity',{method:'GET'});
- return findUnresolvedCreditOrder(activity,{packageId,provider,channel});
+ if(!packageId||!provider||!channel)return null;
+ const query=new URLSearchParams({packageId,provider,channel});
+ const result=await request('/v1/orders/unresolved?'+query.toString(),{method:'GET'});
+ return validPaymentOrderId(result?.order?.id)?{id:result.order.id,payment_status:result.order.status}:null;
 }
