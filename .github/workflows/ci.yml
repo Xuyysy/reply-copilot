@@ -1,8 +1,11 @@
 name: Reply Copilot CI
 
 on:
+  # Every branch push retains full tests and immutable SHA-pinned release artifacts.
   push:
     branches: ['**']
+  # Always verify the latest PR merge context (including synchronize events),
+  # but avoid a second copy of the browser-heavy full suite and release builds.
   pull_request:
   workflow_dispatch:
 
@@ -38,6 +41,7 @@ jobs:
             api/package-lock.json
 
       - name: Install Chrome for isolated browser tests
+        if: github.event_name != 'pull_request'
         id: chrome
         uses: browser-actions/setup-chrome@v2
         with:
@@ -46,6 +50,7 @@ jobs:
       # Temporary CI bridge for legacy tests that hard-code macOS paths.
       # Only modifies the disposable GitHub Linux runner, never any user machine.
       - name: Prepare isolated Linux Chrome test compatibility
+        if: github.event_name != 'pull_request'
         env:
           REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         shell: bash
@@ -68,7 +73,10 @@ jobs:
           npm --prefix api run check:staging
           npm --prefix api run typecheck
 
+      # The guarded deploy pipeline promotes only a successful exact-SHA PUSH run.
+      # Keep the full suite byte-for-byte intact on push and manual dispatch.
       - name: Run full suite and preserve the exit code
+        if: github.event_name != 'pull_request'
         env:
           CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
         shell: bash
@@ -80,16 +88,37 @@ jobs:
           echo "Full npm test exit code: $result"
           exit "$result"
 
+      # Pull-request refs contain the synthetic merge commit. Check that the
+      # proposed change compiles with its base and run representative browser-free
+      # security/commerce tests. Every branch push still runs the complete suite.
+      - name: Verify current PR merge context
+        if: github.event_name == 'pull_request'
+        run: |
+          # Astro supplies ImportMeta.env types through generated .astro/types.d.ts.
+          (cd web && npx --no-install astro sync && npx --no-install tsc --noEmit)
+          node --test --test-concurrency=1 \
+            tests/production-preflight.test.mjs \
+            tests/extension-identity.test.js \
+            api/tests/payment-config.test.mjs \
+            api/tests/subscription-policy.test.mjs \
+            api/tests/signup-device-claims.test.mjs
+
       - name: Build pinned Staging extension
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
         run: npm run build:staging
 
       - name: Package and fingerprint Web and extension
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         run: python3 scripts/package-staging-ci.py
 
       - name: Upload immutable Staging Pages bundle
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: staging-pages-${{ env.SOURCE_SHA }}
@@ -98,6 +127,8 @@ jobs:
           if-no-files-found: error
 
       - name: Upload ZIP and provenance manifest
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: staging-extension-${{ env.SOURCE_SHA }}
