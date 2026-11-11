@@ -9,12 +9,20 @@
       return { sourceUrl: url.origin + url.pathname.replace(/\/$/, ""), statusId: match[1] };
     } catch { return null; }
   }
+  // X can put a quoted tweet inside the OUTER article without a nested
+  // <article>. Such links/timestamps/text are not evidence of the post being
+  // replied to. These selectors follow X's public DOM testid conventions.
+  const QUOTE_CONTENT = '[data-testid="quoteTweet"], [data-testid="card.wrapper"]';
+  function isQuoteContent(node, article) {
+    const quote = node?.closest?.(QUOTE_CONTENT);
+    return Boolean(quote && quote !== article && article?.contains?.(quote));
+  }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
     // The author's timestamp is more reliable than a random /status/ link:
     // quote cards, media and link previews can contain OTHER tweet IDs.
     for (const time of article.querySelectorAll("time")) {
-      if (time.closest("article") !== article) continue;
+      if (time.closest("article") !== article || isQuoteContent(time, article)) continue;
       const link = time.closest('a[href*="/status/"]');
       if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
       const identity = statusLink(link);
@@ -24,7 +32,7 @@
     // exactly one possible post ID; never guess between a post and its quote.
     const candidates = new Map();
     for (const anchor of article.querySelectorAll('a[href*="/status/"]')) {
-      if (anchor.closest("article") !== article) continue;
+      if (anchor.closest("article") !== article || isQuoteContent(anchor, article)) continue;
       const identity = statusLink(anchor);
       if (identity) candidates.set(identity.statusId, identity);
     }
@@ -34,7 +42,7 @@
     // Do not concatenate all tweetText nodes: the rest can belong to
     // embedded quoted posts. Only the text of the target article is sent to AI.
     const primary = [...article.querySelectorAll('[data-testid="tweetText"]')]
-      .find(node => node.closest("article") === article);
+      .find(node => node.closest("article") === article && !isQuoteContent(node, article));
     return (primary?.innerText || primary?.textContent || "").trim();
   }
   function extractPost(article) {
@@ -45,5 +53,5 @@
     return { ok: true, article, ...identity, sourceText };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText };
+  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent };
 })();
