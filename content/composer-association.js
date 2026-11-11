@@ -98,7 +98,8 @@
     // An unknown parent can use verified text; conflicting IDs cannot.
     const ids=new Set();
     for(const anchor of article?.querySelectorAll?.('a[href*="/status/"]')||[]) {
-      if(anchor.closest?.('article')!==article || globalThis.ZaneReplyCopilotContent.postExtractor.isQuoteContent?.(anchor,article))continue;
+      if(anchor.closest?.('article')!==article || globalThis.ZaneReplyCopilotContent.postExtractor.isQuoteContent?.(anchor,article) ||
+         globalThis.ZaneReplyCopilotContent.postExtractor.isRepostBanner?.(anchor,article))continue;
       try{
         const url=new URL(anchor.href);
         const match=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);
@@ -127,7 +128,16 @@
   }
   function routeAllowed(initial,current,statusId) {
     if (initial===current) return true;
-    try {const a=new URL(initial),b=new URL(current);return a.origin===b.origin && b.pathname==='/compose/post' && (!b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId);}catch{return false;}
+    try {
+      const a=new URL(initial),b=new URL(current);
+      if(a.origin!==b.origin)return false;
+      if(b.pathname==='/compose/post')return !b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId;
+      // Some X repost entry points navigate from the feed to the original
+      // author's tweet before opening Reply. Only permit the EXACT same
+      // verified tweet ID, never another status or an unrelated route.
+      const match=b.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);
+      return Boolean(match && match[1]===statusId);
+    }catch{return false;}
   }
   function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[]) {
     const api=globalThis.ZaneReplyCopilotContent;
