@@ -6,6 +6,7 @@ const panel=readFileSync("web/src/components/account/CreatorMomentumIntelligence
 const css=readFileSync("web/src/styles/global.css","utf8");
 const api=readFileSync("api/src/creator-momentum-insights.ts","utf8");
 const dashboard=readFileSync("web/src/components/account/AccountDashboard.tsx","utf8");
+const terminal=readFileSync("web/src/pages/momentum-terminal.astro","utf8");
 
 const ready=panel.split('{state==="ready"&&insights&&cycle&&<>')[1];
 assert.ok(ready,"Paid feature preview must stay protected by ready state");
@@ -52,7 +53,8 @@ test("three release stages remain distinct references, never falsely claim actua
 test("paid-only, locked account UI and compact responsive design remain intact",()=>{
   assert.match(panel,/data-cmi-locked/);
   assert.match(panel,/api<Insights>\("\/v1\/creator-momentum\/insights"\)/);
-  assert.match(dashboard,/<CreatorMomentumIntelligence userId=/);
+  assert.doesNotMatch(dashboard,/CreatorMomentumIntelligence/);
+  assert.match(terminal,/<CreatorMomentumIntelligence client:load \/>/);
   assert.match(css,/\.cmi-overview-grid \{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
   assert.match(css,/\.cmi-cycle-fill/);
   assert.match(css,/@media\(max-width:680px\)/);

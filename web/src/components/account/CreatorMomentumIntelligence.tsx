@@ -10,7 +10,7 @@ type Cycle={stage:number;percent:number;referenceCrossings:number;windowStage:nu
 type Observation={hour:number;score:number;cycleProgress:number;cycleStage:number;referenceCrossings:number};
 type Insights={eligible:boolean;available:boolean;day?:string;timezone?:string;policyVersion?:string;
   score?:number;cycle?:Cycle;curve?:Observation[];observedHours?:number};
-type PanelState="loading"|"ready"|"locked"|"off"|"error";
+type PanelState="loading"|"ready"|"locked"|"guest"|"off"|"error";
 const numerals=["I","II","III"];
 
 function MomentumChart({observations,observedHours,language}:{observations:Observation[];observedHours:number;language:"zh"|"en"}){
@@ -32,7 +32,7 @@ function MomentumChart({observations,observedHours,language}:{observations:Obser
   </div>;
 }
 
-export default function CreatorMomentumIntelligence({userId}:{userId:string}){
+export default function CreatorMomentumIntelligence({userId="terminal"}:{userId?:string}){
  const language=useLanguage();
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [revision,setRevision]=useState(0);
@@ -46,7 +46,7 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
      setInsights(result);setState(!result.eligible?"locked":!result.available?"off":"ready");
    }).catch(error=>{
      if(!active)return;
-     setState(error instanceof ApiError&&error.status===403?"locked":"error");
+     setState(error instanceof ApiError&&error.status===403?"locked":error instanceof ApiError&&error.status===401?"guest":"error");
    });
    return()=>{active=false};
  },[userId,revision]);
@@ -86,12 +86,26 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
   </CardHeader>
   <CardContent className="space-y-4">
    {state==="loading"&&<div role="status" className="cmi-placeholder">{t("正在读取今日势能分析…","Loading today's momentum analysis…")}</div>}
-   {state==="locked"&&<div data-cmi-locked className="cmi-placeholder flex flex-wrap items-center justify-between gap-4">
-     <div className="flex min-w-0 items-start gap-3"><LockKeyhole size={22} className="shrink-0 text-slate-500"/><div>
-      <p className="font-semibold">{t("解锁互动势能研究终端","Unlock the Creator Momentum Terminal")}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{t("仅对持有有效付费权益的账户开放三阶段临界分析与 CMI 趋势。","The three-stage research dashboard and CMI trends require verified paid access.")}</p>
-     </div></div><Button variant="outline" asChild><a href="/pricing/">{t("查看付费方案","See plans")}<ArrowRight size={15}/></a></Button>
-   </div>}
+   {(state==="locked"||state==="guest")&&<div data-cmi-locked className="cmi-locked-overview space-y-5">
+     <div className="cmi-lock-intro">
+      <span className="cmi-lock-status"><LockKeyhole size={15} aria-hidden="true"/>{t("尚未解锁 · 可了解完整功能","Locked · Preview the capabilities")}</span>
+      <h3 className="mt-3 text-xl font-bold">{t("你的每次互动，可能都在为下一次原创积累机会。","Your interactions may build momentum for your next original post.")}</h3>
+      <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{t("互动势能智能分析终端将账户的互动积累转化为研究参考信号，帮助你观察当日势能变化、临界阶段和原创发布窗口。","The Creator Momentum Terminal translates your account's accumulated activity into research signals, helping you explore daily momentum, threshold stages and possible original-post windows.")}</p>
+     </div>
+     <div className="cmi-access-grid" aria-label={t("终端功能介绍","Terminal capabilities")}>
+      <div className="cmi-access-feature"><span className="cmi-access-num">01 / INDEX</span><strong>{t("CMI 互动势能指数","Creator Momentum Index")}</strong><p>{t("查看 0–100 的自研参考指数与当前阶段进度，快速了解今日互动积累情况。","Explore a proprietary 0–100 reference index and current-stage progress for daily momentum.")}</p></div>
+      <div className="cmi-access-feature"><span className="cmi-access-num">02 / SIGNAL</span><strong>{t("三阶段临界信号","Three-stage threshold signals")}</strong><p>{t("将互动过程分为三个独立阶段，观察参考节点、临界区间与下一次原创机会。","Follow three independent stages, reference thresholds and possible next opportunities for original posts.")}</p></div>
+      <div className="cmi-access-feature"><span className="cmi-access-num">03 / CURVE</span><strong>{t("全天势能曲线与解读","Daily momentum chart & insights")}</strong><p>{t("通过时间趋势图研究势能演化，并获得阶段性原创发布建议。","Explore the daily time-series chart and stage-based research guidance for original posting.")}</p></div>
+     </div>
+     <p className="cmi-access-disclaimer">{t("这些指标属于独立研究参考，并非 X 官方流量数据，也不保证曝光或收益。实际三阶段提醒由 Chrome 插件管理，在达到当天阈值后的下一次原生回复操作时触发；终端显示的参考节点不代表提醒已经发出。","These are independent research signals, not official X distribution data or guarantees of reach or revenue. The Chrome extension manages actual three-stage reminders, triggered on a subsequent native Reply action after a daily threshold. Reference nodes here do not prove a reminder was shown.")}</p>
+     <div className="cmi-access-actions">
+      <div className="min-w-0"><strong>{state==="guest"?t("登录后即可检查解锁资格","Sign in to check your access"):t("终端仅对已核验的付费账户开放","Available to verified paid accounts")}</strong><p className="mt-1 text-sm text-muted-foreground">{t("付费资格由服务器核验，免费赠送的回复次数不等于终端访问权限。","Access is verified by the server; welcome reply credits do not unlock the terminal.")}</p></div>
+      <div className="flex flex-wrap gap-2">
+       {state==="guest"&&<Button asChild><a href="/login">{t("登录账户","Sign in")}<ArrowRight size={15}/></a></Button>}
+       <Button variant={state==="guest"?"outline":"default"} asChild><a href="/pricing/">{t("查看付费方案","See paid plans")}<ArrowRight size={15}/></a></Button>
+      </div>
+     </div>
+    </div>}
    {state==="off"&&<div data-cmi-off className="cmi-placeholder">
     <strong>{t("分析功能暂未开放","Momentum analysis is not currently active")}</strong>
     <p className="mt-2 text-sm text-muted-foreground">{t("请以管理后台当前功能状态为准。","Availability follows the current admin policy.")}</p>

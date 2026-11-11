@@ -4,11 +4,12 @@ import {readFileSync} from "node:fs";
 const source=path=>readFileSync(path,"utf8");
 const panel=source("web/src/components/account/CreatorMomentumIntelligence.tsx");
 const dashboard=source("web/src/components/account/AccountDashboard.tsx");
+const terminal=source("web/src/pages/momentum-terminal.astro");
 const api=source("api/src/creator-momentum-insights.ts");
 const routes=source("api/src/index.ts");
-test("account page includes a single paid-only momentum terminal before the compact order center",()=>{
-  assert.equal((dashboard.match(/<CreatorMomentumIntelligence userId=/g)||[]).length,1);
-  assert.ok(dashboard.indexOf("<CreatorMomentumIntelligence userId=")<dashboard.indexOf("<Card data-orders-card"));
+test("paid-only momentum terminal moves out of the account into its own page",()=>{
+  assert.doesNotMatch(dashboard,/CreatorMomentumIntelligence/);
+  assert.match(terminal,/<CreatorMomentumIntelligence client:load \/>/);
   assert.match(dashboard,/data-testid="account-subscription-quota"/);
   assert.match(dashboard,/data-credit-orders/);
 });
