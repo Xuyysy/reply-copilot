@@ -549,9 +549,10 @@
     }
     const control=api.replyDetector.findReplyControl(event.target);
     if (recoveryRequired) recoverAfterQuiescence();
-    // X's modal contains its own Reply button and "Replying to" controls.
-    // They are not a fresh activation on a timeline post.
-    if (control?.closest('[role="dialog"]')) return;
+    // X's composer has its own Reply/submit controls, but a media viewer
+    // may ALSO be a dialog containing a genuine post Reply button.
+    // Only suppress dialog controls that are not inside a post article.
+    if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
@@ -587,7 +588,7 @@
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
     const control=api.replyDetector.findReplyControl(event.target);
-    if (control?.closest('[role="dialog"]')) return;
+    if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.blocked || performance.now()-activation.at>1500) {
