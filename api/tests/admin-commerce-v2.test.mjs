@@ -93,3 +93,30 @@ test('Admin commerce endpoints require an admin and reject malformed selectors',
   }
  }finally{f.sql.close();}
 });
+
+test('Verified money remains visible when a payment succeeded but entitlements did not apply',async()=>{
+ const f=admin();
+ try{
+  const now=Date.now();
+  seedCredit(f,'credit-paid-ungranted',now-900000,true);
+  seedSubscription(f,'subscription-paid-unapplied',now-800000);
+  // Deliberately simulate an interrupted entitlement commit after provider confirmation.
+  f.sql.exec("UPDATE recharge_orders SET credited_at=NULL WHERE id='credit-paid-ungranted'");
+  f.sql.exec("UPDATE subscription_orders SET paid_at=NULL,applied_at=NULL WHERE id='subscription-paid-unapplied'");
+  const receipts=await f.call('/v1/admin/commerce/summary',{method:'GET'});
+  assert.equal(receipts.status,200,JSON.stringify(receipts.body));
+  assert.equal(receipts.body.verifiedCredit.gross_fen,699);
+  assert.equal(receipts.body.verifiedSubscription[0].gross_fen,6990);
+  assert.equal(receipts.body.verifiedGrossFen,7689);
+  const orders=await f.call('/v1/admin/commerce/orders',{method:'GET'});
+  assert.equal(orders.status,200,JSON.stringify(orders.body));
+  const credit=orders.body.items.find(x=>x.id==='credit-paid-ungranted');
+  const subscription=orders.body.items.find(x=>x.id==='subscription-paid-unapplied');
+  assert.equal(credit.payment_evidence,'verified_event');
+  assert.equal(credit.entitlement_status,'not_granted');
+  assert.equal(subscription.payment_evidence,'verified_event');
+  assert.equal(subscription.entitlement_status,'not_applied');
+  assert.equal(f.sql.prepare("SELECT credited_at FROM recharge_orders WHERE id='credit-paid-ungranted'").get().credited_at,null);
+  assert.equal(f.sql.prepare("SELECT applied_at FROM subscription_orders WHERE id='subscription-paid-unapplied'").get().applied_at,null);
+ }finally{f.sql.close();}
+});
