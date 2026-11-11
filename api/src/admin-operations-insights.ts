@@ -26,10 +26,15 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
  // as sampled if more than 1000; never claim incomplete cohorts are exact.
  const [deliveries,subscriptionReview,creditUnknown,aiFailures,budget,setting]=await Promise.all([
   env.DB.prepare(`SELECT r.request_id,r.user_id,r.delivery_confirmed_at created_at,
-     sa.period_id,v.plan_code,r.credit_source source,c.model,c.estimated_cost_micro_usd
+     sa.period_id,v.plan_code,
+     CASE WHEN ca.state='consumed' AND cb.bucket IN ('free','paid') THEN cb.bucket
+       WHEN ca.id IS NULL AND sa.id IS NULL AND r.credit_source IN ('free','paid') THEN r.credit_source
+       ELSE NULL END source,c.model,c.estimated_cost_micro_usd
     FROM ai_requests r
     LEFT JOIN subscription_ai_allocations sa
       ON sa.user_id=r.user_id AND sa.request_id=r.request_id AND sa.state='consumed'
+    LEFT JOIN ai_credit_allocations ca ON ca.user_id=r.user_id AND ca.request_id=r.request_id
+    LEFT JOIN credit_batches cb ON cb.id=ca.credit_batch_id
     LEFT JOIN subscription_periods sp ON sp.id=sa.period_id
     LEFT JOIN subscription_plan_versions v ON v.id=sp.plan_version_id
     LEFT JOIN ai_usage_costs c ON c.user_id=r.user_id AND c.request_id=r.request_id
@@ -112,7 +117,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
   aiUsage:{
    rowsSampled:sampled.length,moreThanSample:Boolean(list.length>DELIVERIES_LIMIT),limit:DELIVERIES_LIMIT,
    subscription,free,paid,unattributed,plans,
-   attributionNote:'Plan is current period snapshot; past upgrades may change historical grouping. Cost is recorded for successful ACK deliveries only; excludes upstream failed requests and does not imply profit.'
+   attributionNote:'Allocation ledger is authoritative for subscription/free/permanent source; a legacy request source is fallback only when neither allocation exists. Plan is current period snapshot and upgrades may change historical grouping. Cost covers successful ACK deliveries only; excludes upstream failures and is not profit.'
   },
   aiBudget:{dayUtc:day,limitMicroUsd:limit,committedMicroUsd:committed,
    percent:limit>0?Math.min(100,Math.round(100*committed/limit)):null},
