@@ -110,7 +110,7 @@ export default function AdminCommercePanel({active,language}:{active:boolean;lan
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
     {loading?<p role="status" className="text-sm">{t('正在加载订单…','Loading orders…')}</p>:
      <div className="data-table-wrap admin-list-scroll" role="region" tabIndex={0} aria-label={t('统一订单表','Unified orders table')}>
-      <Table className="min-w-[1080px]"><TableHeader><TableRow>
+      <Table className="min-w-[1080px]"><TableHeader className="sticky top-0 z-10 bg-background"><TableRow>
        {[t('订单时间','Created'),t('用户','User'),t('商品','Product'),t('实付人民币','CNY'),t('商户','Merchant'),t('订单 / 支付','Order / payment'),t('权益状态','Entitlement'),t('付款证据','Payment evidence')].map(x=><TableHead key={x}>{x}</TableHead>)}
       </TableRow></TableHeader><TableBody>{rows.map(row=><TableRow key={row.product_type+':'+row.id}>
        <TableCell className="whitespace-nowrap text-xs">{new Date(row.created_at).toLocaleString(language==='zh'?'zh-CN':'en-US')}</TableCell>
