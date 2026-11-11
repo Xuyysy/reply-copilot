@@ -35,7 +35,9 @@ test("a guest or unpaid account sees detailed locked explanations, not score dat
  assert.match(panel,/error.status===403\?"locked"/);
  assert.match(panel,/\(state==="locked"\|\|state==="guest"\)/);
  assert.match(panel,/data-cmi-locked/);
- for(const feature of ["CMI 互动势能指数","三阶段临界信号","全天势能曲线与解读","下一次原生回复操作时触发"])
+ assert.doesNotMatch(panel,/cmi-research-status|cmi-access-disclaimer/);
+ assert.match(panel,/实际提醒以插件本机阈值为准/);
+ for(const feature of ["CMI 互动势能指数","三阶段临界信号","全天势能曲线与解读"])
    assert.ok(panel.includes(feature),"missing locked overview: "+feature);
  assert.match(panel,/href="\/login"/);
  assert.match(panel,/href="\/pricing\/"/);
