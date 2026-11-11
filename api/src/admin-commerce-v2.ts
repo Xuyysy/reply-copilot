@@ -70,7 +70,7 @@ async function creditOrders(env:Env,at:ReturnType<typeof params>,limit:number){
   o.status order_status,COALESCE(t.status,o.status) payment_status,
   t.merchant_provider,t.amount_fen,t.currency,o.credits,
   CASE WHEN o.credited_at IS NOT NULL THEN 'granted' ELSE 'not_granted' END entitlement_status,
-  CASE WHEN o.credited_at IS NOT NULL AND t.merchant_provider IN ('mk99','xiaodou')
+  CASE WHEN t.paid_at IS NOT NULL AND t.status IN ('paid','refunded') AND t.merchant_provider IN ('mk99','xiaodou')
       AND t.currency='CNY' AND t.amount_fen>0 AND ${creditProof}
     THEN 'verified_event' WHEN o.credited_at IS NOT NULL THEN 'credited_legacy'
     ELSE 'unverified' END payment_evidence
@@ -87,7 +87,7 @@ async function subscriptionOrders(env:Env,at:ReturnType<typeof params>,limit:num
   t.merchant_provider,o.amount_fen,o.currency,NULL credits,
   CASE WHEN o.status IN ('manual_review','refund_pending','refunded') THEN 'under_review'
     WHEN o.applied_at IS NOT NULL THEN 'applied' ELSE 'not_applied' END entitlement_status,
-  CASE WHEN o.paid_at IS NOT NULL AND t.paid_at IS NOT NULL
+  CASE WHEN t.paid_at IS NOT NULL AND t.status IN ('paid','refunded')
      AND t.merchant_provider IN ('mk99','xiaodou')
      AND t.currency='CNY' AND t.amount_fen=o.amount_fen
      AND ${subscriptionProof} THEN 'verified_event' ELSE 'unverified' END payment_evidence
@@ -127,13 +127,13 @@ export async function adminCommerceSummary(request:Request,env:Env):Promise<Resp
   env.DB.prepare(`SELECT COUNT(*) orders,COUNT(DISTINCT o.user_id) buyers,
     COALESCE(SUM(t.amount_fen),0) gross_fen FROM recharge_orders o
     JOIN payment_transactions t ON t.order_id=o.id
-    WHERE t.paid_at>=? AND t.paid_at<? AND o.credited_at IS NOT NULL
+    WHERE t.paid_at>=? AND t.paid_at<?
       AND t.status IN ('paid','refunded') AND t.merchant_provider IN ('mk99','xiaodou')
       AND t.currency='CNY' AND t.amount_fen>0 AND ${creditProof}`).bind(from,to).first(),
   env.DB.prepare(`SELECT o.kind,COUNT(*) orders,COUNT(DISTINCT o.user_id) buyers,
     COALESCE(SUM(o.amount_fen),0) gross_fen FROM subscription_orders o
     JOIN subscription_payment_transactions t ON t.order_id=o.id
-    WHERE t.paid_at>=? AND t.paid_at<? AND o.paid_at IS NOT NULL
+    WHERE t.paid_at>=? AND t.paid_at<?
       AND t.status IN ('paid','refunded') AND t.merchant_provider IN ('mk99','xiaodou')
       AND t.currency='CNY' AND t.amount_fen=o.amount_fen AND ${subscriptionProof}
     GROUP BY o.kind`).bind(from,to).all(),
@@ -146,7 +146,7 @@ export async function adminCommerceSummary(request:Request,env:Env):Promise<Resp
  return response({from,to,currency:'CNY',verifiedCredit:credit,verifiedSubscription:subs,
    verifiedGrossFen:Number((credit as {gross_fen?:number}|null)?.gross_fen||0)+subs.reduce((sum,x)=>sum+Number(x.gross_fen||0),0),
    creditConfirmedRefunds:creditRefunds,
-   caveat:'Verified gross receipts, not net proceeds. Subscription refund settlement is not included in the refund amount; no profit is asserted.'
+   caveat:'Verified provider receipts may include paid-but-unfulfilled orders. Gross receipts are not net proceeds. Subscription refunds are not included in the confirmed credit refunds, and no profit is asserted.'
  },200,env,request);
 }
 
