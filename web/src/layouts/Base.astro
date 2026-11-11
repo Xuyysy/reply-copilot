@@ -42,7 +42,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
           <a data-nav-id="faq" href="/faq" data-astro-prefetch="hover">FAQ</a>
         </nav>
         <div class="header-actions">
-          {!isAdminPage && <a data-nav-id="momentum-terminal" class="momentum-terminal-entry" href="/momentum-terminal" aria-label="互动势能智能分析终端 / Creator Momentum Intelligence"><span data-zh="互动势能">Creator Momentum</span><span aria-hidden="true">⚡</span></a>}
+          {!isAdminPage && <a data-nav-id="momentum-terminal" class="momentum-terminal-entry" href="/momentum-terminal" aria-label="势能分析 / Momentum Analytics"><span data-zh="势能分析">Momentum Analytics</span><span aria-hidden="true">⚡</span></a>}
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
           <span id="account-loading" class="account-status-loading" role="status" aria-live="polite"><span class="account-loading-dot" aria-hidden="true"></span><span data-zh="正在确认账户">Checking account</span></span>
           <a class="button secondary" id="account-entry" href="/account" hidden><span data-zh="我的账户">My account</span></a><button class="button secondary" id="account-retry" type="button" hidden><span data-zh="重试账户状态">Retry account</span></button>
@@ -55,7 +55,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
             </summary>
             <nav class="mobile-nav-list" aria-label="Mobile navigation">
               <a href="/" data-zh="首页">Home</a>
-              <a href="/momentum-terminal" data-zh="互动势能智能分析终端">Creator Momentum Terminal</a>
+              <a href="/momentum-terminal" data-zh="势能分析">Momentum Analytics</a>
               <a data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install extension</span></a>
               <a href="/guide" data-astro-prefetch="hover" data-zh="使用指南">Guide</a>
               <a href="/pricing" data-astro-prefetch="hover" data-zh="价格与套餐">Pricing</a>
