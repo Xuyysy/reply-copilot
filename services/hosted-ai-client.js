@@ -11,7 +11,7 @@ export class HostedAIClient {
     const abort = () => controller.abort(); if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(abort, this.config.requestTimeoutMs || 30000);
     try {
-      const requestGeneration = () => this.accountClient.request("/v1/ai/generate", { method: "POST", body: { requestId, post: { text: sourceText, url: sourceUrl }, voiceProfile, recentHistory, styleStats, replyStyle, outputSchemaVersion: 1 }, signal: controller.signal });
+      const requestGeneration = () => this.accountClient.request("/v1/ai/generate", { method: "POST", body: { requestId, post: { text: sourceText, url: sourceUrl }, voiceProfile, recentHistory, styleStats, replyStyle, outputSchemaVersion: 2 }, signal: controller.signal });
       const data = await (performanceTrace ? performanceTrace.measure("cloud_generate",requestGeneration) : requestGeneration());
       performanceTrace?.addDurations(data?.performance?.durations);
       if (typeof data?.raw !== "string" || !data.raw.trim()) throw new Error("云端 AI 返回内容无效。");
