@@ -15,7 +15,7 @@ type Insights={
 };
 const usd=(micro:number|null)=>micro==null?'—':'$'+(micro/1_000_000).toFixed(6);
 export default function AdminOperationsInsights({language,active,mode,navigate}:{
- language:Language;active:boolean;mode:'alerts'|'plans';navigate:(tab:string)=>void
+ language:Language;active:boolean;mode:'alerts'|'plans';navigate:(tab:string,orderId?:string)=>void
 }){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [insights,setInsights]=useState<Insights|null>(null);
@@ -55,7 +55,7 @@ export default function AdminOperationsInsights({language,active,mode,navigate}:
        <p className="text-sm font-medium">{statusLabel(a)}{a.count!=null?' · '+a.count:''}</p>
        <p className="break-all font-mono text-xs text-muted-foreground">{a.order_id||a.detail}</p>
       </div>
-      <Button type="button" size="sm" variant="outline" onClick={()=>navigate(a.target)}>
+      <Button type="button" size="sm" variant="outline" onClick={()=>navigate(a.order_id?'orders':a.target,a.order_id)}>
        {t('打开相关管理','Open management')}
       </Button>
      </div>)}
