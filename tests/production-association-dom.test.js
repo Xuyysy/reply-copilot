@@ -111,6 +111,13 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   document.querySelector('#modals').append(emptyDialog);emptyDialog.querySelector('[contenteditable]').focus();
   const noBorrowFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
   results.push({name:'no_borrowing_text_from_feed_behind_modal',ok:noBorrowFacts.editors[0].contextMatches===null});
+  document.querySelector('#modals').replaceChildren();
+  const mediaOverlay=document.createElement('div');mediaOverlay.setAttribute('role','dialog');
+  mediaOverlay.innerHTML='<article data-testid="tweet"><div data-testid="tweetText">same text</div><button data-testid="reply">Reply</button><div data-testid="videoPlayer"></div></article>';
+  document.querySelector('#modals').append(mediaOverlay);
+  const mediaBaseline=api.composerAssociation.baseline(document);
+  const mediaOnlySnapshot=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'media_viewer_dialog_without_composer_is_not_reply_modal',ok:mediaBaseline.baselineModalCount===0&&mediaBaseline.visibleReplyEditorCount===0&&mediaOnlySnapshot.visibleDialogCount===0});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -118,6 +125,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,23);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,24);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
