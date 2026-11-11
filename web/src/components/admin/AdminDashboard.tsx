@@ -182,32 +182,157 @@ export default function AdminDashboard() {
     if (!response.ok) throw new Error(t("导出失败，请重新登录后重试", "Export failed. Sign in and retry."));
     const url = URL.createObjectURL(await response.blob()); const link=document.createElement("a"); link.href=url; link.download=`${type}.csv`; link.click(); URL.revokeObjectURL(url);
   }
-  return <div className="space-y-6">
+  const workspaces: Array<[string,Array<[string,string]>]> = [
+    [t("运营总览","Overview"),[["overview",t("经营指标","Business metrics")]]],
+    [t("用户中心","Users"),[["users",t("用户管理","User management")],["campaigns",t("福利发放","Campaigns")]]],
+    [t("订单与财务","Orders & finance"),[["orders",t("全部订单","All orders")],["subscriptions",t("订阅高级管理","Subscription controls")],["packages",t("商品与定价","Products & pricing")]]],
+    [t("AI 使用分析","AI insights"),[["ledger",t("消费流水","Usage ledger")],["cost",t("模型成本","AI costs")],["ai-models",t("模型管理","Model management")]]],
+    [t("运营内容","Content & growth"),[["creator",t("互动势能","Creator momentum")],["content",t("官网内容","Site content")]]],
+    [t("系统与安全","Settings & security"),[["security",t("支付与安全","Payment & security")],["settings",t("系统设置","System settings")]]],
+    [t("审计中心","Audit"),[["audits",t("操作记录","Activity log")]]]
+  ];
+  const activeWorkspace = workspaces.flatMap(([,items])=>items).find(([id])=>id===tab)?.[1] ?? t("经营指标","Business metrics");
+  return <div className="space-y-5">
     {access !== "ready" && <Card className="max-w-3xl"><CardHeader><CardTitle>{access === "loading" ? t("正在加载管理后台", "Loading admin dashboard") : access === "login" ? t("请先登录", "Please sign in") : access === "forbidden" ? t("无法访问管理后台", "Admin access denied") : t("管理后台暂时不可用", "Admin dashboard unavailable")}</CardTitle></CardHeader><CardContent className="space-y-4"><p className="text-sm text-muted-foreground">{access === "login" ? t("请使用已开通管理员权限的官网账户登录。", "Sign in with your admin account.") : access === "forbidden" ? t("当前账户没有管理员权限，或管理入口尚未开放。", "This account is not an administrator, or the admin portal is closed.") : notice || t("正在检查登录状态和权限。", "Checking your session and permissions.")}</p>{notice && access !== "loading" && <Alert variant={error ? "destructive" : "default"} role="status"><AlertDescription>{notice}</AlertDescription></Alert>}{access === "login" && <Button asChild><a href="/login?mode=login">{t("前往登录", "Go to sign in")}</a></Button>}{access === "error" && <Button variant="outline" disabled={busy} onClick={() => void load()}>{t("重试", "Retry")}</Button>}</CardContent></Card>}
     {access === "ready" && notice && <Alert variant={error ? "destructive" : "default"} role="status"><AlertDescription>{notice}{retryAction && <Button className="ml-3" variant="outline" disabled={busy} onClick={() => void run(retryAction)}>{t("重试原操作", "Retry original operation")}</Button>}</AlertDescription></Alert>}
-    {data && <Tabs value={tab} onValueChange={value => { setTab(value); }}
-      className="grid min-w-0 gap-4 lg:grid-cols-[230px_minmax(0,1fr)] lg:items-start lg:gap-6">
-      <nav aria-label={t("后台工作区导航","Admin workspaces")} className="min-w-0 lg:sticky lg:top-5">
-       <TabsList className="grid h-auto max-h-[min(66dvh,540px)] w-full grid-cols-2 items-start gap-2 overflow-y-auto rounded-xl border bg-card p-2 shadow-sm lg:max-h-[calc(100dvh-3rem)] lg:grid-cols-1">
-        {([
-         [t("运营总览","Overview"),[["overview",t("经营指标","Business metrics")]]],
-         [t("用户中心","Users"),[["users",t("用户管理","User management")],["campaigns",t("福利发放","Campaigns")]]],
-         [t("订单与财务","Orders & finance"),[["orders",t("全部订单","All orders")],["subscriptions",t("订阅高级管理","Subscription controls")],["packages",t("商品与定价","Products & pricing")]]],
-         [t("AI 使用分析","AI insights"),[["ledger",t("消费流水","Usage ledger")],["cost",t("模型成本","AI costs")],["ai-models",t("模型管理","Model management")]]],
-         [t("运营内容","Content & growth"),[["creator",t("互动势能","Creator momentum")],["content",t("官网内容","Site content")]]],
-         [t("系统与安全","Settings & security"),[["security",t("支付与安全","Payment & security")],["settings",t("系统设置","System settings")]]],
-         [t("审计中心","Audit"),[["audits",t("操作记录","Activity log")]]]
-        ] as Array<[string,Array<[string,string]>]>).map(([title,items])=>
-         <section key={title} className="min-w-0 rounded-lg border border-transparent bg-muted/30 px-1 py-2">
-          <p className="px-2 pb-1 text-xs font-semibold text-muted-foreground">{title}</p>
-          <div className="flex min-w-0 flex-col gap-0.5">{items.map(([value,label])=>
-           <TabsTrigger key={value} value={value} disabled={busy}
-            className="min-h-9 w-full justify-start whitespace-normal break-words px-2 text-left text-sm data-[state=active]:bg-background data-[state=active]:shadow-sm">{label}</TabsTrigger>)}</div>
-         </section>)}
-       </TabsList>
+    {data && <Tabs value={tab} onValueChange={setTab} orientation="vertical"
+      className="grid min-w-0 gap-5 lg:grid-cols-[228px_minmax(0,1fr)] lg:items-start xl:gap-7">
+      <nav aria-label={t("后台工作区导航","Admin workspaces")}
+        className="admin-console-nav hidden min-w-0 p-3 lg:sticky lg:top-24 lg:block">
+        <div className="px-3 pb-3 pt-2 text-[10px] font-bold uppercase tracking-[.16em] text-slate-400">WORKSPACES</div>
+        <TabsList className="!flex !h-auto !max-h-none !w-full !flex-col !items-stretch !justify-start !gap-1 !overflow-visible !rounded-none !bg-transparent !p-0">
+          {workspaces.map(([title,items])=>
+            <section key={title} className="min-w-0 py-1">
+              <p className="px-3 pb-1 pt-2 text-[11px] font-bold text-slate-400">{title}</p>
+              <div className="flex min-w-0 flex-col gap-0.5">
+                {items.map(([value,label])=>
+                  <TabsTrigger key={value} value={value} disabled={busy}
+                    className="!h-auto !min-h-9 !w-full !flex-none !justify-start !whitespace-normal !rounded-lg px-3 py-2.5 text-left text-[13px] font-medium data-[state=active]:!bg-slate-900 data-[state=active]:!text-white data-[state=active]:!shadow-none">
+                    {label}
+                  </TabsTrigger>)}
+              </div>
+            </section>)}
+        </TabsList>
       </nav>
-      <div className="min-w-0 space-y-4">
-      <TabsContent value="overview"><AdminOperationsInsights active={tab==="overview"} mode="alerts" language={language} navigate={navigateFromRisk}/><AdminCommerceSummary active={tab==="overview"} language={language}/><div className="mb-5 flex flex-wrap gap-2">{[["users","搜索用户"],["campaigns","赠送额度"],["packages","修改套餐"],["content","编辑官网"],["security","开关支付"],["orders","查看订单"]].map(([value,label])=><Button key={value} variant="outline" onClick={()=>setTab(value)}>{label}</Button>)}</div><div className="flex items-center justify-between mb-4"><h2 className="text-2xl font-semibold">{t("运营概览", "Operations overview")}</h2><Button variant="outline" disabled={busy} onClick={() => void refresh()}><RefreshCw size={15} />{t("刷新", "Refresh")}</Button></div><div className="grid grid-cols-2 gap-4 lg:grid-cols-4">{[["newUsers7d", t("最近 7 天新增", "New users in 7 days")], ["revenue7dFen", t("额度包近7天登记金额（旧口径）", "Credit pack booked amount, 7 days")], ["activeUsers", t("活跃用户", "Active users")], ["paidUsers", t("额度包已记账用户（旧口径）", "Booked credit-pack users (legacy)")], ["successfulOrders", t("额度包已成功订单（旧口径）", "Credit-pack paid orders (legacy)")], ["totalRevenueFen", t("额度包历史登记金额（旧口径）", "Legacy booked credit-pack amount")], ["totalIssued", t("非订阅额度累计发放", "Credits issued, excluding subscriptions")], ["totalUsed", t("免费/永久额度已用（不含订阅）", "Free/permanent credits used; excludes subscription")], ["users", t("用户总数", "Users")], ["verifiedUsers", t("已验证用户", "Verified")], ["todayUsers", t("今日新增", "New today")], ["todayGenerations", t("今日生成", "Generations today")], ["monthGenerations", t("本月生成", "Generations this month")], ["totalFreeGranted", t("免费额度发放", "Free credits granted")], ["abnormalRequests", t("异常请求", "Abnormal requests")], ["monthRevenueFen", t("旧额度包本月收款估算 CNY", "Legacy credit pack monthly estimate (CNY)")]].map(([key, label]) => <Metric key={key} label={label} value={(key === "monthRevenueFen" || key === "totalRevenueFen" || key === "revenue7dFen") ? `¥${(Number(data.metrics[key] || 0) / 100).toFixed(2)}` : String(data.metrics[key] ?? "—")} />)}</div><p className="mt-3 text-sm text-muted-foreground">{t("活跃用户：当前持有未过期官网或插件会话的去重用户数。", "Active users: distinct users with a currently valid website or extension session.")}</p><div className="mt-6 grid gap-4 lg:grid-cols-2"><Card><CardHeader><CardTitle>{t("最近订单", "Recent orders")}</CardTitle></CardHeader><CardContent>{data.orders.slice(0, 5).map(order => <div key={order.id} className="border-b py-3 text-sm last:border-0"><p className="font-medium">{order.email} · {order.package_name}</p><p className="text-muted-foreground">{date(order.created_at, language)} · {statusText(order.payment_status || order.status, language)} · {order.amount_fen == null ? dollars(order.amount_cents) : `¥${(order.amount_fen / 100).toFixed(2)}`}</p><p className="break-all text-xs text-muted-foreground">{order.id}</p></div>)}{!data.orders.length && <Empty text={t("暂无订单。", "No orders yet.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("最近操作", "Recent admin activity")}</CardTitle></CardHeader><CardContent>{audits.slice(0, 5).map(item => <div key={item.id} className="border-b py-3 text-sm last:border-0"><p className="font-medium">{item.action} · {item.target_id || "—"}</p><p>{item.reason || "—"}</p><p className="text-xs text-muted-foreground">{date(item.created_at, language)}</p></div>)}{!audits.length && <Empty text={t("暂无管理操作。", "No admin activity yet.")} />}</CardContent></Card></div></TabsContent>
+      <div className="min-w-0 lg:hidden">
+        <label htmlFor="admin-workspace-switch" className="mb-1.5 block text-xs font-semibold text-slate-500">
+          {t("当前工作区","Current workspace")}
+        </label>
+        <select id="admin-workspace-switch" data-testid="admin-mobile-workspace"
+          aria-label={t("切换工作区","Switch workspace")}
+          value={tab} disabled={busy} onChange={event=>setTab(event.target.value)}
+          className="block h-11 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-900 shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
+          {workspaces.map(([title,items])=><optgroup key={title} label={title}>
+            {items.map(([value,label])=><option key={value} value={value}>{label}</option>)}
+          </optgroup>)}
+        </select>
+      </div>
+      <div className="admin-console-content min-w-0 space-y-4">
+        <div className="hidden items-center gap-2 pb-1 text-[11px] font-medium text-slate-400 lg:flex">
+          <span>CONSOLE</span><span aria-hidden="true">/</span><span className="text-slate-600">{activeWorkspace}</span>
+        </div>
+      <TabsContent value="overview" className="admin-console-overview min-w-0 space-y-5">
+        <div className="flex min-w-0 flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
+          <div className="min-w-0">
+            <p className="text-[11px] font-bold uppercase tracking-[.13em] text-slate-400">OPERATIONS / OVERVIEW</p>
+            <h2 className="mt-1 text-[25px] font-bold leading-tight tracking-tight text-slate-900 sm:text-[29px]">{t("经营总览","Business overview")}</h2>
+            <p className="mt-1 text-xs leading-5 text-slate-500">{t("先看真实收款，再处理异常，最后回顾增长与使用。","Verified receipts, issues needing attention, and platform activity.")}</p>
+          </div>
+          <div className="flex max-w-full flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={()=>setTab("users")}>{t("查用户","Find users")}</Button>
+            <Button variant="outline" size="sm" onClick={()=>setTab("orders")}>{t("查订单","View orders")}</Button>
+            <Button variant="outline" size="sm" disabled={busy} onClick={()=>void refresh()}><RefreshCw size={14}/>{t("刷新","Refresh")}</Button>
+          </div>
+        </div>
+        <AdminCommerceSummary active={tab==="overview"} language={language} variant="overview"/>
+        <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,1fr)] xl:items-start">
+          <aside className="order-first min-w-0 xl:order-last">
+            <AdminOperationsInsights active={tab==="overview"} mode="alerts" language={language} navigate={navigateFromRisk} compact/>
+          </aside>
+          <div className="order-last min-w-0 space-y-4 xl:order-first">
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
+                <CardTitle>{t("用户与 AI 使用","Users & AI activity")}</CardTitle>
+                <button type="button" onClick={()=>setTab("ledger")} className="text-xs font-semibold text-blue-700 hover:underline">
+                  {t("查看消耗流水","View usage ledger")}
+                </button>
+              </CardHeader>
+              <CardContent className="pt-1">
+                <div className="grid grid-cols-2 gap-2.5">
+                  {([
+                    ["newUsers7d",t("近 7 天新增","New users · 7d")],
+                    ["activeUsers",t("活跃用户","Active users")],
+                    ["todayGenerations",t("今日 AI 生成","AI generations · today")],
+                    ["monthGenerations",t("本月 AI 生成","AI generations · month")]
+                  ] as Array<[string,string]>).map(([key,label])=>
+                    <div key={key} className="min-w-0 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3.5">
+                      <p className="text-[11px] leading-4 text-slate-500">{label}</p>
+                      <p className="admin-kpi-number mt-1.5 text-[23px] font-bold leading-none text-slate-900">{String(data.metrics[key]??"—")}</p>
+                    </div>)}
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-slate-400">
+                  {t("活跃用户按未过期的官网或插件会话去重，生成指标与支付收入分开统计。","Active users are deduplicated by valid sessions. Generations and payment receipts are separate metrics.")}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
+                <CardTitle>{t("最近额度包订单","Recent credit-pack orders")}</CardTitle>
+                <button type="button" onClick={()=>setTab("orders")} className="text-xs font-semibold text-blue-700 hover:underline">
+                  {t("全部商品订单","All product orders")}
+                </button>
+              </CardHeader>
+              <CardContent className="pt-0">
+                {data.orders.slice(0,4).map(order=>
+                  <div key={order.id} className="flex min-w-0 items-center justify-between gap-3 border-b border-slate-100 py-3 last:border-b-0">
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-medium text-slate-800">{order.email}</p>
+                      <p className="mt-0.5 truncate text-[11px] text-slate-500">{order.package_name} · {date(order.created_at,language)}</p>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <p className="text-[13px] font-semibold tabular-nums text-slate-900">
+                        {order.amount_fen==null?dollars(order.amount_cents):`¥${(order.amount_fen/100).toFixed(2)}`}
+                      </p>
+                      <p className="text-[11px] text-slate-500">{statusText(order.payment_status||order.status,language)}</p>
+                    </div>
+                  </div>)}
+                {!data.orders.length&&<p className="py-7 text-center text-sm text-slate-500">{t("暂无额度包订单","No credit-pack orders")}</p>}
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+        <details className="admin-overview-secondary rounded-xl border border-slate-200 bg-white px-4 py-3">
+          <summary className="flex cursor-pointer items-center justify-between gap-3 text-[13px] font-semibold text-slate-700">
+            <span>{t("历史口径与更多运营指标","Legacy bookkeeping & more metrics")}</span>
+            <span className="text-[11px] font-normal text-slate-400">{t("展开查看","Expand")}</span>
+          </summary>
+          <p className="mt-3 text-xs leading-5 text-slate-500">{t("以下额度包登记指标沿用旧统计口径；核验实收请以上方经营收入为准。","Legacy credit-pack bookkeeping differs from verified receipts above.")}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+            {([
+              ["revenue7dFen",t("额度包近 7 天登记金额","Credit booked amount · 7d")],
+              ["paidUsers",t("额度包已记账用户","Booked credit-pack users")],
+              ["successfulOrders",t("额度包已成功订单","Booked credit-pack orders")],
+              ["totalRevenueFen",t("额度包历史登记金额","Historic booked credit amount")],
+              ["totalIssued",t("非订阅额度发放","Non-subscription credits issued")],
+              ["totalUsed",t("免费/永久额度已用","Free/permanent credits used")],
+              ["users",t("用户总数","Total users")],
+              ["verifiedUsers",t("已验证用户","Verified users")],
+              ["todayUsers",t("今日新增","New today")],
+              ["totalFreeGranted",t("累计免费赠额","Free credits granted")],
+              ["abnormalRequests",t("异常请求","Abnormal requests")],
+              ["monthRevenueFen",t("额度包本月登记金额","Credit booked amount · month")]
+            ] as Array<[string,string]>).map(([key,label])=>
+              <div key={key} className="min-w-0 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
+                <p className="text-[11px] leading-4 text-slate-500">{label}</p>
+                <p className="admin-kpi-number mt-1.5 text-lg font-semibold text-slate-800">
+                  {["revenue7dFen","totalRevenueFen","monthRevenueFen"].includes(key)
+                    ?`¥${(Number(data.metrics[key]||0)/100).toFixed(2)}`
+                    :String(data.metrics[key]??"—")}
+                </p>
+              </div>)}
+          </div>
+        </details>
+      </TabsContent>
       <TabsContent value="users" className="space-y-5"><Card><CardHeader><CardTitle>{t("用户管理", "Users")}</CardTitle></CardHeader><CardContent><form className="mb-5 flex flex-wrap gap-2" onSubmit={event => void searchUsers(event)}><Input aria-label={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} placeholder={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} value={search} onChange={event => setSearch(event.target.value)} /><Button variant="outline" disabled={busy}><Search size={15} />{t("搜索", "Search")}</Button></form><div className="mb-4 grid gap-3 sm:grid-cols-4"><Field label="付费状态"><select className="h-9 rounded border px-2" value={paidFilter} onChange={e=>setPaidFilter(e.target.value)}><option value="all">全部</option><option value="paid">已付费</option><option value="unpaid">未付费</option></select></Field><Field label="注册日期从"><Input type="date" value={registeredFrom} onChange={e=>setRegisteredFrom(e.target.value)}/></Field><Field label="注册日期至"><Input type="date" value={registeredTo} onChange={e=>setRegisteredTo(e.target.value)}/></Field><Field label="最近活跃起始日期"><Input type="date" value={activeSince} onChange={e=>setActiveSince(e.target.value)}/></Field></div><p className="mb-3 text-xs text-muted-foreground">设置筛选后点击搜索。活跃以会话创建、AI 请求或支付成功时间计算。</p><div className="mb-4 flex flex-wrap gap-2"><Button disabled={busy||!selected.length} variant="outline" onClick={()=>void run(()=>exportCsv("users",selected))}>导出所选用户 CSV</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量冻结", "Freeze selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "frozen"}); setSelected([]); await refresh(); }})}>{t("批量冻结", "Freeze selected")}</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量恢复", "Restore selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "active"}); setSelected([]); await refresh(); }})}>{t("批量恢复", "Restore selected")}</Button></div><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("用户", "User"), t("状态", "Status"), t("免费", "Free"), t("付费", "Paid"), t("已生成", "Generated"), t("操作", "Action")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.users.map(user => <TableRow key={user.id}><TableCell><input aria-label={`Select ${user.email}`} type="checkbox" checked={selected.includes(user.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, user.id] : ids.filter(id => id !== user.id))} /> <strong>{user.username || t("旧账户", "Legacy user")}</strong><div className="text-xs text-muted-foreground">{user.email}</div><div className="text-xs text-muted-foreground">ID {user.id}{user.is_test_account ? t(" · 测试账户", " · Test account") : ""}{user.archived_at ? t(" · 已归档", " · Archived") : ""}</div></TableCell><TableCell><Badge variant={user.status === "active" ? "secondary" : "destructive"}>{statusText(user.status, language)}</Badge></TableCell><TableCell>{user.free_balance}</TableCell><TableCell>{user.paid_balance}</TableCell><TableCell>{user.generations}<div className="mt-1 text-xs text-muted-foreground">{t("注册日期", "Registered")}: {user.created_at?date(user.created_at,language):"—"}</div><div className="text-xs text-muted-foreground">{t("最近活动", "Last active")}: {user.last_active_at?date(user.last_active_at,language):"—"}</div></TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => setDetail(await read<UserDetail>(`/v1/admin/users/${encodeURIComponent(user.id)}`)))}>{t("详情", "Details")}</Button> <Button size="sm" variant="outline" disabled={busy} onClick={() => freeze(user)}>{user.status === "frozen" ? t("解冻", "Unfreeze") : t("冻结", "Freeze")}</Button></TableCell></TableRow>)}</TableBody></Table></div>{!data.users.length && <Empty text={t("没有匹配账户。", "No matching users.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("额度调整", "Adjust credits")}</CardTitle></CardHeader><CardContent><form className="grid grid-cols-2 gap-4 lg:grid-cols-4" onSubmit={adjust}><Field label={t("用户 ID", "User ID")}><Input required value={adjustUser} onChange={event => setAdjustUser(event.target.value)} /></Field><Field label={t("额度类型", "Credit type")}><select className="h-9 rounded-md border border-input bg-white px-3 text-sm" value={adjustKind} onChange={event => setAdjustKind(event.target.value)}><option value="free">{t("免费", "Free")}</option><option value="paid">{t("付费", "Paid")}</option></select></Field><Field label={t("调整次数，可填负数", "Amount, negative allowed")}><Input type="number" required min={-10000} max={10000} value={adjustDelta} onChange={event => setAdjustDelta(event.target.value)} /></Field><Field label={t("原因，至少 8 字", "Reason, at least 8 characters")}><Input required minLength={8} maxLength={500} value={adjustReason} onChange={event => setAdjustReason(event.target.value)} /></Field><Button className="col-span-2 lg:col-span-4 w-fit" disabled={busy}>{t("预览并确认调整", "Review adjustment")}</Button></form></CardContent></Card></TabsContent>
       <TabsContent value="ledger"><AdminUsageLedger active={tab==="ledger"} language={language}/></TabsContent>
       <TabsContent value="orders" className="space-y-4"><AdminCommercePanel active={tab==="orders"} language={language} focusOrderId={orderQuickSearch}/><details className="rounded-lg border bg-card p-3"><summary className="cursor-pointer text-sm font-semibold">{t("历史额度包订单高级操作（原有详情与导出）","Legacy credit-pack advanced operations and export")}</summary><div className="pt-3"><Card><CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader><CardContent><form className="mb-4 flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void run(async()=>{const result=await read<{orders:Order[]}>(`/v1/admin/orders?${new URLSearchParams({q:orderSearch,status:orderStatus})}`);setData(previous=>previous&&({...previous,orders:result.orders}));});}}><Input aria-label="搜索订单号或邮箱" placeholder="搜索订单号或邮箱" value={orderSearch} onChange={e=>setOrderSearch(e.target.value)}/><select aria-label="订单状态" className="h-9 rounded border px-2" value={orderStatus} onChange={e=>setOrderStatus(e.target.value)}>{[["","全部状态"],["paid","支付成功"],["pending","待支付"],["failed","失败"],["unknown","待确认"]].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><Button variant="outline" disabled={busy}>查询订单</Button><Button type="button" variant="outline" disabled={busy||!selectedOrders.length} onClick={()=>void run(()=>exportCsv("orders",selectedOrders))}>导出所选订单 CSV</Button></form><p className="mb-4 text-sm text-muted-foreground">{t("订单状态来自服务端支付记录；只有验证通过的支付结果才会发放额度。", "Order state comes from server-verified payment records; only verified payments grant credits.")}</p><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("订单号", "Order ID"), t("用户", "User"), t("套餐", "Package"), t("美元参考价", "USD reference"), t("实际人民币", "CNY amount"), t("渠道", "Provider"), t("支付状态", "Payment status"), t("额度", "Credits")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.orders.map(order => <TableRow key={order.id}><TableCell className="max-w-44 break-all text-xs"><input aria-label={`选择订单 ${order.id}`} type="checkbox" checked={selectedOrders.includes(order.id)} onChange={e=>setSelectedOrders(ids=>e.target.checked?[...ids,order.id]:ids.filter(id=>id!==order.id))}/><Button variant="link" size="sm" className="h-auto break-all whitespace-normal text-left" disabled={busy} onClick={()=>void run(async()=>setOrderDetail(await read(`/v1/admin/orders/${encodeURIComponent(order.id)}`)))}>{order.id}</Button></TableCell><TableCell>{order.email}</TableCell><TableCell>{order.package_name} · {order.credits}</TableCell><TableCell>{dollars(order.amount_cents)}</TableCell><TableCell>{order.amount_fen == null ? "—" : `¥${(order.amount_fen / 100).toFixed(2)} ${order.payment_currency||"CNY"}`}</TableCell><TableCell>{order.provider === "local_mock" ? t("本地模拟", "Local mock") : order.provider === "xiaodou" ? t("小豆", "Xiaodou") : "—"}</TableCell><TableCell><Badge variant="secondary">{statusText(order.payment_status || order.status, language)}</Badge></TableCell><TableCell>{order.credited_at ? t("已发放", "Granted") : t("未发放", "Not granted")}</TableCell></TableRow>)}</TableBody></Table></div>{!data.orders.length && <Empty text={t("暂无订单。", "No orders yet.")} />}</CardContent></Card></div></details></TabsContent>

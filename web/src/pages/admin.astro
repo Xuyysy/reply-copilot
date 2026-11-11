@@ -3,6 +3,15 @@ import Base from "../layouts/Base.astro";
 import AdminDashboard from "../components/admin/AdminDashboard";
 ---
 <Base title="管理后台" titleEn="Admin dashboard">
-  <div class="container page-hero"><div class="eyebrow">x-Reply-Helper</div><h1 data-zh="管理后台">Admin dashboard</h1><p class="lead" data-zh="登录管理员账户后查看账户、额度、订单与 AI 成本。">Sign in with an admin account to view accounts, credits, orders and AI costs.</p></div>
-  <section class="container app-shell" style="padding-top:0"><AdminDashboard client:load /></section>
+  <header class="container admin-page-heading" aria-label="Admin console heading">
+    <div class="admin-page-heading-kicker">
+      <span class="admin-page-heading-dot" aria-hidden="true"></span>
+      <span>REPLY HELPER / CONSOLE</span>
+    </div>
+    <h1 data-zh="管理后台">Admin dashboard</h1>
+    <p data-zh="在一个工作区管理收入、订单、订阅、用户与 AI 使用情况。">Manage revenue, orders, subscriptions, users and AI usage in one workspace.</p>
+  </header>
+  <section class="container admin-app-shell app-shell" aria-label="Admin operations">
+    <AdminDashboard client:load />
+  </section>
 </Base>
