@@ -42,6 +42,21 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
   assert.equal(await evaluate('window.__creates'),0,'review never creates an order');
   assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   assert.equal(await evaluate('!document.querySelector("#cashier-link").hidden'),mode==='pending');
+  if(mode==='pending'){
+    assert.equal(await evaluate('document.querySelector("#cashier-link").classList.contains("checkout-pay-button")'),true,'original cashier is primary');
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'normal MK99 hides advanced actions');
+    assert.equal(await evaluate('document.querySelector("#refresh-order").hidden'),false,'status refresh still accessible');
+    assert.equal(await evaluate('document.querySelector(".checkout-back-link a").getAttribute("href")'),'/pricing','back link stays simple');
+    assert.equal(await evaluate('document.querySelector(".checkout-main-actions a[href="/pricing"]')===null'),true,'no prominent back-to-plans button');
+  }
+  if(mode==='paid')assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'completed payment hides advanced actions');
+  if(mode==='epay'){
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),false,'Epay keeps safe manual recovery option');
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").open'),false,'recovery actions start collapsed');
+    assert.equal(await evaluate('document.querySelector("#restart-payment").getClientRects().length'),0,'restart is visually hidden until user opens advanced actions');
+    await evaluate('document.querySelector("#checkout-extra-actions").open=true');
+    assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),false,'existing restart still available on demand');
+  }
   assert.equal(await evaluate('document.querySelector("#order-reference,#replacement-purchase,#replacement-help,#cashier-help,#payment-support")===null'),true,'no extra recovery UI');
   if(['unknown','risk','queryerror','badurl'].includes(mode))assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
   if(mode==='unknown'){await evaluate('document.querySelector("#refresh-order").click()');await until('window.__calls.some(c=>c[0].endsWith("/refresh"))');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);}

@@ -24,11 +24,9 @@ import Base from "../layouts/Base.astro";
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
 
-      <p id="restart-notice" class="notice" hidden data-zh="重新发起会创建新的独立订单，旧订单不会取消。请勿同时支付多笔订单。">Restarting creates a separate order and does not cancel earlier orders. Do not pay multiple orders unintentionally.</p>
-      <div class="button-row">
+      <div class="button-row checkout-main-actions">
         <button id="create-order" class="button checkout-pay-button" type="button" disabled><span id="create-order-label" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></button>
-        <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
-        <a id="cashier-link" class="button secondary" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
+        <a id="cashier-link" class="button checkout-pay-button" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
         <section id="wechat-qr-panel" class="checkout-wechat-qr" hidden aria-labelledby="wechat-qr-title">
           <h3 id="wechat-qr-title" data-zh="用微信扫码完成支付">Scan with WeChat to continue</h3>
           <img id="wechat-qr-image" width="240" height="240" alt="微信支付收银台二维码" />
@@ -39,10 +37,31 @@ import Base from "../layouts/Base.astro";
         <button id="simulate-payment" class="button secondary" type="button" hidden data-zh="模拟支付完成">Simulate payment</button>
         <button id="refresh-order" class="button secondary" type="button" hidden data-zh="刷新支付状态">Refresh payment status</button>
         <a id="login-link" class="button secondary" href="/login?mode=login" hidden data-zh="登录后继续">Sign in to continue</a>
-        <a class="button secondary" href="/pricing" data-zh="返回套餐">Back to plans</a>
       </div>
+      <details id="checkout-extra-actions" class="checkout-extra-actions" hidden>
+        <summary data-zh="付款遇到问题？">Having trouble with payment?</summary>
+        <p class="checkout-extra-hint" data-zh="仅在支付方式失效或旧订单状态异常时使用。重新发起付款会创建另一笔订单，请先确认旧订单未付款。">Use only if the cashier fails or the old order status is unclear. Restarting can create another order; verify the original before doing so.</p>
+        <p id="restart-notice" class="notice" hidden data-zh="重新发起会创建新的独立订单，旧订单不会取消。请勿同时支付多笔订单。">Restarting creates a separate order and does not cancel earlier orders. Do not pay multiple orders unintentionally.</p>
+        <div class="button-row">
+          <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
+        </div>
+      </details>
+      <p class="checkout-back-link"><a href="/pricing" data-zh="返回套餐">Back to plans</a></p>
     </div>
   </section>
+  <style>
+    .checkout-main-actions { margin-top: 14px; }
+    .checkout-extra-actions { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
+    .checkout-extra-actions:not([open]) > :not(summary) { display: none !important; }
+    .checkout-extra-actions summary { width: fit-content; cursor: pointer; font-size: 14px; color: var(--muted-foreground); }
+    .checkout-extra-actions summary:hover { color: var(--foreground); }
+    .checkout-extra-actions .button-row { margin-top: 12px; }
+    .checkout-extra-hint { margin: 12px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted-foreground); }
+    .checkout-back-link { margin: 18px 0 0; font-size: 14px; }
+    .checkout-back-link a { color: var(--muted-foreground); text-decoration: underline; text-underline-offset: 3px; }
+    .checkout-back-link a:hover { color: var(--foreground); }
+    @media (max-width: 600px) { .checkout-main-actions .button { width: 100%; } }
+  </style>
   <script>
     import { watchPayment, rememberPayment, rememberedPayment, clearRememberedPayment, paymentReturnOrder, shouldMonitorPayment } from "../lib/payment-sync.mjs";
     import { submitEpayForm } from "../lib/epay-form.mjs";
@@ -136,6 +155,9 @@ import Base from "../layouts/Base.astro";
       const rejectedUnresolvedOrder=!order&&restartAvailable&&selectedProvider==="xiaodou_epay";
       const canRestart=paymentAvailable&&paymentMethods.some(method=>method.provider==="xiaodou_epay")&&(restartableOrder||rejectedUnresolvedOrder);
       show("restart-payment",canRestart);show("restart-notice",canRestart);byId<HTMLButtonElement>("restart-payment").disabled=busy;
+      const extras=byId<HTMLDetailsElement>("checkout-extra-actions");
+      show("checkout-extra-actions",canRestart);
+      if(!canRestart)extras.open=false;
       if(!selected){byId("package-name").textContent=label("套餐不存在或已下架。","Package not found or unavailable.");return;}
       byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
@@ -210,6 +232,7 @@ import Base from "../layouts/Base.astro";
         paymentAvailable=false;
         if(!order)render();
         show("restart-payment",false);show("restart-notice",false);show("epay-submit",false);
+        show("checkout-extra-actions",false);
       }finally{availabilityInFlight=false;}
     }
     function scheduleAvailabilityRefresh(){
