@@ -22,6 +22,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  if(p==='/v1/me')return Response.json({user:{userId:'synthetic-user'}});
  if(p==='/v1/usage')return Response.json({quota:{freeRemaining:200,paidRemaining:400,totalRemaining:600}});
  if(p.endsWith('/attempts'))return Response.json({paymentForm:{method:'POST',action:'https://epay.fixture.invalid/submit.php',fields:{pid:'synthetic-only'}}});
+ if(p==='/v1/orders/unresolved')return Response.json({order:null});
  if(p==='/v1/orders'){window.__creates++;if(mode.startsWith('newsuccess')){order.id='22222222-2222-4222-8222-222222222222';order.paymentChannel=JSON.parse(init.body).channel;return Response.json({order},{status:201});}return Response.json({code:'UNRESOLVED_ORDER_EXISTS',message:'Existing order'}, {status:409});}
  if(p.endsWith('/refresh'))return mode==='queryerror'?Response.json({code:'UPSTREAM_FAILED',message:'Synthetic network failure'},{status:502}):Response.json({ok:true,orderStatus:'pending',verificationSource:'authenticated_https_query'});
  if(p.startsWith('/v1/orders/'))return mode==='otheruser'?Response.json({code:'ORDER_NOT_FOUND',message:'Not found'},{status:404}):Response.json({order:{...order,...(mode==='newsuccess-latest'?{paymentUrl:'https://cashier.fixture.invalid/pay/latest'}:mode==='newsuccess-paid'?{status:'paid',paidAt:1,creditedAt:1}:{})},quota:{paidRemaining:0,totalRemaining:200}});
@@ -49,7 +50,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
   await evaluate('document.documentElement.lang="en";window.dispatchEvent(new Event("reply-copilot-language"))');assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   if(mode==='pending'){await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);}
  }
- await navigate(base+'?package=starter');await until('document.querySelector("#create-order")?.disabled === false');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/"))'),false,'remembered old order must not override explicit package');
+ await navigate(base+'?package=starter');await until('document.querySelector("#create-order")?.disabled === false');assert.equal(await evaluate('window.__calls.some(c=>c[0].startsWith("/v1/orders/")&&c[0]!=="/v1/orders/unresolved")'),false,'remembered old order must not override explicit package');
  assert.equal(await evaluate('document.querySelectorAll("input[name=payment-channel]").length'),3);assert.equal(await evaluate('document.querySelector("#order-reference,#cashier-help,#replacement-purchase")===null'),true);
  await evaluate('document.querySelector("#create-order").click();document.querySelector("#create-order").click()');await until('document.querySelector("#checkout-status").textContent.includes("该套餐已有待付款")');assert.equal(await evaluate('window.__creates'),1);assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
  for(const mode of ['newsuccess','newsuccess-latest','newsuccess-paid']){

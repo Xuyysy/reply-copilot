@@ -297,6 +297,21 @@ function storedXiaodouCashier(env:Env,row:Record<string,unknown>):{url:string;or
     return {url:row.cashier_url,origin:url.origin};
   }catch{return null;}
 }
+export async function findUnresolvedOrder(request:Request,env:Env):Promise<Response>{
+ const session=await webSession(request,env);
+ const url=new URL(request.url);
+ const packageId=cleanId(url.searchParams.get("packageId"),/^[a-z0-9_-]{1,64}$/i);
+ const provider=url.searchParams.get("provider"),channel=url.searchParams.get("channel");
+ if(!["xiaodou","xiaodou_epay","mk99","local_mock"].includes(provider||"")||
+    !["ALIPAY_H5","WECHAT_H5"].includes(channel||""))
+   throw new ApiFailure(400,"INVALID_REQUEST","请选择有效的套餐和付款方式。");
+ const protocol=provider==="mk99"?"mk99":provider==="xiaodou_epay"?"epay":"rsa2";
+ const merchant=provider==="mk99"?"mk99":provider==="local_mock"?"local_mock":"xiaodou";
+ const found=await env.DB.prepare("SELECT o.id,t.status payment_status FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND o.package_id=? AND o.status IN ('pending','awaiting_payment') AND t.payment_protocol=? AND t.merchant_provider=? ORDER BY o.created_at DESC LIMIT 1").bind(session.user_id,packageId,protocol,merchant).first<{id:string;payment_status:string}>();
+ return response({order:found?{id:found.id,status:found.payment_status}:null},200,env,request);
+}
+/* Read-only, authenticated lookup across all orders (not limited to account
+ * history's 50 rows). It never creates an attempt or assumes 'unknown'=unpaid. */
 export async function getOrder(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,(EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) OR EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)) has_credit_settlement,t.provider,t.merchant_provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.risk_state,t.merchant_pricing_snapshot,t.cashier_url,t.merchant_account,t.notification_sign_type,t.amount_contract,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
   if(!row)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");

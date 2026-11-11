@@ -15,7 +15,7 @@ import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTestAccount,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
-import {packages,createOrder,getOrder,refreshOrder,relaunchPayment,cancelUnpaidXiaodouOrder,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
+import {packages,createOrder,findUnresolvedOrder,getOrder,refreshOrder,relaunchPayment,cancelUnpaidXiaodouOrder,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { acknowledgeDelivery, recoverGeneration } from "./quota";
@@ -111,6 +111,7 @@ export default {
       if (request.method === "GET" && path === "/v1/payments/xiaodou/epay/notify") return await epayNotify(request,env);
       if (request.method === "POST" && path === "/v1/payments/xiaodou/webhook") return await xiaodouWebhook(request,env);
       if (request.method === "POST" && path === "/v1/admin/diagnostics/xiaodou-connectivity") return await xiaodouConnectivityDiagnostic(request,env);
+      if(request.method==="GET"&&path==="/v1/orders/unresolved")return await findUnresolvedOrder(request,env);
       const orderRoute=path.match(/^\/v1\/orders\/([0-9a-f-]{36})(?:\/(refresh|attempts|close))?$/i);
       if(request.method==="GET"&&orderRoute&&!orderRoute[2])return await getOrder(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="refresh")return await refreshOrder(request,env,orderRoute[1]);
