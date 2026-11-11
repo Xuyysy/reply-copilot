@@ -59,7 +59,7 @@
     // An unknown parent can use verified text; conflicting IDs cannot.
     const ids=new Set();
     for(const anchor of article?.querySelectorAll?.('a[href*="/status/"]')||[]) {
-      if(anchor.closest?.('article')!==article)continue;
+      if(anchor.closest?.('article')!==article || globalThis.ZaneReplyCopilotContent.postExtractor.isQuoteContent?.(anchor,article))continue;
       try{
         const url=new URL(anchor.href);
         const match=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);
@@ -70,20 +70,21 @@
   }
   const normalized=text=>(text||'').replace(/\s+/g,' ').trim();
   function capturePost(post) {
+    const hasCapturedMedia=Boolean(post.article?.querySelector?.('[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]'));
     const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
       if(a.closest('article')!==post.article)return false;
       try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
     });
-    return {...post,hasCapturedPhoto};
+    return {...post,hasCapturedPhoto,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
   }
   function sameContext(post,text) {
     const source=normalized(post.sourceText),copy=normalized(text);
     if(copy===source)return true;
-    if(!post.hasCapturedPhoto || !source || !copy.startsWith(source+' '))return false;
+    if(!(post.hasCapturedPhoto||post.hasCapturedMedia) || !source || !copy.startsWith(source+' '))return false;
     // X's modal can append a plain picture reference absent from feed text,
     // including a presentation space after https://. This is auxiliary text
     // comparison only: never navigate to it or treat it as identity evidence.
-    return /^(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+$/.test(copy.slice(source.length).trim());
+    return /^(?:(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+\s*){1,4}$/.test(copy.slice(source.length).trim());
   }
   function routeAllowed(initial,current,statusId) {
     if (initial===current) return true;
@@ -99,7 +100,8 @@
     }
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
-      const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node));
+      const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node)
+        && !a.closest?.('[data-testid="quoteTweet"], [data-testid="card.wrapper"]'));
       // Quoted posts/media can add extra article nodes in the modal.
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
@@ -107,18 +109,27 @@
         article, id:contextId(article), text:api.postExtractor.postText(article)
       }));
       const matching=candidates.filter(item=>item.id===post.statusId);
-      const primary=matching.length===1?matching[0]:candidates.length===1?candidates[0]:null;
+      const exactText=candidates.filter(item=>sameContext(post,item.text));
+      // X sometimes omits the parent permalink in a quote/video reply modal,
+      // while leaving a separate quoted article. A UNIQUE source-text match
+      // is valid fallback evidence, even when the modal has several articles.
+      // An explicitly identified DIFFERENT parent never becomes a match.
+      const uniqueText=exactText.length===1?exactText[0]:null;
+      const primary=matching.length===1?matching[0]
+        :uniqueText&&(uniqueText.id===null)?uniqueText
+        :candidates.length===1?candidates[0]:null;
       const text=primary?.text||'';
       const statusId=primary?.id||null;
       const quarantinedContextMatch=Boolean(primary&&text&&quarantinedPosts.some(old=>
         old?.statusId!==post.statusId&&sameContext(old,text)&&statusId!==post.statusId));
-      // Matching a verified post ID permits harmless X presentation changes
-      // (Show translation / media labels). Without ID evidence, keep the
-      // original exact-text check and reject ambiguous multi-post modals.
+      // If the post ID is present it wins, even if X changed the display
+      // text for translation. Otherwise demand a unique original-text match;
+      // missing modal context should WAIT for React, not be rejected.
       const contextMatches=!candidates.length?null
-        :matching.length===1?Boolean(normalized(text))
         :matching.length>1?false
-        :candidates.length===1&&!statusId?(normalized(text)?sameContext(post,text):null)
+        :matching.length===1?Boolean(normalized(text))
+        :uniqueText&&!uniqueText.id&&exactText.length===1?true
+        :candidates.length===1&&!normalized(text)&&!statusId?null
         :false;
       return {node,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
