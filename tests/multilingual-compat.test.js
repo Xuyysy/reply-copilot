@@ -154,3 +154,33 @@ test("legacy v1 profile forced to Korean safely falls back to English rather tha
  assert.match(prompts.user,/Requested language: ko/);
  assert.match(prompts.system,/Return only zh or en as the JSON language tag/i);
 });
+
+test("Staging speed-first: last user instruction pins English/Japanese/Korean regardless of Chinese samples", () => {
+  for (const [text, expected] of [
+    ["I launched my new app today!", "en"],
+    ["今日は新しいアプリを公開しました。", "ja"],
+    ["오늘 새 앱을 출시했어요", "ko"],
+  ]) {
+    const prompts = buildPrompts({ postContext: { text }, voiceProfile: { ...DEFAULT_VOICE_PROFILE, language: "auto", writingSamples: ["太牛了哈哈", "这真的离谱"] }, recentHistory: [{style:"natural",reply:"笑死我了"}], outputSchemaVersion: 2 });
+    assert.match(prompts.user, new RegExp("FINAL REPLY LANGUAGE: " + expected));
+    assert.match(prompts.user, /Chinese writing samples and recent replies are style examples, not a language setting/);
+    assert.match(prompts.system, /OFFHAND HUMAN REPLY RULES/);
+  }
+});
+test("Staging speed-first: keep ambiguous Han contextual, honor manual selection and legacy V1", () => {
+  const zh=buildPrompts({postContext:{text:"今天新功能发布了"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:2});
+  assert.match(zh.user,/FINAL REPLY LANGUAGE: match the original X post language/);
+  const kanji=buildPrompts({postContext:{text:"東京大学"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:2});
+  assert.match(kanji.user,/FINAL REPLY LANGUAGE: match the original X post language/);
+  const ja=buildPrompts({postContext:{text:"This is English."},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"ja"},outputSchemaVersion:2});
+  assert.match(ja.user,/FINAL REPLY LANGUAGE: ja/);
+  const old=buildPrompts({postContext:{text:"Hello world"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:1});
+  assert.doesNotMatch(old.user,/FINAL REPLY LANGUAGE/);
+});
+test("Staging speed-first: added directive is short and does not change the original reply instructions", () => {
+  const modern=buildPrompts({postContext:{text:"A short post"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:2});
+  const legacy=buildPrompts({postContext:{text:"A short post"},voiceProfile:DEFAULT_VOICE_PROFILE,outputSchemaVersion:1});
+  const added=modern.user.slice(legacy.user.length);
+  assert.ok(added.length>0 && added.length<220);
+  assert.equal(modern.system.includes("OFFHAND HUMAN REPLY RULES"),true);
+});
