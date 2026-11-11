@@ -46,7 +46,7 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
    {!insights&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('正在加载运营数据…','Loading operations data…')}</p>}
    {insights&&mode==='alerts'&&<>
-    <p className="text-xs text-muted-foreground">{t('只展示最近30天待核验订单及支付已确认超过5分钟但权益仍未发放的订单，以及预算/AI请求异常。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget and AI anomalies. Up to eight orders per kind; not the full historical backlog.')}</p>}
+     {!compact&&<p className="text-xs leading-5 text-muted-foreground">{t('只展示最近30天待核验订单及支付已确认超过5分钟但权益仍未发放的订单，以及预算/AI请求异常。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget and AI anomalies. Up to eight orders per kind; not the full historical backlog.')}</p>}
     {!insights.alerts.length&&<p role="status" className="text-sm">{t('当前筛选范围没有需关注的事件。','No flagged events in the inspected ranges.')}</p>}
     <div className={compact?"admin-ops-feed space-y-2":"space-y-2"}>
      {insights.alerts.map(a=><div key={a.key} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50/50 px-3 py-2.5" data-testid="admin-ops-alert">
@@ -60,7 +60,10 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
       </Button>
      </div>)}
     </div>
-    <p className="text-xs text-muted-foreground">{t('提醒是来源数据库的只读线索，并不自动进行查单、退款、放款或更改订单状态。','Read-only indicators only. No payment verification calls, refunds, credit grants or status mutations occur here.')}</p>}
+     {compact?<details className="text-[11px] leading-5 text-slate-500">
+       <summary className="cursor-pointer font-medium">{t('关于异常提醒与统计范围','About alert coverage')}</summary>
+       <p className="mt-1">{t('近30天、每类最多8条，只读提示。不会自动退款、补发或更改订单状态。','Recent 30 days, up to eight per type. Read-only; no refunds, credit grants or order status changes.')}</p>
+      </details>:<p className="text-xs text-muted-foreground">{t('提醒是来源数据库的只读线索，并不自动进行查单、退款、放款或更改订单状态。','Read-only indicators only. No payment verification calls, refunds, credit grants or status mutations occur here.')}</p>}
    </>}
    {insights&&mode==='plans'&&<>
     <p className="text-xs text-muted-foreground">{t('最近7天按已确认 ACK 交付统计，最多抽取最新1000个请求；当前周期档位是快照，不代表升级前的历史档位。仅包含成功交付请求的模型成本，不含失败请求费用。','Seven-day ACK-confirmed deliveries, capped at the latest 1,000 requests. Plan is current period snapshot, not necessarily the historical pre-upgrade tier. Cost covers delivered requests only, not failed upstream calls.')}</p>
