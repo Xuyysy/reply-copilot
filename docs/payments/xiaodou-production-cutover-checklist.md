@@ -59,6 +59,22 @@ This single feature checks the 24-migration boundary and local 0025 historical M
 
 The example deliberately remains **NO-GO** for Production; do not fill its flags based on assumptions or this chat alone. Each production authorization and observation must come from the relevant operator and can be independently verified only after the matching explicit approval. A green CI is not such approval.
 
+
+## One-command 0025 synthetic-data migration, local backup and recovery module
+
+Run `node scripts/xiaodou-production-isolated-recovery.mjs` from the repository root, or the focused test `node --test tests/xiaodou-production-isolated-recovery.test.mjs`.
+
+This is an **end-to-end isolated local-only rehearsal** to be executed as one module before the separately authorized real migration. It never accesses Cloudflare, Production D1, real orders, customer rows, API keys or user content. It uses an in-memory SQLite database and an ephemeral **synthetic-only** local backup file, removing the file after checking the restore.
+
+1. Apply the genuine committed Production migrations 0001–0024 to an in-memory database. Seed entirely fictional accounts, three paid and two closed MK99 subscription transactions, three signed synthetic events, three active periods, eleven paid and three closed MK99 credit transactions, eleven paid and three expired recharge orders, and synthetic credit balances. These grouped quantities **mirror the authorized 2026-11-11 Production seven-group read-only audit** without importing a single real customer row.
+2. Fingerprint all rows of nine audited financial, account-credit, entitlement and merchant-routing tables. Use Node's local SQLite backup API to produce an isolated temporary backup and reopen it independently; verify hashes, group totals, foreign keys and integrity.
+3. Apply the **exact source-only 0025 proposal** to the in-memory working database inside an explicit transaction. Enforce deferred foreign keys at COMMIT, validate integrity and check all nine financial/entitlement/routing fingerprints remain unchanged.
+4. On the independently reopened synthetic backup, deliberately interrupt the migration halfway. Verify the transaction rolls back, leaves no temporary migration tables, and preserves every original fingerprint. Separately inject an orphan event: COMMIT **must fail**, then ROLLBACK must restore all synthetic rows and references.
+5. Insert a new synthetic Xiaodou subscription transaction into the successfully migrated database. Confirm that this alone **does not** grant an active subscription period, paid credits, or switch the selected merchant away from MK99.
+6. Return a redacted machine-readable JSON report with SHA-256 of the SQL proposal, pass/fail booleans and migration count. It **always** reports `productionReady=false` and `productionD1Touched=false`, and never asserts a real Production backup or real migration was completed.
+
+The local backup test is **not** a verified Cloudflare D1 export, Production Time Travel bookmark, restore test of real data, or permission to migrate; the security, consistency and downtime risks of Production must be evaluated separately. Use the previously authorized aggregate audit as a baseline, not as a substitute for a fresh separately approved post-migration audit. Any **new** SQL proposal change creates a new hash and requires a new explicit migration approval.
+
 ## Unresolved release blockers
 
 - Production D1 seven-group *read-only audit completed*. No approved backup/recovery validation, no 0025 migration execution, and no permission for further remote SQL.
