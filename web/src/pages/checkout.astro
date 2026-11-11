@@ -56,6 +56,7 @@ import Base from "../layouts/Base.astro";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
     import {checkoutResumeId,loadOrderCheckout} from "../lib/checkout-resume.mjs";
     import {safeMk99Cashier} from "../lib/payment-resume.mjs";
+    import {lookupUnresolvedCreditOrder} from "../lib/credit-order-discovery.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
     type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{feeBearer:string;rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
@@ -174,6 +175,26 @@ import Base from "../layouts/Base.astro";
       byId<HTMLButtonElement>("cancel-unpaid-order").disabled=busy;
       show("create-order",false);
     }
+    // Abandoned checkout: re-open the existing order instead of posting a
+    // second order. The account list is only a locator; GET /orders/:id is
+    // authoritative for current state and immutable original price.
+    async function resumeExistingCreditOrder(){
+      if(!selected?.id||!selectedProvider||!selectedChannel)return false;
+      const found=await lookupUnresolvedCreditOrder({packageId:selected.id,provider:selectedProvider,channel:selectedChannel,request:api});
+      if(!found)return false;
+      const saved=await loadOrderCheckout(found.id,api);
+      const prior=saved.order as Order;
+      if(prior.id!==found.id||!["pending","unknown"].includes(prior.status))return false;
+      confirmedMk99OrderId=saved.verified?found.id:null;
+      selected={id:prior.packageId||selected.id,name_zh:prior.packageName,name_en:prior.packageName,credits:prior.credits,
+        price_cents:prior.displayPriceCents,promo_price_cents:null,currency:"USD",price_cny_fen:prior.baseAmountFen,
+        service_fee_fen:prior.serviceFeeFen,total_payment_fen:prior.amountFen,fee_rate_bps:prior.feeRateBps,
+        merchant_pricing:prior.merchantPricing??undefined};
+      showOrder(prior);
+      setStatus("已找到上次未完成的订单。请继续原订单付款，或先查验／关闭旧订单；无需重新购买。",
+        "Your original unpaid order was found. Continue its cashier, or verify/close it safely; no new purchase is needed.");
+      return true;
+    }
     async function load(){
       try{
         if(invalidOrderLocator){setStatus("订单编号无效，请从账户页面重新打开原订单。","Invalid order ID. Open the original order from your account.");return;}
@@ -188,6 +209,9 @@ import Base from "../layouts/Base.astro";
         }
         render();
         if(!selected){setStatus("套餐不存在或已下架。","Package not found or unavailable.");return;}
+        // Read-only restore on entry. A provider failure here does not imply
+        // it is safe to open a second transaction.
+        try{if(await resumeExistingCreditOrder())return;}catch{/* No auto-payment attempt on page load. */}
         if(!paymentAvailable)setStatus("支付暂未开放，目前不能创建订单。","Checkout is not open yet; an order cannot be created.");
         else if(provider==="local_mock")setStatus("本地模拟支付仅用于开发，不会扣款。","Local mock checkout is for development only; it will not charge you.");
       }catch(error){if(error instanceof ApiError&&error.status===401)show("login-link",true);setStatus(resumeOrderId?"无法读取原订单，请确认登录账户后重试或联系客服。":"暂时无法读取套餐，请稍后重试。",resumeOrderId?"Cannot read the original order. Check the signed-in account, retry or contact support.":"Unable to load packages. Please retry later.");}
@@ -231,14 +255,28 @@ import Base from "../layouts/Base.astro";
       if(!selected||busy||(!restart&&order)||!paymentAvailable)return;
       if(restart&&(order?order.paymentProtocol!=="epay":selectedProvider!=="xiaodou_epay"))return;
       busy=true;render();setStatus("正在创建订单…","Creating order…");let failureMessage:string|null=null;
-      try{const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
+      try{
+        if(!restart){try{if(await resumeExistingCreditOrder())return;}catch{/* Fall through to server atomic duplicate guard. */}}
+        const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
         if(result.order.paymentProtocol==="mk99"&&result.order.status==="pending"){
           const saved=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(result.order.id));
           if(saved.order.id!==result.order.id)throw new Error("ORDER_MISMATCH");
           const latest=mergeCheckoutRead(order,saved.order) as Order;
           confirmedMk99OrderId=safeMk99Cashier(latest,result.order.id)?latest.id:null;showOrder(latest);
         }else showOrder(result.order);}
-      catch(error){const saved=checkoutOrderFromError(error);if(saved)showOrder(saved as Order);else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else{if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";failureMessage=error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"?"UNRESOLVED_ORDER_EXISTS":error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");}}
+      catch(error){
+        const saved=checkoutOrderFromError(error);
+        if(saved)showOrder(saved as Order);
+        else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}
+        else if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"){
+          try{
+            if(!await resumeExistingCreditOrder())failureMessage="UNRESOLVED_ORDER_EXISTS";
+          }catch{failureMessage="UNRESOLVED_ORDER_EXISTS";}
+        }else{
+          if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";
+          failureMessage=error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");
+        }
+      }
       finally{busy=false;render();if(order)showOrder(order);if(failureMessage&&failureMessage.includes("UNRESOLVED_ORDER_EXISTS"))failureMessage=label("该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。","This package has an unpaid or unconfirmed order. Check the original order first. Other packages can still be purchased.");if(failureMessage)byId("checkout-status").textContent=failureMessage;}
     }
     byId("create-order").addEventListener("click",()=>{void startOrder();});
