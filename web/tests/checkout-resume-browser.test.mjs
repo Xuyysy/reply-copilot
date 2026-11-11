@@ -47,7 +47,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
     assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'normal MK99 hides advanced actions');
     assert.equal(await evaluate('document.querySelector("#refresh-order").hidden'),false,'status refresh still accessible');
     assert.equal(await evaluate('document.querySelector(".checkout-back-link a").getAttribute("href")'),'/pricing','back link stays simple');
-    assert.equal(await evaluate('document.querySelector(".checkout-main-actions a.button.secondary")===null'),true,'no prominent back-to-plans button');
+    assert.equal(await evaluate('!Array.from(document.querySelectorAll(".checkout-main-actions a")).some(a=>a.getAttribute("href")==="/pricing")'),true,'no prominent back-to-plans button');
   }
   if(mode==='paid')assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'completed payment hides advanced actions');
   if(mode==='epay'){
