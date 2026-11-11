@@ -78,3 +78,35 @@ test('subscriber payment evidence counts as paid while staging local mocks do no
   assert.equal((await f.call('/v1/admin/users?paid=unpaid',{method:'GET'})).body.users.length,0);
  }finally{f.sql.close();}
 });
+
+
+test('Admin ACK cursor never skips two different users with identical timestamp and request ID',async()=>{
+ const f=adminFixture();
+ try{
+  f.sql.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash) VALUES(?,?,1,1,?,?)")
+   .run('second-user','second@example.test','second-user','hash-second');
+  const stamp=Date.now()-60000;
+  const put=f.sql.prepare(`INSERT INTO ai_requests
+  (request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,delivery_confirmed_at,delivery_confirmation_id,credit_source)
+  VALUES (?,?,'2026-11-11',?,'succeeded',1,?,?,?,?,'free')`);
+  for(let i=1;i<=53;i++){
+   const id='tie-'+String(i).padStart(3,'0');
+   put.run(id,'test-user','nonce-'+id,'hash-'+id,stamp,stamp,'ack-'+id);
+  }
+  put.run('tie-004','second-user','nonce-second-tie-004','hash-second',stamp,stamp,'ack-second-tie-004');
+  const first=await f.call('/v1/admin/usage-ledger',{method:'GET'});
+  assert.equal(first.status,200,JSON.stringify(first.body));
+  assert.equal(first.body.items.length,50);
+  assert.equal(first.body.hasMore,true);
+  assert.ok(first.body.nextCursor?.startsWith(stamp+':'));
+  const second=await f.call('/v1/admin/usage-ledger?cursor='+encodeURIComponent(first.body.nextCursor),{method:'GET'});
+  assert.equal(second.status,200,JSON.stringify(second.body));
+  assert.equal(second.body.items.length,4);
+  assert.equal(second.body.hasMore,false);
+  const all=[...first.body.items,...second.body.items];
+  assert.equal(all.length,54);
+  assert.equal(new Set(all.map(x=>x.user_id+':'+x.request_id)).size,54);
+  assert.equal(all.filter(x=>x.request_id==='tie-004').length,2);
+  assert.equal((await f.call('/v1/admin/usage-ledger?cursor='+stamp+':tie-004',{method:'GET'})).status,400);
+ }finally{f.sql.close();}
+});
