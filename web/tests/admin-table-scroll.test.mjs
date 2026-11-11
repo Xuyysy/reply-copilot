@@ -37,6 +37,11 @@ test('real admin tables scroll independently with sticky headers; controls, dial
       if(p==='/v1/admin/dashboard')data={users:window.__rows,aiService:{enabled:true,provider:'Qwen',model:'qwen3.7-flash',keyConfigured:true}};
       else if(p==='/v1/admin/users')data={users:users()};
       else if(p==='/v1/admin/orders')data={orders:orders()};
+      else if(p==='/v1/admin/usage-ledger')data={items:users().map((u,i)=>({request_id:'req-'+i,user_id:u.id,email:u.email,created_at:1793318400000,source:i%2?'subscription':'free',source_evidence:'credit_allocation',period_plan:'pro',model:'model-1',input_tokens:10,output_tokens:8,estimated_cost_micro_usd:4})),nextCursor:null,hasMore:false};
+      else if(p==='/v1/admin/ops-insights')data={time:{from:1793000000000,to:1793318400000,timezone:'UTC',generatedAt:1793318400000},alerts:[],aiUsage:{rowsSampled:0,moreThanSample:false,limit:1000,subscription:0,free:0,paid:0,unattributed:0,plans:[]},aiBudget:{dayUtc:'2026-11-11',limitMicroUsd:1000000,committedMicroUsd:0,percent:0},aiFailures24h:0};
+      else if(p==='/v1/admin/commerce/summary')data={verifiedCredit:{orders:0,buyers:0,gross_fen:0},verifiedSubscription:[],verifiedGrossFen:0,creditConfirmedRefunds:{refunds:0,amount_fen:0},currency:'CNY'};
+      else if(p==='/v1/admin/commerce/orders')data={items:users().map((u,i)=>({id:'combined-'+i,user_id:u.id,email:u.email,created_at:1793318400000,paid_at:1793318400000,product_type:i%2?'subscription':'credit',product_name:'Business',order_kind:'purchase',order_status:'paid',payment_status:'paid',merchant_provider:'mk99',amount_fen:6990,currency:'CNY',credits:i%2?null:400,entitlement_status:'applied',payment_evidence:'verified_event'})),hasMore:false,nextCursor:null};
+      else if(p.startsWith('/v1/admin/commerce/users/'))data={user:{id:p.split('/')[5],email:'person@example.test'},creditBalances:{free_balance:200,paid_balance:400},subscriptionPeriods:[],subscriptionOrders:[],asOf:1793318400000};
       else if(p==='/v1/admin/ledger')data={ledger:users().map((u,i)=>({id:'l'+i,email:u.email,kind:'generation_debit',free_delta:-1,paid_delta:0,reason:'Generation debit / 正常生成',created_at:1793318400000}))};
       else if(p==='/v1/admin/packages')data={packages:[{id:'starter',name_zh:'入门包',name_en:'Starter',credits:400,price_cents:149,price_cny_fen:990,active:1}]};
       else if(p==='/v1/admin/settings')data={settings:[]};else if(p==='/v1/admin/audits')data={audits:[]};else if(p==='/v1/admin/content')data={content:{}};
@@ -166,7 +171,13 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await click(`[...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm')`);
   await until(`window.__calls.some(c=>c.path==='/v1/admin/users/bulk-status')&&document.querySelectorAll('[role="tabpanel"][data-state="active"] tbody tr')[1]?.textContent.includes('Frozen')`);
   assert.deepEqual(await evaluate(`window.__calls.find(c=>c.path==='/v1/admin/users/bulk-status').body.userIds`),['u1','u2']);
-  await tab('orders');await click(`${panel}.querySelector('tbody a,tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
+   await tab('orders');
+   await click(`${panel}.querySelector('[data-testid="admin-unified-orders"] tbody button')`);
+   await until(`${panel}.textContent.includes('Order review summary')`);
+   await click(`${panel}.querySelector('details > summary')`);
+   await click(`${panel}.querySelector('details tbody button')`);
+   await until('!!document.querySelector(\'[role="dialog"]\')');
+   assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await tab('packages');assert.equal(await evaluate(`${panel}.querySelectorAll('.admin-list-scroll').length`),0);
   console.log(`PASS: ${scenarios} table/layout scenarios; ${detailScenarios} user-detail viewport/language/row scenarios; mark-test, archive, notes; user selection, CSV, freeze, bulk status, user/order details and unaffected package tab`);

@@ -22,7 +22,7 @@ test('subscription-first website section is strictly gated by trusted catalog, p
 
 test('admin subscription tab uses bounded APIs, shared write confirmation and three quota submetrics',()=>{
  assert.match(admin,/import SubscriptionAdminPanel from '\.\/SubscriptionAdminPanel'/);
- assert.match(admin,/\["subscriptions", t\("订阅管理", "Subscriptions"\)\]/);
+ assert.ok(admin.includes('["subscriptions",t("订阅高级管理","Subscription controls")]'));
  assert.match(admin,/<SubscriptionAdminPanel language=\{language\} active=\{tab==="subscriptions"\}/);
  for(const route of ['/v1/admin/subscriptions/plans','/v1/admin/subscriptions/users'])
    assert.ok(subscriptions.includes(route),route);
