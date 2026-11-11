@@ -27,12 +27,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
-      SOURCE_SHA: 8200608265c1f71e08a55d4d05b7d73debe76f53
+      SOURCE_SHA: '8200608265c1f71e08a55d4d05b7d73debe76f53'
       RELEASE_MODE: deploy
-      CI_RUN_ID: 42992596322
-      BUILD_RUN_ID: 42992596087
+      CI_RUN_ID: '42992596322'
+      BUILD_RUN_ID: '42992596087'
       TARGET: pages
-      EXPECTED_CURRENT: 0e3b317d-05cf-4747-ab7f-ee04ce615a68
+      EXPECTED_CURRENT: '0e3b317d-05cf-4747-ab7f-ee04ce615a68'
       CONFIRMATION: DEPLOY_PAGES_TO_PRODUCTION
       API_ORIGIN_TAKEOVER: deny
       API_ORIGIN_TAKEOVER_CONFIRMATION: ''
@@ -104,10 +104,10 @@ jobs:
       name: production
       url: https://app.x-reply-helper.top
     env:
-      SOURCE_SHA: 8200608265c1f71e08a55d4d05b7d73debe76f53
+      SOURCE_SHA: '8200608265c1f71e08a55d4d05b7d73debe76f53'
       RELEASE_MODE: deploy
       TARGET: pages
-      EXPECTED_CURRENT: 0e3b317d-05cf-4747-ab7f-ee04ce615a68
+      EXPECTED_CURRENT: '0e3b317d-05cf-4747-ab7f-ee04ce615a68'
       EXPECTED_DEPLOYMENT: ''
       API_ORIGIN_TAKEOVER: deny
       API_ORIGIN_TAKEOVER_CONFIRMATION: ''
