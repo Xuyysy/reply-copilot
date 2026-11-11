@@ -48,7 +48,7 @@ export function AdminCommerceSummary({active,language}:{active:boolean;language:
   </CardContent></Card>;
 }
 
-export default function AdminCommercePanel({active,language}:{active:boolean;language:Language}){
+export default function AdminCommercePanel({active,language,focusOrderId}:{active:boolean;language:Language;focusOrderId?:string}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [product,setProduct]=useState('all');
  const [status,setStatus]=useState('');
@@ -61,6 +61,10 @@ export default function AdminCommercePanel({active,language}:{active:boolean;lan
  const [error,setError]=useState('');
  const [refresh,setRefresh]=useState(0);
  const [selected,setSelected]=useState<Order|null>(null);
+ useEffect(()=>{
+  if(!focusOrderId)return;
+  setProduct('all');setStatus('');setSearch(focusOrderId);setQuery(focusOrderId);setSelected(null);
+ },[focusOrderId]);
  const path=(next?:string|null)=>{
   const p=new URLSearchParams({product});
   if(status)p.set('status',status);
