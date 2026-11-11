@@ -1,0 +1,289 @@
+name: One-time approved Staging Admin V2 Worker and Pages test
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: Type STAGING-ADMIN-V2-TEST to approve Staging Worker and Pages release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-staging-pages
+  cancel-in-progress: false
+
+jobs:
+  staging-recovery:
+    if: github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/main' && github.actor == 'Xuyysy' && inputs.confirmation == 'STAGING-ADMIN-V2-TEST'
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      SOURCE_SHA: '3b19ed61890c020b95d4aab6d790831ddac3c3fc'
+      CI_RUN_ID: '42949293709'
+      BASE_SHA: '0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0'
+      EXPECTED_WORKER_VERSION: '2fdf4241-8684-4477-91bf-5f5f239d3956'
+      EXPECTED_WORKER_DEPLOYMENT: '7f004fa8-65b5-4b08-8af0-e6adee538895'
+      EXPECTED_PAGES_DEPLOYMENT: 'ac1ba7e8-44a0-48c0-a1a8-f9672cdcb2c0'
+      EXPECTED_PAGES_SOURCE_SHA: '0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0'
+      EXPECTED_PROD_WORKER_DEPLOYMENT: '7ffef2a5-68d6-4866-aaf4-3f73df40b1e2'
+      EXPECTED_PROD_PAGES_DEPLOYMENT: 'cc8ca030-5e55-48db-90a8-943ddda653ff'
+      STAGING_D1_ID: 'cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout exact Staging fix candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 3b19ed61890c020b95d4aab6d790831ddac3c3fc
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify successful immutable CI and exactly 22 reviewed Admin V2 changed files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha==$sha and .event=="push" and .status=="completed"
+            and .conclusion=="success" and .head_repository.full_name==$repo
+            and .path==".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/ci.json"
+          git diff --name-only "$BASE_SHA" "$SOURCE_SHA" | sort > "$RUNNER_TEMP/changed-files"
+          cat > "$RUNNER_TEMP/allowed-files" <<'FILES'
+          api/sql-proposals/0026_admin_v2_read_indexes.sql
+          api/src/admin-commerce-v2.ts
+          api/src/admin-operations-insights.ts
+          api/src/admin-reporting.ts
+          api/src/admin-unified-usage.ts
+          api/src/commercial.ts
+          api/src/index.ts
+          api/tests/admin-commerce-v2.test.mjs
+          api/tests/admin-operations-insights.test.mjs
+          api/tests/admin-query-plans.test.mjs
+          api/tests/admin-unified-usage.test.mjs
+          web/src/components/admin/AdminCommercePanel.tsx
+          web/src/components/admin/AdminCommerceUserProfile.tsx
+          web/src/components/admin/AdminDashboard.tsx
+          web/src/components/admin/AdminOperationsInsights.tsx
+          web/src/components/admin/AdminUsageLedger.tsx
+          web/tests/admin-commerce-v2.test.mjs
+          web/tests/admin-operations-insights.test.mjs
+          web/tests/admin-table-scroll.test.mjs
+          web/tests/admin-unified-usage.test.mjs
+          web/tests/admin-v2-navigation.test.mjs
+          web/tests/subscription-website-admin.test.mjs
+          FILES
+          diff -u "$RUNNER_TEMP/allowed-files" "$RUNNER_TEMP/changed-files"
+          git diff --exit-code "$BASE_SHA" "$SOURCE_SHA" -- api/wrangler.jsonc api/deploy api/migrations .github
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const c=JSON.parse(fs.readFileSync('api/wrangler.jsonc','utf8'));
+          assert.equal(c.env.staging.name,'reply-copilot-api-staging');
+          assert.equal(c.env.staging.vars.ENVIRONMENT,'staging');
+          assert.equal(c.env.staging.vars.API_ORIGIN,'https://api-staging.x-reply-helper.top');
+          assert.equal(c.env.staging.vars.WEB_ORIGIN,'https://staging.x-reply-helper.top');
+          assert.equal(c.env.staging.d1_databases[0].database_id,'cd44bb44-b525-42c4-b286-2cc84dae7fdb');
+          assert.equal(c.env.production.d1_databases[0].database_id,'d9df7d23-9b9c-44ac-a33a-c24474c15691');
+          NODE
+
+      - name: Install locked dependencies and verify Staging types
+        run: |
+          npm --prefix api ci
+          npm --prefix api run typecheck
+          npm --prefix api run check:staging
+
+      - name: Dry-run Staging Worker build without deployment credentials
+        run: |
+          (cd api && ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/dryrun")
+          test -s "$RUNNER_TEMP/dryrun/index.js"
+
+      - name: Download immutable Staging Pages build from same successful CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-3b19ed61890c020b95d4aab6d790831ddac3c3fc
+          run-id: 42949293709
+          github-token: ${{ github.token }}
+          path: web/dist
+
+      - name: Download independently generated artifact hashes and provenance
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-3b19ed61890c020b95d4aab6d790831ddac3c3fc
+          run-id: 42949293709
+          github-token: ${{ github.token }}
+          path: dist/ci
+
+      - name: Verify every downloaded Pages asset and Staging origin
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          root=pathlib.Path.cwd()
+          web=(root/'web/dist').resolve()
+          manifest=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          expected={'sourceSha':os.environ['SOURCE_SHA'],'channel':'staging',
+                    'pagesProject':'x-reply-helper-staging',
+                    'pagesDomain':'https://staging.x-reply-helper.top',
+                    'stagingApi':'https://api-staging.x-reply-helper.top'}
+          for k,v in expected.items(): assert manifest.get(k)==v,(k,'provenance mismatch')
+          hashes={}
+          for line in (root/'dist/ci/web-files.sha256').read_text().splitlines():
+              match=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',line)
+              assert match,'Invalid checksum entry'
+              digest,rel=match.groups()
+              p=(root/rel).resolve()
+              assert p.is_relative_to(web) and p.is_file() and not p.is_symlink() and rel not in hashes
+              hashes[rel]=digest
+          actual={}
+          for p in web.rglob('*'):
+              assert not p.is_symlink(),'Unexpected symlink'
+              if p.is_file(): actual[p.relative_to(root).as_posix()]=hashlib.sha256(p.read_bytes()).hexdigest()
+          assert hashes and hashes==actual and len(actual)==manifest['webFileCount']
+          assert (web/'index.html').is_file() and (web/'admin/index.html').is_file()
+          assert not any(p.name in ('_worker.js','_routes.json') for p in web.rglob('*'))
+          assert any(expected['stagingApi'] in p.read_text(errors='replace') for p in web.rglob('*.js'))
+          print('PASS: byte-for-byte Staging Pages artifact',len(actual),'assets')
+          PY
+
+      - name: Verify exact current Staging pins, all secret binding names and unchanged Production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-before.json"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/bindings-before.json"
+          curl -fsS -H "$auth" "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-before.json"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-production/deployments" > "$RUNNER_TEMP/prod-worker-before.json"
+          curl -fsS -H "$auth" "$root/pages/projects/x-reply-helper-production/deployments?per_page=1" > "$RUNNER_TEMP/prod-pages-before.json"
+          jq -e --arg dep "$EXPECTED_WORKER_DEPLOYMENT" --arg version "$EXPECTED_WORKER_VERSION" '
+            .success and .result.deployments[0].id==$dep and
+            ([.result.deployments[0].versions[]|select(.version_id==$version and .percentage==100)]|length)==1
+          ' "$RUNNER_TEMP/worker-before.json"
+          jq -e --arg id "$STAGING_D1_ID" '
+            .success and
+            ([.result.bindings[]|select(.name=="DB" and .type=="d1" and .id==$id)]|length)==1 and
+            ([.result.bindings[]|select(.name=="ENVIRONMENT" and .text=="staging")]|length)==1 and
+            ([.result.bindings[]|select(.name=="PAYMENTS_ENABLED" and .text=="1")]|length)==1 and
+            ([.result.bindings[]|select(.name=="XIAODOU_WEBHOOKS_ENABLED" and .text=="1")]|length)==1 and
+            ([.result.bindings[]|select(.name=="XIAODOU_RSA2_SUBSCRIPTIONS_READY" and .text=="1")]|length)==1 and
+            ([.result.bindings[]|select(.name=="XIAODOU_SOURCE_IP_CONFIRMED" and .text=="1")]|length)==1 and
+            ([.result.bindings[]|select(.type=="secret_text")]|length)==25
+          ' "$RUNNER_TEMP/bindings-before.json"
+          jq -r '.result.bindings[]|[.name,.type]|join(":")' "$RUNNER_TEMP/bindings-before.json" | sort > "$RUNNER_TEMP/binding-keys-before"
+          jq -e --arg dep "$EXPECTED_PAGES_DEPLOYMENT" --arg src "$EXPECTED_PAGES_SOURCE_SHA" '
+            .success and .result[0].id==$dep and .result[0].deployment_trigger.metadata.commit_hash==$src
+          ' "$RUNNER_TEMP/pages-before.json"
+          jq -e --arg dep "$EXPECTED_PROD_WORKER_DEPLOYMENT" '.success and .result.deployments[0].id==$dep' "$RUNNER_TEMP/prod-worker-before.json"
+          jq -e --arg dep "$EXPECTED_PROD_PAGES_DEPLOYMENT" '.success and .result[0].id==$dep' "$RUNNER_TEMP/prod-pages-before.json"
+          echo 'PASS: all Staging pins and bindings match; Production unaffected'
+
+      - name: Recheck Worker pin and deploy only pinned Staging Worker while preserving vars
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-immediate-before.json"
+          jq -e --arg dep "$EXPECTED_WORKER_DEPLOYMENT" --arg version "$EXPECTED_WORKER_VERSION" '
+            .success and .result.deployments[0].id==$dep and
+            ([.result.deployments[0].versions[]|select(.version_id==$version and .percentage==100)]|length)==1
+          ' "$RUNNER_TEMP/worker-immediate-before.json"
+          (cd api && ./node_modules/.bin/wrangler deploy --env staging --keep-vars)
+
+      - name: Verify Staging Worker health and retained bindings BEFORE Pages upload
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/worker-after.json"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-staging/settings" > "$RUNNER_TEMP/bindings-after.json"
+          jq -e --arg old "$EXPECTED_WORKER_VERSION" '
+            .success and ([.result.deployments[0].versions[]|select(.percentage==100 and .version_id!=$old)]|length)==1
+          ' "$RUNNER_TEMP/worker-after.json"
+          jq -r '.result.bindings[]|[.name,.type]|join(":")' "$RUNNER_TEMP/bindings-after.json" | sort > "$RUNNER_TEMP/binding-keys-after"
+          diff -u "$RUNNER_TEMP/binding-keys-before" "$RUNNER_TEMP/binding-keys-after"
+          jq -e --arg db "$STAGING_D1_ID" '
+            .success and
+            ([.result.bindings[]|select(.name=="DB" and .id==$db)]|length)==1 and
+            ([.result.bindings[]|select(.name=="ENVIRONMENT" and .text=="staging")]|length)==1 and
+            ([.result.bindings[]|select(.name=="XIAODOU_RSA2_SUBSCRIPTIONS_READY" and .text=="1")]|length)==1 and
+            ([.result.bindings[]|select(.name=="XIAODOU_SOURCE_IP_CONFIRMED" and .text=="1")]|length)==1
+          ' "$RUNNER_TEMP/bindings-after.json"
+          curl -fsS --max-time 15 https://api-staging.x-reply-helper.top/health | jq -e '.ok==true'
+          # Unauthenticated GET is a deliberate no-SQL auth-gate smoke test:
+          # must return 401/403, not 404 (missing endpoint) or 500.
+          code="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' https://api-staging.x-reply-helper.top/v1/admin/commerce/summary)"
+          case "$code" in 401|403) ;; *) echo "Unexpected Admin V2 auth-gate HTTP $code"; exit 1;; esac
+          echo 'PASS: upgraded Staging Worker healthy, read-only admin route protected, bindings retained'
+
+      - name: Install isolated pinned Wrangler for Pages upload
+        shell: bash
+        run: |
+          npm install --prefix "$RUNNER_TEMP/staging-release-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+
+      - name: Deploy verified immutable Staging Pages artifact only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/staging-release-tools/node_modules/.bin/wrangler" pages deploy web/dist \
+            --project-name x-reply-helper-staging \
+            --branch codex/v0.4-credits \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved Staging Admin V2 validation release $SOURCE_SHA"
+
+      - name: Verify Staging Pages SHA and Production remains unchanged
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          for n in 1 2 3 4 5 6; do
+            curl -fsS -H "$auth" "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-after.json"
+            if jq -e --arg sha "$SOURCE_SHA" '.success and .result[0].deployment_trigger.metadata.commit_hash==$sha and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-after.json"; then break; fi
+            sleep 4
+          done
+          jq -e --arg sha "$SOURCE_SHA" '.success and .result[0].deployment_trigger.metadata.commit_hash==$sha and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/pages-after.json"
+          curl -fsS -H "$auth" "$root/workers/scripts/reply-copilot-api-production/deployments" > "$RUNNER_TEMP/prod-worker-after.json"
+          curl -fsS -H "$auth" "$root/pages/projects/x-reply-helper-production/deployments?per_page=1" > "$RUNNER_TEMP/prod-pages-after.json"
+          jq -e --arg id "$EXPECTED_PROD_WORKER_DEPLOYMENT" '.success and .result.deployments[0].id==$id' "$RUNNER_TEMP/prod-worker-after.json"
+          jq -e --arg id "$EXPECTED_PROD_PAGES_DEPLOYMENT" '.success and .result[0].id==$id' "$RUNNER_TEMP/prod-pages-after.json"
+          curl -fsS --max-time 15 https://staging.x-reply-helper.top/account/ >/dev/null
+          curl -fsS --max-time 15 https://api-staging.x-reply-helper.top/health | jq -e '.ok==true'
+          echo 'PASS: Staging only Worker/Pages updated; Production unchanged'
+
+      - name: Record Staging-only rollback references
+        if: always()
+        shell: bash
+        run: |
+          echo '### Staging Admin V2 Worker and Pages test' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Candidate: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Original Worker version: $EXPECTED_WORKER_VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Original Worker deployment: $EXPECTED_WORKER_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Original Pages deployment: $EXPECTED_PAGES_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
+          echo '- No remote D1 queries, migrations, manual grants, merchant switches or Production writes' >> "$GITHUB_STEP_SUMMARY"
