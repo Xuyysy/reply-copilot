@@ -170,7 +170,13 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await click(`[...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm')`);
   await until(`window.__calls.some(c=>c.path==='/v1/admin/users/bulk-status')&&document.querySelectorAll('[role="tabpanel"][data-state="active"] tbody tr')[1]?.textContent.includes('Frozen')`);
   assert.deepEqual(await evaluate(`window.__calls.find(c=>c.path==='/v1/admin/users/bulk-status').body.userIds`),['u1','u2']);
-  await tab('orders');await click(`${panel}.querySelector('tbody a,tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
+   await tab('orders');
+   await click(`${panel}.querySelector('[data-testid="admin-unified-orders"] tbody button')`);
+   await until(`${panel}.textContent.includes('Order review summary')`);
+   await click(`${panel}.querySelector('details > summary')`);
+   await click(`${panel}.querySelector('details tbody button')`);
+   await until('!!document.querySelector(\'[role="dialog"]\')');
+   assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await tab('packages');assert.equal(await evaluate(`${panel}.querySelectorAll('.admin-list-scroll').length`),0);
   console.log(`PASS: ${scenarios} table/layout scenarios; ${detailScenarios} user-detail viewport/language/row scenarios; mark-test, archive, notes; user selection, CSV, freeze, bulk status, user/order details and unaffected package tab`);
