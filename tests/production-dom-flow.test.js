@@ -13,10 +13,10 @@ function flow({associationOnly=false,homeComposer=false}={}){
    if(message.type==='REPLY_COPILOT_GENERATE'){generationCount++;return new Promise(resolve=>pending.push(resolve));}
    return Promise.resolve({ok:true});
  }}};
- const assistant=()=>({host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},setStatus:s=>statuses.push(s),showReady(){},close(){}});
+ const assistant=()=>({host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
- const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===9000||ms===60000||ms===8000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
  // Browser boundary only: state machine and content-script actions are real.
@@ -87,14 +87,21 @@ test('normal modal closure removes the old assistant without showing a competiti
  f.resolve(0);await sleep(100);assert.equal(f.commands(),0);f.resolve(1);await sleep(100);assert.equal(f.commands(),1);
 });
 
-test('applied reply closes native dialog but keeps only an inert 8s acknowledgement',async()=>{
+test('applied reply closes native dialog but retains interactive 30s copy-only panel',async()=>{
  const f=flow(),a=f.post('101');f.click(a);f.open(a);await sleep(0);
  f.resolve(0);await sleep(110);assert.equal(f.commands(),1);
  f.close(a);await sleep(380);
  assert.equal(f.hosts[0].isConnected,true,'completed reply briefly remains visible');
- assert.equal(f.hosts[0].style.pointerEvents,'none','old reply actions cannot affect future sessions');
- assert.ok(f.statuses.some(s=>s.includes('悬浮框即将自动收起')));
- f.timeout(8000);assert.equal(f.hosts[0].isConnected,false,'acknowledgement expires');
+ assert.notEqual(f.hosts[0].style.pointerEvents,'none','buttons remain clickable');
+ assert.ok(f.statuses.includes('post_reply_interactive'));
+ f.action('settings');f.action('selected',{style:'natural',reply:'old reply'});
+ f.action('copied',{style:'natural',reply:'old reply'});
+ f.action('feedback',{feedback:'good',style:'natural'});
+ f.action('regenerate');f.action('generate');
+ assert.equal(f.generations(),1,'stale panel cannot start another paid generation');
+ f.action('linger_interaction');
+ assert.equal(f.hosts[0].isConnected,true);
+ f.timeout(30000);assert.equal(f.hosts[0].isConnected,false,'panel expires after inactivity');
 });
 test('next trusted reply instantly retires any lingering acknowledgement',async()=>{
  const f=flow(),a=f.post('101'),b=f.post('102');f.click(a);f.open(a);await sleep(0);
@@ -106,6 +113,15 @@ test('next trusted reply instantly retires any lingering acknowledgement',async(
  f.resolve(1);await sleep(110);
  assert.equal(f.commands(),2,'second suggestion inserts into the new editor');
  assert.equal(b.editor.innerText,'中文 English 😀\nline');
+});
+test('manually closing retained interactive panel cannot block a fresh reply',async()=>{
+ const f=flow(),a=f.post('101'),b=f.post('102');f.click(a);f.open(a);await sleep(0);
+ f.resolve(0);await sleep(110);f.close(a);await sleep(380);
+ assert.equal(f.hosts[0].isConnected,true);
+ f.action('dismiss');assert.equal(f.hosts[0].isConnected,false);
+ f.click(b);f.open(b);await sleep(0);
+ assert.equal(f.generations(),2);
+ f.resolve(1);await sleep(110);assert.equal(f.commands(),2);
 });
 test('regenerating does not orphan the editor lifecycle before the next reply',async()=>{
  const f=flow(),a=f.post('101'),b=f.post('102');f.click(a);f.open(a);await sleep(0);
