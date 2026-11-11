@@ -285,3 +285,56 @@ test('seller fee projection needing finance review does not hide a signed, amoun
   noGrant(f.sql);
  }finally{f.sql.close();}
 });
+
+
+test('user-confirmed Xiaodou close safely releases a blocked package only after signed CLOSED proof',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201);
+  const id=created.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  const blocked=await f.call('/v1/orders');assert.equal(blocked.status,409);
+  const closed=await withProvider(req=>{
+   assert.equal(req.method,'POST');assert.equal(new URL(req.url).pathname,'/api/open/v1/payments/'+trade+'/close');
+   return providerResponse(req,{outTradeNo:trade,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',status:'CLOSED',closeState:'CLOSE_REQUESTED'},{status:200});
+  },()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+  assert.equal(closed.status,200,JSON.stringify(closed.body));assert.equal(closed.body.orderStatus,'closed');
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(id).status,'closed');
+  assert.equal(f.sql.prepare('SELECT status FROM recharge_orders WHERE id=?').get(id).status,'expired');
+  const replacement=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(replacement.status,201,JSON.stringify(replacement.body));
+  assert.notEqual(replacement.body.order.id,id);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,2);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou UNKNOWN_KEPT/paid-conflict/bad amount never close a live or uncertain credit order',async()=>{
+ for(const fields of [
+  {status:'UNKNOWN',closeState:'UNKNOWN_KEPT'},
+  {status:'SUCCEEDED',closeState:'PROVIDER_PAID_CONFLICT'},
+  {status:'CLOSED',closeState:'CLOSE_REQUESTED',amountFen:1006}
+ ]){
+  const f=fixture();try{
+   const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+   const id=created.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+   const before=JSON.stringify(['recharge_orders','payment_transactions','provider_payment_events','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+   const attempt=await withProvider(req=>providerResponse(req,{outTradeNo:trade,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',...fields},{status:200}),()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+   assert.equal(attempt.status,409,JSON.stringify(attempt.body));
+   assert.equal(JSON.stringify(['recharge_orders','payment_transactions','provider_payment_events','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all())),before);
+   noGrant(f.sql);
+  }finally{f.sql.close();}
+ }
+});
+
+test('Xiaodou close upstream HTTP 502 leaves the blocked order and ledger untouched',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  const id=created.body.order.id;
+  const before=JSON.stringify(['recharge_orders','payment_transactions','credit_accounts'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+  const failed=await withProvider(req=>providerResponse(req,{code:'OPEN_API_GUARD_UNAVAILABLE',message:'private upstream detail'},{status:502}),()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+  assert.equal(failed.status,502,JSON.stringify(failed.body));
+  assert.equal(failed.body.code,'PROVIDER_HTTP_ERROR');
+  assert.equal(JSON.stringify(['recharge_orders','payment_transactions','credit_accounts'].map(t=>f.sql.prepare('SELECT * FROM '+t).all())),before);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
