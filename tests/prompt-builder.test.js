@@ -42,14 +42,17 @@ test("default X replies sound offhand instead of like a dutiful AI assistant", (
 test("release gate: complete original Production V1 prompt source is byte-for-byte unchanged except multilingual addendum",()=>{
  const source=readFileSync(new URL("../prompts/prompt-builder.js",import.meta.url),"utf8");
  const importLang='import { inferPostLanguageHint, normalizeReplyLanguage } from "../domain/language-support.js";\n';
+ const extraLanguageImport='import { resolveRequiredReplyLanguage } from "../domain/reply-language-policy.js";\n';
  const extendedSignature=', outputSchemaVersion = 1 }) {';
  const originalSignature=' }) {';
  const marker='  // ADDITIONAL LANGUAGE RULE ONLY. V1 system+user templates above are unchanged.';
  assert.equal(source.split(importLang).length,2,"one new language module import only");
+ assert.equal(source.split(extraLanguageImport).length,2,"one language-policy helper import only");
  assert.equal(source.split(extendedSignature).length,2,"one new language protocol parameter only");
  assert.equal(source.split(marker).length,2,"single independent multilingual policy append");
  const baseline=source
    .replace(importLang,'')
+   .replace(extraLanguageImport,'')
    .replace(extendedSignature,originalSignature)
    .replace(/  \/\/ ADDITIONAL LANGUAGE RULE ONLY\. V1 system\+user templates above are unchanged\.[\s\S]*?(?=\n\}\s*$)/,'  return { system, user };');
  const sha=createHash("sha1").update("blob "+Buffer.byteLength(baseline)+"\0"+baseline).digest("hex");
