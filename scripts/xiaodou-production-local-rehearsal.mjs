@@ -18,6 +18,7 @@ export function rehearseXiaodou0025Locally() {
   const sql = readFileSync(proposal, 'utf8');
   assert.match(sql, /PRAGMA defer_foreign_keys = on/);
   assert.match(sql, /PRAGMA foreign_key_check/);
+  assert.doesNotMatch(sql, /PRAGMA\s+defer_foreign_keys\s*=\s*off\s*;/i, 'Do not discard deferred FK violations before commit');
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('PRAGMA foreign_keys = ON');
@@ -34,8 +35,18 @@ export function rehearseXiaodou0025Locally() {
     assert.equal(txBefore.length, 1);
     assert.equal(eventsBefore.length, 1);
 
-    // The schema proposal runs only against this disposable in-memory database.
-    db.exec(sql);
+    // D1 executes migrations in a transaction. Match commit-time FK behavior
+    // using an explicit LOCAL transaction (never connect to remote D1).
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(sql);
+      assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [], 'Deferred foreign keys violated before commit');
+      db.exec('COMMIT');
+    } catch (error) {
+      if (db.isOpen && db.isTransaction) db.exec('ROLLBACK');
+      throw error;
+    }
+    assert.equal(db.isTransaction, false);
     assert.deepEqual(db.prepare(txQuery).all(), txBefore, 'MK99 transaction history changed');
     assert.deepEqual(db.prepare(eventQuery).all(), eventsBefore, 'MK99 signed event history changed');
     assert.equal(db.prepare("SELECT value FROM system_settings WHERE key='purchase_enabled'").get().value, '0');

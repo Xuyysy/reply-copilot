@@ -71,5 +71,7 @@ FROM _subscription_events_backup_0025;
 CREATE INDEX subscription_payment_events_transaction_idx
  ON subscription_payment_events(transaction_id,received_at DESC);
 DROP TABLE _subscription_events_backup_0025;
+-- D1 checks deferred FK constraints at transaction commit. NEVER turn
+-- defer_foreign_keys OFF here: doing so can discard pending FK violations.
+-- Review foreign_key_check output and abort on any violation before commit.
 PRAGMA foreign_key_check;
-PRAGMA defer_foreign_keys = off;
