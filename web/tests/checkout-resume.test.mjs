@@ -36,5 +36,6 @@ test('Xiaodou credit checkout exposes original-order resume without generating a
  assert.match(source,/\/v1\/orders\/.*\/attempts/);
  const account=readFileSync(fileURLToPath(new URL('../src/components/account/AccountDashboard.tsx',import.meta.url)),'utf8');
  assert.match(account,/payment_protocol==="rsa2"/);
- assert.match(account,/Continue or verify Xiaodou order/);
+ assert.match(account,/data-credit-continue/);
+ assert.match(account,/data-credit-review/);
 });

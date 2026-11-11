@@ -368,3 +368,24 @@ test('legacy BUYER credit order still fails closed on an unverified fee projecti
   noGrant(f.sql);
  }finally{f.sql.close();}
 });
+
+
+test('abandoned credit checkout returns original order ID without another charge',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const attempts=f.sql.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n;
+  const lookup=await f.call('/v1/orders/unresolved?packageId=starter&provider=xiaodou&channel=ALIPAY_H5',{method:'GET'});
+  assert.equal(lookup.status,200,JSON.stringify(lookup.body));
+  assert.deepEqual(lookup.body.order,{id,status:'pending'});
+  const mismatch=await f.call('/v1/orders/unresolved?packageId=standard&provider=xiaodou&channel=ALIPAY_H5',{method:'GET'});
+  assert.equal(mismatch.body.order,null);
+  const channel=await f.call('/v1/orders/unresolved?packageId=starter&provider=xiaodou&channel=WECHAT_H5',{method:'GET'});
+  // Atomic duplicate protection is keyed by package + merchant + protocol,
+  // so even switching ALIPAY to WECHAT must resume the blocking original order.
+  assert.deepEqual(channel.body.order,{id,status:'pending'});
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n,attempts);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
