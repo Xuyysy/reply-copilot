@@ -42,10 +42,17 @@
           // or follow a different post.
           const sameDialog=Boolean(boundDialog && candidate.dialog===boundDialog);
           const verifiedId=candidate.contextStatusId===statusId;
-          if (!candidate.modal || !candidate.focused || !candidate.empty ||
+          if (!candidate.modal || !candidate.empty ||
               previousEditors.has(candidate.node) || (!sameDialog && !verifiedId) ||
               (editor?.isConnected && globalThis.ZaneReplyCopilotContent?.composerAdapter?.hasContent?.(editor)))
             return reject('editor_replaced_or_closed');
+          // The new editor can appear before it receives keyboard focus.
+          // Wait for focusin just like initial binding, without switching
+          // insertion targets or triggering another generation meanwhile.
+          if(!candidate.focused){
+            reason='awaiting_editor_focus';
+            return {state,reason,editor:null};
+          }
           editor=candidate.node;
           boundDialog=candidate.dialog||null;
           reason='verified_editor_remount';
