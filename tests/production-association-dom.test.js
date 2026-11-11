@@ -88,6 +88,29 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   roleEditor.closest('[role="dialog"]').querySelector('article').insertAdjacentHTML('beforeend',roleQuote);
   const roleFacts=api.composerAssociation.snapshot(document,rolePost,initial,initial,10);
   results.push({name:'role_link_quote_with_timestamp_excluded',ok:rolePost.statusId==='110'&&rolePost.sourceText==='same text'&&roleFacts.editors[0].contextStatusId===null&&roleFacts.editors[0].contextMatches===true});
+  // X's media-rich composer can put tweetText directly under the dialog
+  // without rendering any parent article. Scope strictly to that dialog.
+  document.querySelector('#modals').replaceChildren();
+  const bareSource=source('112'),barePost=api.composerAssociation.capturePost(api.postExtractor.extractPost(bareSource));
+  const bareModal=document.createElement('div');bareModal.setAttribute('role','dialog');
+  bareModal.innerHTML='<div data-testid="tweetText">same text</div><div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(bareModal);
+  const bareEditor=bareModal.querySelector('[contenteditable]');bareEditor.focus();
+  const bareFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  const bareSession=api.composerAssociation.create({trusted:true,statusId:'112',requestId:'bare',now:0,baselineModalCount:0,baselineEditors:[]});
+  results.push({name:'modal_without_parent_article_binds_from_scoped_text',ok:bareFacts.editors[0].contextArticleCount===0&&bareFacts.editors[0].contextMatches===true&&bareSession.evaluate(bareFacts).editor===bareEditor});
+  document.querySelector('#modals').replaceChildren();
+  const quoteOnly=document.createElement('div');quoteOnly.setAttribute('role','dialog');
+  quoteOnly.innerHTML='<div data-testid="quoteTweet"><div data-testid="tweetText">same text</div></div><div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(quoteOnly);quoteOnly.querySelector('[contenteditable]').focus();
+  const quoteOnlyFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'quote_only_text_without_root_waits',ok:quoteOnlyFacts.editors[0].contextMatches===null});
+  document.querySelector('#modals').replaceChildren();
+  const emptyDialog=document.createElement('div');emptyDialog.setAttribute('role','dialog');
+  emptyDialog.innerHTML='<div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(emptyDialog);emptyDialog.querySelector('[contenteditable]').focus();
+  const noBorrowFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'no_borrowing_text_from_feed_behind_modal',ok:noBorrowFacts.editors[0].contextMatches===null});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -95,6 +118,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,20);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,23);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
