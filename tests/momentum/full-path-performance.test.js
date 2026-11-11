@@ -8,12 +8,17 @@ test('accepted V1 full-path alternating A/B includes binding, account preflight,
  try{
   const archive=execFileSync('git',['archive','3cebe3ecbee552ef5b0e68afc7882a2dfb3869fa'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',baseline],{input:archive});
   const priorArchive=execFileSync('git',['archive','2a1db4df49e84fb2b10110d8ea6070757c903acb'],{maxBuffer:64*1024*1024});execFileSync('tar',['-x','-C',prior],{input:priorArchive});
-  const before=[],originalCandidate=[],after=[];let promptHash=null;
+  const before=[],originalCandidate=[],after=[];const promptHashes={};
   for(let i=0;i<14;i++)for(const [kind,sourceRoot]of (i%2?[['after',current],['originalCandidate',prior],['before',baseline]]:[['before',baseline],['originalCandidate',prior],['after',current]])){
    const r=await generationFixture({sourceRoot,options:{momentumFeature:{eligible:true,policy:{...DEFAULT_MOMENTUM_CONFIG,enabled:true}}}});
-   assert.deepEqual(r.calls,{generations:1,acks:1,debits:1,insertions:1});if(!promptHash)promptHash=r.promptHashes[0];assert.equal(r.promptHashes[0],promptHash,'personalized prompt body unchanged');assert.equal(r.requestPaths.length,5);assert.ok(r.marks.insert>=r.marks.ack_end);
+   assert.deepEqual(r.calls,{generations:1,acks:1,debits:1,insertions:1});if(!promptHashes[kind])promptHashes[kind]=r.promptHashes[0];assert.equal(r.promptHashes[0],promptHashes[kind],'personalized prompt body remains deterministic within each version');assert.equal(r.requestPaths.length,5);assert.ok(r.marks.insert>=r.marks.ack_end);
    if(i>=2)({before,originalCandidate,after}[kind]).push({display:r.marks.candidates,editor:r.elapsedMs,ack:r.report.metrics.ack.p50,editorBinding:r.report.metrics.editor_bound.p50,preflight:r.report.metrics.precheck_complete.p50,persist:r.report.metrics.delivery_persist.p50,http:r.requestPaths.length});
   }
+  // Multilingual behavior intentionally adds language guidance to new prompts.
+  // The historical A/B control prompts must still match each other, while the
+  // new candidate must remain stable over all repeated A/B iterations.
+  assert.equal(promptHashes.before,promptHashes.originalCandidate,'historical baselines share their original prompt');
+  assert.notEqual(promptHashes.after,promptHashes.before,'new multilingual guidance intentionally changes the prompt');
   const summary=rows=>{const result={samples:rows.length,http:[...new Set(rows.map(r=>r.http))],normalExtraRecoveryHTTP:0};for(const key of ['display','editor','ack','editorBinding','preflight','persist']){const a=rows.map(r=>r[key]).sort((a,b)=>a-b);result[key]={mean:a.reduce((s,x)=>s+x,0)/a.length,p50:a[Math.ceil(a.length*.5)-1],p90:a[Math.ceil(a.length*.9)-1]};}return result;};
   const warm=[];
   for(let i=0;i<12;i++){

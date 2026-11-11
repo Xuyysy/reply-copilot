@@ -1,5 +1,6 @@
 import { InvalidAIResponseError } from "./errors.js";
 import { DEFAULT_REPLY_STYLE, RECOMMENDATIONS, REPLY_STYLES } from "../domain/reply-result.js";
+import { normalizeReplyLanguage } from "../domain/language-support.js";
 
 const LEGACY_STYLE_MAP = Object.freeze({ natural: "natural", funny: "light_humor", sharp: "thoughtful" });
 
@@ -25,11 +26,12 @@ export function parseAIOutput(content) {
   // the server's canonical result is parsed again before delivery ACK.
   if (data.score !== undefined && data.score !== null && (!Number.isInteger(data.score) || data.score < 0 || data.score > 100)) fail();
   const language = isLegacy && data.language === undefined ? "auto" : data.language;
-  if (!(["auto", "zh", "en"].includes(language))) fail();
+  const normalizedLanguage = normalizeReplyLanguage(language);
+  if (normalizedLanguage === null) fail();
   if (!isLegacy && !Object.hasOwn(data, "quoteCandidate") && !Object.hasOwn(data, "quote_candidate")) fail();
   const quoteCandidate = data.quoteCandidate ?? data.quote_candidate ?? null;
   if (data.recommendation === "quote" && (typeof quoteCandidate !== "string" || !quoteCandidate.trim())) fail();
   if (data.recommendation !== "quote" && quoteCandidate !== null && typeof quoteCandidate !== "string") fail();
   if (data.recommendation !== "quote" && typeof quoteCandidate === "string" && !quoteCandidate.trim()) fail();
-  return { recommendation: data.recommendation, defaultStyle, default_style: defaultStyle, best_reply_style: defaultStyle, language, reason: data.reason.trim(), score: data.score ?? null, replies: Object.fromEntries(REPLY_STYLES.map((s) => [s, replies[s].trim()])), quoteCandidate: quoteCandidate?.trim() || null, quote_candidate: quoteCandidate?.trim() || null };
+  return { recommendation: data.recommendation, defaultStyle, default_style: defaultStyle, best_reply_style: defaultStyle, language: normalizedLanguage, reason: data.reason.trim(), score: data.score ?? null, replies: Object.fromEntries(REPLY_STYLES.map((s) => [s, replies[s].trim()])), quoteCandidate: quoteCandidate?.trim() || null, quote_candidate: quoteCandidate?.trim() || null };
 }
