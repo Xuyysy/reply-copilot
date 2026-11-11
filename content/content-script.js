@@ -19,6 +19,14 @@
   let bindingTimer = null;
   let settingsRevision = 0;
   let pendingActivation = null;
+  // Local-only, text-free troubleshooting for disappearing reply windows.
+  // No post text, URL, account data or telemetry is captured.
+  const associationEvents=[];
+  function traceAssociation(stage,reason){
+    associationEvents.push({stage,reason,at:Math.round(performance.now())});
+    if(associationEvents.length>20)associationEvents.shift();
+  }
+  globalThis.replyCopilotAssociationReport=()=>associationEvents.slice();
   let recoveryRequired = false;
   let recoveryReason = null;
   const quarantinedPosts = [];
@@ -37,7 +45,7 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     try { active?.assistant?.host?.remove(); } catch {}
     if (bindingTimer) clearInterval(bindingTimer);
-    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
     active = null;
     try {
       document.removeEventListener("click",onDocumentClick,true);
@@ -87,7 +95,8 @@
     completeTrace(current,"cancelled");
     current.cancelled=true;
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
+    traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     current.assistant?.host?.remove();
@@ -123,10 +132,11 @@
       quarantineActivation(current.post);
     }
     completeTrace(current,"cancelled");
+    traceAssociation('rejected',reason);
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     // Lifecycle codes belong in diagnostics only. Never replace a successful
@@ -161,9 +171,10 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     if (active?.observer) active.observer.disconnect();
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
-    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
     const requestId = crypto.randomUUID();
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    traceAssociation('activated','trusted_reply_click');
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.trace = activation.trace;
@@ -175,7 +186,26 @@
       if (!hasRuntimeContext() || active!==session || session.cancelled) return;
       const found=matchedComposer(post);
       if (!found.editor) return;
-      if (active.editor) return; // Keep observing this same node; never rebind after replacement.
+      if (active.editor) {
+        if (active.editor!==found.editor) {
+          // Preserve the verified session through a React media/quote remount.
+          // Never repeat generation or silently replay an inserted draft.
+          const current=active;
+          current.editor.removeEventListener('input',current.onComposerInput,true);
+          current.editor=found.editor;
+          current.anchor=found.editor.parentElement||found.editor;
+          found.editor.addEventListener('input',current.onComposerInput,true);
+          clearTimeout(current.closeCheckTimer);current.closeCheckTimer=null;
+          traceAssociation('rebound','verified_editor_remount');
+          if(current.userTouchedComposer||current.appliedText){
+            current.userTouchedComposer=true;
+            current.assistant?.setStatus('回复编辑框已更新；原有草稿不会自动重填，可复制建议后自行确认。');
+          }
+        } else if (active.closeCheckTimer) {
+          clearTimeout(active.closeCheckTimer);active.closeCheckTimer=null;
+        }
+        return;
+      }
       clearTimeout(active.acquireTimer);
       active.editor=found.editor;active.matchedPost=true;
       active.trace?.mark("editor_bound");
@@ -194,10 +224,18 @@
       if(active.assistant?.host && !active.assistant.host.isConnected && !active.assistantDetachedReported) {
         active.assistantDetachedReported=true;
       }
-      if(active.editor && records?.some(record=>[...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))) {
-      const facts=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
-        if(facts.editors.length===0&&facts.visibleDialogCount===0)endSession('reply_closed');else rejectAssociation('editor_removed');
-        return;
+      const removedEditor=Boolean(active.editor && (active.editor.isConnected===false || records?.some(record=>
+        [...(record.removedNodes||[])].some(node=>node===active.editor||node.contains?.(active.editor)))));
+      if(removedEditor) {
+        // A single observer tick with no visible reply UI is not proof the
+        // user closed it: X can detach and remount it around rich media.
+        if(!session.closeCheckTimer) session.closeCheckTimer=setTimeout(()=>{
+          session.closeCheckTimer=null;
+          if(active!==session||session.cancelled)return;
+          const facts=api.composerAssociation.snapshot(document,post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
+          if(facts.editors.length===0&&facts.visibleDialogCount===0)endSession('reply_closed');
+          else locate();
+        },350);
       }
       locate();
     });
@@ -511,13 +549,24 @@
     }
     const control=api.replyDetector.findReplyControl(event.target);
     if (recoveryRequired) recoverAfterQuiescence();
-    // X's modal contains its own Reply button and "Replying to" controls.
-    // They are not a fresh activation on a timeline post.
-    if (control?.closest('[role="dialog"]')) return;
+    // X's composer has its own Reply/submit controls, but a media viewer
+    // may ALSO be a dialog containing a genuine post Reply button.
+    // Only suppress dialog controls that are not inside a post article.
+    if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
-    if (active?.editor && !active.cancelled) refreshAssociation();
+    if (active?.editor && !active.cancelled) {
+      // A new trusted Reply click is an explicit switch. If the old dialog
+      // has actually disappeared, release it synchronously instead of
+      // treating the new click as competition during the 350ms close grace.
+      // A visible editor/dialog still blocks concurrent reply targets.
+      if(control) {
+        const prior=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+        if(prior.editors.length===0&&prior.visibleDialogCount===0) endSession('reply_closed');
+        else refreshAssociation();
+      } else refreshAssociation();
+    }
     if (recoveryRequired && control) {pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
@@ -532,21 +581,26 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;return;}
+    if (!post.ok) {
+      traceAssociation('activation_skipped',post.reason||'post_context_unavailable');
+      pendingActivation=null;return;
+    }
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
     const control=api.replyDetector.findReplyControl(event.target);
-    if (control?.closest('[role="dialog"]')) return;
+    if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
-    if (!activation || activation.control!==control || activation.blocked || performance.now()-activation.at>1500) {
+    if (!activation || activation.blocked || performance.now()-activation.at>1500) {
+      traceAssociation('activation_skipped',activation?.blocked?'blocked':'missing_or_expired_capture');
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
-    if (!live.ok || live.statusId!==activation.post.statusId || live.sourceText!==activation.post.sourceText) {
+    if (!live.ok || live.statusId!==activation.post.statusId) {
+      traceAssociation('activation_skipped',!live.ok?(live.reason||'post_context_unavailable'):'post_identity_changed');
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});

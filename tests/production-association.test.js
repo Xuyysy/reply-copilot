@@ -24,6 +24,42 @@ test('source node recycling and unrelated route changes reject',()=>{assert.equa
 test('late editor creation cannot revive an expired operation',()=>{const s=session();assert.equal(resolve(s,facts({now:9001})).reason,'association_expired');assert.equal(resolve(s,facts()).state,'rejected');});
 test('draft content is preserved and blocks binding',()=>{assert.equal(resolve(session(),facts({editors:[{...facts().editors[0],empty:false}]})).reason,'existing_draft');});
 test('a quarantined same-text modal cannot be claimed by a later activation without a status identity',()=>{assert.equal(resolve(session(),facts({editors:[{...facts().editors[0],quarantinedContextMatch:true}]})).reason,'stale_activation_ambiguous');});
-test('closing and rebuilding a bound editor invalidates the operation',()=>{for(const editors of [[],[{...facts().editors[0],node:other}]]){const s=session();resolve(s,facts());assert.equal(resolve(s,facts({editors})).reason,'editor_replaced_or_closed');}});
+test('an empty DOM frame after a bound reply waits for X to remount, without changing target',()=>{
+ const s=session(),dialog={};
+ resolve(s,facts({editors:[{...facts().editors[0],dialog}]}));
+ const gap=resolve(s,facts({editors:[]}));
+ assert.equal(gap.state,'bound');
+ assert.equal(gap.editor,null);
+ assert.equal(gap.reason,'awaiting_editor_remount');
+ const recovered=resolve(s,facts({editors:[{...facts().editors[0],node:other,dialog}]}));
+ assert.equal(recovered.state,'bound');
+ assert.equal(recovered.editor,other);
+ assert.equal(recovered.reason,'verified_editor_remount');
+});
+test('a different dialog cannot steal an existing reply without the exact target ID',()=>{
+ const s=session();
+ resolve(s,facts());
+ assert.equal(resolve(s,facts({editors:[{...facts().editors[0],node:other}]})).reason,'editor_replaced_or_closed');
+});
+test('a newly mounted focused editor with the same verified status can replace a detached one',()=>{
+ const s=session();
+ resolve(s,facts());
+ const r=resolve(s,facts({editors:[{...facts().editors[0],node:other,contextStatusId:'101',dialog:{}}]}));
+ assert.equal(r.editor,other);
+ assert.equal(r.reason,'verified_editor_remount');
+});
+test('remount rejects other IDs and existing drafts, never overwriting the user',()=>{
+ const conflicting=session();resolve(conflicting,facts());
+ assert.equal(resolve(conflicting,facts({editors:[{...facts().editors[0],node:other,contextStatusId:'102'}]})).reason,'context_identity_conflict');
+ const draft=session();resolve(draft,facts());
+ assert.equal(resolve(draft,facts({editors:[{...facts().editors[0],node:other,contextStatusId:'101',empty:false}]})).reason,'editor_replaced_or_closed');
+});
+test('existing reply temporarily without post text cannot silently authorize insertion',()=>{
+ const s=session();resolve(s,facts());
+ const pending=resolve(s,facts({editors:[{...facts().editors[0],contextMatches:null}]}));
+ assert.equal(pending.state,'bound');
+ assert.equal(pending.editor,null);
+ assert.equal(resolve(s,facts()).editor,editor);
+});
 test('adding another editor after binding revokes the association',()=>{const s=session(),x=facts().editors[0];resolve(s,facts());assert.equal(resolve(s,facts({editors:[x,{...x,node:other}]})).reason,'multiple_editors');});
 test('bound operation has a finite lifetime and never rebinds',()=>{const s=session();resolve(s,facts());assert.equal(resolve(s,facts({now:60001})).reason,'operation_expired');});
