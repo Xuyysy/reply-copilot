@@ -15,7 +15,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  try{localStorage.setItem('reply-copilot:pending-payment',JSON.stringify({orderId:fixtureId,at:Date.now()}));}catch{}
  const pkg={id:'starter',name_zh:'入门包',name_en:'Starter',credits:400,price_cents:149,promo_price_cents:null,currency:'USD',price_cny_fen:990,service_fee_fen:0,total_payment_fen:1043,fee_rate_bps:0};
  const status=['closed','failed','refunded','paid','unknown'].includes(mode)?mode:mode==='unavailable'?'closed':'pending';
- const order={id:fixtureId,packageId:'starter',packageName:'原套餐 snapshot',credits:400,displayPriceCents:149,displayCurrency:'USD',baseAmountFen:990,serviceFeeFen:0,feeRateBps:0,amountFen:1043,currency:'CNY',merchantPricing:{rateBps:500,costCoverageFen:53,status:'estimate_unverified'},status,riskState:mode==='risk'?'manual_review':'clear',creditedAt:status==='paid'?1:null,paidAt:status==='paid'?1:null,paymentProvider:mode==='epay'?'xiaodou_epay':'mk99',paymentProtocol:mode==='epay'?'epay':'mk99',paymentChannel:'WECHAT_H5',paymentUrl:mode==='epay'?null:mode==='badurl'?'https://evil.invalid/': 'https://cashier.fixture.invalid/pay/example',paymentCashierOrigin:'https://cashier.fixture.invalid'};
+ const order={id:fixtureId,packageId:'starter',packageName:'原套餐 snapshot',credits:400,displayPriceCents:149,displayCurrency:'USD',baseAmountFen:990,serviceFeeFen:0,feeRateBps:0,amountFen:1043,currency:'CNY',merchantPricing:{rateBps:500,costCoverageFen:53,status:'estimate_unverified'},status,riskState:mode==='risk'?'manual_review':'clear',creditedAt:status==='paid'?1:null,paidAt:status==='paid'?1:null,paymentProvider:mode==='epay'?'xiaodou_epay':mode.startsWith('rsa2-')?'xiaodou':'mk99',paymentProtocol:mode==='epay'?'epay':mode.startsWith('rsa2-')?'rsa2':'mk99',paymentChannel:mode.startsWith('rsa2-')?'ALIPAY_H5':'WECHAT_H5',paymentUrl:mode==='epay'||mode==='rsa2-no-cashier'?null:mode==='badurl'?'https://evil.invalid/': 'https://cashier.fixture.invalid/pay/example',paymentCashierOrigin:'https://cashier.fixture.invalid'};
  window.fetch=async(url,init={})=>{if(!String(url).startsWith('https://checkout.fixture.invalid'))throw Error('External requests forbidden');const p=new URL(url).pathname;window.__calls.push([p,init.method||'GET']);
  if(p==='/v1/packages')return Response.json({packages:mode==='unavailable'?[]:[pkg],paymentAvailable:true,paymentProvider:'mk99',paymentMethods:[{provider:'mk99',channel:'ALIPAY_H5'},{provider:'mk99',channel:'WECHAT_H5'},{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]});
  if(p==='/v1/auth/csrf')return Response.json({csrfToken:'synthetic-only'});
@@ -35,14 +35,34 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  chrome=spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--headless=new','--no-first-run','--disable-background-networking','--remote-debugging-pipe',`--user-data-dir=${path.join(dir,'profile')}`,'about:blank'],{stdio:['ignore','ignore','pipe','pipe','pipe']});chrome.stderr.on('data',c=>{if(String(c).includes('FATAL'))console.error(String(c));});chrome.on('exit',(code,signal)=>{if(code)console.error('Test Chrome exited',code,signal);});chrome.stdio[4].on('data',c=>{buffer+=c;let i;while((i=buffer.indexOf('\0'))>=0){const r=JSON.parse(buffer.slice(0,i));buffer=buffer.slice(i+1);if(r.method==='Fetch.requestPaused'){const request=r.params.request;if(request.url!=='https://cashier.fixture.invalid/favicon.ico')cashierRequests.push({url:request.url});void call('Fetch.fulfillRequest',{requestId:r.params.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'text/html'}],body:Buffer.from('<!doctype html><link rel="icon" href="data:,">Synthetic cashier; no merchant contacted').toString('base64')},r.sessionId).catch(()=>{});continue;}const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.error?p.reject(Error(r.error.message)):p.resolve(r);}}});
  const target=(await call('Target.createTarget',{url:'about:blank'},null)).result.targetId;session=(await call('Target.attachToTarget',{targetId:target,flatten:true},null)).result.sessionId;await call('Page.enable');await call('Fetch.enable',{patterns:[{urlPattern:'https://cashier.fixture.invalid/*'}]});
  const id='11111111-1111-4111-8111-111111111111',base=pathToFileURL(path.join(dir,'index.html')).href;
- for(const mode of ['pending','unknown','paid','closed','failed','refunded','risk','badurl','queryerror','unavailable','otheruser','epay']){
+ for(const mode of ['pending','unknown','paid','closed','failed','refunded','risk','badurl','queryerror','unavailable','otheruser','epay','rsa2-ready','rsa2-no-cashier']){
   await navigate(base+'?order='+id+'&fixture='+mode);await until('window.__calls?.some(c=>c[0].startsWith("/v1/orders/"))');
   if(mode==='otheruser'){await until('document.querySelector("#checkout-status").textContent.includes("无法读取原订单")');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);continue;}
   await until('document.querySelector("#package-cny").textContent.includes("10.43")');
-  if(mode==='pending')await until('!document.querySelector("#cashier-link").hidden');
+  if(['pending','rsa2-ready'].includes(mode))await until('!document.querySelector("#cashier-link").hidden');
   assert.equal(await evaluate('window.__creates'),0,'review never creates an order');
   assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
-  assert.equal(await evaluate('!document.querySelector("#cashier-link").hidden'),mode==='pending');
+  assert.equal(await evaluate('!document.querySelector("#cashier-link").hidden'),['pending','rsa2-ready'].includes(mode));
+  if(mode==='pending'){
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'MK99 normal checkout needs no advanced actions');
+    assert.equal(await evaluate('document.querySelector("#checkout-back-link")===null'),true,'no duplicate large back button');
+  }
+  if(mode==='rsa2-ready'){
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),false);
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").open'),false,'normal Xiaodou checkout starts with extra actions collapsed');
+    assert.equal(await evaluate('document.querySelector("#relaunch-rsa2").getClientRects().length'),0,'recreate QR stays visually hidden');
+    assert.equal(await evaluate('document.querySelector("#cancel-unpaid-order").getClientRects().length'),0,'close unpaid order stays visually hidden');
+    assert.equal(await evaluate('document.querySelector("#refresh-order").hidden'),false,'refresh remains accessible');
+    await evaluate('document.querySelector("#checkout-extra-actions").open=true');
+    assert.equal(await evaluate('document.querySelector("#relaunch-rsa2").hidden'),false,'recovery remains accessible on demand');
+    assert.equal(await evaluate('document.querySelector("#cancel-unpaid-order").hidden'),false,'safe closure remains available on demand');
+  }
+  if(mode==='rsa2-no-cashier'){
+    assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").open'),true,'missing cashier exposes recovery immediately');
+    assert.equal(await evaluate('document.querySelector("#relaunch-rsa2").hidden'),false,'relaunch only the original order');
+  }
+  if(mode==='paid')assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'no advanced actions for completed payments');
   assert.equal(await evaluate('document.querySelector("#order-reference,#replacement-purchase,#replacement-help,#cashier-help,#payment-support")===null'),true,'no extra recovery UI');
   if(['unknown','risk','queryerror','badurl'].includes(mode))assert.equal(await evaluate('document.querySelector("#restart-payment").hidden'),true);
   if(mode==='unknown'){await evaluate('document.querySelector("#refresh-order").click()');await until('window.__calls.some(c=>c[0].endsWith("/refresh"))');assert.equal(await evaluate('document.querySelector("#cashier-link").hidden'),true);}
