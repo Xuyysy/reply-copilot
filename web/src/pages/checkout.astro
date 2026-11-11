@@ -54,6 +54,8 @@ import Base from "../layouts/Base.astro";
   <style>
     .checkout-main-actions { margin-top: 14px; }
     .checkout-extra-actions { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
+    /* Site-wide .button rules must never override the collapsed details state. */
+    .checkout-extra-actions:not([open]) > :not(summary) { display: none !important; }
     .checkout-extra-actions summary { width: fit-content; cursor: pointer; font-size: 14px; color: var(--muted-foreground); }
     .checkout-extra-actions summary:hover { color: var(--foreground); }
     .checkout-extra-actions .button-row { margin-top: 12px; }
