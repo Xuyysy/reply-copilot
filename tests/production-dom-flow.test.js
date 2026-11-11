@@ -189,3 +189,13 @@ test('media/modal reflow keeps one generation and rebinds only to verified targe
  assert.equal(newNode.editor.innerText,'中文 English 😀\nline');
  assert.equal(p.editor.innerText,'');
 });
+
+test('a Reply button inside an X media-viewer dialog still activates the text-only assistant',async()=>{
+ const f=flow(),p=f.post('101');
+ const baseClosest=p.control.closest;
+ p.control.closest=selector=>selector==='[role="dialog"]'?{}:baseClosest(selector);
+ f.click(p);f.open(p);await sleep(0);
+ assert.equal(f.generations(),1,'a media viewer is not a reply composer submit button');
+ f.resolve(0);await sleep(110);
+ assert.equal(f.commands(),1);
+});
