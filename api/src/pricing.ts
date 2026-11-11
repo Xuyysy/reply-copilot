@@ -32,6 +32,16 @@ export function projectPackagePricing(pkg:PackagePricing){
   return {...projectPaymentFee(base.baseAmountFen,feeRateBps),...base};
 }
 
+/**
+ * Xiaodou RSA2 default SELLER: website CNY price is the exact buyer amount.
+ * The provider deducts processing fees from merchant settlement. Historical
+ * orders retain immutable amount/fee snapshots in the transaction table.
+ */
+export function projectXiaodouSellerPricing(pkg:PackagePricing){
+ const base=packageBasePricing(pkg);
+ return {...base,serviceFeeFen:0,totalPaymentFen:base.baseAmountFen,feeRateBps:0};
+}
+
 // Commercial estimate only: platform settlement has not been reconciled.
 export function projectMk99Pricing(pkg:PackagePricing){
  const base=packageBasePricing(pkg),gross=projectPaymentFee(base.baseAmountFen,500),costCoverageFen=gross.totalPaymentFen-base.baseAmountFen;

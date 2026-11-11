@@ -3,7 +3,7 @@ import {orderById,querySubscriptionPayment} from './subscription-settlement';
 export {mk99Notify,adminMk99Check};
 import {mk99Config} from './mk99';
 import { paymentControl, type PaymentChannel, type PaymentProvider } from "./payment-policy";
-import { CUSTOMER_FEE_RATE_BPS, projectMk99Pricing, projectPackagePricing, type PackagePricing } from "./pricing";
+import { CUSTOMER_FEE_RATE_BPS, projectMk99Pricing, projectPackagePricing, projectXiaodouSellerPricing, type PackagePricing } from "./pricing";
 export { projectPaymentFee } from "./pricing";
 import type { Env, Session } from "./types";
 import { epayCheckout, parseEpayParameters, verifyEpay, moneyToFen } from "./epay.js";
@@ -194,7 +194,7 @@ async function applyRefundEvent(env:Env,transaction:PaymentTransaction,refund:Re
 export async function packages(request:Request,env:Env):Promise<Response>{
   const rows=await env.DB.prepare("SELECT id,name_zh,name_en,credits,price_cents,promo_price_cents,currency,price_cny_fen,description_zh,description_en,recommended_label_zh,recommended_label_en,featured,settlement_mode,exchange_rate_micros,fee_rate_bps,sort_order FROM recharge_packages WHERE active=1 ORDER BY sort_order,id").all();
   const control=await paymentControl(env);
-  const priced=rows.results.map((row:any)=>{let fee:ReturnType<typeof projectPackagePricing>|null=null;try{fee=control.activeMerchant==='mk99'?projectMk99Pricing(row):projectPackagePricing(row);}catch(error){if(!(error instanceof ApiFailure))throw error;}return {...row,price_cny_fen:fee?.baseAmountFen??null,service_fee_fen:fee?.serviceFeeFen??null,total_payment_fen:fee?.totalPaymentFen??null,...(fee&&"merchantPricing" in fee?{merchant_pricing:fee.merchantPricing}:{}),fee_rate_bps:fee?.feeRateBps??(control.activeMerchant==='mk99'?0:row.fee_rate_bps??CUSTOMER_FEE_RATE_BPS)};});
+  const priced=rows.results.map((row:any)=>{let fee:ReturnType<typeof projectPackagePricing>|null=null;try{fee=control.activeMerchant==='mk99'?projectMk99Pricing(row):control.defaultMethod?.provider==='xiaodou'?projectXiaodouSellerPricing(row):projectPackagePricing(row);}catch(error){if(!(error instanceof ApiFailure))throw error;}return {...row,price_cny_fen:fee?.baseAmountFen??null,service_fee_fen:fee?.serviceFeeFen??null,total_payment_fen:fee?.totalPaymentFen??null,...(fee&&"merchantPricing" in fee?{merchant_pricing:fee.merchantPricing}:{}),fee_rate_bps:fee?.feeRateBps??(control.activeMerchant==='mk99'?0:row.fee_rate_bps??CUSTOMER_FEE_RATE_BPS)};});
   const localMock=isLocalMock(env,request),paymentAvailable=localMock||control.effectiveEnabled;
   return response({packages:priced,paymentAvailable,paymentProvider:localMock?"local_mock":control.defaultMethod?.provider??null,paymentMethods:localMock?[{provider:"local_mock",channel:"ALIPAY_H5"}]:control.methods},200,env,request);
 }
@@ -208,7 +208,7 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   const paymentProvider=selected.provider as PaymentProvider|"local_mock";
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
   if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","套餐不存在或已下架。");
-  const feeSnapshot=paymentProvider==="mk99"?projectMk99Pricing(pkg):projectPackagePricing(pkg),amountFen=feeSnapshot.totalPaymentFen;
+  const feeSnapshot=paymentProvider==="mk99"?projectMk99Pricing(pkg):paymentProvider==="xiaodou"?projectXiaodouSellerPricing(pkg):projectPackagePricing(pkg),amountFen=feeSnapshot.totalPaymentFen;
   const mk99=real&&paymentProvider==="mk99",mkConfig=mk99?mk99Config(env):null;
   const epay=real&&paymentProvider==="xiaodou_epay";
   if(body.restartPayment!==undefined&&(typeof body.restartPayment!=="boolean"||!epay))throw new ApiFailure(400,"INVALID_REQUEST","仅易支付支持主动重新发起订单。");
@@ -246,9 +246,9 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   try {
     const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
     checkout=inspectCheckoutResponse(result,{outTradeNo,amountFen});
-    const projection=await recordProviderFeeProjection(env,(await transactionForOrder(env,id))!,result.feeProjection);
-    if(checkout.outcome==="ready"&&projection.status!=="verified")
-      checkout={outcome:"unavailable",issue:"CHECKOUT_FEE_PROJECTION_REVIEW",paymentUrl:null,paymentStatus:"pending"};
+    // Show a verified buyer cashier even if the independent seller-fee
+    // projection needs accounting review; never change the buyer amount.
+    await recordProviderFeeProjection(env,(await transactionForOrder(env,id))!,result.feeProjection);
   } catch(error) { providerError=error;checkout=classifyCheckoutFailure(error); }
   try { await persistCheckout(env,transactionId,attemptId,checkout); }
   catch { checkout={outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED",paymentUrl:null,paymentStatus:"unknown"}; }
@@ -404,8 +404,9 @@ export async function relaunchPayment(request:Request,env:Env,orderId:string):Pr
   try {
     const result=await client.relaunchPayment(transaction.provider_trade_id!,{requestId});
     checkout=inspectCheckoutResponse(result,{outTradeNo:transaction.provider_trade_id!,amountFen:transaction.amount_fen});
-    const projection=await recordProviderFeeProjection(env,transaction,result.feeProjection);
-    if(checkout.outcome==="ready"&&projection.status!=="verified")checkout={outcome:"unavailable",issue:"CHECKOUT_FEE_PROJECTION_REVIEW",paymentUrl:null,paymentStatus:"pending"};
+    // Merchant settlement audit is not a condition for exposing a properly
+    // signed original-order cashier at the exact agreed buyer total.
+    await recordProviderFeeProjection(env,transaction,result.feeProjection);
   }catch(error){providerError=error;checkout=classifyCheckoutFailure(error);}
   try {await persistCheckout(env,transaction.id,attemptId,checkout);}catch{checkout={outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED",paymentUrl:null,paymentStatus:"unknown"};}
   const current=await transactionForOrder(env,orderId),settled=current&&["paid","refunded","closed","failed"].includes(current.status);
