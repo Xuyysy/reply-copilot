@@ -581,7 +581,10 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;return;}
+    if (!post.ok) {
+      traceAssociation('activation_skipped',post.reason||'post_context_unavailable');
+      pendingActivation=null;return;
+    }
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
@@ -592,10 +595,12 @@
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.blocked || performance.now()-activation.at>1500) {
+      traceAssociation('activation_skipped',activation?.blocked?'blocked':'missing_or_expired_capture');
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId) {
+      traceAssociation('activation_skipped',!live.ok?(live.reason||'post_context_unavailable'):'post_identity_changed');
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
