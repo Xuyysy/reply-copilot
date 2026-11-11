@@ -75,7 +75,11 @@
   function baseline(document) {
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
     const editors=[...document.querySelectorAll(editorSelector)];
-    return {baselineModalCount:dialogs.length,visibleEditorCount:editors.filter(visible).length,
+    // Media viewers and non-composer overlays are not existing reply
+    // dialogs. Only a dialog with a visible editable target blocks a fresh
+    // verified Reply click.
+    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(editorSelector)].some(visible));
+    return {baselineModalCount:composerDialogs.length,visibleEditorCount:editors.filter(visible).length,
       visibleReplyEditorCount:editors.filter(node=>visible(node)&&node.closest('[role="dialog"]')).length,
       baselineEditors:editors};
   }
@@ -181,7 +185,8 @@
         contextTextMatches:Boolean(primary&&sameContext(post,text)),
         contextMatches};
     });
-    return {now,editors,visibleDialogCount:dialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
+    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(editorSelector)].some(visible));
+    return {now,editors,visibleDialogCount:composerDialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
