@@ -183,6 +183,9 @@ test('media/modal reflow keeps one generation and rebinds only to verified targe
  f.entries([]); // X briefly unmounts its media-rich reply composer.
  f.entries([{node:newNode.editor,modal:true,contextMatches:true,contextStatusId:'101'}]);
  await sleep(0);
+ assert.equal(f.generations(),1,'editor remount must not restart generation before focus');
+ f.focus(newNode.editor);
+ await sleep(0);
  assert.equal(f.generations(),1,'editor remount must never regenerate or double-debit');
  f.resolve(0);await sleep(110);
  assert.equal(f.commands(),1);
