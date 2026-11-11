@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_SHA: '96af2ccd8358d06eacc67c81ebe9185a64750aa7'
-      CI_RUN_ID: '42949418321'
+      SOURCE_SHA: '8425c053883065def77a05bab2efcc8bab3ad665'
+      CI_RUN_ID: '42950036480'
       BASE_SHA: '0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0'
       EXPECTED_WORKER_VERSION: '2fdf4241-8684-4477-91bf-5f5f239d3956'
       EXPECTED_WORKER_DEPLOYMENT: '7f004fa8-65b5-4b08-8af0-e6adee538895'
@@ -40,11 +40,11 @@ jobs:
       - name: Checkout exact Staging fix candidate
         uses: actions/checkout@v4
         with:
-          ref: 96af2ccd8358d06eacc67c81ebe9185a64750aa7
+          ref: 8425c053883065def77a05bab2efcc8bab3ad665
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify successful immutable CI and exactly ten authorized changed files
+      - name: Verify successful immutable CI and exactly eleven authorized changed files
         shell: bash
         run: |
           set -euo pipefail
@@ -66,6 +66,7 @@ jobs:
           web/src/lib/credit-order-discovery.mjs
           web/src/pages/checkout.astro
           web/tests/account-credit-resume-buttons.test.mjs
+          web/tests/checkout-resume-browser.test.mjs
           web/tests/checkout-resume.test.mjs
           web/tests/credit-order-discovery.test.mjs
           FILES
@@ -97,16 +98,16 @@ jobs:
       - name: Download immutable Staging Pages build from same successful CI run
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-96af2ccd8358d06eacc67c81ebe9185a64750aa7
-          run-id: 42949418321
+          name: staging-pages-8425c053883065def77a05bab2efcc8bab3ad665
+          run-id: 42950036480
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download independently generated artifact hashes and provenance
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-96af2ccd8358d06eacc67c81ebe9185a64750aa7
-          run-id: 42949418321
+          name: staging-extension-8425c053883065def77a05bab2efcc8bab3ad665
+          run-id: 42950036480
           github-token: ${{ github.token }}
           path: dist/ci
 
