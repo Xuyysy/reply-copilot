@@ -43,6 +43,7 @@ test("X reply button recognizes localized UI safely without changing posting beh
 
 test("all selectable reply locales survive Voice Profile without affecting UI language",()=>{
   assert.equal(DEFAULT_VOICE_PROFILE.language,"auto");
+  assert.deepEqual([...REPLY_LANGUAGES],["auto","zh","en","ja","ko"]);
   for(const language of REPLY_LANGUAGES) {
     assert.equal(validateVoiceProfile({...DEFAULT_VOICE_PROFILE, language}).language,language);
   }
@@ -50,13 +51,15 @@ test("all selectable reply locales survive Voice Profile without affecting UI la
     assert.throws(()=>validateVoiceProfile({...DEFAULT_VOICE_PROFILE,language:bad}),String(bad));
   }
   assert.equal(normalizeReplyLanguage("ja-JP"),"ja-JP");
-  assert.equal(normalizeReplyLanguage("PT-br"),"pt-BR");
+  assert.equal(normalizeReplyLanguage("ko-KR"),"ko-KR");
+  assert.equal(normalizeReplyLanguage("pt-BR"),"pt-BR");
+  assert.equal(normalizeReplyLanguage("fr"),"fr");
   assert.equal(normalizeReplyLanguage("zh-Hant-TW"),"zh-Hant-TW");
   assert.equal(normalizeReplyLanguage("xx"),null);
 });
 
 test("hosted and extension output contract keeps Japanese, Korean, European and RTL locales",()=>{
-  for(const language of ["ja","ja-JP","ko","es","fr","de","pt-BR","zh-TW","ar","hi","th","vi","ru","uk","tr"]){
+  for(const language of ["ja","ja-JP","ko","ko-KR","zh-TW","en-US","es","fr","pt-BR","ru","ar"]){
     assert.equal(parseAIOutput(payload(language)).language,language);
   }
   for(const bad of ["Japanese","jp","ja<script>","xx","",null]){
@@ -70,9 +73,9 @@ test("hosted and extension output contract keeps Japanese, Korean, European and 
 test("script detection supplies only high-confidence hints and leaves ambiguous scripts to model",()=>{
   assert.equal(inferPostLanguageHint("明日は東京に行きます。新しい発見が楽しみです"),"ja");
   assert.equal(inferPostLanguageHint("오늘은 정말 좋은 하루였습니다"),"ko");
-  assert.equal(inferPostLanguageHint("สวัสดีครับ"),"th");
-  assert.equal(inferPostLanguageHint("مرحبا بالجميع"),"ar");
-  assert.equal(inferPostLanguageHint("नमस्ते दुनिया"),"hi");
+  assert.equal(inferPostLanguageHint("สวัสดีครับ"),"auto");
+  assert.equal(inferPostLanguageHint("مرحبا بالجميع"),"auto");
+  assert.equal(inferPostLanguageHint("नमस्ते दुनिया"),"auto");
   assert.equal(inferPostLanguageHint("今日是個好日子"),"auto");
   assert.equal(inferPostLanguageHint("¿Qué opinas de este lanzamiento?"),"auto");
   assert.equal(inferPostLanguageHint("Это очень интересно"),"auto");
@@ -82,18 +85,18 @@ test("auto prompting follows source post rather than user-interface or saved Chi
   const post="今日は日本の開発者コミュニティで面白い議論がありました。";
   const prompts=buildPrompts({postContext:{text:post,url:"https://x.com/test/status/123"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"auto",writingSamples:["太牛了哈哈"]}});
   assert.match(prompts.system,/Automatic reply language/);
-  assert.match(prompts.system,/Script clue: "ja"/);
-  assert.match(prompts.system,/ALL three replies/i);
-  assert.match(prompts.system,/do not mistake Japanese kanji for Chinese/i);
+  assert.match(prompts.system,/script hint: ja/);
+  assert.match(prompts.system,/all reply options/i);
+  assert.match(prompts.system,/Chinese\/Japanese Han-only text may be ambiguous/i);
   assert.match(prompts.user,/Source script hint: ja/);
   assert.ok(prompts.user.includes(post));
   assert.match(prompts.system,/untrusted content/i);
 });
 test("manual language overrides post, with output language tag encoded for JSON",()=>{
-  const prompts=buildPrompts({postContext:{text:"今日は素晴らしい天気です。"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"fr"}});
-  assert.match(prompts.system,/explicitly selected reply language "fr"/);
-  assert.match(prompts.system,/Write ALL three replies and any quoteCandidate in that language/);
-  assert.match(prompts.user,/Requested language: fr/);
+  const prompts=buildPrompts({postContext:{text:"今日は素晴らしい天気です。"},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"ko"}});
+  assert.match(prompts.system,/in ko; return that language tag/i);
+  assert.match(prompts.system,/Write all three replies and any quoteCandidate/i);
+  assert.match(prompts.user,/Requested language: ko/);
 });
 test("options and side panel offer the same languages without changing Chinese UI",()=>{
   const options=readFileSync(new URL("../options/options.html",import.meta.url),"utf8");
@@ -117,4 +120,20 @@ test("X DOM extraction preserves original Japanese, Korean and mixed-language te
     assert.equal(extracted.ok,true);
     assert.equal(extracted.sourceText,post);
   }
+});
+
+
+test("speed-first language policy stays small and skips unsupported locales",()=>{
+  const prompts=buildPrompts({postContext:{text:"Bonjour"},voiceProfile:DEFAULT_VOICE_PROFILE});
+  const policy=prompts.system.split("REPLY LANGUAGE POLICY")[1].split("VOICE PROFILE")[0];
+  assert.ok(policy.length < 440,"language policy should stay compact");
+  assert.match(policy,/fall back to English/i);
+  assert.ok(!policy.includes("Spanish, French, Portuguese"));
+});
+
+
+test("legacy model language tags remain parseable even when manual menu is small",()=>{
+  assert.equal(REPLY_LANGUAGES.includes("fr"),false);
+  assert.equal(parseAIOutput(payload("fr")).language,"fr");
+  assert.equal(parseAIOutput(payload("pt-BR")).language,"pt-BR");
 });
