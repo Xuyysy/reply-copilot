@@ -1,7 +1,9 @@
 name: Reply Copilot CI
 
 on:
-  # Every branch push retains full tests and immutable SHA-pinned release artifacts.
+  # Ordinary pushes retain full tests and immutable SHA-pinned release artifacts.
+  # Opt-in 'ci-lite:' intermediate commits on non-release branches get a fast
+  # check only; final releasable commits MUST omit the prefix and pass full CI.
   push:
     branches: ['**']
   # Always verify the latest PR merge context (including synchronize events),
@@ -23,6 +25,11 @@ jobs:
     timeout-minutes: 50
     env:
       SOURCE_SHA: ${{ github.event_name == 'pull_request' && github.head_ref == 'codex/subscriptions-v1-issue21' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.sha || github.sha }}
+      # Never honor the fast-path prefix on protected release/staging namespaces.
+      # A fast push does NOT produce artifacts and cannot satisfy a deploy's
+      # artifact verification. This flag only applies to the push head commit.
+      # A final unmarked commit remains subject to the original complete CI.
+      CI_LITE_PUSH: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'ci-lite:') && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/heads/staging/') }}
     steps:
       - name: Checkout full history for regression baselines
         uses: actions/checkout@v4
@@ -41,7 +48,7 @@ jobs:
             api/package-lock.json
 
       - name: Install Chrome for isolated browser tests
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         id: chrome
         uses: browser-actions/setup-chrome@v2
         with:
@@ -50,7 +57,7 @@ jobs:
       # Temporary CI bridge for legacy tests that hard-code macOS paths.
       # Only modifies the disposable GitHub Linux runner, never any user machine.
       - name: Prepare isolated Linux Chrome test compatibility
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         env:
           REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         shell: bash
@@ -73,10 +80,10 @@ jobs:
           npm --prefix api run check:staging
           npm --prefix api run typecheck
 
-      # The guarded deploy pipeline promotes only a successful exact-SHA PUSH run.
-      # Keep the full suite byte-for-byte intact on push and manual dispatch.
+      # Full tests are mandatory on normal/final pushes and manual dispatch.
+      # ci-lite: intermediate pushes get ONLY focused checks and no artifacts.
       - name: Run full suite and preserve the exit code
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         env:
           CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
         shell: bash
@@ -88,11 +95,10 @@ jobs:
           echo "Full npm test exit code: $result"
           exit "$result"
 
-      # Pull-request refs contain the synthetic merge commit. Check that the
-      # proposed change compiles with its base and run representative browser-free
-      # security/commerce tests. Every branch push still runs the complete suite.
-      - name: Verify current PR merge context
-        if: github.event_name == 'pull_request'
+      # PRs validate the synthetic merge context; ci-lite: push commits validate
+      # their exact SHA. Neither produces trusted Staging/Production artifacts.
+      - name: Verify lightweight PR or intermediate-push context
+        if: github.event_name == 'pull_request' || env.CI_LITE_PUSH == 'true'
         run: |
           # Astro supplies ImportMeta.env types through generated .astro/types.d.ts.
           (cd web && npx --no-install astro sync && npx --no-install tsc --noEmit)
@@ -105,7 +111,7 @@ jobs:
 
       - name: Build pinned Staging extension
         # Only push artifacts can be promoted by the guarded Staging release.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
@@ -113,12 +119,12 @@ jobs:
 
       - name: Package and fingerprint Web and extension
         # Only push artifacts can be promoted by the guarded Staging release.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         run: python3 scripts/package-staging-ci.py
 
       - name: Upload immutable Staging Pages bundle
         # Only push artifacts can be promoted by the guarded Staging release.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: staging-pages-${{ env.SOURCE_SHA }}
@@ -128,7 +134,7 @@ jobs:
 
       - name: Upload ZIP and provenance manifest
         # Only push artifacts can be promoted by the guarded Staging release.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: staging-extension-${{ env.SOURCE_SHA }}
@@ -137,7 +143,7 @@ jobs:
           if-no-files-found: error
 
       - name: Verify subscription release builds and Web types
-        if: github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109')
         env:
           PUBLIC_API_BASE_URL: https://api.x-reply-helper.top
           PUBLIC_TURNSTILE_SITE_KEY: 0x4AAAAAAFhsvhYsTlFR6LIM
@@ -148,7 +154,7 @@ jobs:
           (cd api && npx --no-install wrangler deploy --config deploy/production.wrangler.json --dry-run)
 
       - name: Build and fingerprint Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109')
         env:
           REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
@@ -157,15 +163,22 @@ jobs:
           python3 scripts/package-production-rc.py
 
       - name: Upload Production Chrome candidate
-        if: github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.head_ref == 'codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109'
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109')
         uses: actions/upload-artifact@v4
         with:
           name: production-extension-${{ env.SOURCE_SHA }}
           path: dist/production-rc/
           if-no-files-found: error
 
+      - name: Explain lightweight run is not release evidence
+        if: github.event_name == 'pull_request' || env.CI_LITE_PUSH == 'true'
+        run: |
+          echo '### Lightweight validation only' >> "$GITHUB_STEP_SUMMARY"
+          echo 'This run did not execute the full browser suite or generate release artifacts.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'For a releasable source SHA, push a final commit without the ci-lite: prefix and require a green full Push CI.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Always save full test logs
-        if: always()
+        if: always() && github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ env.SOURCE_SHA }}-${{ github.run_id }}
