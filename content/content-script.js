@@ -19,6 +19,18 @@
   let bindingTimer = null;
   let settingsRevision = 0;
   let pendingActivation = null;
+  // An already-applied draft may leave a brief non-interactive acknowledgement
+  // after X closes its native reply dialog. The old editor/session is retired
+  // immediately; no generation, payment or account state is kept alive.
+  const POST_REPLY_LINGER_MS = 8_000;
+  let lingeringHost = null;
+  let lingeringTimer = null;
+  function clearLingeringHost() {
+    if (lingeringTimer !== null) clearTimeout(lingeringTimer);
+    lingeringTimer = null;
+    lingeringHost?.remove();
+    lingeringHost = null;
+  }
   // Local-only, text-free troubleshooting for disappearing reply windows.
   // No post text, URL, account data or telemetry is captured.
   const associationEvents=[];
@@ -40,6 +52,7 @@
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    clearLingeringHost();
     momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
@@ -99,7 +112,19 @@
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
-    current.assistant?.host?.remove();
+    clearLingeringHost();
+    const host = current.assistant?.host;
+    if (reason === 'reply_closed' && current.appliedText && host?.isConnected) {
+      // Only the visual acknowledgement lingers. Disallow old actions and
+      // tear down the verified editor association and request immediately.
+      current.assistant?.setStatus?.('回复窗口已关闭，悬浮框即将自动收起。');
+      host.style.pointerEvents = 'none';
+      host.style.opacity = '0.85';
+      lingeringHost = host;
+      lingeringTimer = setTimeout(() => {
+        if (lingeringHost === host) clearLingeringHost();
+      }, POST_REPLY_LINGER_MS);
+    } else host?.remove();
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     active=null;pendingActivation=null;
     if (reason === 'quiescent_recovery' || reason === 'reply_closed') { recoveryRequired=false; recoveryReason=null; }
@@ -166,6 +191,7 @@
   function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
     if (!hasRuntimeContext()) return;
+    clearLingeringHost(); // A new reply always starts with a clean visual surface.
     if (active?.requestId) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: active.requestId });
     if (bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
