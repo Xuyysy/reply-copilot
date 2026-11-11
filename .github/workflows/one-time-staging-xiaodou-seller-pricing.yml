@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_SHA: '1f7803e67430579c62545a4ad517fc029db9acda'
-      CI_RUN_ID: '42941217729'
+      SOURCE_SHA: '714b1fd81b6cfdc1e63dd8c705cf719eb48f661a'
+      CI_RUN_ID: '42942415304'
       BASE_SHA: '145ffee1c405571479faffbda765e20eeab6283d'
       EXPECTED_WORKER_VERSION: '176ca159-0846-4b88-8773-b32845559d1d'
       EXPECTED_WORKER_DEPLOYMENT: 'cefa3dfd-a79c-4e1f-9fdc-9af4a2c6abea'
@@ -40,11 +40,11 @@ jobs:
       - name: Checkout exact Staging fix candidate
         uses: actions/checkout@v4
         with:
-          ref: 1f7803e67430579c62545a4ad517fc029db9acda
+          ref: 714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify successful immutable CI and exactly eight authorized changed files
+      - name: Verify successful immutable CI and exactly eleven authorized changed files
         shell: bash
         run: |
           set -euo pipefail
@@ -64,7 +64,10 @@ jobs:
           api/tests/helpers/payment-v2.mjs
           api/tests/payment-provider-policy.test.mjs
           api/tests/payment-v2.test.mjs
+          web/src/lib/package-summary.mjs
           web/src/pages/checkout.astro
+          web/src/pages/index.astro
+          web/tests/package-summary.test.mjs
           web/tests/xiaodou-credit-cancel.test.mjs
           FILES
           diff -u "$RUNNER_TEMP/allowed-files" "$RUNNER_TEMP/changed-files"
@@ -95,16 +98,16 @@ jobs:
       - name: Download immutable Staging Pages build from same successful CI run
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-1f7803e67430579c62545a4ad517fc029db9acda
-          run-id: 42941217729
+          name: staging-pages-714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
+          run-id: 42942415304
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download independently generated artifact hashes and provenance
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-1f7803e67430579c62545a4ad517fc029db9acda
-          run-id: 42941217729
+          name: staging-extension-714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
+          run-id: 42942415304
           github-token: ${{ github.token }}
           path: dist/ci
 
