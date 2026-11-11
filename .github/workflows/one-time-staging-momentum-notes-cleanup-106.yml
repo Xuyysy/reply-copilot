@@ -9,7 +9,9 @@ permissions:
   actions: read
 
 concurrency:
-  group: reply-copilot-staging-pages
+  # This one-shot release is isolated from unrelated legacy issue_comment workflows.
+  # Exact Staging/Production pins and the immediate pre-upload checks still fail closed.
+  group: reply-copilot-staging-momentum-notes-cleanup-106
   cancel-in-progress: false
 
 jobs:
