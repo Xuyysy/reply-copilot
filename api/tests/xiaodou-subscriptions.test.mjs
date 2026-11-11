@@ -167,7 +167,8 @@ test('schema migration 0025 preserves MK99 subscription payment proofs and permi
    db.exec("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,quoted_at,quote_expires_at,created_at,updated_at) VALUES('order-old','user-old','basic-v1','purchase',6990,1,999999999,1,1)");
    db.exec("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,created_at,updated_at) VALUES('tx-old','order-old','mk99','merchant-old','MK99_old_trade','ALIPAY_H5',6990,'MD5',1,1)");
    db.exec("INSERT INTO subscription_payment_events(id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at) VALUES('event-old','tx-old','mk99','mk99-sub-old','PAYMENT_SUCCEEDED',6990,'verified-old-hash',1)");
-   db.exec(readFileSync(new URL('0025_subscription_xiaodou_rsa2.sql',root),'utf8'));
+   // Review unapproved schema proposal only in isolated SQLite memory.
+   db.exec(readFileSync(new URL('../sql-proposals/0025_subscription_xiaodou_rsa2.sql',root),'utf8'));
    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
    assert.equal(db.prepare("SELECT body_sha256 FROM subscription_payment_events WHERE id='event-old'").get().body_sha256,'verified-old-hash');
    assert.equal(db.prepare("SELECT merchant_provider FROM subscription_payment_transactions WHERE id='tx-old'").get().merchant_provider,'mk99');

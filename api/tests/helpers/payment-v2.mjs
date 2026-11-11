@@ -17,6 +17,9 @@ const token='b'.repeat(64), secret='local-v2-auth-secret-which-is-not-a-real-sec
 export function fixture({released=true}={}) {
   const sql = new DatabaseSync(':memory:');
   for(const file of readdirSync(new URL('migrations/',apiRoot)).filter(x=>x.endsWith('.sql')).sort())sql.exec(readFileSync(new URL(`migrations/${file}`,apiRoot),'utf8'));
+  // Local fixture only: exercise the not-yet-approved 0025 contract without adding it
+  // to deployable api/migrations or querying any remote D1.
+  sql.exec(readFileSync(new URL('sql-proposals/0025_subscription_xiaodou_rsa2.sql',apiRoot),'utf8'));
   sql.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash) VALUES('test-user','v2@example.test',1,1,'v2-user','test-hash')").run();
   sql.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES('test-session',?,'test-user','web',1,?)").run(createHash('sha256').update(token).digest('hex'),Date.now()+60000);
   sql.prepare("INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES('test-user',200,0,1,1)").run();
