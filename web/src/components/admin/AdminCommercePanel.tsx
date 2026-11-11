@@ -20,7 +20,9 @@ type Stats={
 };
 const money=(fen:number|null)=>fen==null?'—':'¥'+(fen/100).toFixed(2);
 
-export function AdminCommerceSummary({active,language}:{active:boolean;language:Language}){
+export function AdminCommerceSummary({active,language,variant='default'}:{
+ active:boolean;language:Language;variant?:'overview'|'default'
+}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [stats,setStats]=useState<Stats|null>(null);
  const [error,setError]=useState('');
@@ -31,21 +33,45 @@ export function AdminCommerceSummary({active,language}:{active:boolean;language:
   return()=>{live=false;};
  },[active]);
  if(!active)return null;
- return <Card data-testid="admin-unified-finance"><CardHeader><CardTitle>{t('已核验经营收款 · 最近90天','Verified receipts · last 90 days')}</CardTitle></CardHeader>
+ const values:Array<[string,string]> = stats?[
+  [t('总核验实收','Total verified gross'),money(stats.verifiedGrossFen)],
+  [t('订阅实收','Subscription receipts'),money(stats.verifiedSubscription.reduce((sum,x)=>sum+Number(x.gross_fen||0),0))],
+  [t('永久额度包实收','Credit pack receipts'),money(stats.verifiedCredit?.gross_fen??0)],
+  [t('额度包已确认退款','Confirmed credit refunds'),money(stats.creditConfirmedRefunds?.amount_fen??0)]
+ ]:[];
+ const grid=<div className="grid min-w-0 grid-cols-2 gap-2.5 lg:grid-cols-4">
+  {values.map(([label,value],i)=><div key={label}
+    className={variant==='overview'
+      ?'min-w-0 rounded-xl border px-3.5 py-4 sm:px-4 '+(i===0?'border-slate-900 bg-slate-900 text-white':'border-slate-200 bg-white text-slate-900')
+      :'min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-4'}>
+   <p className={'text-[11px] leading-4 '+(variant==='overview'&&i===0?'text-slate-300':'text-slate-500')}>{label}</p>
+   <strong className="admin-kpi-number mt-2 block text-[22px] font-bold leading-none sm:text-[25px]">{value}</strong>
+  </div>)}
+ </div>;
+ const status=<>
+  {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
+  {!stats&&!error&&<p role="status" className="rounded-xl border border-slate-200 bg-white px-4 py-6 text-sm text-slate-500">{t('正在读取已核验收款…','Loading verified receipts…')}</p>}
+ </>;
+ const caveat=<p className="text-[11px] leading-5 text-slate-500">
+  {t('核验实收是历史支付毛额，并非净利润；订阅退款仍需独立复核，未计入额度包退款。','Gross verified receipts are not profit. Subscription refunds require independent review and are excluded from credit-pack refunds.')}
+ </p>;
+ if(variant==='overview')return <section data-testid="admin-unified-finance" className="space-y-3">
+  <div className="flex flex-wrap items-baseline justify-between gap-2">
+   <h3 className="text-[15px] font-semibold text-slate-900">{t('经营收入','Verified revenue')}</h3>
+   <span className="text-[11px] text-slate-500">{t('最近 90 天 · 仅统计有可信支付事件的订单','Last 90 days · verified provider events')}</span>
+  </div>
+  {status}
+  {stats&&grid}
+  {stats&&caveat}
+ </section>;
+ return <Card data-testid="admin-unified-finance">
+  <CardHeader className="pb-2"><CardTitle>{t('已核验经营收款 · 最近90天','Verified receipts · last 90 days')}</CardTitle></CardHeader>
   <CardContent className="space-y-3">
-   <p className="text-xs text-muted-foreground">{t('只统计具有可信支付事件的真实商户订单；永久额度包与订阅首购/续购/升级统一汇总。不包括本地模拟、待支付或仅有历史赠额的交易。','Verified provider events only. Combines credit packs and subscription purchases, renewals and upgrades; excludes mocks, pending payments and legacy grants without proof.')}</p>
-   {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
-   {!stats&&!error&&<p role="status" className="text-sm">{t('正在读取已核验收款…','Loading verified receipts…')}</p>}
-   {stats&&<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-    {[
-     [t('总核验实收','Total verified gross'),money(stats.verifiedGrossFen)],
-     [t('永久额度包实收','Credit pack gross'),money(stats.verifiedCredit?.gross_fen??0)],
-     [t('订阅实收','Subscription gross'),money(stats.verifiedSubscription.reduce((s,x)=>s+Number(x.gross_fen||0),0))],
-     [t('额度包已确认退款','Confirmed credit refunds'),money(stats.creditConfirmedRefunds?.amount_fen??0)]
-    ].map(([label,value])=><div key={label} className="rounded-lg border bg-card p-3"><p className="text-xs text-muted-foreground">{label}</p><strong className="mt-1 block text-lg font-semibold tabular-nums">{value}</strong></div>)}
-   </div>}
-   {stats&&<p className="text-xs text-muted-foreground">{t('注意：总实收是历史支付毛额，不是净利润；订阅退款仍需独立复核，不在已确认退款数字中。','Gross receipts are not net profit. Subscription refunds require separate verification and are not part of the confirmed refund amount above.')}</p>}
-  </CardContent></Card>;
+   {status}
+   {stats&&grid}
+   {stats&&caveat}
+  </CardContent>
+ </Card>;
 }
 
 export default function AdminCommercePanel({active,language,focusOrderId}:{active:boolean;language:Language;focusOrderId?:string}){
