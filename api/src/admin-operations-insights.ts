@@ -40,7 +40,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
    .bind(from,now+1,DELIVERIES_LIMIT+1).all<Delivery>(),
   // The existing pending-status partial index makes this list cheap.
   env.DB.prepare(`SELECT id,user_id,status,created_at FROM subscription_orders
-     WHERE status IN ('unknown','manual_review') AND created_at>=?
+     WHERE status IN ('pending','unknown','manual_review') AND status<>'pending' AND created_at>=?
      ORDER BY created_at DESC,id DESC LIMIT 8`).bind(now-30*DAY)
    .all<{id:string;user_id:string;status:string;created_at:number}>(),
   // Existing (provider,status,updated_at) index; legacy protocol provider
