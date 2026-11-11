@@ -10,7 +10,7 @@ type Delivery={
  source:string|null;model:string|null;estimated_cost_micro_usd:number|null;
 };
 type Alert={
- key:string;type:'subscription_review'|'credit_payment_unknown'|'ai_budget'|'ai_failures';
+ key:string;type:'subscription_review'|'credit_payment_unknown'|'credit_entitlement_gap'|'subscription_entitlement_gap'|'ai_budget'|'ai_failures';
  severity:'attention'|'warning';title:string;detail:string;
  order_id?:string;user_id?:string;created_at?:number;count?:number;target:'orders'|'subscriptions'|'cost'
 };
@@ -24,7 +24,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
  const day=new Date(now).toISOString().slice(0,10);
  // Index: ai_requests_delivered_at_idx. Rows are capped and explicitly labelled
  // as sampled if more than 1000; never claim incomplete cohorts are exact.
- const [deliveries,subscriptionReview,creditUnknown,aiFailures,budget,setting]=await Promise.all([
+ const [deliveries,subscriptionReview,creditUnknown,aiFailures,budget,setting,creditUnfulfilled,subscriptionUnfulfilled]=await Promise.all([
   env.DB.prepare(`SELECT r.request_id,r.user_id,r.delivery_confirmed_at created_at,
      sa.period_id,v.plan_code,
      CASE WHEN ca.state='consumed' AND cb.bucket IN ('free','paid') THEN cb.bucket
@@ -61,7 +61,30 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
     .first<{n:number}>(),
   env.DB.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?')
     .bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
-  env.DB.prepare(`SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'`).first<{value:string}>()
+  env.DB.prepare(`SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'`).first<{value:string}>(),
+  // Paid funds must not disappear when the separate entitlement transaction did
+  // not complete. A five-minute grace window avoids transient checkout alarms.
+  env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
+    FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id
+    WHERE t.provider='xiaodou' AND t.status='paid' AND t.paid_at IS NOT NULL
+      AND t.updated_at>=? AND t.paid_at<=? AND o.credited_at IS NULL
+      AND t.merchant_provider IN ('mk99','xiaodou') AND t.currency='CNY'
+      AND t.amount_fen>0
+      AND EXISTS(SELECT 1 FROM provider_payment_events e WHERE e.transaction_id=t.id
+        AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
+        AND e.amount_fen=t.amount_fen AND e.currency='CNY' AND e.body_sha256 IS NOT NULL)
+    ORDER BY t.updated_at DESC LIMIT 8`).bind(now-30*DAY,now-5*60_000)
+    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>(),
+  env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
+    FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id
+    WHERE o.created_at>=? AND t.status='paid' AND t.paid_at IS NOT NULL AND t.paid_at<=?
+      AND o.applied_at IS NULL AND t.merchant_provider IN ('mk99','xiaodou')
+      AND t.currency='CNY' AND t.amount_fen=o.amount_fen AND t.amount_fen>0
+      AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id
+        AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
+        AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
+    ORDER BY o.created_at DESC LIMIT 8`).bind(now-30*DAY,now-5*60_000)
+    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>()
  ]);
  const list=(deliveries.results||[]),sampled=list.slice(0,DELIVERIES_LIMIT);
  const byPlan=new Map<string,PlanRow>();
@@ -93,6 +116,16 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
     title:'Credit-pack payment state unknown',detail:o.merchant_provider,
     order_id:o.order_id,user_id:o.user_id,created_at:o.updated_at,target:'orders'});
  }
+ for(const o of creditUnfulfilled.results||[]){
+  alerts.push({key:'ungranted:'+o.order_id,type:'credit_entitlement_gap',severity:'attention',
+    title:'Provider-confirmed payment without credited entitlement',
+    detail:o.merchant_provider,order_id:o.order_id,user_id:o.user_id,created_at:o.paid_at,target:'orders'});
+ }
+ for(const o of subscriptionUnfulfilled.results||[]){
+  alerts.push({key:'unapplied:'+o.order_id,type:'subscription_entitlement_gap',severity:'attention',
+    title:'Provider-confirmed subscription payment without applied entitlement',
+    detail:o.merchant_provider,order_id:o.order_id,user_id:o.user_id,created_at:o.paid_at,target:'subscriptions'});
+ }
  const limit=Number(setting?.value||0),committed=Number(budget?.reserved_micro_usd||0)+Number(budget?.settled_micro_usd||0);
  if(limit>0&&committed>=limit*.8){
   alerts.push({key:'budget:'+day,type:'ai_budget',severity:committed>=limit?'attention':'warning',
@@ -113,7 +146,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
  }));
  return response({
   time:{from,to:now,timezone:'UTC',generatedAt:now},
-  alerts,alertCoverage:'Bounded recent unresolved subscription/credit orders; not an exhaustive backlog or proof of a financial incident',
+  alerts,alertCoverage:'Bounded recent unresolved orders and provider-confirmed, 5-minute-old, unfulfilled payments; not an exhaustive historical backlog. Review first; no automatic grant or refund.',
   aiUsage:{
    rowsSampled:sampled.length,moreThanSample:Boolean(list.length>DELIVERIES_LIMIT),limit:DELIVERIES_LIMIT,
    subscription,free,paid,unattributed,plans,
