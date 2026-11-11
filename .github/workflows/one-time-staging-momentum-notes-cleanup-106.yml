@@ -14,15 +14,15 @@ concurrency:
 
 jobs:
   staging-momentum-notes-cleanup:
-    if: github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/main' && github.event.issue.number == 106 && github.event.issue.pull_request != null && github.actor == 'Xuyysy' && github.event.comment.user.login == 'Xuyysy' && github.event.comment.body == '/deploy-staging-momentum-notes-cleanup 4dd74cae3abc38b9915a38cb2fb7b38bc553519f'
+    if: github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/main' && github.event.issue.number == 106 && github.event.issue.pull_request != null && github.actor == 'Xuyysy' && github.event.comment.user.login == 'Xuyysy' && github.event.comment.body == '/deploy-staging-momentum-notes-cleanup e2a35723978f019d6443f1ed4c8e8034372a551a'
     environment:
       name: staging
       url: https://staging.x-reply-helper.top
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_SHA: '4dd74cae3abc38b9915a38cb2fb7b38bc553519f'
-      CI_RUN_ID: '43003684508'
+      SOURCE_SHA: 'e2a35723978f019d6443f1ed4c8e8034372a551a'
+      CI_RUN_ID: '43004388377'
       BASE_SHA: '9e6197d793b9a0b4035f579f14034c1cf0d97c33'
       EXPECTED_WORKER_VERSION: '089a12fb-3dd8-4dc7-ad5f-65c5bbd1df04'
       EXPECTED_WORKER_DEPLOYMENT: '0fd3ba7d-bd57-4940-9361-989582544d67'
@@ -36,7 +36,7 @@ jobs:
       - name: Checkout exact Staging fix candidate
         uses: actions/checkout@v4
         with:
-          ref: 4dd74cae3abc38b9915a38cb2fb7b38bc553519f
+          ref: e2a35723978f019d6443f1ed4c8e8034372a551a
           fetch-depth: 0
           persist-credentials: false
 
@@ -75,16 +75,16 @@ jobs:
       - name: Download immutable Staging Pages build from same successful CI run
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-4dd74cae3abc38b9915a38cb2fb7b38bc553519f
-          run-id: 43003684508
+          name: staging-pages-e2a35723978f019d6443f1ed4c8e8034372a551a
+          run-id: 43004388377
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download independently generated artifact hashes and provenance
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-4dd74cae3abc38b9915a38cb2fb7b38bc553519f
-          run-id: 43003684508
+          name: staging-extension-e2a35723978f019d6443f1ed4c8e8034372a551a
+          run-id: 43004388377
           github-token: ${{ github.token }}
           path: dist/ci
 
