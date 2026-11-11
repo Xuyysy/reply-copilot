@@ -25,7 +25,8 @@ test('Financial overview distinguishes real gross payment from mock or legacy an
  assert.match(orders,/Last 90 days · verified provider events/);
  assert.match(orders,/Subscription refunds require independent review/);
  assert.match(orders,/Gross verified receipts are not profit/);
- assert.ok(root.includes('Booked credit-pack users (legacy)'));
+ assert.ok(root.includes('Booked credit-pack users'));
+ assert.ok(root.includes('Legacy bookkeeping & more metrics'));
 });
 test('Admin user detail exposes subscription period and permanent entitlement without merging balances',()=>{
  assert.match(root,/AdminCommerceUserProfile userId=\{detail.user.id\}/);
