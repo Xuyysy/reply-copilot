@@ -15,6 +15,8 @@ test('Admin orders combine existing credit and subscription business histories w
  assert.match(orders,/payment_evidence/);
  assert.match(orders,/entitlement_status/);
  assert.match(orders,/nextCursor/);
+ assert.ok(root.includes('focusOrderId={orderQuickSearch}'));
+ assert.ok(orders.includes('setQuery(focusOrderId)'));
  assert.match(orders,/AdminCommerceSummary/);
 });
 test('Financial overview distinguishes real gross payment from mock or legacy and refund caveats',()=>{
