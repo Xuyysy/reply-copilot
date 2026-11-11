@@ -22,7 +22,7 @@ test('Financial overview distinguishes real gross payment from mock or legacy an
  assert.match(orders,/\/v1\/admin\/commerce\/summary/);
  assert.match(orders,/Verified provider events only/);
  assert.match(orders,/Subscription refunds require separate verification/);
- assert.match(root,/Credit-pack buyers \(legacy\)/);
+ assert.ok(root.includes('Booked credit-pack users (legacy)'));
 });
 test('Admin user detail exposes subscription period and permanent entitlement without merging balances',()=>{
  assert.match(root,/AdminCommerceUserProfile userId=\{detail.user.id\}/);
