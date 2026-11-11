@@ -1357,7 +1357,6 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .cmi-access-num {display:block;font-size:11px;font-weight:780;letter-spacing:.08em;color:#5479b6;margin-bottom:12px;}
 .cmi-access-feature strong {display:block;font-size:16px;color:#1b3155;line-height:1.45;}
 .cmi-access-feature p {color:#5c6f89;line-height:1.7;font-size:13px;margin:10px 0 0;}
-.cmi-access-disclaimer {font-size:12px;line-height:1.8;color:#667894;margin:0;}
 .cmi-access-actions {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:18px;border-top:1px solid #dfe8f5;padding-top:20px;}
 @media (max-width:820px) {
   .public-refresh .header-actions .momentum-terminal-entry {display:none;}
@@ -1378,12 +1377,8 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .cmi-founder-narrative .cmi-theory-lead {font-size:clamp(21px,2.2vw,29px);line-height:1.46;font-weight:800;letter-spacing:-.025em;color:#182a48;max-width:860px;margin-bottom:24px;}
 .cmi-founder-narrative .cmi-theory-paragraph {font-size:14px;}
 .cmi-founder-narrative .cmi-theory-manifesto {margin-top:25px;font-size:clamp(17px,2vw,22px);font-weight:800;line-height:1.55;color:#2659bf;letter-spacing:.01em;}
-.cmi-research-status {max-width:960px;margin-top:24px;border-left:3px solid #9db7e9;background:#edf3fc;border-radius:0 10px 10px 0;padding:15px 18px;}
-.cmi-research-status strong {display:block;font-size:13px;color:#294c84;}
-.cmi-research-status p {margin:6px 0 0;font-size:12px;line-height:1.85;color:#587092;}
 .cmi-capabilities-heading {font-size:15px;font-weight:800;color:#1c3155;margin:5px 0 -4px;}
 @media(max-width:520px){
  .cmi-founder-narrative p+p {margin-top:12px;}
  .cmi-founder-narrative .cmi-theory-lead {margin-bottom:20px;}
- .cmi-research-status {padding:13px 14px;}
 }

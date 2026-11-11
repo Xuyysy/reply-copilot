@@ -103,10 +103,6 @@ export default function CreatorMomentumIntelligence({userId="terminal"}:{userId?
        <span className="cmi-theory-kicker">{t("创始人研究主张 / 互动势能临界值","FOUNDER'S THESIS / CREATOR MOMENTUM THRESHOLD")}</span>
        {founderNarrative.map(([zh,en],index)=><p key={index} className={index===0?"cmi-theory-lead":index===6?"cmi-theory-manifesto":"cmi-theory-paragraph"}>{t(zh,en)}</p>)}
       </div>
-      <div className="cmi-research-status" role="note">
-       <strong>{t("研究愿景与已上线能力的边界","Research vision vs. available capabilities")}</strong>
-       <p>{t("以上七段为原创者提出的完整理论与技术研究方向，不代表 X 官方验证，也不表示历史样本数据库、创作者榜单实时接入或持续模型训练等技术链路均已上线。当前可核验的终端能力基于插件已确认交付的 AI 生成事件与后台参考区间，不包含 X 官方曝光量或实际发布的评论数。","The seven paragraphs present the founder's complete thesis and research roadmap—not an X-endorsed finding or a claim that historical datasets, live creator-rank integrations or continuous model training are all deployed. The current verified terminal uses acknowledged AI generation deliveries and server-managed reference ranges, not X impressions or actually published replies.")}</p>
-      </div>
      </div>
      <h4 className="cmi-capabilities-heading">{t("已提供的分析能力","Available analysis capabilities")}</h4>
      <div className="cmi-access-grid" aria-label={t("终端功能介绍","Terminal capabilities")}>
@@ -114,7 +110,6 @@ export default function CreatorMomentumIntelligence({userId="terminal"}:{userId?
       <div className="cmi-access-feature"><span className="cmi-access-num">02 / SIGNAL</span><strong>{t("三阶段临界信号","Three-stage threshold signals")}</strong><p>{t("以三段独立的临界参考区间观察积累节奏，辅助识别值得尝试原创发布的窗口；实际提醒以插件本机阈值为准。","Study three independent reference windows and potential moments to try an original post; actual reminders follow the extension's local thresholds.")}</p></div>
       <div className="cmi-access-feature"><span className="cmi-access-num">03 / CURVE</span><strong>{t("全天势能曲线与解读","Daily momentum chart & insights")}</strong><p>{t("观察当天 CMI 指数与阶段进度的时间趋势，理解研究参考信号如何随可核验的活动记录变化。","See how the day's CMI index and stage progress evolve with verified activity records.")}</p></div>
      </div>
-     <p className="cmi-access-disclaimer">{t("这些指标属于独立研究参考，并非 X 官方流量数据，不保证曝光或收益。实际三阶段提醒由 Chrome 插件管理，在达到当天阈值后的下一次原生回复操作时触发；终端参考节点不代表提醒已发出。","These are independent research signals, not official X distribution data or guarantees of reach or revenue. Actual three-stage reminders come from the Chrome extension, on the next native Reply action after its daily threshold; terminal reference nodes do not prove any reminder was shown.")}</p>
      <div className="cmi-access-actions">
       <div className="min-w-0"><strong>{state==="guest"?t("登录后即可检查解锁资格","Sign in to check your access"):t("终端仅对已核验的付费账户开放","Available to verified paid accounts")}</strong><p className="mt-1 text-sm text-muted-foreground">{t("付费资格由服务器核验，免费赠送的回复次数不等于终端访问权限。","Access is verified by the server; welcome reply credits do not unlock the terminal.")}</p></div>
       <div className="flex flex-wrap gap-2">

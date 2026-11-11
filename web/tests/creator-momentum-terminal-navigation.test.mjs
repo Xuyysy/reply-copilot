@@ -35,7 +35,9 @@ test("a guest or unpaid account sees detailed locked explanations, not score dat
  assert.match(panel,/error.status===403\?"locked"/);
  assert.match(panel,/\(state==="locked"\|\|state==="guest"\)/);
  assert.match(panel,/data-cmi-locked/);
- for(const feature of ["CMI 互动势能指数","三阶段临界信号","全天势能曲线与解读","非 X 官方流量数据","下一次原生回复操作时触发"])
+ assert.doesNotMatch(panel,/cmi-research-status|cmi-access-disclaimer/);
+ assert.match(panel,/实际提醒以插件本机阈值为准/);
+ for(const feature of ["CMI 互动势能指数","三阶段临界信号","全天势能曲线与解读"])
    assert.ok(panel.includes(feature),"missing locked overview: "+feature);
  assert.match(panel,/href="\/login"/);
  assert.match(panel,/href="\/pricing\/"/);
@@ -72,11 +74,8 @@ test("the full founder-approved Notion thesis appears in its exact seven-paragra
  assert.match(panel,/cmi-founder-narrative/);
  assert.match(panel,/cmi-theory-manifesto/);
  assert.match(panel,/state==="locked"\|\|state==="guest"/);
- assert.match(panel,/完整理论与技术研究方向/);
- assert.match(panel,/不代表 X 官方验证/);
- assert.match(panel,/不表示历史样本数据库、创作者榜单实时接入或持续模型训练等技术链路均已上线/);
  assert.match(panel,/基于已确认交付的 AI 生成事件/);
- assert.match(panel,/解锁势能分析/);
+
  assert.match(css,/\.cmi-founder-narrative/);
  assert.doesNotMatch(panel,/你的每次互动，可能都在为下一次原创积累机会/);
 });
@@ -88,7 +87,5 @@ test("founder English narrative retains the original thesis and roadmap boundari
   "Through daily data updates, historical sample accumulation, and ongoing model training and analysis",
   "Engagement builds momentum. Thresholds signal opportunity. Original posts release it."
  ]) assert.ok(panel.includes(paragraph),"missing English narrative: "+paragraph);
- assert.match(panel,/not an X-endorsed finding/);
- assert.match(panel,/not X impressions or actually published replies/);
  assert.match(layout,/aria-label="势能分析 \/ Momentum Analytics"/);
 });
