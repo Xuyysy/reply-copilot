@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {fixture} from './helpers/payment-v2.mjs';
+
+const proposedIndexes=readFileSync(new URL('../sql-proposals/0026_admin_v2_read_indexes.sql',import.meta.url),'utf8');
 
 function plan(sql,params=[]){
  const f=fixture();
- try{return f.sql.prepare('EXPLAIN QUERY PLAN '+sql).all(...params).map(x=>String(x.detail));}
+ try{
+  // Explicit local application: this SQL is NOT automatically part of any
+  // Staging/Production migration chain until separately approved.
+  f.sql.exec(proposedIndexes);
+  return f.sql.prepare('EXPLAIN QUERY PLAN '+sql).all(...params).map(x=>String(x.detail));
+ }
  finally{f.sql.close();}
 }
 function uses(details,name){
