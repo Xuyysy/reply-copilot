@@ -49,3 +49,15 @@ test("invalid profile values are rejected and stored corrupt profile falls back"
   assert.equal((await service.get()).name, "Personal");
   assert.deepEqual((await service.get()).writingSamples, ["My own words"]);
  });
+
+
+test("retired language choice preserves stored custom voice and writing samples",async()=>{
+ const store=memoryStorage(),service=new VoiceProfileService(store);
+ store.data[VOICE_PROFILE_KEY]={...DEFAULT_VOICE_PROFILE,name:"Custom",language:"fr",writingSamples:["My own original words"],customInstructions:"Dry humor only"};
+ const profile=await service.get();
+ assert.equal(profile.language,"auto");
+ assert.equal(profile.name,"Custom");
+ assert.deepEqual(profile.writingSamples,["My own original words"]);
+ assert.equal(profile.customInstructions,"Dry humor only");
+ assert.equal(store.data[VOICE_PROFILE_KEY].language,"fr");
+});

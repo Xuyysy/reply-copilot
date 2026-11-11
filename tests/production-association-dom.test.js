@@ -45,6 +45,79 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   results.push({name:'another_status_photo_is_not_evidence',ok:api.composerAssociation.snapshot(document,wrongPost,initial,initial,10).editors[0].contextMatches===false});
   document.querySelector('#modals').replaceChildren();const shell=document.createElement('div');shell.setAttribute('role','dialog');shell.innerHTML='<div role="textbox" contenteditable="true"></div>';document.querySelector('#modals').append(shell);
   const emptyShell=api.composerAssociation.snapshot(document,wrongPost,initial,initial,10);results.push({name:'modal_shell_waits_for_source_article',ok:emptyShell.editors.length===1&&emptyShell.editors[0].contextMatches===null&&emptyShell.editors[0].contextStatusId===null});
+  // The X quote preview is often a nested [data-testid=quoteTweet]
+  // WITHOUT its own article. Its different /status/ is not the parent.
+  document.querySelector('#modals').replaceChildren();
+  const quotedSource=source('107');
+  quotedSource.insertAdjacentHTML('beforeend','<div data-testid="quoteTweet"><a href="https://x.com/other/status/991">quoted</a><div data-testid="tweetText">different quote text</div></div>');
+  const quotedPost=api.composerAssociation.capturePost(api.postExtractor.extractPost(quotedSource));
+  const quotedEditor=modal();quotedEditor.focus();
+  quotedEditor.closest('[role="dialog"]').querySelector('article').insertAdjacentHTML('beforeend','<div data-testid="quoteTweet"><a href="https://x.com/other/status/991">quoted</a><div data-testid="tweetText">different quote text</div></div>');
+  const quotedFacts=api.composerAssociation.snapshot(document,quotedPost,initial,initial,10);
+  results.push({name:'quoted_card_status_link_is_not_parent',ok:quotedPost.statusId==='107'&&quotedPost.sourceText==='same text'&&quotedFacts.editors[0].contextStatusId===null&&quotedFacts.editors[0].contextMatches===true});
+  document.querySelector('#modals').replaceChildren();
+  const nestedEditor=modal();nestedEditor.focus();
+  nestedEditor.closest('[role="dialog"]').querySelector('article').insertAdjacentHTML('beforeend','<article data-testid="quoteTweet"><a href="https://x.com/other/status/992">quote</a><div data-testid="tweetText">quoted inner article</div></article>');
+  const nestedFacts=api.composerAssociation.snapshot(document,quotedPost,initial,initial,10);
+  results.push({name:'nested_quote_article_ignored',ok:nestedFacts.editors[0].contextArticleCount===1&&nestedFacts.editors[0].contextMatches===true});
+  document.querySelector('#modals').replaceChildren();
+  const videoSource=source('108');videoSource.insertAdjacentHTML('beforeend','<div data-testid="videoPlayer">media</div>');
+  const videoPost=api.composerAssociation.capturePost(api.postExtractor.extractPost(videoSource));
+  const videoEditor=modal();videoEditor.focus();
+  videoEditor.closest('[role="dialog"]').querySelector('[data-testid="tweetText"]').textContent='same text pic.x.com/Abcd';
+  const videoFacts=api.composerAssociation.snapshot(document,videoPost,initial,initial,10);
+  results.push({name:'text_with_video_media_suffix',ok:videoPost.hasCapturedMedia===true&&videoFacts.editors[0].contextMatches===true});
+  document.querySelector('#modals').replaceChildren();
+  const photosSource=source('109');photosSource.insertAdjacentHTML('beforeend','<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/mock.jpg"></div>');
+  const photosPost=api.composerAssociation.capturePost(api.postExtractor.extractPost(photosSource));
+  const photosEditor=modal();photosEditor.focus();
+  photosEditor.closest('[role="dialog"]').querySelector('[data-testid="tweetText"]').textContent='same text pic.x.com/Abcd pic.x.com/EFgh';
+  const photosFacts=api.composerAssociation.snapshot(document,photosPost,initial,initial,10);
+  results.push({name:'multiple_photo_media_suffixes',ok:photosPost.hasCapturedMedia===true&&photosFacts.editors[0].contextMatches===true});
+  document.querySelector('#modals').replaceChildren();
+  const wrongEditor=modal('991');wrongEditor.focus();
+  const wrongFacts=api.composerAssociation.snapshot(document,quotedPost,initial,initial,10);
+  results.push({name:'explicit_other_post_identity_still_rejected',ok:wrongFacts.editors[0].contextStatusId==='991'&&wrongFacts.editors[0].contextMatches===false});
+  // X can present a quote as a generic role=link card with its OWN
+  // timestamp; it must not override the parent without an explicit testid.
+  document.querySelector('#modals').replaceChildren();
+  const roleQuote='<div role="link" tabindex="0"><div data-testid="User-Name"><span>@quoted</span></div><a href="https://x.com/other/status/993"><time>Nov 11</time></a><div data-testid="tweetText">a different quote</div></div>';
+  const roleSource=source('110');roleSource.insertAdjacentHTML('beforeend',roleQuote);
+  const rolePost=api.composerAssociation.capturePost(api.postExtractor.extractPost(roleSource));
+  const roleEditor=modal();roleEditor.focus();
+  roleEditor.closest('[role="dialog"]').querySelector('article').insertAdjacentHTML('beforeend',roleQuote);
+  const roleFacts=api.composerAssociation.snapshot(document,rolePost,initial,initial,10);
+  results.push({name:'role_link_quote_with_timestamp_excluded',ok:rolePost.statusId==='110'&&rolePost.sourceText==='same text'&&roleFacts.editors[0].contextStatusId===null&&roleFacts.editors[0].contextMatches===true});
+  // X's media-rich composer can put tweetText directly under the dialog
+  // without rendering any parent article. Scope strictly to that dialog.
+  document.querySelector('#modals').replaceChildren();
+  const bareSource=source('112'),barePost=api.composerAssociation.capturePost(api.postExtractor.extractPost(bareSource));
+  const bareModal=document.createElement('div');bareModal.setAttribute('role','dialog');
+  bareModal.innerHTML='<div data-testid="tweetText">same text</div><div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(bareModal);
+  const bareEditor=bareModal.querySelector('[contenteditable]');bareEditor.focus();
+  const bareFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  const bareSession=api.composerAssociation.create({trusted:true,statusId:'112',requestId:'bare',now:0,baselineModalCount:0,baselineEditors:[]});
+  results.push({name:'modal_without_parent_article_binds_from_scoped_text',ok:bareFacts.editors[0].contextArticleCount===0&&bareFacts.editors[0].contextMatches===true&&bareSession.evaluate(bareFacts).editor===bareEditor});
+  document.querySelector('#modals').replaceChildren();
+  const quoteOnly=document.createElement('div');quoteOnly.setAttribute('role','dialog');
+  quoteOnly.innerHTML='<div data-testid="quoteTweet"><div data-testid="tweetText">same text</div></div><div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(quoteOnly);quoteOnly.querySelector('[contenteditable]').focus();
+  const quoteOnlyFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'quote_only_text_without_root_waits',ok:quoteOnlyFacts.editors[0].contextMatches===null});
+  document.querySelector('#modals').replaceChildren();
+  const emptyDialog=document.createElement('div');emptyDialog.setAttribute('role','dialog');
+  emptyDialog.innerHTML='<div role="textbox" contenteditable="true"></div>';
+  document.querySelector('#modals').append(emptyDialog);emptyDialog.querySelector('[contenteditable]').focus();
+  const noBorrowFacts=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'no_borrowing_text_from_feed_behind_modal',ok:noBorrowFacts.editors[0].contextMatches===null});
+  document.querySelector('#modals').replaceChildren();
+  const mediaOverlay=document.createElement('div');mediaOverlay.setAttribute('role','dialog');
+  mediaOverlay.innerHTML='<article data-testid="tweet"><div data-testid="tweetText">same text</div><button data-testid="reply">Reply</button><div data-testid="videoPlayer"></div></article>';
+  document.querySelector('#modals').append(mediaOverlay);
+  const mediaBaseline=api.composerAssociation.baseline(document);
+  const mediaOnlySnapshot=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
+  results.push({name:'media_viewer_dialog_without_composer_is_not_reply_modal',ok:mediaBaseline.baselineModalCount===0&&mediaBaseline.visibleReplyEditorCount===0&&mediaOnlySnapshot.visibleDialogCount===0});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -52,6 +125,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,14);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,24);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
