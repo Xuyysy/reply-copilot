@@ -1,0 +1,87 @@
+name: Chrome 0.3.7 Production compatibility candidate (build only)
+on:
+  push:
+    branches:
+      - chatgpt/production-v037-approved-release-20261111
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Build Production extension using existing Store identity (NO publishing)
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+        run: |
+          set -euo pipefail
+          npm run build:production
+          python3 scripts/package-production-ci.py
+          python3 - <<'PY'
+          import hashlib,json,pathlib,zipfile
+          root=pathlib.Path('dist/production-ci/extension')
+          provenance=json.loads((root/'provenance.json').read_text())
+          assert provenance['version']=='0.3.7'
+          assert provenance['extensionId']=='fgfjajofkapebgphfidblngcjomkbdaj'
+          assert provenance['sourceSha'] and len(provenance['sourceSha'])==40
+          archive=root/provenance['archive']
+          assert archive.is_file() and hashlib.sha256(archive.read_bytes()).hexdigest()==provenance['sha256']
+          with zipfile.ZipFile(archive) as z:
+              names=z.namelist()
+              assert 'manifest.json' in names and 'config/runtime.js' in names
+              assert not any(name.startswith('staging/') for name in names)
+              manifest=json.loads(z.read('manifest.json'))
+              runtime=z.read('config/runtime.js').decode()
+              assert manifest['version']=='0.3.7'
+              assert manifest['host_permissions']==['https://api.x-reply-helper.top/*']
+              assert manifest['externally_connectable']=={'matches':['https://app.x-reply-helper.top/*']}
+              assert manifest['permissions']==['contextMenus','storage','sidePanel','clipboardWrite']
+              assert 'channel: "production"' in runtime and 'https://api.x-reply-helper.top' in runtime
+          print('PASS: Production Chrome ZIP, identity, version, origin, checksum, permissions')
+          PY
+      - name: Compile Production API Worker with exact source (NO deployment)
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run typecheck
+          mkdir -p dist/chrome-037-rc/worker
+          (cd api && ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --dry-run --outdir "$GITHUB_WORKSPACE/dist/chrome-037-rc/worker")
+      - name: Record immutable release candidate provenance
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/chrome-037-rc
+          cp dist/production-ci/extension/reply-copilot-production-0.3.7.zip dist/chrome-037-rc/
+          cp dist/production-ci/extension/provenance.json dist/chrome-037-rc/
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path('dist/chrome-037-rc')
+          prov=json.loads((root/'provenance.json').read_text())
+          assert prov['sourceSha']==os.environ['SOURCE_SHA']
+          files={p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(root.rglob('*')) if p.is_file()}
+          assert 'worker/index.js' in files
+          (root/'release-summary.json').write_text(json.dumps({'sourceSha':prov['sourceSha'],'channel':'production-release-candidate','chromeVersion':prov['version'],'chromeId':prov['extensionId'],'files':files,'deploymentPerformed':False,'storeUploadPerformed':False},indent=2)+'\n')
+          print('PASS: immutable Chrome/Worker candidate from',prov['sourceSha'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chrome-037-production-candidate-${{ github.sha }}
+          path: dist/chrome-037-rc/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Explicit no-release guard
+        run: |
+          echo '### Candidate only: no Worker deploy, D1, Pages, or Chrome Web Store upload' >> "$GITHUB_STEP_SUMMARY"
+          echo "Source: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
