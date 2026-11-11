@@ -10,8 +10,18 @@ type Cycle={stage:number;percent:number;referenceCrossings:number;windowStage:nu
 type Observation={hour:number;score:number;cycleProgress:number;cycleStage:number;referenceCrossings:number};
 type Insights={eligible:boolean;available:boolean;day?:string;timezone?:string;policyVersion?:string;
   score?:number;cycle?:Cycle;curve?:Observation[];observedHours?:number};
-type PanelState="loading"|"ready"|"locked"|"off"|"error";
+type PanelState="loading"|"ready"|"locked"|"guest"|"off"|"error";
 const numerals=["I","II","III"];
+const founderNarrative:[string,string][]=[
+ ["我认为，原创帖的传播机会，并不只取决于发布的那一刻。","I believe an original post's distribution opportunity is shaped by more than the moment it is published."],
+ ["持续参与高质量讨论，可能让账号逐渐建立话题关联、受众连接与行为信号，形成潜在的传播势能。","Sustained participation in meaningful conversations may help an account build topic relevance, audience connections, and behavioral signals that contribute to potential distribution momentum."],
+ ["我将这种互动积累过程中，可能出现传播条件非线性变化的关键节点，定义为「互动势能临界值」。","I call the point at which accumulated engagement may correspond to a nonlinear shift in distribution conditions the “Creator Momentum Threshold.”"],
+ ["互动势能分析引擎融合 X 推荐机制研究、互动时序建模、传播趋势分析及中文区创作者X榜单，构建多维势能评估体系。","The Creator Momentum Analysis Engine brings together research on X's recommendation mechanisms, engagement time-series modeling, distribution trends, and Chinese-language creator rankings to develop a multidimensional momentum assessment framework."],
+ ["通过每日动态数据更新、历史样本数据库积累与持续模型训练分析，不断优化行为信号权重与临界策略，探索互动积累和原创内容曝光表现之间的潜在关联。","Through daily data updates, historical sample accumulation, and ongoing model training and analysis, the framework aims to refine behavioral signal weights and threshold strategies, exploring potential relationships between engagement accumulation and original-post impressions."],
+ ["系统通过分阶段临界识别，辅助捕捉值得尝试原创发布的关键窗口。","Staged threshold detection helps identify promising windows to consider publishing original content."],
+ ["互动是蓄势，临界是信号，原创是释放。","Engagement builds momentum. Thresholds signal opportunity. Original posts release it."]
+];
+
 
 function MomentumChart({observations,observedHours,language}:{observations:Observation[];observedHours:number;language:"zh"|"en"}){
   const points=observations.slice(0,Math.max(1,Math.min(24,observedHours)));
@@ -32,7 +42,7 @@ function MomentumChart({observations,observedHours,language}:{observations:Obser
   </div>;
 }
 
-export default function CreatorMomentumIntelligence({userId}:{userId:string}){
+export default function CreatorMomentumIntelligence({userId="terminal"}:{userId?:string}){
  const language=useLanguage();
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [revision,setRevision]=useState(0);
@@ -46,7 +56,7 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
      setInsights(result);setState(!result.eligible?"locked":!result.available?"off":"ready");
    }).catch(error=>{
      if(!active)return;
-     setState(error instanceof ApiError&&error.status===403?"locked":"error");
+     setState(error instanceof ApiError&&error.status===403?"locked":error instanceof ApiError&&error.status===401?"guest":"error");
    });
    return()=>{active=false};
  },[userId,revision]);
@@ -86,12 +96,28 @@ export default function CreatorMomentumIntelligence({userId}:{userId:string}){
   </CardHeader>
   <CardContent className="space-y-4">
    {state==="loading"&&<div role="status" className="cmi-placeholder">{t("正在读取今日势能分析…","Loading today's momentum analysis…")}</div>}
-   {state==="locked"&&<div data-cmi-locked className="cmi-placeholder flex flex-wrap items-center justify-between gap-4">
-     <div className="flex min-w-0 items-start gap-3"><LockKeyhole size={22} className="shrink-0 text-slate-500"/><div>
-      <p className="font-semibold">{t("解锁互动势能研究终端","Unlock the Creator Momentum Terminal")}</p>
-      <p className="mt-1 text-sm text-muted-foreground">{t("仅对持有有效付费权益的账户开放三阶段临界分析与 CMI 趋势。","The three-stage research dashboard and CMI trends require verified paid access.")}</p>
-     </div></div><Button variant="outline" asChild><a href="/pricing/">{t("查看付费方案","See plans")}<ArrowRight size={15}/></a></Button>
-   </div>}
+   {(state==="locked"||state==="guest")&&<div data-cmi-locked className="cmi-locked-overview space-y-5">
+     <div className="cmi-lock-intro">
+      <span className="cmi-lock-status"><LockKeyhole size={15} aria-hidden="true"/>{t("尚未解锁 · 可了解完整功能","Locked · Explore the complete research thesis")}</span>
+      <div className="cmi-founder-narrative" aria-label={t("互动势能临界值完整理论叙事","Complete Creator Momentum Threshold thesis")}>
+       <span className="cmi-theory-kicker">{t("创始人研究主张 / 互动势能临界值","FOUNDER'S THESIS / CREATOR MOMENTUM THRESHOLD")}</span>
+       {founderNarrative.map(([zh,en],index)=><p key={index} className={index===0?"cmi-theory-lead":index===6?"cmi-theory-manifesto":"cmi-theory-paragraph"}>{t(zh,en)}</p>)}
+      </div>
+     </div>
+     <h4 className="cmi-capabilities-heading">{t("已提供的分析能力","Available analysis capabilities")}</h4>
+     <div className="cmi-access-grid" aria-label={t("终端功能介绍","Terminal capabilities")}>
+      <div className="cmi-access-feature"><span className="cmi-access-num">01 / INDEX</span><strong>{t("CMI 互动势能指数","Creator Momentum Index")}</strong><p>{t("基于已确认交付的 AI 生成事件与后台参考区间，呈现 0–100 的自研势能指数及阶段进度。","A proprietary 0–100 reference index and stage progress, based on acknowledged AI generation deliveries and server-managed ranges.")}</p></div>
+      <div className="cmi-access-feature"><span className="cmi-access-num">02 / SIGNAL</span><strong>{t("三阶段临界信号","Three-stage threshold signals")}</strong><p>{t("以三段独立的临界参考区间观察积累节奏，辅助识别值得尝试原创发布的窗口；实际提醒以插件本机阈值为准。","Study three independent reference windows and potential moments to try an original post; actual reminders follow the extension's local thresholds.")}</p></div>
+      <div className="cmi-access-feature"><span className="cmi-access-num">03 / CURVE</span><strong>{t("全天势能曲线与解读","Daily momentum chart & insights")}</strong><p>{t("观察当天 CMI 指数与阶段进度的时间趋势，理解研究参考信号如何随可核验的活动记录变化。","See how the day's CMI index and stage progress evolve with verified activity records.")}</p></div>
+     </div>
+     <div className="cmi-access-actions">
+      <div className="min-w-0"><strong>{state==="guest"?t("登录后即可检查解锁资格","Sign in to check your access"):t("终端仅对已核验的付费账户开放","Available to verified paid accounts")}</strong><p className="mt-1 text-sm text-muted-foreground">{t("付费资格由服务器核验，免费赠送的回复次数不等于终端访问权限。","Access is verified by the server; welcome reply credits do not unlock the terminal.")}</p></div>
+      <div className="flex flex-wrap gap-2">
+       {state==="guest"&&<Button asChild><a href="/login">{t("登录账户","Sign in")}<ArrowRight size={15}/></a></Button>}
+       <Button variant={state==="guest"?"outline":"default"} asChild><a href="/pricing/">{t("解锁势能分析","Unlock Momentum Analytics")}<ArrowRight size={15}/></a></Button>
+      </div>
+     </div>
+    </div>}
    {state==="off"&&<div data-cmi-off className="cmi-placeholder">
     <strong>{t("分析功能暂未开放","Momentum analysis is not currently active")}</strong>
     <p className="mt-2 text-sm text-muted-foreground">{t("请以管理后台当前功能状态为准。","Availability follows the current admin policy.")}</p>
