@@ -24,7 +24,15 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1},session);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
  };
- const tab=async value=>{await click(`document.querySelector('[role="tab"][id$="-trigger-${value}"]')`);await until(`!!document.querySelector('[role="tabpanel"][data-state="active"] table')`);};
+ const tab=async value=>{
+  if(await evaluate('window.innerWidth<1024')){
+   await until("!!document.querySelector('[data-testid=admin-mobile-workspace]')");
+   await evaluate(`(()=>{const select=document.querySelector('[data-testid=admin-mobile-workspace]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(select,${JSON.stringify(value)});select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  }else{
+   await click(`document.querySelector('[role="tab"][id$="-trigger-${value}"]')`);
+  }
+  await until(`!!document.querySelector('[role="tabpanel"][data-state="active"] table')`);
+ };
  const panel='document.querySelector(\'[role="tabpanel"][data-state="active"]\')';
  try{
   const css=readdirSync(path.join(webRoot,'dist/_astro')).filter(p=>p.endsWith('.css')).map(p=>readFileSync(path.join(webRoot,'dist/_astro',p),'utf8')).join('\n');
@@ -37,6 +45,11 @@ test('real admin tables scroll independently with sticky headers; controls, dial
       if(p==='/v1/admin/dashboard')data={users:window.__rows,aiService:{enabled:true,provider:'Qwen',model:'qwen3.7-flash',keyConfigured:true}};
       else if(p==='/v1/admin/users')data={users:users()};
       else if(p==='/v1/admin/orders')data={orders:orders()};
+      else if(p==='/v1/admin/usage-ledger')data={items:users().map((u,i)=>({request_id:'req-'+i,user_id:u.id,email:u.email,created_at:1793318400000,source:i%2?'subscription':'free',source_evidence:'credit_allocation',period_plan:'pro',model:'model-1',input_tokens:10,output_tokens:8,estimated_cost_micro_usd:4})),nextCursor:null,hasMore:false};
+      else if(p==='/v1/admin/ops-insights')data={time:{from:1793000000000,to:1793318400000,timezone:'UTC',generatedAt:1793318400000},alerts:[],aiUsage:{rowsSampled:0,moreThanSample:false,limit:1000,subscription:0,free:0,paid:0,unattributed:0,plans:[]},aiBudget:{dayUtc:'2026-11-11',limitMicroUsd:1000000,committedMicroUsd:0,percent:0},aiFailures24h:0};
+      else if(p==='/v1/admin/commerce/summary')data={verifiedCredit:{orders:0,buyers:0,gross_fen:0},verifiedSubscription:[],verifiedGrossFen:0,creditConfirmedRefunds:{refunds:0,amount_fen:0},currency:'CNY'};
+      else if(p==='/v1/admin/commerce/orders')data={items:users().map((u,i)=>({id:'combined-'+i,user_id:u.id,email:u.email,created_at:1793318400000,paid_at:1793318400000,product_type:i%2?'subscription':'credit',product_name:'Business',order_kind:'purchase',order_status:'paid',payment_status:'paid',merchant_provider:'mk99',amount_fen:6990,currency:'CNY',credits:i%2?null:400,entitlement_status:'applied',payment_evidence:'verified_event'})),hasMore:false,nextCursor:null};
+      else if(p.startsWith('/v1/admin/commerce/users/'))data={user:{id:p.split('/')[5],email:'person@example.test'},creditBalances:{free_balance:200,paid_balance:400},subscriptionPeriods:[],subscriptionOrders:[],asOf:1793318400000};
       else if(p==='/v1/admin/ledger')data={ledger:users().map((u,i)=>({id:'l'+i,email:u.email,kind:'generation_debit',free_delta:-1,paid_delta:0,reason:'Generation debit / 正常生成',created_at:1793318400000}))};
       else if(p==='/v1/admin/packages')data={packages:[{id:'starter',name_zh:'入门包',name_en:'Starter',credits:400,price_cents:149,price_cny_fen:990,active:1}]};
       else if(p==='/v1/admin/settings')data={settings:[]};else if(p==='/v1/admin/audits')data={audits:[]};else if(p==='/v1/admin/content')data={content:{}};
@@ -63,6 +76,11 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   for(const [width,height] of [[1440,1000],[375,700]])for(const language of ['zh','en'])for(const count of [0,1,5,100]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);
     await evaluate(`window.__mount(${count},${JSON.stringify(language)})`);await until('!!document.querySelector(\'[role="tablist"]\')');
+    const layout=await evaluate(`(()=>{const picker=document.querySelector('[data-testid=admin-mobile-workspace]'),nav=document.querySelector('.admin-console-nav');const p=picker.getBoundingClientRect(),n=nav.getBoundingClientRect();return {viewport:innerWidth,document:document.documentElement.scrollWidth,mobilePicker:p.width>0&&p.height>0,desktopSidebar:n.width>0&&n.height>0,selected:picker.value};})()`);
+    assert.ok(layout.document<=width+1,'Admin console must not overflow: '+JSON.stringify(layout));
+    assert.equal(layout.mobilePicker,width<1024,'Mobile workspace select visibility: '+JSON.stringify(layout));
+    assert.equal(layout.desktopSidebar,width>=1024,'Desktop sidebar visibility: '+JSON.stringify(layout));
+    assert.equal(layout.selected,'overview');
     for(const value of ['users','ledger','orders']){
       await tab(value);await until(`${panel}.querySelector('tbody').children.length===${count}`);
       const info=await evaluate(`(async()=>{const p=${panel},wrap=p.querySelector('.data-table-wrap'),s=wrap.querySelector('[data-slot="table-container"]'),head=s.querySelector('thead');const before=head.getBoundingClientRect().top;const controls=[...p.querySelectorAll('form,button')].filter(el=>!wrap.contains(el));const top=controls.map(el=>el.getBoundingClientRect().top);s.scrollTop=200;s.scrollLeft=150;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {h:s.clientHeight,sh:s.scrollHeight,w:s.clientWidth,sw:s.scrollWidth,outerOverflow:getComputedStyle(wrap).overflow,sticky:getComputedStyle(head).position,headDelta:Math.abs(head.getBoundingClientRect().top-before),controlsStayed:controls.every((el,i)=>Math.abs(el.getBoundingClientRect().top-top[i])<1),aligned:Math.abs(s.querySelector('th').getBoundingClientRect().left-(s.querySelector('td')?.getBoundingClientRect().left??s.querySelector('th').getBoundingClientRect().left))<1,pageWidth:document.documentElement.scrollWidth};})()`);
@@ -166,7 +184,13 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await click(`[...document.querySelectorAll('[role="alertdialog"] button')].find(el=>el.textContent==='Confirm')`);
   await until(`window.__calls.some(c=>c.path==='/v1/admin/users/bulk-status')&&document.querySelectorAll('[role="tabpanel"][data-state="active"] tbody tr')[1]?.textContent.includes('Frozen')`);
   assert.deepEqual(await evaluate(`window.__calls.find(c=>c.path==='/v1/admin/users/bulk-status').body.userIds`),['u1','u2']);
-  await tab('orders');await click(`${panel}.querySelector('tbody a,tbody button')`);await until('!!document.querySelector(\'[role="dialog"]\')');assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
+   await tab('orders');
+   await click(`${panel}.querySelector('[data-testid="admin-unified-orders"] tbody button')`);
+   await until(`${panel}.textContent.includes('Order review summary')`);
+   await click(`${panel}.querySelector('details > summary')`);
+   await click(`${panel}.querySelector('details tbody button')`);
+   await until('!!document.querySelector(\'[role="dialog"]\')');
+   assert.ok((await evaluate('document.querySelector(\'[role="dialog"]\').textContent')).includes('o0'));
   await click(`document.querySelector('[role="dialog"] [data-slot="dialog-close"]')`);
   await tab('packages');assert.equal(await evaluate(`${panel}.querySelectorAll('.admin-list-scroll').length`),0);
   console.log(`PASS: ${scenarios} table/layout scenarios; ${detailScenarios} user-detail viewport/language/row scenarios; mark-test, archive, notes; user selection, CSV, freeze, bulk status, user/order details and unaffected package tab`);

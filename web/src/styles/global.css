@@ -1216,3 +1216,120 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
  .cmi-overline {font-size:9px;letter-spacing:.05em}
 }
 @media(prefers-reduced-motion:reduce){.cmi-detail *, .cmi-cycle-fill{scroll-behavior:auto;transition:none!important}}
+
+
+/* Admin console: app-oriented information density. Scoped to /admin only. */
+.admin-page-heading,
+.container.admin-app-shell {
+  width: min(1480px, calc(100% - 64px));
+  max-width: none;
+  margin-inline: auto;
+}
+.admin-page-heading {
+  padding: 32px 0 20px;
+}
+.admin-page-heading-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: #66758b;
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: .13em;
+}
+.admin-page-heading-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2563eb;
+  box-shadow: 0 0 0 4px #dbeafe;
+}
+.admin-page-heading h1 {
+  margin: 9px 0 4px;
+  font-size: clamp(29px, 3.1vw, 37px);
+  font-weight: 760;
+  line-height: 1.18;
+  letter-spacing: -.045em;
+}
+.admin-page-heading p {
+  margin: 0;
+  max-width: 730px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: #65748a;
+}
+.container.admin-app-shell {
+  padding: 0 0 70px;
+}
+.admin-console-content { min-width: 0; }
+.admin-console-nav {
+  border: 1px solid #e3e8f0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 4px 22px rgb(15 23 42 / .035);
+}
+.admin-console-overview [data-slot="card"],
+.admin-console-content [data-slot="card"] {
+  min-width: 0;
+  border-color: #e5eaf1;
+  box-shadow: 0 1px 3px rgb(15 23 42 / .025);
+}
+.admin-console-overview [data-slot="card-header"],
+.admin-console-content [data-slot="card-header"] {
+  gap: 5px;
+}
+.admin-console-overview [data-slot="card-title"] {
+  font-size: 15px;
+  letter-spacing: -.015em;
+}
+.admin-console-overview .admin-overview-secondary > summary {
+  list-style: none;
+}
+.admin-console-overview .admin-overview-secondary > summary::-webkit-details-marker {
+  display: none;
+}
+.admin-console-overview .admin-kpi-number {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.035em;
+}
+.admin-console-overview .admin-ops-feed {
+  max-height: 350px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.admin-console-overview [data-testid="admin-ops-alert"] {
+  align-items: start;
+}
+.admin-console-overview [data-testid="admin-ops-alert"] button {
+  flex: 0 0 auto;
+  min-height: 30px;
+}
+@media (max-width: 1023px) {
+  .admin-page-heading,
+  .container.admin-app-shell {
+    width: min(100% - 40px, 1480px);
+  }
+}
+@media (max-width: 640px) {
+  .admin-page-heading,
+  .container.admin-app-shell {
+    width: calc(100% - 28px);
+  }
+  .admin-page-heading {
+    padding: 22px 0 14px;
+  }
+  .admin-page-heading h1 {
+    font-size: 29px;
+  }
+  .admin-page-heading p {
+    font-size: 12px;
+  }
+  .admin-console-overview [data-slot="card-content"] {
+    padding-inline: 14px;
+  }
+  .admin-console-overview [data-slot="card-header"] {
+    padding-inline: 14px;
+  }
+}

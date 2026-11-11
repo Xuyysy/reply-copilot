@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+const root=readFileSync(new URL('../src/components/admin/AdminDashboard.tsx',import.meta.url),'utf8');
+const panel=readFileSync(new URL('../src/components/admin/AdminOperationsInsights.tsx',import.meta.url),'utf8');
+const api=readFileSync(new URL('../../api/src/admin-operations-insights.ts',import.meta.url),'utf8');
+
+test('Admin V2 mounts operations inbox and AI economics only in relevant workspaces',()=>{
+ assert.match(root,/AdminOperationsInsights active=\{tab==="overview"\} mode="alerts"/);
+ assert.match(root,/AdminOperationsInsights active=\{tab==="cost"\} mode="plans"/);
+ assert.match(panel,/\/v1\/admin\/ops-insights/);
+ assert.match(panel,/admin-ops-alert/);
+ assert.ok(panel.includes("navigate(a.order_id?'orders':a.target,a.order_id)"));
+ assert.ok(root.includes('navigate={navigateFromRisk}'));
+ assert.match(panel,/credit_entitlement_gap/);
+ assert.match(panel,/subscription_entitlement_gap/);
+ assert.match(panel,/moreThanSample/);
+ assert.match(panel,/NOT full seven-day totals/);
+ assert.match(panel,/not provider billing, net settlement, or profit/);
+});
+test('AI insights are bounded and mark uncertain cost and upgraded plan attribution',()=>{
+ assert.match(api,/DELIVERIES_LIMIT=1000/);
+ assert.match(api,/LIMIT \?/);
+ assert.match(api,/moreThanSample/);
+ assert.match(api,/plan_attribution|Plan is current period snapshot/);
+ assert.match(api,/costedDeliveries/);
+ assert.match(api,/requireAdminSession\(request,env\)/);
+ assert.doesNotMatch(api,/\.run\(/);
+ assert.doesNotMatch(api,/\.batch\(/);
+});
+test('Rarely used audit and website editor data is loaded only in active workspace',()=>{
+ const index=root.indexOf('const load = useCallback');
+ const after=root.indexOf('  useEffect(() => { void load(); }, [load]);');
+ assert.ok(index>0&&after>index);
+ const initial=root.slice(index,after);
+ assert.doesNotMatch(initial,/read<\{ audits: Audit\[\] \}>\("\/v1\/admin\/audits"\)/);
+ assert.doesNotMatch(initial,/read<\{ content: Record<string, string> \}>\("\/v1\/admin\/content"\)/);
+ assert.match(root,/tab!=="audits"\|\|auditsLoaded/);
+ assert.match(root,/tab!=="content"\|\|contentLoaded/);
+ assert.match(root,/contentLoaded \? <SiteEditor/);
+ assert.match(root,/auditsLoaded \? <Card/);
+});
