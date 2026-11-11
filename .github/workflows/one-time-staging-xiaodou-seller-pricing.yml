@@ -25,8 +25,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
-      SOURCE_SHA: '714b1fd81b6cfdc1e63dd8c705cf719eb48f661a'
-      CI_RUN_ID: '42942415304'
+      SOURCE_SHA: '0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0'
+      CI_RUN_ID: '42943036133'
       BASE_SHA: '145ffee1c405571479faffbda765e20eeab6283d'
       EXPECTED_WORKER_VERSION: '176ca159-0846-4b88-8773-b32845559d1d'
       EXPECTED_WORKER_DEPLOYMENT: 'cefa3dfd-a79c-4e1f-9fdc-9af4a2c6abea'
@@ -40,11 +40,11 @@ jobs:
       - name: Checkout exact Staging fix candidate
         uses: actions/checkout@v4
         with:
-          ref: 714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
+          ref: 0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify successful immutable CI and exactly eleven authorized changed files
+      - name: Verify successful immutable CI and exactly thirteen authorized changed files
         shell: bash
         run: |
           set -euo pipefail
@@ -68,6 +68,8 @@ jobs:
           web/src/pages/checkout.astro
           web/src/pages/index.astro
           web/tests/package-summary.test.mjs
+          web/tests/public-subscription-integration.test.mjs
+          web/tests/subscription-website-admin.test.mjs
           web/tests/xiaodou-credit-cancel.test.mjs
           FILES
           diff -u "$RUNNER_TEMP/allowed-files" "$RUNNER_TEMP/changed-files"
@@ -98,16 +100,16 @@ jobs:
       - name: Download immutable Staging Pages build from same successful CI run
         uses: actions/download-artifact@v4
         with:
-          name: staging-pages-714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
-          run-id: 42942415304
+          name: staging-pages-0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0
+          run-id: 42943036133
           github-token: ${{ github.token }}
           path: web/dist
 
       - name: Download independently generated artifact hashes and provenance
         uses: actions/download-artifact@v4
         with:
-          name: staging-extension-714b1fd81b6cfdc1e63dd8c705cf719eb48f661a
-          run-id: 42942415304
+          name: staging-extension-0ed2a77a1fb91161baec15f9ddbf1b6aac3e4fa0
+          run-id: 42943036133
           github-token: ${{ github.token }}
           path: dist/ci
 
