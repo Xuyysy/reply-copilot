@@ -78,6 +78,16 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const wrongEditor=modal('991');wrongEditor.focus();
   const wrongFacts=api.composerAssociation.snapshot(document,quotedPost,initial,initial,10);
   results.push({name:'explicit_other_post_identity_still_rejected',ok:wrongFacts.editors[0].contextStatusId==='991'&&wrongFacts.editors[0].contextMatches===false});
+  // X can present a quote as a generic role=link card with its OWN
+  // timestamp; it must not override the parent without an explicit testid.
+  document.querySelector('#modals').replaceChildren();
+  const roleQuote='<div role="link" tabindex="0"><div data-testid="User-Name"><span>@quoted</span></div><a href="https://x.com/other/status/993"><time>Nov 11</time></a><div data-testid="tweetText">a different quote</div></div>';
+  const roleSource=source('110');roleSource.insertAdjacentHTML('beforeend',roleQuote);
+  const rolePost=api.composerAssociation.capturePost(api.postExtractor.extractPost(roleSource));
+  const roleEditor=modal();roleEditor.focus();
+  roleEditor.closest('[role="dialog"]').querySelector('article').insertAdjacentHTML('beforeend',roleQuote);
+  const roleFacts=api.composerAssociation.snapshot(document,rolePost,initial,initial,10);
+  results.push({name:'role_link_quote_with_timestamp_excluded',ok:rolePost.statusId==='110'&&rolePost.sourceText==='same text'&&roleFacts.editors[0].contextStatusId===null&&roleFacts.editors[0].contextMatches===true});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -85,6 +95,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,19);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,20);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
