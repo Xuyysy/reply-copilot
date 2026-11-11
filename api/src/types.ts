@@ -49,6 +49,8 @@ export interface Env {
   XIAODOU_EPAY_KEY?: string;
   XIAODOU_NETWORK_DIAGNOSTIC_ENABLED?: string;
   XIAODOU_SOURCE_IP_CONFIRMED?: string;
+  /** The operator independently confirmed the vendor IP allowlist is disabled. */
+  XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED?: string;
   XIAODOU_RSA2_SUBSCRIPTIONS_READY?: string;
   XIAODOU_WECHAT_MERCHANT_APPROVED?: string;
   XIAODOU_TRADE_SCOPE?: string;

@@ -17,7 +17,7 @@ export default function MerchantPaymentSettings({control,language,locked,reason,
  return <section className="space-y-4 rounded-xl border bg-card p-4 sm:p-5" aria-labelledby="merchant-settings-title">
   <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="merchant-settings-title" className="text-base font-semibold">{t('选择收款商家','Choose payment merchant')}</h3><span className="rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground">{t('额度包 + 四档订阅一起切换','Credit packs + all subscriptions')}</span></div>
   <select className="h-11 w-full rounded-lg border border-input bg-background px-3 text-sm font-medium" aria-label={t('当前收款商家','Active payment merchant')} disabled={busy} value={settings.activeMerchant} onChange={e=>setSettings(s=>({...s,activeMerchant:e.target.value as Settings['activeMerchant']}))}><option value="mk99">MK99</option><option value="xiaodou">{t('小豆','Xiaodou')}</option>{control.activeMerchant==='none'&&<option value="none">{t('已暂停（当前配置）','Paused (current setting)')}</option>}</select>
-  <p className="text-xs leading-5 text-muted-foreground">{t('仅影响新订单，旧订单仍由原商家验签结算。切换小豆前必须通过 RSA2 支付宝、订阅与来源 IP 验收。','Only new orders follow the selection. Old orders settle with their original merchant. Xiaodou needs RSA2 Alipay, subscription and source-IP verification before switching.')}</p>
+  <p className="text-xs leading-5 text-muted-foreground">{t('仅影响新订单，旧订单仍由原商家验签结算。切换小豆前必须通过 RSA2 支付宝、订阅与网络接入模式验收。','Only new orders follow the selection. Old orders settle with their original merchant. Xiaodou needs RSA2 Alipay, subscription and approved network mode before switching.')}</p>
   {changed&&<p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{t('你选择了新的配置，尚未保存；当前收款仍按原商家运行。','Your selection is a draft and is not saved; live payments still use the current merchant.')}</p>}
   {settings.activeMerchant==='mk99'&&<div className="space-y-3">
    <div className="grid gap-2 sm:grid-cols-2">
@@ -41,7 +41,7 @@ export default function MerchantPaymentSettings({control,language,locked,reason,
   </div>}
   {settings.activeMerchant==='xiaodou'&&<div className="rounded-lg border bg-muted/20 p-3 text-sm">
     <div className="flex flex-wrap items-center justify-between gap-2"><strong>{t('小豆 · RSA2 支付宝','Xiaodou · RSA2 Alipay')}</strong><span className="text-muted-foreground">{control.activeMerchant==='xiaodou'&&control.availability.rsa2.alipay.available?t('当前可用','Available now'):t('待验证','Pending verification')}</span></div>
-    <p className="mt-2 text-xs leading-5 text-muted-foreground">{t('微信支付尚未开通；易支付不再处理新订单。若 RSA2 订阅或来源 IP 尚未通过验收，保存时服务器会拒绝切换。','WeChat is not yet approved and Epay is retired for new sales. The server blocks switching until RSA2 subscription and source-IP checks pass.')}</p>
+    <p className="mt-2 text-xs leading-5 text-muted-foreground">{t('微信支付尚未开通；易支付不再处理新订单。若 RSA2 订阅或网络接入方式尚未确认，保存时服务器会拒绝切换。','WeChat is not yet approved and Epay is retired for new sales. The server blocks switching until RSA2 subscription and network-mode checks pass.')}</p>
   </div>}
   {settings.activeMerchant==='none'&&<p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">{t('停止创建所有新支付订单，历史订单仍可继续回调和对账。','Stops all new checkout orders. Historical payments can still be verified and reconciled.')}</p>}
   <div className="space-y-2 border-t pt-4">

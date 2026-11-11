@@ -1,5 +1,12 @@
 import type { Env } from './types';
 import { XiaodouClient } from './xiaodou.js';
+/**
+ * Vendor-side allowlist explicitly disabled OR known egress IP confirmed.
+ * Both modes require an exact operator-confirmed '1' and default to false.
+ */
+export function xiaodouNetworkReady(env:Env):boolean {
+ return env.XIAODOU_SOURCE_IP_CONFIRMED==='1'||env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED==='1';
+}
 /** Reused RSA2 client. No secret or signing material leaves the Worker. */
 export function configuredXiaodouMerchant(env:Env):InstanceType<typeof XiaodouClient>{
  if(!env.XIAODOU_BASE_URL||!env.XIAODOU_APP_ID||!env.XIAODOU_KEY_ID||!env.XIAODOU_PRIVATE_KEY||!env.XIAODOU_PLATFORM_PUBLIC_KEYS)

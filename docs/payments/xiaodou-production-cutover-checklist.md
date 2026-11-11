@@ -14,9 +14,9 @@
 
 1. **Remote Production D1 read-only assessment**, including every SELECT, PRAGMA, EXPLAIN or schema probe. Even read-only D1 requires fresh and action-specific permission. Verify deployed schema, applied-migration ledger, existing MK99 subscription/credit payments and events, pending/unknown orders and latest backup status. No speculative D1 reads.
 2. **Production D1 backup and 0025 migration**, an independent approval specifying D1 database, secure backup destination/expiry, tested recovery plan, exact SQL content SHA, migration execution window and authorized operator. Verify D1-specific foreign-key deferral, table recreation and indexes before executing. No automated migration from CI or PR merge.
-3. **Production RSA2 secret provisioning and source IP**, separately authorized: XIAODOU_BASE_URL, XIAODOU_APP_ID, XIAODOU_KEY_ID, XIAODOU_PRIVATE_KEY, XIAODOU_PLATFORM_PUBLIC_KEYS. Keep private material in Secret bindings and do not copy or echo it into logs. Verify exact merchant authorization, verified egress/source IP and allowlist, callback identity and platform signed GET with a read-only provider diagnostic under operator approval.
+3. **Production RSA2 secret provisioning and network access mode**, separately authorized: XIAODOU_BASE_URL, XIAODOU_APP_ID, XIAODOU_KEY_ID, XIAODOU_PRIVATE_KEY, XIAODOU_PLATFORM_PUBLIC_KEYS. Keep private material in Secret bindings and do not copy or echo it into logs. User confirmed the merchant IP allowlist is disabled. The alternative `XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED=1` requires separately approved Production configuration; original `XIAODOU_SOURCE_IP_CONFIRMED=1` remains for verified egress. Verify merchant status, callback identity and signed GET under operator approval. Neither confirmation is auto-set.
 4. **Backward-compatible Worker and Pages release**, separately authorized, after approved D1 and secret gates: merge reviewed source on release/production, require full Push CI and independent Production-build on the same exact SHA, artifact integrity check and protected environment. Pin live Worker/Pages and rollback version. Deploy with active_merchant still MK99 and verify both old MK99 and new code are compatible. Do not switch the merchant in a deploy step.
-5. **Actual merchant flip**, a distinct explicit operator approval following signed real Staging verification of the four 30-day subscription tiers (purchase, renewal, upgrade) and credit packages, source-IP readiness and verified historical callbacks. Start with approved Xiaodou Alipay channel only. WeChat needs separate platform/merchant approval. Record audit reason and owner, observe checkout/settlement telemetry, and never auto-change the merchant based on a green CI.
+5. **Actual merchant flip**, a distinct explicit operator approval following signed real Staging verification of the four 30-day subscription tiers (purchase, renewal, upgrade) and credit packages, confirmed network access mode and verified historical callbacks. Start with approved Xiaodou Alipay channel only. WeChat needs separate platform/merchant approval. Record audit reason and owner, observe checkout/settlement telemetry, and never auto-change the merchant based on a green CI.
 
 ## Financial GO criteria
 
@@ -36,6 +36,6 @@
 ## Unresolved release blockers
 
 - No Production D1 0025 authorization, remote assessment, approved backup or execution.
-- No Production RSA2 credential binding names or confirmed egress/source IP in most recent read-only inspection.
+- No Production RSA2 credential binding names or network access confirmation in most recent read-only inspection. Vendor IP allowlist is disabled per user; new flag still needs separate approved Production configuration.
 - No exact-SHA protected Production release build or real Production signed Xiaodou acceptance.
 - PR #103 stays Draft and unmerged; current payment merchant stays MK99.

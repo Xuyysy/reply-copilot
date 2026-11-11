@@ -180,7 +180,7 @@ test('schema migration 0025 preserves MK99 subscription payment proofs and permi
 });
 
 
-test('admin switches both products to Xiaodou only after explicit subscription and IP readiness',async()=>{
+test('admin switches both products to Xiaodou after explicit subscription and network-mode readiness',async()=>{
  const f=ready();
  try{
   f.env.ADMIN_PORTAL_ENABLED='1';
@@ -195,7 +195,8 @@ test('admin switches both products to Xiaodou only after explicit subscription a
   const rejected=await f.call('/v1/admin/payment-control',{body:params()});
   assert.equal(rejected.status,409,JSON.stringify(rejected.body));
   assert.equal(f.sql.prepare("SELECT value FROM system_settings WHERE key='active_merchant'").get().value,'mk99');
-  f.env.XIAODOU_SOURCE_IP_CONFIRMED='1';
+  // Vendor IP allowlist disabled by operator: no fixed Worker egress required.
+  f.env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED='1';
   const accepted=await f.call('/v1/admin/payment-control',{body:params()});
   assert.equal(accepted.status,200,JSON.stringify(accepted.body));
   assert.equal(accepted.body.activeMerchant,'xiaodou');
@@ -265,7 +266,7 @@ test('Xiaodou renewed subscription is queued for the next period and does not in
 });
 
 
-test('server-side payment methods fail closed when Xiaodou source IP or subscription readiness is missing',async()=>{
+test('Xiaodou methods require confirmed network mode, subscriptions and webhooks',async()=>{
  const f=ready();
  try{
   f.env.XIAODOU_SOURCE_IP_CONFIRMED='0';
@@ -273,13 +274,26 @@ test('server-side payment methods fail closed when Xiaodou source IP or subscrip
   let s=await f.call('/v1/subscriptions/plans',{method:'GET'});
   assert.deepEqual(p.body.paymentMethods,[]);
   assert.deepEqual(s.body.paymentMethods,[]);
-  f.env.XIAODOU_SOURCE_IP_CONFIRMED='1';
+  f.env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED='true';
+  p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[],'only exact 1 counts as operator confirmation');
+  f.env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED='1';
   f.env.XIAODOU_RSA2_SUBSCRIPTIONS_READY='0';
   p=await f.call('/v1/packages',{method:'GET'});
   assert.deepEqual(p.body.paymentMethods,[]);
   f.env.XIAODOU_RSA2_SUBSCRIPTIONS_READY='1';
+  f.env.XIAODOU_WEBHOOKS_ENABLED='0';
   p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[],'signed Webhook readiness cannot be bypassed');
+  f.env.XIAODOU_WEBHOOKS_ENABLED='1';
+  p=await f.call('/v1/packages',{method:'GET'});
+  s=await f.call('/v1/subscriptions/plans',{method:'GET'});
   assert.deepEqual(p.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}]);
+  assert.deepEqual(s.body.paymentMethods,['ALIPAY_H5']);
+  f.env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED='0';
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='1';
+  p=await f.call('/v1/packages',{method:'GET'});
+  assert.deepEqual(p.body.paymentMethods,[{provider:'xiaodou',channel:'ALIPAY_H5'}],'legacy verified egress remains supported');
  }finally{f.sql.close();}
 });
 

@@ -2,6 +2,7 @@ import {mk99Readiness} from './mk99';
 import type { Env } from './types';
 import { epayCheckout } from './epay.js';
 import { XiaodouClient } from './xiaodou.js';
+import {xiaodouNetworkReady} from './xiaodou-merchant';
 
 export type PaymentChannel = 'ALIPAY_H5' | 'WECHAT_H5';
 export type PaymentProvider = 'xiaodou' | 'xiaodou_epay' | 'mk99';
@@ -63,8 +64,9 @@ export async function paymentControl(env:Env){
  };
  const canSell=environmentReady&&operatorEnabled;
  // A stale D1 merchant selection or direct API request must not bypass the
- // operator's separately confirmed RSA2 subscription + source IP readiness.
- const xiaodouReady=env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==='1'&&env.XIAODOU_SOURCE_IP_CONFIRMED==='1'&&env.XIAODOU_WEBHOOKS_ENABLED==='1';
+ // operator's confirmed RSA2 subscription + approved network access mode.
+ // A disabled vendor allowlist is an alternative to fixed egress.
+ const xiaodouReady=env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==='1'&&xiaodouNetworkReady(env)&&env.XIAODOU_WEBHOOKS_ENABLED==='1';
  const methods:PaymentMethod[]=[];
  if(canSell&&activeMerchant==='xiaodou'&&xiaodouReady&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
   // Prefer WeChat for new RSA2 checkouts while the Alipay path is being
