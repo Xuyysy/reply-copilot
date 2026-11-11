@@ -10,7 +10,10 @@ test('Admin V2 mounts operations inbox and AI economics only in relevant workspa
  assert.match(root,/AdminOperationsInsights active=\{tab==="cost"\} mode="plans"/);
  assert.match(panel,/\/v1\/admin\/ops-insights/);
  assert.match(panel,/admin-ops-alert/);
- assert.match(panel,/navigate\(a\.target\)/);
+ assert.ok(panel.includes("navigate(a.order_id?'orders':a.target,a.order_id)"));
+ assert.ok(root.includes('navigate={navigateFromRisk}'));
+ assert.match(panel,/credit_entitlement_gap/);
+ assert.match(panel,/subscription_entitlement_gap/);
  assert.match(panel,/moreThanSample/);
  assert.match(panel,/NOT full seven-day totals/);
  assert.match(panel,/not provider billing, net settlement, or profit/);
