@@ -15,7 +15,16 @@
   const QUOTE_CONTENT = '[data-testid="quoteTweet"], [data-testid="card.wrapper"]';
   function isQuoteContent(node, article) {
     const quote = node?.closest?.(QUOTE_CONTENT);
-    return Boolean(quote && quote !== article && article?.contains?.(quote));
+    if (quote && quote !== article && article?.contains?.(quote)) return true;
+    // Some X layouts render a quote as a role=link card without
+    // data-testid=quoteTweet. Require a distinct main text node OUTSIDE
+    // that card, so we never mistake the whole main article for a quote.
+    const card = node?.closest?.('[role="link"]');
+    if (!card || card===article || !article?.contains?.(card) ||
+        !card.querySelector?.('[data-testid="User-Name"]') ||
+        !card.querySelector?.('[data-testid="tweetText"]')) return false;
+    return [...(article.querySelectorAll?.('[data-testid="tweetText"]')||[])]
+      .some(text => text.closest("article")===article && !card.contains(text));
   }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
