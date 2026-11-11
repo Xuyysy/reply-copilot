@@ -81,7 +81,7 @@ test('a competing reply while a bound editor is still visible remains rejected',
 
 test('normal modal closure removes the old assistant without showing a competition error',async()=>{
  const f=flow(),a=f.post('101'),b=f.post('102');f.click(a);f.open(a);await sleep(0);
- f.outside();f.close(a);assert.equal(f.hosts[0].isConnected,false);
+ f.outside();f.close(a);await sleep(380);assert.equal(f.hosts[0].isConnected,false);
  assert.ok(!f.logs.some(x=>x[2]?.includes('competing_activation')));
  f.click(b);f.open(b);await sleep(0);assert.equal(f.generations(),2);
  f.resolve(0);await sleep(100);assert.equal(f.commands(),0);f.resolve(1);await sleep(100);assert.equal(f.commands(),1);
@@ -174,4 +174,18 @@ test('a permanent home composer does not lock recovery after a rejected reply mo
  f.close(a);f.click(b);f.open(b);await sleep(0);
  assert.equal(f.generations(),1);
  f.resolve(0);await sleep(100);assert.equal(f.commands(),1);
+});
+
+test('media/modal reflow keeps one generation and rebinds only to verified target editor',async()=>{
+ const f=flow(),p=f.post('101'),newNode=f.post('102');
+ f.click(p);f.open(p);await sleep(0);
+ assert.equal(f.generations(),1);
+ f.entries([]); // X briefly unmounts its media-rich reply composer.
+ f.entries([{node:newNode.editor,modal:true,contextMatches:true,contextStatusId:'101'}]);
+ await sleep(0);
+ assert.equal(f.generations(),1,'editor remount must never regenerate or double-debit');
+ f.resolve(0);await sleep(110);
+ assert.equal(f.commands(),1);
+ assert.equal(newNode.editor.innerText,'中文 English 😀\nline');
+ assert.equal(p.editor.innerText,'');
 });
