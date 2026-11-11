@@ -71,7 +71,7 @@ Local style preference counts (context only): ${JSON.stringify(styleStats)}`;
   const targetLanguage = resolveRequiredReplyLanguage({ sourceText: postText, selectedLanguage: profile.language });
   const languagePolicy = outputSchemaVersion === 2
     ? requestedLanguage === "auto"
-      ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); the local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples when deciding the post's language. For other languages use English. Use one consistent language across all three replies and any quoteCandidate, and return its tag in JSON. Required reply language: ${targetLanguage === "auto" ? "the original post language" : targetLanguage}; do not default to Chinese because of previous replies or writing samples.`
+      ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples. For other languages use English. Use the same language for all three replies and any quoteCandidate; return its tag. Target: ${targetLanguage === "auto" ? "original post language" : targetLanguage}. Do not default to Chinese.`
       : `Write all three replies and any quoteCandidate in ${requestedLanguage} and return that same language tag in JSON. Ignore conflicting Chinese writing samples or reply history.`
     : `Legacy client output supports zh or en only. Keep the original post's language when it is Chinese or English; otherwise use English. Return only zh or en as the JSON language tag for all three replies and any quoteCandidate.`;
   const finalLanguageReminder = targetLanguage === "auto"
