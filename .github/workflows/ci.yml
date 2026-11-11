@@ -1,9 +1,15 @@
 name: Reply Copilot CI
 
 on:
+  # Keep every branch's push CI: Staging and Production release guards require
+  # a successful push run for the exact SHA and its immutable artifacts.
   push:
     branches: ['**']
+  # Running the entire test/build/package pipeline again on every PR update
+  # doubles CI minutes. Push CI already validates each new commit. Retain PR
+  # merge-context testing on opening/reopening and at final review readiness.
   pull_request:
+    types: [opened, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
@@ -81,15 +87,21 @@ jobs:
           exit "$result"
 
       - name: Build pinned Staging extension
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         env:
           REPLY_COPILOT_WEBSITE_URL: https://staging.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api-staging.x-reply-helper.top
         run: npm run build:staging
 
       - name: Package and fingerprint Web and extension
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         run: python3 scripts/package-staging-ci.py
 
       - name: Upload immutable Staging Pages bundle
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: staging-pages-${{ env.SOURCE_SHA }}
@@ -98,6 +110,8 @@ jobs:
           if-no-files-found: error
 
       - name: Upload ZIP and provenance manifest
+        # Only push artifacts can be promoted by the guarded Staging release.
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
           name: staging-extension-${{ env.SOURCE_SHA }}
