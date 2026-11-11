@@ -42,13 +42,13 @@ export async function adminUnifiedUsage(request:Request,env:Env):Promise<Respons
   if(source!=='all'){filters.push('('+SOURCE_SQL+')=?');args.push(source);}
   const cursor=p.get('cursor');
   if(cursor){
-    const match=/^([0-9]{1,15}):([A-Za-z0-9_-]{1,100})$/.exec(cursor);
+    const match=/^([0-9]{1,15}):([A-Za-z0-9_-]{1,100}):([A-Za-z0-9_-]{1,100})$/.exec(cursor);
     if(!match)throw new ApiFailure(400,'INVALID_FILTER','分页游标无效。');
     const timestamp=Number(match[1]);
     if(!Number.isSafeInteger(timestamp)||timestamp<from||timestamp>=to)
       throw new ApiFailure(400,'INVALID_FILTER','分页时间无效。');
-    filters.push('(r.delivery_confirmed_at<? OR (r.delivery_confirmed_at=? AND r.request_id<?))');
-    args.push(timestamp,timestamp,match[2]);
+    filters.push('(r.delivery_confirmed_at<? OR (r.delivery_confirmed_at=? AND (r.request_id<? OR (r.request_id=? AND r.user_id<?))))');
+    args.push(timestamp,timestamp,match[2],match[2],match[3]);
   }
   // Partial index 0021_ai_delivery_statistics_index limits the delivered range.
   // Do NOT aggregate unbounded historic ledgers on each admin page visit.
@@ -69,14 +69,14 @@ export async function adminUnifiedUsage(request:Request,env:Env):Promise<Respons
     'LEFT JOIN subscription_plan_versions v ON v.id=sp.plan_version_id',
     'LEFT JOIN ai_usage_costs c ON c.user_id=r.user_id AND c.request_id=r.request_id',
     'WHERE '+filters.join(' AND '),
-    'ORDER BY r.delivery_confirmed_at DESC,r.request_id DESC LIMIT ?'
+    'ORDER BY r.delivery_confirmed_at DESC,r.request_id DESC,r.user_id DESC LIMIT ?'
   ].join(' ');
   const rows=(await env.DB.prepare(sql).bind(...args,limit+1).all<UsageRow>()).results||[];
   const hasMore=rows.length>limit,items=rows.slice(0,limit),last=items.at(-1);
   return response({
     items,hasMore,
-    nextCursor:hasMore&&last?last.created_at+':'+last.request_id:null,
+    nextCursor:hasMore&&last?last.created_at+':'+last.request_id+':'+last.user_id:null,
     range:{from,to},limit,
-    definition:'ACK-proven successful deliveries; one row per (user_id,request_id); payments and grants are not generations'
+    definition:'ACK-proven successful deliveries; one row per (user_id,request_id); stable cross-user cursor; payments and grants are not generations'
   },200,env,request);
 }
