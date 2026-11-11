@@ -118,6 +118,38 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const mediaBaseline=api.composerAssociation.baseline(document);
   const mediaOnlySnapshot=api.composerAssociation.snapshot(document,barePost,initial,initial,10);
   results.push({name:'media_viewer_dialog_without_composer_is_not_reply_modal',ok:mediaBaseline.baselineModalCount===0&&mediaBaseline.visibleReplyEditorCount===0&&mediaOnlySnapshot.visibleDialogCount===0});
+  // A plain Repost adds a socialContext banner whose links/possible
+  // timestamps refer to the person reposting, NOT the original post.
+  // Both the feed article and reply modal must select the ORIGINAL ID.
+  document.querySelector('#modals').replaceChildren();
+  const repostSource=source('501');
+  const repostBanner='<div data-testid="socialContext"><a href="https://x.com/reposter/status/999"><time>reposted</time></a><div data-testid="tweetText">Reposted by somebody</div></div>';
+  repostSource.insertAdjacentHTML('afterbegin',repostBanner);
+  const repostPost=api.composerAssociation.capturePost(api.postExtractor.extractPost(repostSource));
+  results.push({name:'repost_banner_status_and_text_ignored',ok:repostPost.ok&&repostPost.statusId==='501'&&repostPost.sourceText==='same text'});
+  const repostEditor=modal();repostEditor.focus();
+  const parentArticle=repostEditor.closest('[role="dialog"]').querySelector('article');
+  parentArticle.insertAdjacentHTML('afterbegin',repostBanner);
+  const repostFacts=api.composerAssociation.snapshot(document,repostPost,initial,initial,10);
+  const repostSession=api.composerAssociation.create({trusted:true,statusId:'501',requestId:'repost',now:0,baselineModalCount:0,baselineEditors:[]});
+  results.push({name:'repost_modal_matches_original_not_reposter',ok:repostFacts.editors[0].contextStatusId==='501'&&repostFacts.editors[0].contextMatches===true&&repostSession.evaluate(repostFacts).state==='bound'});
+  const originalRoute=api.composerAssociation.snapshot(document,repostPost,initial,'https://x.com/author/status/501',10);
+  const wrongRoute=api.composerAssociation.snapshot(document,repostPost,initial,'https://x.com/author/status/999',10);
+  results.push({name:'repost_navigation_allows_only_original_status',ok:originalRoute.routeAllowed===true&&wrongRoute.routeAllowed===false});
+  // An unattributed socialContext timestamp may be the only <time>.
+  // A unique original permalink is still sufficient; the reposter's ID
+  // must never become the source identity.
+  const noTimeSource=source('502');
+  noTimeSource.insertAdjacentHTML('afterbegin',repostBanner);
+  const noTimePost=api.postExtractor.extractPost(noTimeSource);
+  results.push({name:'repost_own_link_fallback_not_social_context_time',ok:noTimePost.ok&&noTimePost.statusId==='502'&&noTimePost.sourceText==='same text'});
+  // The same post as a quote-repost must keep the outer commentary, not
+  // the quoted tweet (and must not use the reposter social context).
+  const quoteRepost=source('503');
+  quoteRepost.insertAdjacentHTML('afterbegin',repostBanner);
+  quoteRepost.insertAdjacentHTML('beforeend','<div data-testid="quoteTweet"><a href="https://x.com/quoted/status/777"><time>quote</time></a><div data-testid="tweetText">quoted body</div></div>');
+  const quoteRepostPost=api.postExtractor.extractPost(quoteRepost);
+  results.push({name:'quote_repost_uses_own_commentary',ok:quoteRepostPost.ok&&quoteRepostPost.statusId==='503'&&quoteRepostPost.sourceText==='same text'});
   document.querySelector('#result').textContent=JSON.stringify(results);
   </script></body></html>`;
   const file=path.join(dir,'fixture.html');writeFileSync(file,html);
@@ -125,6 +157,6 @@ test('real Chrome DOM snapshots handle nested no-link modals, hidden editors, id
   const result=spawnSync(chrome,['--headless=new','--disable-gpu',`--user-data-dir=${path.join(dir,'profile')}`,'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:30000});
   assert.equal(result.status,0,`${result.stderr} ${result.error?.message||''} ${result.signal||''}`);
   const output=result.stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];assert.ok(output,'fixture must finish');
-  const results=JSON.parse(output);assert.equal(results.length,24);for(const r of results)assert.equal(r.ok,true,r.name);
+  const results=JSON.parse(output);assert.equal(results.length,29);for(const r of results)assert.equal(r.ok,true,r.name);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
