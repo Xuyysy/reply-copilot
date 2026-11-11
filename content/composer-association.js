@@ -136,6 +136,21 @@
       const candidates=articles.map(article=>({
         article, id:contextId(article), text:api.postExtractor.postText(article)
       }));
+      // On some rich-media reply modals X renders the original tweetText
+      // directly in the dialog, without wrapping it in an article. The
+      // fallback is STRICTLY scoped to this opened reply dialog, never
+      // the feed behind it. A quoted preview cannot masquerade as the root.
+      const bareTexts=[...dialog.querySelectorAll('[data-testid="tweetText"]')]
+        .filter(textNode=>visible(textNode)&&!textNode.closest('article')&&
+          !textNode.closest('[data-testid="quoteTweet"], [data-testid="card.wrapper"]')&&
+          !textNode.closest('[contenteditable="true"]'));
+      for(const textNode of bareTexts){
+        const card=textNode.closest('[role="link"]');
+        if(card?.querySelector?.('[data-testid="User-Name"]') &&
+           bareTexts.some(other=>other!==textNode && !card.contains(other)))continue;
+        const text=normalized(textNode.innerText||textNode.textContent);
+        if(text)candidates.push({article:null,id:null,text});
+      }
       const matching=candidates.filter(item=>item.id===post.statusId);
       const exactText=candidates.filter(item=>sameContext(post,item.text));
       // X sometimes omits the parent permalink in a quote/video reply modal,
