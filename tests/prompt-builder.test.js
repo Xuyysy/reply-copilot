@@ -52,7 +52,7 @@ test("release gate: complete original Production V1 prompt source is byte-for-by
    .replace(importLang,'')
    .replace(extendedSignature,originalSignature)
    .replace(/  \/\/ ADDITIONAL LANGUAGE RULE ONLY\. V1 system\+user templates above are unchanged\.[\s\S]*?(?=\n\}\s*$)/,'  return { system, user };');
- const sha=createHash("sha1").update("blob "+Buffer.byteLength(baseline)+"\\0"+baseline).digest("hex");
+ const sha=createHash("sha1").update("blob "+Buffer.byteLength(baseline)+"\0"+baseline).digest("hex");
  assert.equal(sha,"738dc09092531d7e001a957e2496ff3259b915d6","original 0.3.6 V1 source has been modified");
 });
 test("V1 writing samples and reply history are not cut, reordered or shortened",()=>{
