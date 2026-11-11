@@ -85,3 +85,14 @@ test('Operations insights API refuses non-admin access and never starts merchant
   assert.equal(trace,0);
  }finally{f.sql.close();}
 });
+
+test('Subscription exception inbox uses existing partial-index filter in isolated SQLite',()=>{
+ const f=admin();
+ try{
+  const plan=f.sql.prepare(`EXPLAIN QUERY PLAN SELECT id,user_id,status,created_at FROM subscription_orders
+    WHERE status IN ('pending','unknown','manual_review') AND status<>'pending' AND created_at>=?
+    ORDER BY created_at DESC,id DESC LIMIT 8`).all(Date.now()-30*86400000);
+  assert.ok(plan.some(x=>String(x.detail).includes('subscription_orders_pending_idx')),
+   'Partial index must be used so dashboard risk polling does not scan every subscription order');
+ }finally{f.sql.close();}
+});
