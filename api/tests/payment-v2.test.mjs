@@ -338,3 +338,33 @@ test('Xiaodou close upstream HTTP 502 leaves the blocked order and ledger untouc
   noGrant(f.sql);
  }finally{f.sql.close();}
 });
+
+
+test('SELLER cashier with missing fee projection persists across fresh authenticated order reads',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req,{feeProjection:null}),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const txn=f.sql.prepare('SELECT amount_contract,provider_fee_projection_status FROM payment_transactions WHERE order_id=?').get(id);
+  assert.equal(txn.amount_contract,'CNY_EXACT_BUYER_TOTAL');
+  assert.equal(txn.provider_fee_projection_status,'review');
+  const detail=await f.call('/v1/orders/'+id,{method:'GET'});
+  assert.equal(detail.status,200);
+  assert.equal(detail.body.order.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.equal(detail.body.order.paymentCashierOrigin,'https://cashier.example.test');
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('legacy BUYER credit order still fails closed on an unverified fee projection',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201);
+  const id=created.body.order.id;
+  const txn=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id);
+  f.sql.prepare("UPDATE payment_transactions SET amount_contract=NULL, provider_fee_projection_status='review' WHERE id=?").run(txn.id);
+  const detail=await f.call('/v1/orders/'+id,{method:'GET'});
+  assert.equal(detail.body.order.paymentUrl,null);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
