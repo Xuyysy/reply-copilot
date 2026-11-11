@@ -1,5 +1,6 @@
 """Offline-only regression checks for an explicitly approved Production Script-API source takeover."""
 import importlib.util
+import json
 import os
 import pathlib
 import sys
@@ -76,6 +77,107 @@ class ProductionApiOriginGuardTests(unittest.TestCase):
         self.assertNotIn("  push:", text)
         self.assertNotIn("  pull_request:", text)
         self.assertNotIn("wrangler d1", text)
+
+
+
+class ProductionPostflightTests(unittest.TestCase):
+    @staticmethod
+    def bindings():
+        return {
+            "vars": {"ADMIN_PORTAL_ENABLED": "1", "PAYMENTS_ENABLED": "1"},
+            "secrets": ["AUTH_HASH_SECRET"],
+            "binding_names": [
+                ["ADMIN_PORTAL_ENABLED", "plain_text"],
+                ["AUTH_HASH_SECRET", "secret_text"],
+                ["DB", "d1"],
+                ["PAYMENTS_ENABLED", "plain_text"],
+            ],
+        }
+
+    def run_after(self, *, target="worker", binding_reads=None, live_reads=None):
+        stable = self.bindings()
+        previous = "old-version" if target == "worker" else "old-pages"
+        with tempfile.TemporaryDirectory() as folder:
+            snapshot = pathlib.Path(folder) / "production-release-snapshot.json"
+            snapshot.write_text(json.dumps({
+                "target": target,
+                "bindings": stable,
+                "previous": previous,
+                "previousDeployment": "old-deployment",
+            }))
+            with mock.patch.dict(os.environ, {
+                "TARGET": target,
+                "EXPECTED_CURRENT": previous,
+                "RUNNER_TEMP": folder,
+            }, clear=False), mock.patch.object(
+                sys, "argv", [str(GUARD_PATH), "after"]
+            ), mock.patch.object(
+                guard, "check_bindings",
+                side_effect=binding_reads if binding_reads is not None else [stable],
+            ) as check, mock.patch.object(
+                guard, "live_id",
+                side_effect=live_reads if live_reads is not None else [("new-version", "new-deployment")],
+            ) as live, mock.patch.object(
+                guard.time, "sleep",
+            ) as sleep:
+                guard.main()
+                return check.call_count, live.call_count, sleep.call_count
+
+    def test_actual_worker_binding_snapshot_has_json_stable_shape(self):
+        settings = {
+            "bindings": [
+                {"name": "DB", "type": "d1", "id": guard.DATABASE},
+                {"name": "PAYMENTS_ENABLED", "type": "plain_text", "text": "1"},
+                {"name": "ADMIN_PORTAL_ENABLED", "type": "plain_text", "text": "1"},
+                *({"name": name, "type": "secret_text"} for name in guard.REQUIRED_SECRETS),
+            ],
+            "compatibility_date": "2026-10-14",
+        }
+        config = {"vars": {"PAYMENTS_ENABLED": "1", "ADMIN_PORTAL_ENABLED": "1"}}
+        with mock.patch.object(guard, "get", return_value=settings), mock.patch.object(
+            pathlib.Path, "read_text", return_value=json.dumps(config)
+        ):
+            actual = guard.check_bindings()
+        self.assertEqual(actual, json.loads(json.dumps(actual)))
+        self.assertTrue(all(isinstance(entry, list) for entry in actual["binding_names"]))
+
+    def test_worker_postflight_passes_with_equal_json_snapshots(self):
+        self.assertEqual(self.run_after(), (1, 1, 0))
+
+    def test_worker_postflight_recovers_from_transient_binding_drift(self):
+        wrong = self.bindings()
+        wrong["vars"]["PAYMENTS_ENABLED"] = "0"
+        self.assertEqual(
+            self.run_after(binding_reads=[wrong, self.bindings()]),
+            (2, 1, 1),
+        )
+
+    def test_pages_postflight_waits_for_new_canonical_deployment(self):
+        self.assertEqual(
+            self.run_after(
+                target="pages",
+                binding_reads=[self.bindings(), self.bindings()],
+                live_reads=[("old-pages", "old-deployment"), ("new-pages", "new-deployment")],
+            ),
+            (2, 2, 1),
+        )
+
+    def test_persistent_variable_drift_fails_closed_and_no_values_leak(self):
+        wrong = self.bindings()
+        wrong["vars"]["PAYMENTS_ENABLED"] = "DO_NOT_LOG"
+        with self.assertRaisesRegex(RuntimeError, r"binding drift.*PAYMENTS_ENABLED") as failure:
+            self.run_after(binding_reads=[wrong] * 15)
+        self.assertNotIn("DO_NOT_LOG", str(failure.exception))
+
+    def test_persistent_secret_drift_fails_closed(self):
+        wrong = self.bindings()
+        wrong["secrets"] = []
+        with self.assertRaisesRegex(RuntimeError, "secret binding names removed: AUTH_HASH_SECRET"):
+            self.run_after(binding_reads=[wrong] * 15)
+
+    def test_settings_validator_failure_cannot_be_retried_into_success_without_recovery(self):
+        with self.assertRaisesRegex(RuntimeError, "Production D1 binding mismatch"):
+            self.run_after(binding_reads=[RuntimeError("Production D1 binding mismatch")] * 15)
 
 
 if __name__ == "__main__":

@@ -46,8 +46,38 @@ def check_bindings():
         raise RuntimeError("Production D1 binding mismatch")
     if settings.get("compatibility_date") != "2026-10-14":
         raise RuntimeError("Production runtime compatibility changed")
+    # JSON snapshots decode arrays as lists. Keep the live view in the exact
+    # same JSON-compatible shape to avoid tuple-vs-list false drift alarms.
     return {"vars": live_vars, "secrets": sorted(secrets),
-            "binding_names": sorted((b.get("name"), b.get("type")) for b in bindings)}
+            "binding_names": sorted([b.get("name"), b.get("type")] for b in bindings)}
+
+
+def describe_binding_drift(previous, current):
+    """Explain only changed key names/types, never configuration or secret values."""
+    if previous == current:
+        return ""
+    changes = []
+    old_vars, new_vars = previous["vars"], current["vars"]
+    changed_vars = sorted(
+        k for k in old_vars.keys() | new_vars.keys()
+        if old_vars.get(k) != new_vars.get(k)
+    )
+    if changed_vars:
+        changes.append("plain-text variable keys: " + ", ".join(changed_vars))
+    old_secrets, new_secrets = set(previous["secrets"]), set(current["secrets"])
+    if old_secrets != new_secrets:
+        changes.append("secret binding names added: " + ", ".join(sorted(new_secrets - old_secrets)))
+        changes.append("secret binding names removed: " + ", ".join(sorted(old_secrets - new_secrets)))
+    old_types = {tuple(row) for row in previous["binding_names"]}
+    new_types = {tuple(row) for row in current["binding_names"]}
+    if old_types != new_types:
+        changes.append("bindings added: " + ", ".join(
+            sorted(name + "/" + kind for name, kind in new_types - old_types)
+        ))
+        changes.append("bindings removed: " + ", ".join(
+            sorted(name + "/" + kind for name, kind in old_types - new_types)
+        ))
+    return "; ".join(part for part in changes if not part.endswith(": ")) or "unclassified binding difference"
 
 def live_id(target):
     if target == "worker":
@@ -87,26 +117,35 @@ def main():
         before = json.loads(snapshot.read_text())
         if before["target"] != target:
             raise RuntimeError("Production release target unexpectedly changed")
-        # Cloudflare Pages may need time to finish building, and the Worker
-        # versions endpoint may briefly report the previous active version.
-        # Never conceal a variable/secret/D1 drift while waiting.
+        # A live Worker settings read immediately after an upload can be
+        # temporarily inconsistent. Retry a bounded number of times, but only
+        # accept a new deployment with the original bindings intact.
+        # A persistent mismatch still FAILS CLOSED; never mask D1/secret drift.
         active = deployment = None
         for attempt in range(15):
-            current = check_bindings()
-            if current != before["bindings"]:
-                raise RuntimeError("ALERT: Production variables, secrets or bindings changed")
+            issue = None
             try:
-                active, deployment = live_id(target)
+                current = check_bindings()
             except RuntimeError as error:
-                if target != "pages" or "canonical deployment not successful" not in str(error):
-                    raise
-                if attempt == 14:
-                    raise
+                issue = "settings validation: " + str(error)
             else:
-                if active != before["previous"]:
-                    break
+                drift = describe_binding_drift(before["bindings"], current)
+                if drift:
+                    issue = "binding drift: " + drift
+            if issue is None:
+                try:
+                    active, deployment = live_id(target)
+                except RuntimeError as error:
+                    if target != "pages" or "canonical deployment not successful" not in str(error):
+                        raise
+                    issue = "Pages canonical deployment not successful yet"
+                else:
+                    if active != before["previous"]:
+                        break
+                    issue = "new Production release not active yet"
             if attempt == 14:
-                raise RuntimeError("New Production release not active within postflight window")
+                raise RuntimeError("ALERT: Production postflight did not stabilize: " + issue)
+            print(f"Postflight check {attempt + 1}/15: {issue}; retrying", file=sys.stderr)
             time.sleep(5)
         print(f"PASS: new Production {target} is active, all vars/secrets/D1 preserved")
         print(f"New active ID: {active}")
