@@ -39,6 +39,7 @@ import Base from "../layouts/Base.astro";
         <button id="simulate-payment" class="button secondary" type="button" hidden data-zh="模拟支付完成">Simulate payment</button>
         <button id="refresh-order" class="button secondary" type="button" hidden data-zh="刷新支付状态">Refresh payment status</button>
         <button id="relaunch-rsa2" class="button secondary" type="button" hidden data-zh="重新生成原订单二维码">Generate a fresh QR code for this order</button>
+        <button id="cancel-unpaid-order" class="button secondary" type="button" hidden data-zh="关闭未支付旧订单">Close unpaid order</button>
         <a id="login-link" class="button secondary" href="/login?mode=login" hidden data-zh="登录后继续">Sign in to continue</a>
         <a class="button secondary" href="/pricing" data-zh="返回套餐">Back to plans</a>
       </div>
@@ -167,6 +168,8 @@ import Base from "../layouts/Base.astro";
       show("refresh-order",next.status==="unknown"||(next.status==="pending"&&(next.paymentProtocol==="rsa2"||next.paymentProtocol==="epay"||next.paymentProtocol==="mk99")));
       show("relaunch-rsa2",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
       byId<HTMLButtonElement>("relaunch-rsa2").disabled=busy;
+      show("cancel-unpaid-order",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
+      byId<HTMLButtonElement>("cancel-unpaid-order").disabled=busy;
       show("create-order",false);
     }
     async function load(){
@@ -295,6 +298,26 @@ import Base from "../layouts/Base.astro";
           setStatus("新付款入口暂无法确认，请先刷新原订单状态，勿重复创建订单。","Could not confirm a new cashier. Refresh the original order; do not create another purchase.");
         }
       }finally{busy=false;byId<HTMLButtonElement>("relaunch-rsa2").disabled=false;}
+    });
+    byId("cancel-unpaid-order").addEventListener("click",async()=>{
+      if(busy||!order||order.paymentProtocol!=="rsa2"||!["pending","unknown"].includes(order.status))return;
+      if(!window.confirm(label("确定放弃原订单付款并向小豆申请安全关单？只有平台确认未支付才会关闭。","Request provider-confirmed cancellation of this original order? Paid orders cannot be closed.")))return;
+      const orderId=order.id;busy=true;show("cashier-link",false);
+      byId<HTMLButtonElement>("cancel-unpaid-order").disabled=true;
+      setStatus("正在向小豆确认并关闭原订单…","Requesting provider-confirmed closure of the original order…");
+      try{
+        const result=await api<{ok:boolean;orderStatus:string}>("/v1/orders/"+encodeURIComponent(orderId)+"/close",{method:"POST",body:"{}"});
+        if(!result.ok||result.orderStatus!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        const detail=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(orderId));
+        if(detail.order.id!==orderId||detail.order.status!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        showOrder(detail.order);
+        setStatus("原订单已安全关闭，可以返回套餐重新购买。","Original order safely closed. Return to plans to buy again.");
+      }catch(error){
+        setStatus(error instanceof ApiError&&error.code==="PROVIDER_HTTP_ERROR"
+          ?"小豆关单暂时不可用，原订单仍保留，请勿重复付款。"
+          :"平台尚未确认安全关单，原订单保留，请查验或联系客服。",
+          "Provider closure is not confirmed. The original order is preserved; verify its status before purchasing.");
+      }finally{busy=false;if(order)render();}
     });
     byId("simulate-payment").addEventListener("click",async()=>{
       if(!order||busy)return;busy=true;show("simulate-payment",false);setStatus("正在模拟本地支付…","Simulating local payment…");
