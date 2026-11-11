@@ -6,6 +6,7 @@ import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOr
 import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans,publishSubscriptionPlan,holdSubscriptionOrder,adminSubscriptionFinance,reviewSubscriptionPayment} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {adminUnifiedUsage} from './admin-unified-usage';
+import {adminCommerceOrders,adminCommerceSummary,adminCommerceUser} from './admin-commerce-v2';
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminReauth,siteContent,updateContent,contentHistory,restoreContent} from "./admin-operations";
@@ -136,6 +137,10 @@ export default {
       if (request.method === "GET" && path === "/v1/admin/settings") return await adminSettings(request,env);
       if (request.method === "GET" && path === "/v1/admin/ledger") return await adminLedger(request,env);
       if (request.method === "GET" && path === "/v1/admin/usage-ledger") return await adminUnifiedUsage(request,env);
+      if (request.method === "GET" && path === "/v1/admin/commerce/orders") return await adminCommerceOrders(request,env);
+      if (request.method === "GET" && path === "/v1/admin/commerce/summary") return await adminCommerceSummary(request,env);
+      const commerceUser=path.match(/^\/v1\/admin\/commerce\/users\/([0-9a-f-]{36})$/i);
+      if (request.method === "GET" && commerceUser) return await adminCommerceUser(request,env,commerceUser[1]);
       if(request.method==="POST"&&path==="/v1/admin/users/bulk-status")return await adminBulkStatus(request,env);
       if(request.method==="POST"&&path==="/v1/admin/packages")return await adminPackageCreate(request,env);
       if(request.method==="GET"&&path==="/v1/admin/audits")return await adminAudits(request,env);
