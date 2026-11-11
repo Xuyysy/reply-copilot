@@ -181,8 +181,18 @@ import Base from "../layouts/Base.astro";
     <p id="home-subscription-disclosure" class="fineprint" style="margin-top:18px"></p>
     <a class="button secondary" href="/pricing" id="home-subscription-link"></a></div>
   </section>
-  <section id="home-legacy-pricing" class="section soft"><div class="container"><div class="section-heading"><div class="eyebrow" data-zh="简单透明的额度">Simple credit pricing</div><h2 data-site-text="packageTitle" data-zh="先用 200 次，再按需充值。">Start with 200, top up when needed.</h2></div><div class="grid-3"><div class="pricing-card featured"><h3 data-zh="免费赠送">Free grant</h3><div class="price">$0</div><p data-account-status>正在确认账户状态…</p><a class="button" data-account-cta href="/login?mode=register" hidden><span>免费注册领取</span></a></div><div class="pricing-card grid-span-2"><h3 data-zh="按需充值">Credit packs</h3><p data-site-text="packageBody" data-zh="按需选择适合你的生成额度，最新套餐和美元价格请查看价格页。">Choose the credits you need. Visit pricing for current packages and USD prices.</p><p class="notice" data-zh="可按需购买永久额度包，也可以选择 30 天订阅；无需自行配置 API Key。">Choose permanent credit packs or a 30-day subscription; no personal API key required.</p><a class="button secondary" href="/pricing" data-zh="查看套餐">View packages</a></div></div></div></section>
-  <div id="featured-packages" class="container grid-3" style="padding-bottom:32px" hidden></div>
+  <section id="home-legacy-pricing" class="section soft"><div class="container"><div class="section-heading"><div class="eyebrow" data-zh="简单透明的额度">Simple credit pricing</div><h2 data-site-text="packageTitle" data-zh="先用 200 次，再按需充值。">Start with 200, top up when needed.</h2></div><div class="grid-3"><div class="pricing-card featured"><h3 data-zh="免费赠送">Free grant</h3><div class="price">$0</div><p data-account-status>正在确认账户状态…</p><a class="button" data-account-cta href="/login?mode=register" hidden><span>免费注册领取</span></a></div><div class="pricing-card grid-span-2"><h3 data-zh="按需充值">Credit packs</h3><p data-site-text="packageBody" data-zh="按需选择适合你的生成额度，官网人民币标价就是实际付款价格，支付手续费由商家承担。">Choose the credits you need. CNY prices shown on our website are the final payment amounts; processing fees are paid by the merchant.</p><p class="notice" data-zh="可按需购买永久额度包，也可以选择 30 天订阅；无需自行配置 API Key。">Choose permanent credit packs or a 30-day subscription; no personal API key required.</p><a class="button secondary" href="/pricing" data-zh="查看套餐">View packages</a></div></div></div></section>
+  <section id="home-credit-packages" class="section" hidden aria-labelledby="home-credit-title">
+    <div class="container">
+      <div class="section-heading">
+        <div class="eyebrow" data-zh="永久额度包">Permanent credit packs</div>
+        <h2 id="home-credit-title" data-zh="按需购买，官网标价即实付。">Buy as needed. The displayed CNY price is the final amount.</h2>
+        <p data-zh="按后台最新人民币价格展示，支付通道手续费由商家承担，不再向用户额外加收。">Live CNY prices from our pricing settings. Payment processing fees are covered by the merchant.</p>
+      </div>
+      <div id="featured-packages" class="grid-3"></div>
+      <a class="button secondary" href="/pricing#packages" style="margin-top:22px" data-zh="查看所有永久额度包">See all permanent credit packs</a>
+    </div>
+  </section>
   <section class="section"><div class="container"><div class="section-heading"><h2 data-zh="常见问题">Questions, answered.</h2></div><p class="lead" data-site-text="faq" hidden></p><div class="faq-item" data-site-faq-default><h3 data-zh="它会自动发送评论吗？">Will it post for me?</h3><p data-zh="不会。你可以编辑草稿，并且必须自己确认发送。">No. You review and edit the draft, then decide whether to send it.</p></div><div class="faq-item" data-site-faq-default><h3 data-zh="需要自己的 API Key 吗？">Do I need my own API key?</h3><p data-zh="不需要。验证邮箱后，请在插件中连接账户以领取新人免费额度。">No. Hosted AI is included; verify your email and connect your account in the extension to receive welcome credits.</p></div><div class="faq-item" data-site-faq-default><h3 data-zh="如何查看充值套餐？">Where can I find credit packs?</h3><p data-zh="在价格页查看当前套餐和可用的支付方式。">Visit pricing for current packages and available payment methods.</p></div><div style="margin-top:28px"><a class="button secondary" href="/faq" data-zh="查看更多问题">More answers</a></div></div></section>
   <script>
     import {api} from "../lib/api";
@@ -226,7 +236,12 @@ import Base from "../layouts/Base.astro";
     void loadHomeSubscriptions();
     window.addEventListener('reply-copilot-language',renderHomeSubscriptions);
     let featuredSource:unknown[]=[];
-    function renderFeatured(){const container=document.getElementById("featured-packages");if(!container)return;if(homeSubscriptions){container.hidden=true;return;}renderFeaturedPackages(document,container,featuredSource,document.documentElement.lang==="en"?"en":"zh");}
+    function renderFeatured(){
+       const container=document.getElementById("featured-packages"),section=document.getElementById("home-credit-packages");
+       if(!container||!section)return;
+       renderFeaturedPackages(document,container,featuredSource,document.documentElement.lang==="en"?"en":"zh");
+       section.hidden=container.hidden;
+     }
     void api<{packages:unknown[]}>("/v1/packages").then(data=>{featuredSource=data.packages;renderFeatured();}).catch(()=>{featuredSource=[];renderFeatured();});
     window.addEventListener("reply-copilot-language",renderFeatured);
   </script>

@@ -41,7 +41,16 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       });
       let body: any;
       try { body = await response.json(); } catch { if(!response.ok)throw new ApiError(`服务请求失败（HTTP ${response.status}）。`, "HTTP_ERROR", response.status);throw new ApiError("服务返回的数据无效。", "INVALID_RESPONSE", response.status); }
-      if (!response.ok) throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), ["/v1/orders","/v1/subscriptions/orders"].includes(path) ? body?.order : undefined);
+       if (!response.ok) {
+         // This read-only provider endpoint emits a bounded errorCode/requestId
+         // rather than the ordinary API code. Do not expose raw provider data.
+         if (path==="/v1/admin/payment-platform-check" && typeof body?.errorCode==="string" && /^[A-Z0-9_]{1,80}$/.test(body.errorCode)) {
+           const stage=typeof body?.stage==="string"?body.stage:"unknown";
+           const upstream=Number.isInteger(body?.upstreamHttpStatus)?body.upstreamHttpStatus:null;
+           throw new ApiError("小豆 RSA2 只读检测未通过。",body.errorCode,response.status,safeRequestId(body?.requestId),safeDiagnostic({stage,upstreamHttpStatus:upstream}));
+         }
+         throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), ["/v1/orders","/v1/subscriptions/orders"].includes(path) ? body?.order : undefined);
+       }
       return body as T;
     }, path.includes("/v1/admin/ai-models/") && path.includes("/test-") ? MODEL_TEST_TIMEOUT_MS : path === "/v1/auth/register" ? REGISTER_REQUEST_TIMEOUT_MS : API_REQUEST_TIMEOUT_MS, options.signal || undefined);
   } catch (error) {

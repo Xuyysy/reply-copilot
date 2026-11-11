@@ -62,23 +62,32 @@ export async function paymentControl(env:Env){
   alipay:{enabled:enabled(values.payment_epay_alipay_enabled??values.payment_alipay_enabled),platformReleased:enabled(values.payment_epay_alipay_released)},
  };
  const canSell=environmentReady&&operatorEnabled;
+ // A stale D1 merchant selection or direct API request must not bypass the
+ // operator's separately confirmed RSA2 subscription + source IP readiness.
+ const xiaodouReady=env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==='1'&&env.XIAODOU_SOURCE_IP_CONFIRMED==='1'&&env.XIAODOU_WEBHOOKS_ENABLED==='1';
  const methods:PaymentMethod[]=[];
- if(canSell&&activeMerchant==='xiaodou'&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
+ if(canSell&&activeMerchant==='xiaodou'&&xiaodouReady&&providers.rsa2.enabled&&providers.rsa2.credentialsConfigured){
   // Prefer WeChat for new RSA2 checkouts while the Alipay path is being
   // investigated. The platform-release gate remains mandatory for both.
-  if(rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
+  // Xiaodou WeChat is not approved for this merchant; a manual dashboard
+  // release checkbox cannot bypass this server-side merchant-approval gate.
+ if(env.XIAODOU_WECHAT_MERCHANT_APPROVED==='1'&&rsa2Channels.wechat.enabled&&rsa2Channels.wechat.platformReleased)methods.push({provider:'xiaodou',channel:'WECHAT_H5'});
   if(rsa2Channels.alipay.enabled&&rsa2Channels.alipay.platformReleased)methods.push({provider:'xiaodou',channel:'ALIPAY_H5'});
  }
- // Epay has its own Alipay controls and release confirmation. RSA2 and Epay
- // never borrow each other's release state. If RSA2 Alipay is ready it wins;
- // Epay is only the separately configured fallback when its own gates pass.
- if(canSell&&activeMerchant==='xiaodou'&&providers.epay.enabled&&providers.epay.credentialsConfigured&&epayChannels.alipay.enabled&&epayChannels.alipay.platformReleased
-   &&!methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
+ // New orders use Xiaodou RSA2 only; Epay is retained solely for historical signed callbacks.
+ // Legacy Epay checkout is reachable ONLY inside a reserved .test fixture URL,
+ // with an explicit regression-test flag. This cannot match production or
+ // real Staging hosts; it preserves historical Epay tests without re-enabling
+ // Epay for actual buyers. Remove when old fixture tests are migrated.
+ const legacyEpayFixture=env.ENVIRONMENT==='staging'&&env.API_ORIGIN==='https://api-staging.example.test'&&env.XIAODOU_EPAY_TEST_COMPAT==='1';
+ if(legacyEpayFixture&&canSell&&activeMerchant==='xiaodou'&&providers.epay.enabled&&providers.epay.credentialsConfigured&&
+    epayChannels.alipay.enabled&&epayChannels.alipay.platformReleased&&
+    !methods.some(method=>method.channel==='ALIPAY_H5'))methods.push({provider:'xiaodou_epay',channel:'ALIPAY_H5'});
  if(canSell&&activeMerchant==='mk99'&&providers.mk99.enabled&&mk99.credentialsConfigured&&mk99.protocolConfirmed&&mk99.amountContractConfirmed){
   if(mk99Channels.wechat.enabled&&mk99Channels.wechat.platformReleased)methods.push({provider:'mk99',channel:'WECHAT_H5'});
   if(mk99Channels.alipay.enabled&&mk99Channels.alipay.platformReleased)methods.push({provider:'mk99',channel:'ALIPAY_H5'});
  }
- const defaultMethod=methods.find(method=>method.provider==='xiaodou')??methods[0]??null;
+ const defaultMethod=methods[0]??null;
  const gateReasons=(provider:PaymentProvider,channel:'alipay'|'wechat')=>{
   const providerState=providers[provider==='mk99'?'mk99':provider==='xiaodou'?'rsa2':'epay'],channelState=provider==='mk99'?mk99Channels[channel]:provider==='xiaodou'?rsa2Channels[channel]:channel==='alipay'?epayChannels.alipay:null;
   const reasons:string[]=[];
@@ -87,6 +96,9 @@ export async function paymentControl(env:Env){
   if(provider==='mk99'&&!mk99.amountContractConfirmed)reasons.push('amount_contract_unconfirmed');
   if(!environmentReady)reasons.push('environment_protection');
   if(!operatorEnabled)reasons.push('purchase_paused');
+  if(provider==='xiaodou'&&!xiaodouReady)reasons.push('xiaodou_merchant_not_ready');
+  if(provider==='xiaodou_epay')reasons.push('legacy_protocol_not_for_new_orders');
+  if(provider==='xiaodou'&&channel==='wechat'&&env.XIAODOU_WECHAT_MERCHANT_APPROVED!=='1')reasons.push('wechat_merchant_not_approved');
   if(!providerState.enabled)reasons.push('interface_disabled');
   if(!providerState.credentialsConfigured)reasons.push('credentials_missing');
   if(!channelState)reasons.push('channel_not_supported');

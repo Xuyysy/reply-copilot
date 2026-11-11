@@ -37,7 +37,7 @@ test('RSA2 Alipay is not exposed until its own channel and release gates are ena
 });
 
 test('WeChat is not exposed until its own platform-release gate is enabled',async()=>{
- const f=fixture({released:false});
+ const f=fixture({released:false});f.env.XIAODOU_WECHAT_MERCHANT_APPROVED='1';
  f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_rsa2_wechat_enabled'");
  let r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,false);assert.deepEqual(r.body.paymentMethods,[]);
@@ -48,7 +48,7 @@ test('WeChat is not exposed until its own platform-release gate is enabled',asyn
 });
 
 test('WeChat is the preferred RSA2 channel when both channels are enabled and platform-released',async()=>{
- const f=fixture();
+ const f=fixture();f.env.XIAODOU_WECHAT_MERCHANT_APPROVED='1';
  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released','payment_rsa2_wechat_enabled','payment_rsa2_wechat_released')");
  const r=await f.call('/v1/packages',{method:'GET'});
  assert.equal(r.body.paymentAvailable,true);
@@ -68,8 +68,8 @@ test('WeChat is the preferred RSA2 channel when both channels are enabled and pl
  f.sql.close();
 });
 
-test('legacy Epay Alipay sales require only their own channel and release gates',async()=>{
- const f=enableEpaySales(fixture({released:false}));
+test('legacy Epay release flags do not enable new checkout orders',async()=>{
+ const f=enableEpaySales(fixture({released:false}));f.env.XIAODOU_EPAY_TEST_COMPAT='0';
  f.env.XIAODOU_EPAY_GATEWAY='https://gateway.example.test/submit.php';
  f.env.XIAODOU_EPAY_PID='12345';
  f.env.XIAODOU_EPAY_KEY='local-test-key';
@@ -79,8 +79,8 @@ test('legacy Epay Alipay sales require only their own channel and release gates'
   assert.deepEqual(r.body.paymentMethods,[]);
   f.sql.exec("UPDATE system_settings SET value='1' WHERE key='payment_epay_alipay_released'");
   r=await f.call('/v1/packages',{method:'GET'});
-  assert.equal(r.body.paymentAvailable,true);
-  assert.deepEqual(r.body.paymentMethods,[{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]);
+  assert.equal(r.body.paymentAvailable,false);
+  assert.deepEqual(r.body.paymentMethods,[]);
  } finally { f.sql.close(); }
 });
 
@@ -123,12 +123,17 @@ test('RSA2 pending orders relaunch from their immutable protocol when the legacy
   const before=f.sql.prepare('SELECT payment_protocol,status,provider_trade_id FROM payment_transactions WHERE order_id=?').get(orderId);
   assert.equal(before.payment_protocol,'rsa2');
   let calls=0;
-  await withProvider(req=>{calls++;return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006},{status:200});},async()=>{
+  const paths=[];
+  await withProvider(req=>{
+   calls++;const path=new URL(req.url).pathname;paths.push(req.method+' '+path);
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:990,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+  },async()=>{
    const result=await f.call(`/v1/orders/${orderId}/attempts`,{body:{}});
-   assert.equal(result.status,201);
+   assert.equal(result.status,201,JSON.stringify(result.body));
    assert.equal(result.body.paymentUrl,'https://cashier.example.test/pay/test');
   });
-  assert.equal(calls,1);
+  assert.equal(calls,2);
+  assert.deepEqual(paths,['GET /api/open/v1/payments/'+before.provider_trade_id,'POST /api/open/v1/payments/'+before.provider_trade_id+'/attempts']);
   assert.equal(f.sql.prepare('SELECT payment_protocol,status FROM payment_transactions WHERE order_id=?').get(orderId).status,'pending');
  } finally { f.sql.close(); }
 });
@@ -157,4 +162,48 @@ test('admin read-only RSA2 reachability check verifies the platform response and
   const result=await f.call('/v1/admin/payment-platform-check',{body:{}});assert.equal(result.status,200);assert.equal(result.body.ok,true);assert.equal(result.body.responseSignature,'verified');assert.equal(JSON.stringify(result.body).includes('MUST_NOT_LEAK'),false);assert.equal(JSON.stringify(result.body).includes('1234'),false);
  });
  assert.equal(called,1);f.sql.close();
+});
+
+
+test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch after merchant switch',async()=>{
+ const f=fixture({released:false});
+ try{
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
+  const created=await withProvider(req=>providerResponse(req,{channel:'ALIPAY_H5'}),()=>f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const before=f.sql.prepare('SELECT merchant_provider,merchant_account,notification_sign_type,payment_protocol,provider_trade_id FROM payment_transactions WHERE order_id=?').get(id);
+  assert.equal(before.merchant_provider,'xiaodou');
+  assert.equal(before.payment_protocol,'rsa2');
+  assert.equal(before.merchant_account,f.env.XIAODOU_APP_ID);
+  assert.equal(before.notification_sign_type,f.env.XIAODOU_KEY_ID);
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  const calls=[];
+  const relaunched=await withProvider(req=>{
+   calls.push(req.method+' '+new URL(req.url).pathname);
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:990,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+  },()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(relaunched.status,201,JSON.stringify(relaunched.body));
+  assert.deepEqual(calls,['GET /api/open/v1/payments/'+before.provider_trade_id,'POST /api/open/v1/payments/'+before.provider_trade_id+'/attempts']);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+ }finally{f.sql.close();}
+});
+
+test('historical RSA2 credit-package cannot relaunch with a different appId or while global purchases are stopped',async()=>{
+ const f=fixture({released:false});
+ try{
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
+  const created=await withProvider(req=>providerResponse(req,{channel:'ALIPAY_H5'}),()=>f.call('/v1/orders',{body:{packageId:'starter',channel:'ALIPAY_H5'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  f.env.XIAODOU_APP_ID='xdop_abcdef0123456789';
+  const wrong=await withProvider(()=>{throw Error('must not fetch when merchant differs');},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(wrong.status,409,JSON.stringify(wrong.body));
+  f.env.XIAODOU_APP_ID='xdop_1234567890abcdef';
+  f.sql.exec("UPDATE system_settings SET value='0' WHERE key='purchase_enabled'");
+  const stopped=await withProvider(()=>{throw Error('must not fetch if purchases paused');},()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
+  assert.equal(stopped.status,409,JSON.stringify(stopped.body));
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM payment_attempts').get().n,1);
+ }finally{f.sql.close();}
 });

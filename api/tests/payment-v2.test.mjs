@@ -8,7 +8,7 @@ function noGrant(sql){assert.equal(sql.prepare('SELECT paid_balance n FROM credi
 test('V2 signed creation validates snapshot and releases only a verified cashier',async()=>{
  const f=fixture();try{await withProvider(req=>providerResponse(req),async calls=>{
   const r=await f.call('/v1/orders',{body:{packageId:'starter',amountFen:1}});
-  assert.equal(r.status,201);assert.equal(r.body.order.checkout.outcome,'ready');assert.equal(r.body.order.amountFen,1006);assert.equal(r.body.order.credits,400);assert.ok(r.body.order.paymentUrl);assert.equal(calls.length,1);assert.equal(calls[0].redirect,'manual');
+  assert.equal(r.status,201);assert.equal(r.body.order.checkout.outcome,'ready');assert.equal(r.body.order.amountFen,990);assert.equal(r.body.order.credits,400);assert.ok(r.body.order.paymentUrl);assert.equal(calls.length,1);assert.equal(calls[0].redirect,'manual');
   const stored=await f.call(`/v1/orders/${r.body.order.id}`,{method:'GET'});assert.equal(stored.body.order.checkout.outcome,'ready');
   noGrant(f.sql);
  });}finally{f.sql.close();}
@@ -27,7 +27,7 @@ test('V2 explicit HTTP rejection differs from uncertain creation and remains dup
 });
 
 test('V2 invalid signed snapshots and absent materials never expose a payment link',async()=>{
- for(const [fields,options] of [[{amountFen:990},{}],[{outTradeNo:'different-order'},{}],[{currency:'USD'},{}],[{status:'INVALID'},{}],[{unknown:true},{}],[{payUrl:null},{}],[{payUrl:'http://cashier.example.test/'},{}],[{payUrl:'https://user:pass@cashier.example.test/'},{}],[{feeProjection:null},{}],[{}, {badSignature:true}]]){
+ for(const [fields,options] of [[{amountFen:1006},{}],[{outTradeNo:'different-order'},{}],[{currency:'USD'},{}],[{status:'INVALID'},{}],[{unknown:true},{}],[{payUrl:null},{}],[{payUrl:'http://cashier.example.test/'},{}],[{payUrl:'https://user:pass@cashier.example.test/'},{}],[{}, {badSignature:true}]]){
   const f=fixture();try{await withProvider(req=>providerResponse(req,fields,options),async()=>{
    const r=await f.call('/v1/orders');assert.ok(r.status!==201);assert.equal(r.body.order.paymentUrl,null);noGrant(f.sql);
   });}finally{f.sql.close();}
@@ -86,7 +86,7 @@ test('V2 verified query and webhook races grant one batch and ledger, even after
   let orderId,outTradeNo;
   await withProvider(req=>providerResponse(req),async()=>{const r=await f.call('/v1/orders');orderId=r.body.order.id;outTradeNo='XRH_'+orderId.replaceAll('-','');});
   f.env.PAYMENTS_ENABLED='0';
-  const event={eventId:'v2-success-event-123',eventType:'PAYMENT_SUCCEEDED',appId:f.env.XIAODOU_APP_ID,outTradeNo,outRefundNo:null,eventAmountFen:1006,grossAmountFen:1006,status:'SUCCEEDED',occurredAt:Math.floor(Date.now()/1000),stateVersion:0};
+  const event={eventId:'v2-success-event-123',eventType:'PAYMENT_SUCCEEDED',appId:f.env.XIAODOU_APP_ID,outTradeNo,outRefundNo:null,eventAmountFen:990,grossAmountFen:990,status:'SUCCEEDED',occurredAt:Math.floor(Date.now()/1000),stateVersion:0};
   const { platform,worker }=await import('./helpers/payment-v2.mjs');
   const {sign,createHash}=await import('node:crypto');
   async function webhook(payload=event,{invalid=false}={}){
@@ -97,7 +97,7 @@ test('V2 verified query and webhook races grant one batch and ledger, even after
   }
   assert.equal((await webhook(event,{invalid:true})).status,401);noGrant(f.sql);
   assert.equal((await webhook({...event,outTradeNo:'XRH_wrong_order'})).status,404);noGrant(f.sql);
-  assert.equal((await webhook({...event,grossAmountFen:990})).status,409);noGrant(f.sql);
+  assert.equal((await webhook({...event,grossAmountFen:1006})).status,409);noGrant(f.sql);
   // Closed/failed notifications are not absorbing: a late verified success wins.
   assert.equal((await webhook({...event,eventId:'v2-closed-event-123',eventType:'PAYMENT_CLOSED',status:'CLOSED',eventAmountFen:0})).status,200);
   await withProvider(req=>providerResponse(req,{outTradeNo,status:'SUCCEEDED',payUrl:null},{status:200}),async calls=>{
@@ -119,9 +119,11 @@ test('V2 material relaunch is validated and cannot run concurrently',async()=>{
  const f=fixture();try{
   let id,outTradeNo;
   await withProvider(req=>providerResponse(req),async()=>{const r=await f.call('/v1/orders');id=r.body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');});
-  await withProvider(req=>providerResponse(req,{outTradeNo,amountFen:990}),async calls=>{
+  await withProvider(req=>providerResponse(req,{outTradeNo,amountFen:1006}),async calls=>{
     const result=await Promise.all([f.call(`/v1/orders/${id}/attempts`,{body:{}}),f.call(`/v1/orders/${id}/attempts`,{body:{}})]);
-    assert.equal(calls.length,1);assert.ok(result.every(x=>x.status>=400));
+    assert.equal(calls.filter(x=>x.method==='POST').length,0,'mismatched signed queries must block relaunch before provider POST');
+    assert.equal(calls.filter(x=>x.method==='GET').length,2);
+    assert.ok(result.every(x=>x.status===409&&x.body.code==='PAYMENT_MISMATCH'));
     assert.ok(result.every(x=>!x.body.paymentUrl));noGrant(f.sql);
   });
  }finally{f.sql.close();}
@@ -137,5 +139,253 @@ test('V2 failed trusted query does not modify any financial or order rows',async
   for(const status of [401,403,404,503])await withProvider(req=>providerResponse(req,{code:status===403?'OPEN_API_SOURCE_IP_REJECTED':'OPEN_API_RESOURCE_NOT_FOUND',message:'private'},{status}),async()=>{
     assert.ok((await f.call(`/v1/orders/${id}/refresh`)).status>=400);assert.equal(snapshot(),before);
   });
+ }finally{f.sql.close();}
+});
+
+
+test('RSA2 credit order read restores only the original verified cashier, like subscription recovery',async()=>{
+ const f=fixture();try{
+  let id;
+  await withProvider(req=>providerResponse(req),async calls=>{
+   const created=await f.call('/v1/orders');
+   assert.equal(created.status,201);
+   id=created.body.order.id;
+   assert.equal(calls.length,1);
+   const recovered=await f.call('/v1/orders/'+id,{method:'GET'});
+   assert.equal(recovered.status,200);
+   assert.equal(recovered.body.order.paymentUrl,'https://cashier.example.test/pay/test');
+   assert.equal(recovered.body.order.paymentCashierOrigin,'https://cashier.example.test');
+   assert.equal(calls.length,1,'read must never ask the provider or mint another order');
+  });
+  const tx=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id).id;
+  // A risk hold, an ambiguous attempt, a merchant mismatch, and paid evidence
+  // must each independently suppress a stale link.
+  f.sql.prepare("UPDATE payment_transactions SET risk_state='manual_review' WHERE id=?").run(tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET risk_state='clear', merchant_account='xdop_othermerchant00' WHERE id=?").run(tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET merchant_account=?, status='unknown' WHERE id=?").run(f.env.XIAODOU_APP_ID,tx);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  f.sql.prepare("UPDATE payment_transactions SET status='pending', cashier_url='https://cashier.example.test/pay/test' WHERE id=?").run(tx);
+  f.sql.prepare("UPDATE recharge_orders SET paid_at=1 WHERE id=?").run(id);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,null);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('RSA2 credit relaunch requires a signed unpaid lookup before creating a new attempt',async()=>{
+ const f=fixture();try{
+  let id,outTradeNo;
+  await withProvider(req=>providerResponse(req),async()=>{
+   const created=await f.call('/v1/orders');assert.equal(created.status,201);
+   id=created.body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');
+  });
+  const calls=[];
+  const result=await withProvider(req=>{
+   const path=new URL(req.url).pathname;calls.push(req.method+' '+path);
+   if(req.method==='GET')return providerResponse(req,{outTradeNo,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',status:'CREATED',payUrl:null},{status:200});
+   assert.equal(req.method,'POST');assert.match(path,/\/attempts$/);
+   return providerResponse(req,{outTradeNo,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',status:'CREATED'});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(result.status,201,JSON.stringify(result.body));
+  assert.equal(result.body.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.deepEqual(calls,['GET /api/open/v1/payments/'+outTradeNo,'POST /api/open/v1/payments/'+outTradeNo+'/attempts']);
+  assert.equal((await f.call('/v1/orders/'+id,{method:'GET'})).body.order.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('RSA2 credit recovery from an unconfirmed original requires provider nextAction',async()=>{
+ const f=fixture();try{
+  let id,outTradeNo;
+  await withProvider(req=>providerResponse(req),async()=>{id=(await f.call('/v1/orders')).body.order.id;outTradeNo='XRH_'+id.replaceAll('-','');});
+  const txn=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id).id;
+  f.sql.prepare("UPDATE payment_transactions SET status='unknown',cashier_url=NULL WHERE id=?").run(txn);
+  f.sql.prepare("UPDATE payment_attempts SET state='unknown',cashier_url=NULL WHERE transaction_id=?").run(txn);
+  let attempts=0;
+  const unsafe=await withProvider(req=>{
+   if(req.method!=='GET')attempts++;
+   return providerResponse(req,{outTradeNo,amountFen:990,channel:'ALIPAY_H5',status:'PAYING',payUrl:null},{status:200});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(unsafe.status,409,JSON.stringify(unsafe.body));
+  assert.equal(attempts,0);
+  const recovered=await withProvider(req=>{
+   if(req.method==='GET')return providerResponse(req,{outTradeNo,amountFen:990,channel:'ALIPAY_H5',status:'CREATED',payUrl:null,nextAction:'CREATE_ATTEMPT'},{status:200});
+   attempts++;
+   return providerResponse(req,{outTradeNo,amountFen:990,channel:'ALIPAY_H5',status:'PAYING'});
+  },()=>f.call('/v1/orders/'+id+'/attempts',{body:{}}));
+  assert.equal(recovered.status,201,JSON.stringify(recovered.body));
+  assert.equal(attempts,1);
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE id=?').get(txn).status,'pending');
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou GET 502 leaves the original credit order and attempts unchanged',async()=>{
+ const f=fixture();try{
+  let id;
+  await withProvider(req=>providerResponse(req),async()=>{id=(await f.call('/v1/orders')).body.order.id;});
+  const counts=()=>JSON.stringify(['payment_transactions','payment_attempts','credit_accounts','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+  const before=counts();
+  const failed=await withProvider(req=>providerResponse(req,{code:'OPEN_API_GUARD_UNAVAILABLE',message:'do not expose provider message'},{status:502}),async calls=>{
+   const result=await f.call('/v1/orders/'+id+'/attempts',{body:{}});
+   assert.equal(calls.length,1);
+   assert.equal(calls[0].method,'GET','never request /attempts after failed GET');
+   return result;
+  });
+  assert.equal(failed.status,502);
+  assert.equal(failed.body.code,'PROVIDER_HTTP_ERROR');
+  assert.equal(counts(),before);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+
+test('website price is the exact signed Xiaodou SELLER amount with merchant fees deducted from settlement',async()=>{
+ const f=fixture();
+ try{
+  const list=await f.call('/v1/packages',{method:'GET'});
+  const starter=list.body.packages.find(x=>x.id==='starter');
+  assert.equal(starter.price_cny_fen,990);
+  assert.equal(starter.total_payment_fen,990);
+  assert.equal(starter.service_fee_fen,0);
+  assert.equal(starter.fee_rate_bps,0);
+  const created=await withProvider(req=>{
+   const sent=JSON.parse(req.body);
+   assert.equal(sent.amountFen,990);
+   assert.equal(sent.currency,'CNY');
+   assert.equal(sent.channel,'ALIPAY_H5');
+   assert.equal(sent.feeBearer,undefined,'Xiaodou defaults to SELLER');
+   assert.equal(sent.merchantAmountFen,undefined,'BUYER mode must not be used');
+   return providerResponse(req);
+  },()=>f.call('/v1/orders',{body:{packageId:'starter'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  assert.equal(created.body.order.amountFen,990);
+  assert.equal(created.body.order.baseAmountFen,990);
+  assert.equal(created.body.order.serviceFeeFen,0);
+  assert.equal(created.body.order.checkout.outcome,'ready');
+  const row=f.sql.prepare("SELECT amount_fen,base_amount_fen,service_fee_fen,provider_fee_projection_status,provider_fee_projection_json FROM payment_transactions").get();
+  assert.deepEqual([row.amount_fen,row.base_amount_fen,row.service_fee_fen,row.provider_fee_projection_status],[990,990,0,'verified']);
+  const ledger=JSON.parse(row.provider_fee_projection_json);
+  assert.equal(ledger.merchantSettlementFen+ledger.companyServiceFeeFen,990);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('seller fee projection needing finance review does not hide a signed, amount-matched cashier',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req,{feeProjection:null}),()=>f.call('/v1/orders',{body:{packageId:'starter'}}));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  assert.equal(created.body.order.checkout.outcome,'ready');
+  assert.equal(created.body.order.paymentUrl,'https://cashier.example.test/pay/test');
+  const row=f.sql.prepare("SELECT amount_fen,provider_fee_projection_status,provider_fee_projection_issue FROM payment_transactions").get();
+  assert.equal(row.amount_fen,990);assert.equal(row.provider_fee_projection_status,'review');assert.equal(row.provider_fee_projection_issue,'missing');
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+
+test('user-confirmed Xiaodou close safely releases a blocked package only after signed CLOSED proof',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201);
+  const id=created.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+  const blocked=await f.call('/v1/orders');assert.equal(blocked.status,409);
+  const closed=await withProvider(req=>{
+   assert.equal(req.method,'POST');assert.equal(new URL(req.url).pathname,'/api/open/v1/payments/'+trade+'/close');
+   return providerResponse(req,{outTradeNo:trade,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',status:'CLOSED',closeState:'CLOSE_REQUESTED'},{status:200});
+  },()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+  assert.equal(closed.status,200,JSON.stringify(closed.body));assert.equal(closed.body.orderStatus,'closed');
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(id).status,'closed');
+  assert.equal(f.sql.prepare('SELECT status FROM recharge_orders WHERE id=?').get(id).status,'expired');
+  const replacement=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(replacement.status,201,JSON.stringify(replacement.body));
+  assert.notEqual(replacement.body.order.id,id);
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,2);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou UNKNOWN_KEPT/paid-conflict/bad amount never close a live or uncertain credit order',async()=>{
+ for(const fields of [
+  {status:'UNKNOWN',closeState:'UNKNOWN_KEPT'},
+  {status:'SUCCEEDED',closeState:'PROVIDER_PAID_CONFLICT'},
+  {status:'CLOSED',closeState:'CLOSE_REQUESTED',amountFen:1006}
+ ]){
+  const f=fixture();try{
+   const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+   const id=created.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+   const before=JSON.stringify(['recharge_orders','payment_transactions','provider_payment_events','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+   const attempt=await withProvider(req=>providerResponse(req,{outTradeNo:trade,amountFen:990,currency:'CNY',channel:'ALIPAY_H5',...fields},{status:200}),()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+   assert.equal(attempt.status,409,JSON.stringify(attempt.body));
+   assert.equal(JSON.stringify(['recharge_orders','payment_transactions','provider_payment_events','credit_ledger'].map(t=>f.sql.prepare('SELECT * FROM '+t).all())),before);
+   noGrant(f.sql);
+  }finally{f.sql.close();}
+ }
+});
+
+test('Xiaodou close upstream HTTP 502 leaves the blocked order and ledger untouched',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  const id=created.body.order.id;
+  const before=JSON.stringify(['recharge_orders','payment_transactions','credit_accounts'].map(t=>f.sql.prepare('SELECT * FROM '+t).all()));
+  const failed=await withProvider(req=>providerResponse(req,{code:'OPEN_API_GUARD_UNAVAILABLE',message:'private upstream detail'},{status:502}),()=>f.call('/v1/orders/'+id+'/close',{body:{}}));
+  assert.equal(failed.status,502,JSON.stringify(failed.body));
+  assert.equal(failed.body.code,'PROVIDER_HTTP_ERROR');
+  assert.equal(JSON.stringify(['recharge_orders','payment_transactions','credit_accounts'].map(t=>f.sql.prepare('SELECT * FROM '+t).all())),before);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+
+test('SELLER cashier with missing fee projection persists across fresh authenticated order reads',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req,{feeProjection:null}),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const txn=f.sql.prepare('SELECT amount_contract,provider_fee_projection_status FROM payment_transactions WHERE order_id=?').get(id);
+  assert.equal(txn.amount_contract,'CNY_EXACT_BUYER_TOTAL');
+  assert.equal(txn.provider_fee_projection_status,'review');
+  const detail=await f.call('/v1/orders/'+id,{method:'GET'});
+  assert.equal(detail.status,200);
+  assert.equal(detail.body.order.paymentUrl,'https://cashier.example.test/pay/test');
+  assert.equal(detail.body.order.paymentCashierOrigin,'https://cashier.example.test');
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+test('legacy BUYER credit order still fails closed on an unverified fee projection',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201);
+  const id=created.body.order.id;
+  const txn=f.sql.prepare('SELECT id FROM payment_transactions WHERE order_id=?').get(id);
+  f.sql.prepare("UPDATE payment_transactions SET amount_contract=NULL, provider_fee_projection_status='review' WHERE id=?").run(txn.id);
+  const detail=await f.call('/v1/orders/'+id,{method:'GET'});
+  assert.equal(detail.body.order.paymentUrl,null);
+  noGrant(f.sql);
+ }finally{f.sql.close();}
+});
+
+
+test('abandoned credit checkout returns original order ID without another charge',async()=>{
+ const f=fixture();try{
+  const created=await withProvider(req=>providerResponse(req),()=>f.call('/v1/orders'));
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const id=created.body.order.id;
+  const attempts=f.sql.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n;
+  const lookup=await f.call('/v1/orders/unresolved?packageId=starter&provider=xiaodou&channel=ALIPAY_H5',{method:'GET'});
+  assert.equal(lookup.status,200,JSON.stringify(lookup.body));
+  assert.deepEqual(lookup.body.order,{id,status:'pending'});
+  const mismatch=await f.call('/v1/orders/unresolved?packageId=standard&provider=xiaodou&channel=ALIPAY_H5',{method:'GET'});
+  assert.equal(mismatch.body.order,null);
+  const channel=await f.call('/v1/orders/unresolved?packageId=starter&provider=xiaodou&channel=WECHAT_H5',{method:'GET'});
+  // Atomic duplicate protection is keyed by package + merchant + protocol,
+  // so even switching ALIPAY to WECHAT must resume the blocking original order.
+  assert.deepEqual(channel.body.order,{id,status:'pending'});
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n,attempts);
+  noGrant(f.sql);
  }finally{f.sql.close();}
 });
