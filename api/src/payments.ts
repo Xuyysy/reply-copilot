@@ -307,7 +307,7 @@ export async function findUnresolvedOrder(request:Request,env:Env):Promise<Respo
    throw new ApiFailure(400,"INVALID_REQUEST","请选择有效的套餐和付款方式。");
  const protocol=provider==="mk99"?"mk99":provider==="xiaodou_epay"?"epay":"rsa2";
  const merchant=provider==="mk99"?"mk99":provider==="local_mock"?"local_mock":"xiaodou";
- const found=await env.DB.prepare("SELECT o.id,t.status payment_status FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND o.package_id=? AND o.status IN ('pending','awaiting_payment') AND t.payment_protocol=? AND t.merchant_provider=? AND t.payment_channel=? ORDER BY o.created_at DESC LIMIT 1").bind(session.user_id,packageId,protocol,merchant,channel).first<{id:string;payment_status:string}>();
+ const found=await env.DB.prepare("SELECT o.id,t.status payment_status FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND o.package_id=? AND o.status IN ('pending','awaiting_payment') AND t.payment_protocol=? AND t.merchant_provider=? ORDER BY o.created_at DESC LIMIT 1").bind(session.user_id,packageId,protocol,merchant).first<{id:string;payment_status:string}>();
  return response({order:found?{id:found.id,status:found.payment_status}:null},200,env,request);
 }
 /* Read-only, authenticated lookup across all orders (not limited to account

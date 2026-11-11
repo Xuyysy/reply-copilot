@@ -382,7 +382,9 @@ test('abandoned credit checkout returns original order ID without another charge
   const mismatch=await f.call('/v1/orders/unresolved?packageId=standard&provider=xiaodou&channel=ALIPAY_H5',{method:'GET'});
   assert.equal(mismatch.body.order,null);
   const channel=await f.call('/v1/orders/unresolved?packageId=starter&provider=xiaodou&channel=WECHAT_H5',{method:'GET'});
-  assert.equal(channel.body.order,null);
+  // Atomic duplicate protection is keyed by package + merchant + protocol,
+  // so even switching ALIPAY to WECHAT must resume the blocking original order.
+  assert.deepEqual(channel.body.order,{id,status:'pending'});
   assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM payment_attempts').get().n,attempts);
   noGrant(f.sql);
  }finally{f.sql.close();}
