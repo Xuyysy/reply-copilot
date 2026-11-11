@@ -36,6 +36,9 @@ test('Admin B5 shows a truthful bounded subscription ACK sample and AI costs',as
   insertRequest(f,'delivered-sub',true,now);
   insertRequest(f,'delivered-free',true,now-200);
   insertRequest(f,'unacknowledged',false,now-300);
+  // Modern credit allocations override misleading legacy credit_source hints.
+  f.sql.exec("UPDATE ai_requests SET credit_source='paid' WHERE request_id='delivered-free'");
+  f.sql.prepare("INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,state,created_at,consumed_at) VALUES('free-source','test-user','delivered-free','free-batch','consumed',?,?)").run(now,now);
   f.sql.prepare(`INSERT INTO subscription_ai_allocations
    (id,user_id,request_id,period_id,day_index,state,created_at,consumed_at)
    VALUES ('alloc1','test-user','delivered-sub',?,1,'consumed',?,?)`)
@@ -47,6 +50,7 @@ test('Admin B5 shows a truthful bounded subscription ACK sample and AI costs',as
   assert.equal(r.body.aiUsage.rowsSampled,2);
   assert.equal(r.body.aiUsage.subscription,1);
   assert.equal(r.body.aiUsage.free,1);
+  assert.equal(r.body.aiUsage.paid,0,'authoritative free allocation beats legacy source hint');
   assert.equal(r.body.aiUsage.plans[0].plan,'basic');
   assert.equal(r.body.aiUsage.plans[0].deliveries,1);
   assert.equal(r.body.aiUsage.plans[0].deliveryCostMicroUsd,120);
@@ -94,5 +98,44 @@ test('Subscription exception inbox uses existing partial-index filter in isolate
     ORDER BY created_at DESC,id DESC LIMIT 8`).all(Date.now()-30*86400000);
   assert.ok(plan.some(x=>String(x.detail).includes('subscription_orders_pending_idx')),
    'Partial index must be used so dashboard risk polling does not scan every subscription order');
+ }finally{f.sql.close();}
+});
+
+test('Provider-confirmed but unfulfilled payments become review alerts without automatic grants',async()=>{
+ const f=admin();
+ try{
+  const at=Date.now()-10*60_000;
+  seedPeriod(f,'subscription-unfulfilled',at,'paid');
+  f.sql.exec("UPDATE subscription_orders SET applied_at=NULL WHERE id='subscription-unfulfilled'");
+  f.sql.prepare(`INSERT INTO subscription_payment_transactions
+   (id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,
+    amount_fen,notification_sign_type,status,risk_state,created_at,updated_at,paid_at)
+   VALUES ('stx-review','subscription-unfulfilled','mk99','m1','trade-review','ALIPAY_H5',6990,'MD5','paid','clear',?,?,?)`)
+   .run(at,at,at);
+  f.sql.prepare(`INSERT INTO subscription_payment_events
+   (id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at)
+   VALUES ('sev-review','stx-review','mk99','verified-review','PAYMENT_SUCCEEDED',6990,?,?)`)
+   .run('a'.repeat(64),at);
+
+  const pkg=f.sql.prepare('SELECT id FROM recharge_packages LIMIT 1').get().id;
+  f.sql.prepare(`INSERT INTO recharge_orders
+   (id,user_id,package_id,package_name,credits,amount_cents,currency,status,created_at,paid_at)
+   VALUES ('credit-unfulfilled','test-user',?,'Starter',400,149,'USD','paid',?,?)`)
+   .run(pkg,at,at);
+  f.sql.prepare(`INSERT INTO payment_transactions
+   (id,order_id,provider,currency,amount_fen,status,created_at,updated_at,paid_at,merchant_provider)
+   VALUES ('ctx-review','credit-unfulfilled','xiaodou','CNY',699,'paid',?,?,?,'mk99')`)
+   .run(at,at,at);
+  f.sql.prepare(`INSERT INTO provider_payment_events
+   (id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider)
+   VALUES ('cev-review','xiaodou','proof-credit-review','ctx-review','PAYMENT_SUCCEEDED',699,'CNY',?,?,'mk99')`)
+   .run('b'.repeat(64),at);
+  const resp=await f.call('/v1/admin/ops-insights',{method:'GET'});
+  assert.equal(resp.status,200,JSON.stringify(resp.body));
+  assert.ok(resp.body.alerts.some(a=>a.type==='subscription_entitlement_gap'&&a.order_id==='subscription-unfulfilled'));
+  assert.ok(resp.body.alerts.some(a=>a.type==='credit_entitlement_gap'&&a.order_id==='credit-unfulfilled'));
+  // A read-only alert must never repair or mutate the business ledger itself.
+  assert.equal(f.sql.prepare("SELECT applied_at FROM subscription_orders WHERE id='subscription-unfulfilled'").get().applied_at,null);
+  assert.equal(f.sql.prepare("SELECT credited_at FROM recharge_orders WHERE id='credit-unfulfilled'").get().credited_at,null);
  }finally{f.sql.close();}
 });
