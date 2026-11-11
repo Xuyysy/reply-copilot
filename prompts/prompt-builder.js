@@ -1,4 +1,5 @@
 import { DEFAULT_VOICE_PROFILE } from "../domain/voice-profile.js";
+import { inferPostLanguageHint, normalizeReplyLanguage } from "../domain/language-support.js";
 
 const schemaExample = `{
   "recommendation": "reply",
@@ -23,7 +24,7 @@ function safeProfile(profile) {
   };
 }
 
-export function buildPrompts({ request, postContext, voiceProfile, persona, recentHistory = [], styleStats = {}, replyStyle = "natural-friendly" }) {
+export function buildPrompts({ request, postContext, voiceProfile, persona, recentHistory = [], styleStats = {}, replyStyle = "natural-friendly", outputSchemaVersion = 1 }) {
   const profile = safeProfile(voiceProfile || (persona ? { ...DEFAULT_VOICE_PROFILE, name: "Zane", interests: persona.topics || [], customInstructions: [persona.voice, persona.humor, persona.postStyleGuidance].filter(Boolean).join(" "), writingSamples: persona.postStyleExamples || [] } : null));
   const source = postContext || request || {};
   const postText = typeof source.text === "string" ? source.text : source.sourceText || "";
@@ -61,5 +62,15 @@ Requested display style: ${replyStyle}
 Requested language: ${profile.language}
 Recent selected replies (avoid only obvious idea repetition): ${JSON.stringify(recentHistory.map(({ style, reply }) => ({ style, reply })).filter((item) => typeof item.reply === "string").slice(0, 20))}
 Local style preference counts (context only): ${JSON.stringify(styleStats)}`;
-  return { system, user };
+  // ADDITIONAL LANGUAGE RULE ONLY. V1 system+user templates above are unchanged.
+  // 0.3.6 clients are schema v1: only zh/en are safe for their result parser.
+  // 0.3.7 opts into v2 to support Japanese/Korean without another AI request.
+  const requestedLanguage = normalizeReplyLanguage(profile.language) || "auto";
+  const scriptHint = inferPostLanguageHint(postText);
+  const languagePolicy = outputSchemaVersion === 2
+    ? requestedLanguage === "auto"
+      ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); the local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples when deciding the post's language. For other languages use English. Use one consistent language across all three replies and any quoteCandidate, and return its tag in JSON.`
+      : `Write all three replies and any quoteCandidate in ${requestedLanguage} and return that same language tag in JSON.`
+    : `Legacy client output supports zh or en only. Keep the original post's language when it is Chinese or English; otherwise use English. Return only zh or en as the JSON language tag for all three replies and any quoteCandidate.`;
+  return { system: `${system}\n\nREPLY LANGUAGE POLICY\n${languagePolicy}`, user };
 }

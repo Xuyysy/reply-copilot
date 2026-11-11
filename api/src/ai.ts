@@ -102,7 +102,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle } as any);
+  const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.

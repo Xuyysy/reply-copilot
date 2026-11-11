@@ -14,5 +14,8 @@ export function normalizeAiInput(body) {
   const history = Array.isArray(body.recentHistory) ? body.recentHistory.slice(0, 20) : [];
   const styleStats = body.styleStats && typeof body.styleStats === "object" && !Array.isArray(body.styleStats) ? body.styleStats : undefined;
   const replyStyle = ["natural-friendly", "short", "balanced", "bold"].includes(String(body.replyStyle)) ? String(body.replyStyle) : "natural-friendly";
-  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle };
+  // Protocol v2 opt-in is necessary for ja/ko. Keep v1 exactly unchanged so
+  // existing request hashes and idempotent recovery remain byte-compatible.
+  const v2 = body.outputSchemaVersion === 2;
+  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle, ...(v2 ? {outputSchemaVersion:2} : {}) };
 }
