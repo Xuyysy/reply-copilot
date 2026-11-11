@@ -79,7 +79,7 @@ test("momentum-first first-fold replaces generic reply hero while retaining CMS 
   assert.match(home, /renderFeaturedPackages/);
   assert.match(home, /\/v1\/packages/);
   const layout = read("web/src/layouts/Base.astro");
-  assert.match(layout, /!isAdminPage && <a class="momentum-nav-link"/);
+  assert.match(layout, /!isAdminPage && <a data-nav-id="momentum-terminal" class="momentum-terminal-entry"/);
   assert.match(site, /\.public-refresh \.momentum-v2-landing/);
   assert.match(site, /\.public-refresh \.momentum-v2-device/);
 });

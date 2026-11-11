@@ -1,0 +1,9 @@
+---
+import Base from "../layouts/Base.astro";
+import CreatorMomentumIntelligence from "../components/account/CreatorMomentumIntelligence";
+---
+<Base title="互动势能智能分析终端" titleEn="Creator Momentum Intelligence Terminal" description="探索 CMI 互动势能指数、三阶段临界信号与势能曲线。付费账户可查看实时研究分析；未解锁账户可了解功能详情。">
+  <section class="container momentum-terminal-page app-shell" aria-label="Creator Momentum Intelligence Terminal">
+    <CreatorMomentumIntelligence client:load />
+  </section>
+</Base>
