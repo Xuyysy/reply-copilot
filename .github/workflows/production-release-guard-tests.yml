@@ -1,0 +1,39 @@
+name: Offline Production release guard regression (no deployments)
+on:
+  push:
+    branches:
+      - 'chatgpt/production-api-origin-guard-*'
+    paths:
+      - '.github/workflows/production-deploy.yml'
+      - '.github/workflows/production-release-guard-tests.yml'
+      - 'scripts/guard-production-release.py'
+      - 'tests/test_production_api_origin_guard.py'
+  pull_request:
+    paths:
+      - '.github/workflows/production-deploy.yml'
+      - 'scripts/guard-production-release.py'
+      - 'tests/test_production_api_origin_guard.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-guard-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-release-gate:
+    name: Read-only release guard unit tests
+    if: >-
+      github.event_name == 'push' ||
+      !startsWith(github.head_ref, 'chatgpt/production-api-origin-guard-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check guard Python syntax
+        run: python3 -m py_compile scripts/guard-production-release.py tests/test_production_api_origin_guard.py
+      - name: Offline guard regressions (mocked Cloudflare; no credentials)
+        run: python3 -m unittest discover -s tests -p 'test_production_api_origin_guard.py' -v
