@@ -165,18 +165,18 @@ jobs:
       # The trusted historical main branch has NO api/package.json or api lockfile.
       # Staging already uses an isolated pinned Wrangler install for this reason.
       - uses: actions/setup-node@v4
-        if: 'deploy' == 'deploy'
+        if: ${{ 'deploy' == 'deploy' }}
         with:
           node-version: '24'
       - name: Install pinned isolated Wrangler (no main-branch API dependency)
-        if: 'deploy' == 'deploy'
+        if: ${{ 'deploy' == 'deploy' }}
         shell: bash
         run: |
           set -euo pipefail
           npm install --prefix "$RUNNER_TEMP/production-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
           "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" --version
       - name: Deploy ONLY precompiled verified Worker, with vars and Secrets preserved
-        if: 'deploy' == 'deploy' && 'pages' == 'worker'
+        if: ${{ 'deploy' == 'deploy' && 'pages' == 'worker' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -208,7 +208,7 @@ jobs:
               --no-bundle --keep-vars --strict
           fi
       - name: Deploy ONLY immutable verified Production Pages files
-        if: 'deploy' == 'deploy' && 'pages' == 'pages'
+        if: ${{ 'deploy' == 'deploy' && 'pages' == 'pages' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -217,7 +217,7 @@ jobs:
             --commit-hash "$SOURCE_SHA" \
             --commit-message "Approved Production Pages $SOURCE_SHA"
       - name: Check deployment succeeded AND preserved payment/secret/D1 bindings
-        if: 'deploy' == 'deploy'
+        if: ${{ 'deploy' == 'deploy' }}
         run: python3 scripts/guard-production-release.py after
       - name: Verify Production Worker and Staging Pages unchanged after Pages deployment
         shell: bash
