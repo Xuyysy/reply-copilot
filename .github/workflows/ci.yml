@@ -94,7 +94,8 @@ jobs:
       - name: Verify current PR merge context
         if: github.event_name == 'pull_request'
         run: |
-          (cd web && npx --no-install tsc --noEmit)
+          # Astro supplies ImportMeta.env types through generated .astro/types.d.ts.
+          (cd web && npx --no-install astro sync && npx --no-install tsc --noEmit)
           node --test --test-concurrency=1 \
             tests/production-preflight.test.mjs \
             tests/extension-identity.test.js \
