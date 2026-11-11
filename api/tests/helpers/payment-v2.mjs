@@ -34,10 +34,10 @@ export function enableEpaySales(f){
   f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_epay_enabled','payment_alipay_enabled')");
   return f;
 }
-export const feeProjection={ruleVersion:'test-v1',thresholdFen:0,tier:'STANDARD',merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:976,companyServiceFeeFen:30};
+export const feeProjection={ruleVersion:'test-v1',thresholdFen:0,tier:'STANDARD',merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:960,companyServiceFeeFen:30};
 export function providerResponse(request, fields={}, {status=201,signed=true,badSignature=false}={}) {
   const requestId=request.headers.get('X-XD-Request-Id');
-  const body=JSON.stringify(fields.code?{requestId,...fields}:{requestId,outTradeNo:JSON.parse(request.body||'{}').outTradeNo,amountFen:1006,currency:'CNY',status:'CREATED',payUrl:'https://cashier.example.test/pay/test',feeProjection,...fields});
+  const body=JSON.stringify(fields.code?{requestId,...fields}:{requestId,outTradeNo:JSON.parse(request.body||'{}').outTradeNo,amountFen:990,currency:'CNY',status:'CREATED',payUrl:'https://cashier.example.test/pay/test',feeProjection,...fields});
   const headers={'Content-Type':'application/json','X-XD-Request-Id':requestId};
   if(signed){const timestamp=String(Math.floor(Date.now()/1000)),nonce='response-nonce-12345',keyId='test-platform';const canonical=['XD-Response-v1',String(status),'application/json',requestId,timestamp,nonce,keyId,createHash('sha256').update(body).digest('hex')].join('\n');Object.assign(headers,{'X-XD-Response-Timestamp':timestamp,'X-XD-Response-Nonce':nonce,'X-XD-Response-Key-Id':keyId,'X-XD-Response-Sign':badSignature?'AAAA':sign('RSA-SHA256',Buffer.from(canonical),platform.privateKey).toString('base64')});}
   return new Response(body,{status,headers});

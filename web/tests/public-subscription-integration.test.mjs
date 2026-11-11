@@ -15,14 +15,17 @@ test("creator theory and AI reply preview lead the homepage together", () => {
   }
 });
 
-test("live catalog controls subscription cards and permanently protects credit fallback", () => {
+test("live catalog controls subscription cards and keeps live-CNY credit packs available", () => {
   for (const id of ["home-subscriptions", "home-legacy-pricing"]) {
     assert.equal(home.split('id="' + id + '"').length - 1, 1, id + " must be unique");
   }
   assert.ok(home.includes('id="home-subscriptions" class="section soft" hidden'));
-  for (const token of ["/v1/subscriptions/plans","data.autoRenew!==false","data.plans.length>4","homeSubscriptions=data.plans","subscriptionCheckout=data.checkoutAvailable===true","document.getElementById('home-legacy-pricing')!.hidden=true","if(homeSubscriptions){container.hidden=true;return;}","reply-copilot-language',renderHomeSubscriptions","订阅结账尚未开放","永久额度包不主动过期"]) {
+  for (const token of ["/v1/subscriptions/plans","data.autoRenew!==false","data.plans.length>4","homeSubscriptions=data.plans","subscriptionCheckout=data.checkoutAvailable===true","document.getElementById('home-legacy-pricing')!.hidden=true","renderFeaturedPackages(document,container,featuredSource","reply-copilot-language',renderHomeSubscriptions","订阅结账尚未开放","永久额度包不主动过期"]) {
     assert.ok(home.includes(token), token);
   }
+  assert.ok(home.includes('id="home-credit-packages"'),"permanent CNY packages remain visible below subscriptions");
+  assert.ok(home.includes('section.hidden=container.hidden'),"credit visibility follows package catalog, not subscription state");
+  assert.ok(!home.includes("if(homeSubscriptions){container.hidden=true;return;}"));
   assert.ok(!home.includes("无需订阅，也无需自行配置 API Key。"));
   assert.ok(!home.includes("No subscription or personal API key required."));
   assert.ok(home.includes("30 天订阅"));
