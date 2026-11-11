@@ -105,7 +105,7 @@ test('next trusted reply instantly retires any lingering acknowledgement',async(
  assert.equal(f.generations(),2,'second reply generates exactly once');
  f.resolve(1);await sleep(110);
  assert.equal(f.commands(),2,'second suggestion inserts into the new editor');
- assert.equal(b.editor.innerText,'中文 English 😀\\nline');
+ assert.equal(b.editor.innerText,'中文 English 😀\nline');
 });
 test('regenerating does not orphan the editor lifecycle before the next reply',async()=>{
  const f=flow(),a=f.post('101'),b=f.post('102');f.click(a);f.open(a);await sleep(0);
