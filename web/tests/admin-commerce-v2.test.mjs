@@ -22,8 +22,9 @@ test('Admin orders combine existing credit and subscription business histories w
 test('Financial overview distinguishes real gross payment from mock or legacy and refund caveats',()=>{
  assert.match(root,/AdminCommerceSummary active=\{tab==="overview"\}/);
  assert.match(orders,/\/v1\/admin\/commerce\/summary/);
- assert.match(orders,/Verified provider events only/);
- assert.match(orders,/Subscription refunds require separate verification/);
+ assert.match(orders,/Last 90 days · verified provider events/);
+ assert.match(orders,/Subscription refunds require independent review/);
+ assert.match(orders,/Gross verified receipts are not profit/);
  assert.ok(root.includes('Booked credit-pack users (legacy)'));
 });
 test('Admin user detail exposes subscription period and permanent entitlement without merging balances',()=>{

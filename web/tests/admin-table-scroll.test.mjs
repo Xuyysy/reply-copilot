@@ -24,7 +24,15 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1},session);
   await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
  };
- const tab=async value=>{await click(`document.querySelector('[role="tab"][id$="-trigger-${value}"]')`);await until(`!!document.querySelector('[role="tabpanel"][data-state="active"] table')`);};
+ const tab=async value=>{
+  if(await evaluate('window.innerWidth<1024')){
+   await until("!!document.querySelector('[data-testid=admin-mobile-workspace]')");
+   await evaluate(`(()=>{const select=document.querySelector('[data-testid=admin-mobile-workspace]');const setter=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;setter.call(select,${JSON.stringify(value)});select.dispatchEvent(new Event('change',{bubbles:true}));})()`);
+  }else{
+   await click(`document.querySelector('[role="tab"][id$="-trigger-${value}"]')`);
+  }
+  await until(`!!document.querySelector('[role="tabpanel"][data-state="active"] table')`);
+ };
  const panel='document.querySelector(\'[role="tabpanel"][data-state="active"]\')';
  try{
   const css=readdirSync(path.join(webRoot,'dist/_astro')).filter(p=>p.endsWith('.css')).map(p=>readFileSync(path.join(webRoot,'dist/_astro',p),'utf8')).join('\n');
@@ -68,6 +76,11 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   for(const [width,height] of [[1440,1000],[375,700]])for(const language of ['zh','en'])for(const count of [0,1,5,100]){
     await call('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false},session);
     await evaluate(`window.__mount(${count},${JSON.stringify(language)})`);await until('!!document.querySelector(\'[role="tablist"]\')');
+    const layout=await evaluate(`(()=>{const picker=document.querySelector('[data-testid=admin-mobile-workspace]'),nav=document.querySelector('.admin-console-nav');const p=picker.getBoundingClientRect(),n=nav.getBoundingClientRect();return {viewport:innerWidth,document:document.documentElement.scrollWidth,mobilePicker:p.width>0&&p.height>0,desktopSidebar:n.width>0&&n.height>0,selected:picker.value};})()`);
+    assert.ok(layout.document<=width+1,'Admin console must not overflow: '+JSON.stringify(layout));
+    assert.equal(layout.mobilePicker,width<1024,'Mobile workspace select visibility: '+JSON.stringify(layout));
+    assert.equal(layout.desktopSidebar,width>=1024,'Desktop sidebar visibility: '+JSON.stringify(layout));
+    assert.equal(layout.selected,'overview');
     for(const value of ['users','ledger','orders']){
       await tab(value);await until(`${panel}.querySelector('tbody').children.length===${count}`);
       const info=await evaluate(`(async()=>{const p=${panel},wrap=p.querySelector('.data-table-wrap'),s=wrap.querySelector('[data-slot="table-container"]'),head=s.querySelector('thead');const before=head.getBoundingClientRect().top;const controls=[...p.querySelectorAll('form,button')].filter(el=>!wrap.contains(el));const top=controls.map(el=>el.getBoundingClientRect().top);s.scrollTop=200;s.scrollLeft=150;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));return {h:s.clientHeight,sh:s.scrollHeight,w:s.clientWidth,sw:s.scrollWidth,outerOverflow:getComputedStyle(wrap).overflow,sticky:getComputedStyle(head).position,headDelta:Math.abs(head.getBoundingClientRect().top-before),controlsStayed:controls.every((el,i)=>Math.abs(el.getBoundingClientRect().top-top[i])<1),aligned:Math.abs(s.querySelector('th').getBoundingClientRect().left-(s.querySelector('td')?.getBoundingClientRect().left??s.querySelector('th').getBoundingClientRect().left))<1,pageWidth:document.documentElement.scrollWidth};})()`);
