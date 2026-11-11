@@ -42,5 +42,7 @@ test("persistent read failures are neutral and accessible instead of an alarming
  assert.doesNotMatch(account,/账户暂时无法读取/);
  assert.doesNotMatch(account,/if \(state === "error" \|\| !data\) return <Alert variant="destructive"/);
  assert.match(account,/if \(code && !validCode\) return <Alert variant="destructive" role="alert">/);
- assert.match(account,/<CreatorMomentumIntelligence userId=/);
+ assert.doesNotMatch(account,/CreatorMomentumIntelligence/);
+ const terminal=source("src/pages/momentum-terminal.astro");
+ assert.match(terminal,/<CreatorMomentumIntelligence client:load \/>/);
 });
