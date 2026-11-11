@@ -2,7 +2,7 @@
   // All references and post identities stay in this content script's isolated world.
   function create({trusted,statusId,requestId,now,baselineModalCount,baselineEditors}) {
     const startedAt=now, previousEditors=new Set(baselineEditors);
-    let state='waiting',reason='awaiting_new_editor',editor=null;
+    let state='waiting',reason='awaiting_new_editor',editor=null,boundDialog=null;
     function reject(why) {state='rejected';reason=why;editor=null;return result();}
     function result() {return {state,reason,editor};}
     if (!trusted) reject('untrusted_activation');
@@ -19,10 +19,38 @@
       const candidates=[...nodes.values()];
       if (candidates.length>1) return reject('multiple_editors');
       if (state==='bound') {
-        if (candidates.length!==1 || candidates[0].node!==editor) return reject('editor_replaced_or_closed');
-        if (candidates[0].contextStatusId && candidates[0].contextStatusId!==statusId) return reject('context_identity_conflict');
-        if (candidates[0].quarantinedContextMatch && candidates[0].contextStatusId!==statusId) return reject('stale_activation_ambiguous');
-        if (!candidates[0].contextMatches) return reject('reply_context_unconfirmed');
+        // React may briefly unmount the editor while mounting media/quote
+        // attachments. The surrounding dialog can also disappear for a
+        // frame. Wait for the caller's short close-grace check instead of
+        // treating one empty snapshot as a permanent user cancellation.
+        if (!candidates.length) {
+          reason='awaiting_editor_remount';
+          return {state,reason,editor:null};
+        }
+        const candidate=candidates[0];
+        if (candidate.contextStatusId && candidate.contextStatusId!==statusId) return reject('context_identity_conflict');
+        if (candidate.quarantinedContextMatch && candidate.contextStatusId!==statusId) return reject('stale_activation_ambiguous');
+        if (candidate.contextMatches===null) {
+          reason='awaiting_reply_context';
+          return {state,reason,editor:null};
+        }
+        if (!candidate.contextMatches) return reject('reply_context_unconfirmed');
+        if (candidate.node!==editor) {
+          // A new *focused, empty* editor is safe to rebind only when it is
+          // the same reply dialog or has the exact verified target status ID.
+          // Never revive a pre-existing editor, carry a user's draft across,
+          // or follow a different post.
+          const sameDialog=Boolean(boundDialog && candidate.dialog===boundDialog);
+          const verifiedId=candidate.contextStatusId===statusId;
+          if (!candidate.modal || !candidate.focused || !candidate.empty ||
+              previousEditors.has(candidate.node) || (!sameDialog && !verifiedId) ||
+              (editor?.isConnected && globalThis.ZaneReplyCopilotContent?.composerAdapter?.hasContent?.(editor)))
+            return reject('editor_replaced_or_closed');
+          editor=candidate.node;
+          boundDialog=candidate.dialog||null;
+          reason='verified_editor_remount';
+          return result();
+        }
         return result();
       }
       if (!candidates.length) return result();
@@ -35,7 +63,7 @@
       if (!candidate.contextMatches) return reject('reply_context_unconfirmed');
       if (!candidate.empty) return reject('existing_draft');
       if (!candidate.focused) {reason='awaiting_editor_focus';return result();}
-      state='bound';reason='new_focused_reply_editor';editor=candidate.node;
+      state='bound';reason='new_focused_reply_editor';editor=candidate.node;boundDialog=candidate.dialog||null;
       return result();
     }});
   }
@@ -131,7 +159,7 @@
         :uniqueText&&!uniqueText.id&&exactText.length===1?true
         :candidates.length===1&&!normalized(text)&&!statusId?null
         :false;
-      return {node,modal:Boolean(dialog),focused:node===document.activeElement,
+      return {node,dialog,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)),
