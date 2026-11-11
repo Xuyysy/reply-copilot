@@ -32,6 +32,8 @@ export default function AdminOperationsInsights({language,active,mode,navigate}:
  const statusLabel=(a:Alert)=>{
   if(a.type==='subscription_review')return t('订阅待复核','Subscription review');
   if(a.type==='credit_payment_unknown')return t('额度包付款待确认','Credit payment unknown');
+  if(a.type==='credit_entitlement_gap')return t('额度包已付款但未发放额度','Credit paid, credits not granted');
+  if(a.type==='subscription_entitlement_gap')return t('订阅已付款但权益未生效','Subscription paid, entitlement not applied');
   if(a.type==='ai_budget')return t('AI 预算预警','AI budget warning');
   return t('AI 失败请求','AI failure requests');
  };
@@ -44,7 +46,7 @@ export default function AdminOperationsInsights({language,active,mode,navigate}:
    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
    {!insights&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('正在加载运营数据…','Loading operations data…')}</p>}
    {insights&&mode==='alerts'&&<>
-    <p className="text-xs text-muted-foreground">{t('只展示最近30天有待核验状态的订阅和额度包订单，以及预算/AI请求异常。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget and AI anomalies. Up to eight orders per kind; not the full historical backlog.')}</p>
+    <p className="text-xs text-muted-foreground">{t('只展示最近30天待核验订单及支付已确认超过5分钟但权益仍未发放的订单，以及预算/AI请求异常。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget and AI anomalies. Up to eight orders per kind; not the full historical backlog.')}</p>
     {!insights.alerts.length&&<p role="status" className="text-sm">{t('当前筛选范围没有需关注的事件。','No flagged events in the inspected ranges.')}</p>}
     <div className="space-y-2">
      {insights.alerts.map(a=><div key={a.key} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2" data-testid="admin-ops-alert">
