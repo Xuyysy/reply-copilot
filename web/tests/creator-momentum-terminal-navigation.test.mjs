@@ -18,7 +18,8 @@ test("the independent momentum button sits in header actions BEFORE language swi
  assert.match(actions,/data-nav-id="momentum-terminal"/);
  assert.match(actions,/class="momentum-terminal-entry" href="\/momentum-terminal"/);
  assert.ok(actions.indexOf('href="/momentum-terminal"')<actions.indexOf('id="language-toggle"'));
- assert.match(layout,/<a href="\/momentum-terminal" data-zh="互动势能智能分析终端">Creator Momentum Terminal<\/a>/);
+ assert.match(layout,/<a href="\/momentum-terminal" data-zh="势能分析">Momentum Analytics<\/a>/);
+ assert.match(actions,/<span data-zh="势能分析">Momentum Analytics<\/span>/);
  assert.match(css,/\.header-actions \.momentum-terminal-entry \{display:none;/);
 });
 
@@ -49,4 +50,45 @@ test("payment access is still server-trusted, without adding or inferring user e
  assert.match(feature,/subscriptionAccount\(env,userId\)/);
  assert.doesNotMatch(feature,/freeRemaining>0/);
  assert.match(panel,/api<Insights>\("\/v1\/creator-momentum\/insights"\)/);
+});
+
+test("the full founder-approved Notion thesis appears in its exact seven-paragraph order for guests and nonpay users",()=>{
+ const canonical=[
+  "我认为，原创帖的传播机会，并不只取决于发布的那一刻。",
+  "持续参与高质量讨论，可能让账号逐渐建立话题关联、受众连接与行为信号，形成潜在的传播势能。",
+  "我将这种互动积累过程中，可能出现传播条件非线性变化的关键节点，定义为「互动势能临界值」。",
+  "互动势能分析引擎融合 X 推荐机制研究、互动时序建模、传播趋势分析及中文区创作者X榜单，构建多维势能评估体系。",
+  "通过每日动态数据更新、历史样本数据库积累与持续模型训练分析，不断优化行为信号权重与临界策略，探索互动积累和原创内容曝光表现之间的潜在关联。",
+  "系统通过分阶段临界识别，辅助捕捉值得尝试原创发布的关键窗口。",
+  "互动是蓄势，临界是信号，原创是释放。"
+ ];
+ let previous=-1;
+ for(const paragraph of canonical){
+  const index=panel.indexOf(paragraph);
+  assert.ok(index>previous,"missing or out-of-order canonical founder paragraph: "+paragraph);
+  previous=index;
+ }
+ assert.match(panel,/founderNarrative\.map\(/);
+ assert.match(panel,/cmi-founder-narrative/);
+ assert.match(panel,/cmi-theory-manifesto/);
+ assert.match(panel,/state==="locked"\|\|state==="guest"/);
+ assert.match(panel,/完整理论与技术研究方向/);
+ assert.match(panel,/不代表 X 官方验证/);
+ assert.match(panel,/不表示历史样本数据库、创作者榜单实时接入或持续模型训练等技术链路均已上线/);
+ assert.match(panel,/基于已确认交付的 AI 生成事件/);
+ assert.match(panel,/解锁势能分析/);
+ assert.match(css,/\.cmi-founder-narrative/);
+ assert.doesNotMatch(panel,/你的每次互动，可能都在为下一次原创积累机会/);
+});
+
+test("founder English narrative retains the original thesis and roadmap boundaries",()=>{
+ for(const paragraph of [
+  "I believe an original post's distribution opportunity is shaped by more than the moment it is published.",
+  "I call the point at which accumulated engagement may correspond to a nonlinear shift in distribution conditions",
+  "Through daily data updates, historical sample accumulation, and ongoing model training and analysis",
+  "Engagement builds momentum. Thresholds signal opportunity. Original posts release it."
+ ]) assert.ok(panel.includes(paragraph),"missing English narrative: "+paragraph);
+ assert.match(panel,/not an X-endorsed finding/);
+ assert.match(panel,/not X impressions or actually published replies/);
+ assert.match(layout,/aria-label="势能分析 \/ Momentum Analytics"/);
 });

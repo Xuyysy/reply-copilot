@@ -32,3 +32,11 @@ test("gating stays on the authenticated API; no paid status from free balance",(
   assert.match(panel,/data-cmi-locked/);
   assert.match(panel,/api<Insights>\("\/v1\/creator-momentum\/insights"\)/);
 });
+
+test("the independent locked-page research thesis does not alter paid-only data protections",()=>{
+ assert.match(panel,/founderNarrative/);
+ assert.match(panel,/data-cmi-locked/);
+ assert.match(panel,/state==="ready"&&insights&&cycle&&<>/);
+ assert.match(panel,/api<Insights>\("\/v1\/creator-momentum\/insights"\)/);
+ assert.doesNotMatch(dashboard,/CreatorMomentumIntelligence/);
+});
