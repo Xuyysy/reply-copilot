@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "note": "Sanitized operator-claims TEMPLATE ONLY. Never put credentials, order IDs or customer data here. All booleans describe evidence NOT independently verified by the CLI.",
+  "source": {
+    "candidateSha": ""
+  },
+  "database": {
+    "readOnlyAuditApproved": false,
+    "schema0024Matches": false,
+    "backupApproved": false,
+    "backupRestoreTested": false,
+    "migration0025Approved": false,
+    "migration0025AppliedVerified": false,
+    "appliedSqlSha256": "",
+    "legacyMk99Preserved": false,
+    "foreignKeysVerified": false
+  },
+  "runtime": {
+    "networkMode": "allowlist_disabled",
+    "networkModeConfirmed": false,
+    "workerBindings": [
+      {
+        "name": "PAYMENTS_ENABLED",
+        "type": "plain_text"
+      },
+      {
+        "name": "XIAODOU_WEBHOOKS_ENABLED",
+        "type": "plain_text"
+      }
+    ]
+  },
+  "provider": {
+    "signedQueryVerified": false,
+    "signedWebhookVerified": false,
+    "alipayMerchantReleased": false,
+    "subscriptionSettlementVerified": false,
+    "creditSettlementVerified": false,
+    "legacyMk99SettlementVerified": false
+  },
+  "release": {
+    "fullPushCiSha": "",
+    "fullPushCiPassed": false,
+    "productionBuildSha": "",
+    "productionBuildPassed": false,
+    "productionArtifactChecksumVerified": false,
+    "protectedEnvironmentApproved": false,
+    "compatibleWorkerDeployApproved": false,
+    "rollbackWorkerDeploymentId": "",
+    "liveWorkerSourceSha": "",
+    "mk99StillActiveVerified": false,
+    "merchantSwitchApproved": false,
+    "signedProductionAcceptanceApproved": false
+  }
+}

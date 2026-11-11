@@ -33,6 +33,17 @@
 - Roll back Worker/Pages binaries only when compatible with any already-written Xiaodou subscription rows. Once real Xiaodou orders exist, NEVER blindly drop/revert 0025 tables or restore a stale snapshot that erases payment history.
 - Refunds, manual grants, dispute handling, Production SQL repair, credentials rotation and live transactions each require their own approval. No trial Production charges in this task.
 
+
+## One-command Production cutover readiness (offline feature)
+
+Run from repository root:
+- `node scripts/xiaodou-production-readiness.mjs` — local checks and explicit NO-GO blockers, no remote connections.
+- `node scripts/xiaodou-production-readiness.mjs --evidence docs/payments/xiaodou-production-readiness.example.json` — evaluate a **sanitized** operator evidence claim packet. Exit code 2 means blockers; exit 0 means only that the supplied claims appear internally complete, **not** that authorization was granted.
+
+This single feature checks the 24-migration boundary and local 0025 historical MK99 replay, Production Worker identity and D1 isolation, proposal SQL SHA-256, authorized D1 audit and backup claims, **exact five RSA2 secret binding names and types** (never their values), explicit allowlist-disabled or verified-egress flag matched to the stated mode, signed provider GET/Webhook and MK99 continuation, exact-SHA full Push CI, independent Production build, pinned rollback Worker, and **independent merchant-switch approval**. Output is structured JSON with phase-level results and actionable blockers. The script never requests D1 data or secrets, makes no network calls, changes no settings, and never deploys, even when every checklist item is marked true. Manual evidence is not cryptographically authenticated.
+
+The example deliberately remains **NO-GO** for Production; do not fill its flags based on assumptions or this chat alone. Each production authorization and observation must come from the relevant operator and can be independently verified only after the matching explicit approval. A green CI is not such approval.
+
 ## Unresolved release blockers
 
 - No Production D1 0025 authorization, remote assessment, approved backup or execution.
