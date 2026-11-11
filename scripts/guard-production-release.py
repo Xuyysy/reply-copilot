@@ -75,6 +75,9 @@ def main():
         active, deployment = live_id(target)
         if active != expected:
             raise RuntimeError("Production changed after approval; refused stale release")
+        pinned_deployment = os.environ.get("EXPECTED_DEPLOYMENT", "")
+        if pinned_deployment and (target != "worker" or deployment != pinned_deployment):
+            raise RuntimeError("Production Worker deployment ID changed after explicit API-origin approval")
         snapshot.write_text(json.dumps({
             "bindings": current, "previous": active,
             "previousDeployment": deployment, "target": target,

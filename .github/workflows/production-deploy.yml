@@ -38,6 +38,22 @@ on:
         description: For check type CHECK_ONLY; for deploy type DEPLOY_WORKER_TO_PRODUCTION or DEPLOY_PAGES_TO_PRODUCTION
         required: true
         type: string
+      api_origin_takeover:
+        description: Optional one-time Worker source ownership transfer after API-origin conflict. Default denies any override.
+        type: choice
+        required: true
+        default: deny
+        options:
+          - deny
+          - approve-after-review
+      api_origin_takeover_confirmation:
+        description: Only for approved Worker API-origin takeover; type ACKNOWLEDGE_WORKER_SCRIPT_API_SOURCE_OVERWRITE
+        type: string
+        required: false
+      expected_current_deployment:
+        description: Exact CURRENT Production Worker deployment ID, mandatory for API-origin takeover
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -65,6 +81,9 @@ jobs:
       TARGET: ${{ inputs.target }}
       EXPECTED_CURRENT: ${{ inputs.expected_current }}
       CONFIRMATION: ${{ inputs.confirmation }}
+      API_ORIGIN_TAKEOVER: ${{ inputs.api_origin_takeover }}
+      API_ORIGIN_TAKEOVER_CONFIRMATION: ${{ inputs.api_origin_takeover_confirmation }}
+      EXPECTED_DEPLOYMENT: ${{ inputs.expected_current_deployment }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Exact immutable release identity
@@ -78,6 +97,20 @@ jobs:
           case "$RELEASE_MODE:$TARGET:$CONFIRMATION" in
             check:worker:CHECK_ONLY|check:pages:CHECK_ONLY|deploy:worker:DEPLOY_WORKER_TO_PRODUCTION|deploy:pages:DEPLOY_PAGES_TO_PRODUCTION) ;;
             *) echo 'Release mode, target or confirmation phrase invalid'; exit 1 ;;
+          esac
+          # Explicitly opt in to the API-origin -> Wrangler ownership handoff.
+          # Default behavior continues to fail closed with Wrangler --strict.
+          case "$API_ORIGIN_TAKEOVER" in
+            deny)
+              test -z "$API_ORIGIN_TAKEOVER_CONFIRMATION" || { echo 'Unexpected source-takeover confirmation'; exit 1; }
+              test -z "$EXPECTED_DEPLOYMENT" || { echo 'Unexpected takeover deployment pin'; exit 1; }
+              ;;
+            approve-after-review)
+              test "$RELEASE_MODE:$TARGET" = "deploy:worker" || { echo 'API-origin approval only supported for Worker deployment'; exit 1; }
+              test "$API_ORIGIN_TAKEOVER_CONFIRMATION" = "ACKNOWLEDGE_WORKER_SCRIPT_API_SOURCE_OVERWRITE" || { echo 'Missing separate API-origin overwrite approval'; exit 1; }
+              [[ "$EXPECTED_DEPLOYMENT" =~ ^[0-9a-f-]{36}$ ]] || { echo 'Missing pinned current Worker deployment ID'; exit 1; }
+              ;;
+            *) echo 'Invalid API-origin takeover mode'; exit 1 ;;
           esac
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/production-ci-run.json"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/production-build-run.json"
@@ -107,6 +140,9 @@ jobs:
       RELEASE_MODE: ${{ inputs.release_mode }}
       TARGET: ${{ inputs.target }}
       EXPECTED_CURRENT: ${{ inputs.expected_current }}
+      EXPECTED_DEPLOYMENT: ${{ inputs.expected_current_deployment }}
+      API_ORIGIN_TAKEOVER: ${{ inputs.api_origin_takeover }}
+      API_ORIGIN_TAKEOVER_CONFIRMATION: ${{ inputs.api_origin_takeover_confirmation }}
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -120,6 +156,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Verify production API-origin guard in isolated offline tests
+        shell: bash
+        run: python3 -m unittest discover -s tests -p 'test_production_api_origin_guard.py' -v
       - name: Download immutable artifact from independently verified build
         uses: actions/download-artifact@v4
         with:
@@ -161,9 +200,21 @@ jobs:
           path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'production.wrangler.json'
           path.write_text(json.dumps(config))
           PY
-          "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" deploy \
-            --config "$RUNNER_TEMP/production.wrangler.json" \
-            --no-bundle --keep-vars --strict
+          if [[ "$API_ORIGIN_TAKEOVER" == "approve-after-review" ]]; then
+            # The pre-upload --strict refusal is expected when the active
+            # Worker was updated through the Script API. Require a second
+            # separately approved owner confirmation and an exact deployment
+            # pin before any intentional ownership transfer.
+            test "$API_ORIGIN_TAKEOVER_CONFIRMATION" = "ACKNOWLEDGE_WORKER_SCRIPT_API_SOURCE_OVERWRITE"
+            python3 scripts/guard-production-release.py before
+            "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" deploy \
+              --config "$RUNNER_TEMP/production.wrangler.json" \
+              --no-bundle --keep-vars
+          else
+            "$RUNNER_TEMP/production-deploy-tools/node_modules/.bin/wrangler" deploy \
+              --config "$RUNNER_TEMP/production.wrangler.json" \
+              --no-bundle --keep-vars --strict
+          fi
       - name: Deploy ONLY immutable verified Production Pages files
         if: inputs.release_mode == 'deploy' && inputs.target == 'pages'
         shell: bash
