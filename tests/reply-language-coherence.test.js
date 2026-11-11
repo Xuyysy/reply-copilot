@@ -20,7 +20,7 @@ test("v2 prompt explicitly prioritizes target language over Chinese samples with
   for(const [text,lang] of [["I shipped a new app!","en"],["新しいアプリを公開しました","ja"],["새 앱을 출시했어요","ko"]]){
     const prompt=buildPrompts({postContext:{text},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"auto",writingSamples:["这太好笑了"]},recentHistory:[{style:"natural",reply:"哈哈真的"}],outputSchemaVersion:2});
     assert.match(prompt.system,/OFFHAND HUMAN REPLY RULES/);
-    assert.match(prompt.system,new RegExp("Required reply language: "+lang));
+    assert.match(prompt.system,new RegExp("Target: "+lang));
     assert.match(prompt.user,new RegExp("Write every reply in "+lang));
     assert.ok(prompt.user.includes(text));
   }
