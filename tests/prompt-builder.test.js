@@ -42,7 +42,7 @@ test("default X replies sound offhand instead of like a dutiful AI assistant", (
 test("release gate: complete original Production V1 prompt source is byte-for-byte unchanged except multilingual addendum",()=>{
  const source=readFileSync(new URL("../prompts/prompt-builder.js",import.meta.url),"utf8");
  const importLang='import { inferPostLanguageHint, normalizeReplyLanguage } from "../domain/language-support.js";\n';
- const extendedSignature=', outputSchemaVersion = 1 }) {';
+ const extendedSignature=', outputSchemaVersion = 2 }) {';
  const originalSignature=' }) {';
  const marker='  // ADDITIONAL LANGUAGE RULE ONLY. V1 system+user templates above are unchanged.';
  assert.equal(source.split(importLang).length,2,"one new language module import only");
