@@ -91,6 +91,8 @@ export default function AdminDashboard() {
   useEffect(()=>setNote(detail?.user.admin_note || ""),[detail]);
   const [audits, setAudits] = useState<Audit[]>([]);
   const [content, setContent] = useState<Record<string, string>>({});
+  const [auditsLoaded, setAuditsLoaded] = useState(false);
+  const [contentLoaded, setContentLoaded] = useState(false);
   const [creating, setCreating] = useState(false);
   const say = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const read = <T,>(path: string) => api<T>(path);
@@ -118,14 +120,13 @@ export default function AdminDashboard() {
   };
 
   const load = useCallback(async () => {
-    setBusy(true); setAccess("loading"); setData(null); setNotice("");
+    setBusy(true); setAccess("loading"); setData(null); setNotice(""); setAuditsLoaded(false); setContentLoaded(false);
     try {
       const metrics = await read<Metrics>("/v1/admin/dashboard");
       const [users, packages, orders, settings] = await Promise.all([
         read<{ users: User[] }>("/v1/admin/users"), read<{ packages: Package[] }>("/v1/admin/packages"), read<{ orders: Order[] }>("/v1/admin/orders"), read<{ settings: Setting[] }>("/v1/admin/settings"),
       ]);
-      const [auditResponse, contentResponse] = await Promise.all([read<{ audits: Audit[] }>("/v1/admin/audits"), read<{ content: Record<string, string> }>("/v1/admin/content")]);
-      setAudits(auditResponse.audits); setContent(contentResponse.content);
+      // Audit and CMS details load only if an operator opens those workspaces.
       setData({ metrics, users: users.users, packages: packages.packages, orders: orders.orders, settings: settings.settings });
       setAccess("ready");
     } catch (cause) {
@@ -134,6 +135,22 @@ export default function AdminDashboard() {
     } finally { setBusy(false); }
   }, [language]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if(access!=="ready"||tab!=="audits"||auditsLoaded)return;
+    let live=true;
+    void read<{audits:Audit[]}>("/v1/admin/audits").then(data=>{
+      if(live){setAudits(data.audits);setAuditsLoaded(true);}
+    }).catch(cause=>{if(live)say(readableError(cause,language),true);});
+    return()=>{live=false;};
+  },[access,tab,auditsLoaded,language]);
+  useEffect(() => {
+    if(access!=="ready"||tab!=="content"||contentLoaded)return;
+    let live=true;
+    void read<{content:Record<string,string>}>("/v1/admin/content").then(data=>{
+      if(live){setContent(data.content);setContentLoaded(true);}
+    }).catch(cause=>{if(live)say(readableError(cause,language),true);});
+    return()=>{live=false;};
+  },[access,tab,contentLoaded,language]);
   const run = async (action: () => Promise<void>) => { if (busyGuard.current) return; busyGuard.current = true; setBusy(true); setRetryAction(null); say(""); try { await action(); } catch (cause) { if (!(cause instanceof ApiError) || cause.status >= 500) setRetryAction(() => action); if (cause instanceof ApiError && cause.status === 401) { setData(null); setAccess(cause.status === 401 ? "login" : "forbidden"); } say(readableError(cause, language), true); } finally { busyGuard.current = false; setBusy(false); } };
   const securityWrite = async <T,>(path: string, body: Record<string, unknown>): Promise<T> => {
     if (busyGuard.current) throw new Error(t("请等待当前操作完成。", "Wait for the current operation."));
@@ -212,8 +229,8 @@ export default function AdminDashboard() {
       <TabsContent value="settings"><Card><CardHeader><CardTitle>{t("系统设置", "System settings")}</CardTitle></CardHeader><CardContent className="space-y-4">{data.settings.filter(item => item.key !== "announcement").map(item => <SettingRow key={item.key} setting={item} language={language} onSave={value => saveSetting(item, value)} />)}</CardContent></Card></TabsContent>
       <TabsContent value="campaigns"><CampaignPanel busy={busy} write={write} selected={selected} run={run} confirm={(title,description,action)=>setConfirm({title,description,action})}/></TabsContent>
       <TabsContent value="security"><SecurityPaymentPanel language={language} busy={busy} read={read} write={securityWrite}/></TabsContent>
-      <TabsContent value="content"><SiteEditor content={content} pending={busy} language={language} loadHistory={()=>read("/v1/admin/content/history")} onSave={next=>setConfirm({title:"保存网站装修",description:"公开文案与导航保存后立即生效。",action:async()=>{await write("/v1/admin/content",{content:next});await refresh();}})} onRestore={versionId=>setConfirm({title:"恢复网站版本",description:"将选中的内容保存为一个新版本，历史记录继续保留。",action:async()=>{await write("/v1/admin/content/restore",{versionId});await refresh();}})}/></TabsContent>
-      <TabsContent value="audits"><Card><CardHeader><CardTitle>{t("操作审计", "Operation audit")}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow>{[t("时间", "Time"), t("操作", "Action"), t("对象", "Target"), t("原因", "Reason"), t("操作编号", "Operation ID")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{audits.map(a => <TableRow key={a.id}><TableCell>{date(a.created_at, language)}</TableCell><TableCell>{a.action}</TableCell><TableCell>{a.target_id || "—"}</TableCell><TableCell>{a.reason}</TableCell><TableCell className="break-all">{a.operation_id || a.id}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card></TabsContent>
+      <TabsContent value="content">{contentLoaded ? <SiteEditor content={content} pending={busy} language={language} loadHistory={()=>read("/v1/admin/content/history")} onSave={next=>setConfirm({title:"保存网站装修",description:"公开文案与导航保存后立即生效。",action:async()=>{await write("/v1/admin/content",{content:next});await refresh();}})} onRestore={versionId=>setConfirm({title:"恢复网站版本",description:"将选中的内容保存为一个新版本，历史记录继续保留。",action:async()=>{await write("/v1/admin/content/restore",{versionId});await refresh();}})}/> : <p role="status" className="py-8 text-sm text-muted-foreground">{t("正在读取网站编辑内容…","Loading website editor data…")}</p>}</TabsContent>
+      <TabsContent value="audits">{auditsLoaded ? <Card><CardHeader><CardTitle>{t("操作审计", "Operation audit")}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow>{[t("时间", "Time"), t("操作", "Action"), t("对象", "Target"), t("原因", "Reason"), t("操作编号", "Operation ID")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{audits.map(a => <TableRow key={a.id}><TableCell>{date(a.created_at, language)}</TableCell><TableCell>{a.action}</TableCell><TableCell>{a.target_id || "—"}</TableCell><TableCell>{a.reason}</TableCell><TableCell className="break-all">{a.operation_id || a.id}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <p role="status" className="py-8 text-sm text-muted-foreground">{t("正在读取审计记录…","Loading audit log…")}</p>}</TabsContent>
     </div></Tabs>}
     <AlertDialog open={Boolean(confirm)} onOpenChange={open => { if (!open) setConfirm(null); }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{confirm?.title}</AlertDialogTitle><AlertDialogDescription className="break-all">{confirm?.description}</AlertDialogDescription></AlertDialogHeader><Field label={t("操作原因（至少 8 字）", "Reason (at least 8 characters)")}><Input value={reason} minLength={8} maxLength={500} onChange={e => setReason(e.target.value)} /></Field><AlertDialogFooter><AlertDialogCancel>{t("取消", "Cancel")}</AlertDialogCancel><AlertDialogAction disabled={busy || reason.trim().length < 8} onClick={event => { event.preventDefault(); const action = confirm?.action; reasonRef.current = reason.trim(); setConfirm(null); if (action) void run(action); }}>{t("确认操作", "Confirm")}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
     <Dialog open={Boolean(editing)} onOpenChange={open => { if (!open) setEditing(null); }}>{editing && <PackageEditor creating={creating} item={editing} language={language} pending={busy} onCancel={() => setEditing(null)} onSave={body => { const item = editing; setEditing(null); setConfirm({ title: t("确认修改套餐", "Confirm package update"), description: `${item.id} · ${t("已有订单价格不会变化。", "Existing order prices will not change.")}`, action: async () => { await write(creating ? "/v1/admin/packages" : `/v1/admin/packages/${encodeURIComponent(item.id)}`, body); await refresh(); } }); }} />}</Dialog>
