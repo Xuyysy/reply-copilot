@@ -126,7 +126,7 @@ test('RSA2 pending orders relaunch from their immutable protocol when the legacy
   const paths=[];
   await withProvider(req=>{
    calls++;const path=new URL(req.url).pathname;paths.push(req.method+' '+path);
-   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:990,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
   },async()=>{
    const result=await f.call(`/v1/orders/${orderId}/attempts`,{body:{}});
    assert.equal(result.status,201,JSON.stringify(result.body));
@@ -181,7 +181,7 @@ test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch 
   const calls=[];
   const relaunched=await withProvider(req=>{
    calls.push(req.method+' '+new URL(req.url).pathname);
-   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:1006,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
+   return providerResponse(req,{outTradeNo:before.provider_trade_id,amountFen:990,channel:'ALIPAY_H5',status:'CREATED'},{status:200});
   },()=>f.call(`/v1/orders/${id}/attempts`,{body:{}}));
   assert.equal(relaunched.status,201,JSON.stringify(relaunched.body));
   assert.deepEqual(calls,['GET /api/open/v1/payments/'+before.provider_trade_id,'POST /api/open/v1/payments/'+before.provider_trade_id+'/attempts']);
