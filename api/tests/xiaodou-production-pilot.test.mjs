@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID,createHash,sign} from 'node:crypto';
-import {fixture,withProvider,providerResponse,platform} from './helpers/payment-v2.mjs';
+import {fixture,withProvider,providerResponse,platform,worker} from './helpers/payment-v2.mjs';
 
 function owner({approved=true}={}){
  const f=fixture({released:false});
@@ -117,10 +117,12 @@ test('Signed paid webhook settles the test order once; replay does not double-gr
    eventAmountFen:990,feeProjection:{ruleVersion:'test-v1',thresholdFen:0,tier:'STANDARD',
    merchantRateBps:250,companyServiceFeeRateBps:100,merchantSettlementFen:960,companyServiceFeeFen:30}};
   const headers=signedHeaders(event);
-  const first=await f.call('/v1/payments/xiaodou/webhook',{body:event,headers});
-  assert.equal(first.status,200,JSON.stringify(first.body));
-  const second=await f.call('/v1/payments/xiaodou/webhook',{body:event,headers});
-  assert.equal(second.status,200,JSON.stringify(second.body));
+  const webhook=()=>worker.fetch(new Request(f.env.API_ORIGIN+'/v1/payments/xiaodou/webhook',{
+   method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(event)}),f.env);
+  const first=await webhook();
+  assert.equal(first.status,200,await first.text());
+  const second=await webhook();
+  assert.equal(second.status,200,await second.text());
   assert.equal(f.sql.prepare("SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").get().paid_balance,400);
   assert.equal(f.sql.prepare('SELECT status FROM recharge_orders').get().status,'paid');
   assert.equal(count(f,'provider_payment_events'),1);
