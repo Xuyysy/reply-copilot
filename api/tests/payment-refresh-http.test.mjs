@@ -455,7 +455,7 @@ test("checkout rejection remains UNKNOWN but releases only local retry block aft
   for (const environment of ["staging", "production"]) {
     const DB = makeCheckoutDb();
     let calls = 0, providerRequestId;
-    const options = { environment, envOverrides: { PAYMENTS_ENABLED: "1" }, body: { packageId: "starter" }, query: async request => {
+    const options = { environment, envOverrides: { PAYMENTS_ENABLED: "1", XIAODOU_RSA2_SUBSCRIPTIONS_READY: "1", XIAODOU_SOURCE_IP_CONFIRMED: "1" }, body: { packageId: "starter" }, query: async request => {
       calls++; providerRequestId = request.headers.get("X-XD-Request-Id");
       assert.equal(request.method, "POST");
       assert.equal(new URL(request.url).pathname, "/api/open/v1/payments");

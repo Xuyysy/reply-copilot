@@ -291,7 +291,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    });}catch(error){
      if(error instanceof Mk99Error){
        problem=error.code;
-       if(!['MK99_TIMEOUT','MK99_NETWORK_ERROR','MK99_HTTP_ERROR','MK99_REQUEST_REJECTED'].includes(error.code))needsReview=true;
+       if(!['MK99_TIMEOUT','MK99_NETWORK_UNCERTAIN','MK99_HTTP_ERROR','MK99_REQUEST_REJECTED'].includes(error.code))needsReview=true;
      }
    }
  }

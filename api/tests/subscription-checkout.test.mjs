@@ -126,6 +126,7 @@ test('wrong cashier identity or origin never appears as payable and remains one 
    assert.equal(r.status,502);
    assert.equal(r.body.order.checkout.paymentUrl,null);
    assert.equal(r.body.order.checkout.paymentConfirmed,false);
+   assert.equal(r.body.order.retryAvailable,false,'mismatched signed MK99 response needs review');
    assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
   }finally{f.sql.close();}
  }
