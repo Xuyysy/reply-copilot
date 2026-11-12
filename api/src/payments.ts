@@ -12,6 +12,7 @@ import { requireCsrf, sessionFor } from "./auth";
 import { requireAdminSession } from "./admin-auth";
 import { jsonBody, nowMs, uuid } from "./security";
 import { response } from "./http";
+import { releaseUnusableCreditCheckout } from "./payment-retry-release.js";
 import { balance } from "./quota";
 import { PayloadTooLargeError, readLimitedBytes, refundEventMatchesTransaction, reconcileFeeProjection, webhookEventMatchesStatus, XiaodouClient, XiaodouProviderError, safeProviderResponseDiagnostic, xiaodouWebhookIsEnabled } from "./xiaodou.js";
 
@@ -202,6 +203,14 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   const paymentProtocol=epay?"epay":"rsa2";
   const unresolvedProtocol=" AND EXISTS(SELECT 1 FROM payment_transactions existing WHERE existing.order_id=recharge_orders.id AND existing.payment_protocol=? AND existing.merchant_provider=?)";
   const client=real&&!epay&&!mk99?paymentClient(env):null;
+  // A previous first attempt that never issued a checkout URL must not block
+  // a fresh purchase forever. This only expires the LOCAL order; provider
+  // transaction and late signed-payment reconciliation remain untouched.
+  const retryMerchant = mk99 ? 'mk99' : real && paymentProvider === 'xiaodou' ? 'xiaodou' : null;
+  if (retryMerchant) {
+    try { await releaseUnusableCreditCheckout(env,{userId:session.user_id,merchant:retryMerchant,packageId:pkg.id}); }
+    catch { console.warn({event:'credit_checkout_retry_release_error',merchant:retryMerchant,stage:'precreate'}); }
+  }
   const id=uuid(),now=nowMs(),amountCents=pkg.promo_price_cents??pkg.price_cents,provider=mock?"local_mock":"xiaodou",outTradeNo=`XRH_${id.replaceAll("-","")}`,transactionId=uuid(),attemptId=uuid(),requestId=`xrh-${uuid()}`;
   let paymentForm:ReturnType<typeof epayCheckout>|null=null;
   if(epay){
@@ -239,11 +248,16 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   try { await persistCheckout(env,transactionId,attemptId,checkout); }
   catch { checkout={outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED",paymentUrl:null,paymentStatus:"unknown"}; }
   const current=await transactionForOrder(env,id);
+  let retryAvailable=false;
+  if(paymentProvider==='xiaodou'&&checkout.outcome!=='ready'&&checkout.outcome!=='confirmation_required'){
+    try { retryAvailable=await releaseUnusableCreditCheckout(env,{userId:session.user_id,merchant:'xiaodou',orderId:id}); }
+    catch { console.warn({event:'credit_checkout_retry_release_error',merchant:'xiaodou',stage:'postcreate'}); }
+  }
   const settled=current&&["paid","refunded","closed","failed"].includes(current.status);
   const diagnostic=providerError&&env.ENVIRONMENT==="staging"?refreshProviderFailure(providerError,requestId):null;
-  return response({ok:checkout.outcome==="ready",...(checkout.outcome!=="ready"?{code:"PAYMENT_CHECKOUT_UNAVAILABLE",message:"付款链接未生成，请保留订单并核对结果，不要重复下单。"}:{}),
+  return response({ok:checkout.outcome==="ready",...(checkout.outcome!=="ready"?{code:"PAYMENT_CHECKOUT_UNAVAILABLE",message:retryAvailable?"付款链接未生成；本地重试限制已解除，可以重新下单；如发生实际扣款请联系客服核对。":"付款链接未生成，请保留订单并核对结果，不要重复下单。"}:{}),
     order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:settled?current.status:checkout.paymentStatus,
-      paymentUrl:!settled&&checkout.outcome==="ready"?checkout.paymentUrl:null,checkout:{outcome:checkout.outcome,issue:checkout.issue},paymentLinkUnavailable:checkout.outcome!=="ready",paymentProtocol,paymentChannel:channel},
+      paymentUrl:!settled&&checkout.outcome==="ready"?checkout.paymentUrl:null,checkout:{outcome:checkout.outcome,issue:checkout.issue},paymentLinkUnavailable:checkout.outcome!=="ready",retryAvailable,paymentProtocol,paymentChannel:channel},
     requestId,...(diagnostic?{diagnostic:{stage:diagnostic.stage,upstreamHttpStatus:diagnostic.upstreamHttpStatus,...(diagnostic.providerResponse?{providerResponse:diagnostic.providerResponse}:{})}}:{})},checkoutHttpStatus(checkout),env,request);
 }
 async function persistCheckout(env:Env,transactionId:string,attemptId:string,result:CheckoutResult):Promise<void>{
@@ -267,7 +281,7 @@ export async function getOrder(request:Request,env:Env,orderId:string):Promise<R
   const session=await webSession(request,env),row=await env.DB.prepare("SELECT o.id,o.package_id,o.package_name,o.credits,o.amount_cents,o.currency,o.status,o.created_at,o.paid_at,o.credited_at,(EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) OR EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)) has_credit_settlement,t.provider,t.merchant_provider,t.payment_protocol,t.payment_channel,t.amount_fen,t.base_amount_fen,t.service_fee_fen,t.fee_rate_bps,t.currency payment_currency,t.status payment_status,t.risk_state,t.merchant_pricing_snapshot,t.cashier_url,t.provider_fee_projection_status,t.provider_fee_projection_issue,(SELECT a.provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) checkout_marker FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? AND o.user_id=?").bind(orderId,session.user_id).first<Record<string,unknown>>();
   if(!row)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
   const cashier=storedMk99Cashier(env,row);
-  return response({order:{paymentProvider:row.merchant_provider==="mk99"?"mk99":row.provider,paymentProtocol:row.merchant_provider==="mk99"?"mk99":row.payment_protocol,paymentChannel:row.payment_channel??null,...(row.merchant_provider==="mk99"?{riskState:row.risk_state,merchantPricing:row.merchant_pricing_snapshot?JSON.parse(String(row.merchant_pricing_snapshot)):null}:{}),checkout:checkoutFromAttempt(row.checkout_marker),id:row.id,packageId:row.package_id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:cashier?.url??null,paymentCashierOrigin:cashier?.origin??null},quota:await balance(env,session.user_id)},200,env,request);
+  return response({order:{paymentProvider:row.merchant_provider==="mk99"?"mk99":row.provider,paymentProtocol:row.merchant_provider==="mk99"?"mk99":row.payment_protocol,paymentChannel:row.payment_channel??null,...(row.merchant_provider==="mk99"?{riskState:row.risk_state,merchantPricing:row.merchant_pricing_snapshot?JSON.parse(String(row.merchant_pricing_snapshot)):null}:{}),checkout:checkoutFromAttempt(row.checkout_marker),id:row.id,packageId:row.package_id,packageName:row.package_name,credits:row.credits,displayPriceCents:row.amount_cents,displayCurrency:row.currency,baseAmountFen:row.base_amount_fen,serviceFeeFen:row.service_fee_fen,feeRateBps:row.fee_rate_bps,amountFen:row.amount_fen,currency:row.payment_currency,status:row.payment_status,providerFeeProjectionStatus:row.provider_fee_projection_status,providerFeeProjectionIssue:row.provider_fee_projection_issue,createdAt:row.created_at,paidAt:row.paid_at,creditedAt:row.credited_at,paymentUrl:cashier?.url??null,paymentCashierOrigin:cashier?.origin??null,retryAvailable:row.status==="expired"&&row.payment_status==="unknown"&&row.paid_at==null&&row.credited_at==null&&Number(row.has_credit_settlement)===0&&!row.cashier_url},quota:await balance(env,session.user_id)},200,env,request);
 }
 async function paymentTransactionForOwner(env:Env,orderId:string,userId:string):Promise<PaymentTransaction>{
   const txn=await env.DB.prepare("SELECT t.*,o.user_id order_user_id,o.credits order_credits,o.status order_status,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE o.id=? AND o.user_id=?").bind(orderId,userId).first<PaymentTransaction>();
