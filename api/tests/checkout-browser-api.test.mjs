@@ -12,7 +12,7 @@ buildSync({entryPoints:[fileURLToPath(new URL('../../web/src/lib/api.ts',import.
 const {api,ApiError}=createRequire(import.meta.url)(out);
 test.after(()=>rmSync(temp,{recursive:true,force:true}));
 
-test('browser API, CSRF, worker, signed provider rejection and checkout UI preserve one local order',async()=>{
+test('browser API safely releases linkless rejection and permits another buyer-initiated checkout',async()=>{
  const f=fixture(),original=globalThis.fetch;let creates=0,csrfCalls=0;
  globalThis.fetch=async(url,init)=>{
   if(new URL(url).origin==='https://provider.example.test'){
@@ -28,10 +28,17 @@ test('browser API, CSRF, worker, signed provider rejection and checkout UI prese
    let caught;
    try{await api('/v1/orders',{method:'POST',body:JSON.stringify({packageId:'starter'})});}catch(error){caught=error;}
    assert.ok(caught instanceof ApiError);assert.equal(caught.status,502);
-   const order=checkoutOrderFromError(caught);assert.ok(order);assert.equal(order.checkout.outcome,'rejected');
-   assert.match(checkoutOrderMessage(order,'zh'),/拒绝生成付款链接/);
-   assert.equal(creates,1);assert.equal(csrfCalls,1);
-   assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);
+   assert.equal(caught.order.checkout.outcome,'rejected');
+   assert.equal(caught.order.retryAvailable,true);
+   assert.equal(checkoutOrderFromError(caught),null,'checkout must not latch a released order');
+   assert.match(checkoutOrderMessage(caught.order,'zh'),/重新购买/);
+   let again;try{await api('/v1/orders',{method:'POST',body:JSON.stringify({packageId:'starter'})});}catch(e){again=e;}
+   assert.ok(again instanceof ApiError);assert.equal(again.status,502);
+   assert.equal(again.order.retryAvailable,true);
+   assert.notEqual(again.order.id,caught.order.id);
+   assert.equal(creates,2);assert.equal(csrfCalls,1);
+   assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,2);
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM recharge_orders WHERE status='expired'").get().n,2);
    assert.equal(f.sql.prepare('SELECT paid_balance n FROM credit_accounts').get().n,0);
  }finally{globalThis.fetch=original;f.sql.close();}
 });

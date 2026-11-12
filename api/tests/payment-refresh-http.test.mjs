@@ -421,6 +421,12 @@ function makeCheckoutDb() {
   DB.state.created = false;
   DB.state.checkoutBatches = [];
   DB.prepare = sql => {
+    // The fake DB has no SQL engine: model a single first-attempt local release
+    // without equating it to provider payment success or changing balances.
+    if (sql.startsWith("UPDATE recharge_orders SET status='expired'")) return {
+      bind(){return this;},
+      async run(){const changes=DB.state.created?1:0;DB.state.created=false;return {meta:{changes}};}
+    };
     if (sql.startsWith("SELECT") && sql.includes("system_settings WHERE key='purchase_enabled'")) return {async first(){return {value:"1"};}};
     if (sql.startsWith('SELECT') && sql.includes('system_settings WHERE key IN')) return {bind(){return this;},async all(){return {results:[
       {key:'purchase_enabled',value:'1'},{key:'payment_rsa2_enabled',value:'1'},{key:'payment_epay_enabled',value:'0'},
@@ -445,7 +451,7 @@ function makeCheckoutDb() {
   return DB;
 }
 
-test("checkout rejection explicitly reports unavailable payment link, preserves UNKNOWN and blocks duplicate orders", async () => {
+test("checkout rejection remains UNKNOWN but releases only local retry block after a linkless attempt", async () => {
   for (const environment of ["staging", "production"]) {
     const DB = makeCheckoutDb();
     let calls = 0, providerRequestId;
@@ -460,6 +466,7 @@ test("checkout rejection explicitly reports unavailable payment link, preserves 
     assert.equal(result.body.order.status, "unknown");
     assert.equal(result.body.order.paymentUrl, null);
     assert.equal(result.body.order.paymentLinkUnavailable, true);
+    assert.equal(result.body.order.retryAvailable,true);
     assert.match(result.body.message, /付款链接未生成/);
     assert.doesNotMatch(result.body.message, /刷新/);
     if (environment === "staging") {
@@ -471,8 +478,10 @@ test("checkout rejection explicitly reports unavailable payment link, preserves 
     assert.doesNotMatch(JSON.stringify(result.body), /sensitive-marker|private-upstream-message|BEGIN.*KEY|X-XD-Sign/);
     assert.equal(DB.state.paidBalance, 0);
     assert.equal(DB.state.events.size, 0);
-    const duplicate = await call("/v1/orders", DB, options);
-    assert.equal(duplicate.body.code, "UNRESOLVED_ORDER_EXISTS");
-    assert.equal(calls, 1, "neither automatic query nor second create request");
+    const next = await call("/v1/orders", DB, options);
+    assert.equal(next.response.status,502);
+    assert.equal(next.body.order.retryAvailable,true);
+    assert.notEqual(next.body.order.id,result.body.order.id);
+    assert.equal(calls,2,"only the two explicit buyer requests contact Xiaodou");
   }
 });

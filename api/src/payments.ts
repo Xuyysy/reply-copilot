@@ -255,7 +255,7 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   }
   const settled=current&&["paid","refunded","closed","failed"].includes(current.status);
   const diagnostic=providerError&&env.ENVIRONMENT==="staging"?refreshProviderFailure(providerError,requestId):null;
-  return response({ok:checkout.outcome==="ready",...(checkout.outcome!=="ready"?{code:"PAYMENT_CHECKOUT_UNAVAILABLE",message:retryAvailable?"本次未生成付款链接，已解除本地重试限制，可以重新下单；如发生实际扣款请联系客服核对。":"付款链接未生成，请保留订单并核对结果，不要重复下单。"}:{}),
+  return response({ok:checkout.outcome==="ready",...(checkout.outcome!=="ready"?{code:"PAYMENT_CHECKOUT_UNAVAILABLE",message:retryAvailable?"付款链接未生成；本地重试限制已解除，可以重新下单；如发生实际扣款请联系客服核对。":"付款链接未生成，请保留订单并核对结果，不要重复下单。"}:{}),
     order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:settled?current.status:checkout.paymentStatus,
       paymentUrl:!settled&&checkout.outcome==="ready"?checkout.paymentUrl:null,checkout:{outcome:checkout.outcome,issue:checkout.issue},paymentLinkUnavailable:checkout.outcome!=="ready",retryAvailable,paymentProtocol,paymentChannel:channel},
     requestId,...(diagnostic?{diagnostic:{stage:diagnostic.stage,upstreamHttpStatus:diagnostic.upstreamHttpStatus,...(diagnostic.providerResponse?{providerResponse:diagnostic.providerResponse}:{})}}:{})},checkoutHttpStatus(checkout),env,request);
