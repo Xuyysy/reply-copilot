@@ -13,6 +13,8 @@ export interface Env {
   AI_MOCK_DELAY_MS?: string;
   AI_MODE?: string;
   AI_PERFORMANCE_DIAGNOSTICS?: string;
+  /** Off by default; only Staging + V2 can enable the isolated tone experiment. */
+  AI_PROMPT_V3_EXPERIMENT?: string;
   MAIL_API_KEY?: string;
   MAIL_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;
