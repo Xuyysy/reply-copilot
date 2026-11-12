@@ -185,9 +185,9 @@ import Base from "../layouts/Base.astro";
   :global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}
   .subscription-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
   .subscription-featured{border:2px solid #2663ac}
-  .subscription-card-actions{display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-top:12px}
-  .subscription-card-actions .fineprint{margin:0;line-height:1.55}
-  .subscription-card-actions .button{text-align:center}
+  :global(.subscription-card-actions){display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-top:12px}
+  :global(.subscription-card-actions .fineprint){margin:0;line-height:1.55}
+  :global(.subscription-card-actions .button){text-align:center}
   .subscription-limit{font-size:1.35rem;font-weight:700}
   .quota-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin-top:18px}
   .quota-rule{border:1px solid #dbe4ef;border-radius:16px;padding:16px;background:#f7f9fd}
