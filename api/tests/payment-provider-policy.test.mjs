@@ -165,7 +165,7 @@ test('admin read-only RSA2 reachability check verifies the platform response and
 });
 
 
-test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch after merchant switch',async()=>{
+test('Xiaodou credit-package RSA2 keeps immutable merchant on relaunch using disabled-IP-allowlist confirmation',async()=>{
  const f=fixture({released:false});
  try{
   f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_rsa2_alipay_enabled','payment_rsa2_alipay_released')");
@@ -178,6 +178,9 @@ test('Xiaodou credit-package RSA2 freezes app and signing key, and can relaunch 
   assert.equal(before.merchant_account,f.env.XIAODOU_APP_ID);
   assert.equal(before.notification_sign_type,f.env.XIAODOU_KEY_ID);
   f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  // Production can explicitly disable the provider IP allowlist instead of pinning a fixed egress IP.
+  f.env.XIAODOU_SOURCE_IP_CONFIRMED='0';
+  f.env.XIAODOU_IP_ALLOWLIST_DISABLED_CONFIRMED='1';
   const calls=[];
   const relaunched=await withProvider(req=>{
    calls.push(req.method+' '+new URL(req.url).pathname);
