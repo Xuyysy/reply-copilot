@@ -4,7 +4,7 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
-export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
+export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;retryAvailable?:boolean;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
 type Refresh={orderStatus:string;providerStatus?:string;paymentConfirmed:boolean;entitlementApplied?:boolean};
@@ -75,10 +75,17 @@ export default function SubscriptionCheckout(){
      :t('原订单已更新，请查看支付状态。','Original order updated. Check its payment status.'));
    }
   }catch(cause){
-   if(cause instanceof ApiError&&cause.order&&typeof cause.order==='object'&&'id' in cause.order&&typeof cause.order.id==='string'&&orderPattern.test(cause.order.id)){
-    showOrder(cause.order as SubscriptionOrder);
+   const canRetry=action==='create'&&cause instanceof ApiError&&
+     (cause.order as SubscriptionOrder|undefined)?.retryAvailable===true;
+   if(canRetry){
+     // Do not latch the original UNKNOWN order or reuse its idempotency key.
+     key.current=null;setPayUrl(null);setBlockingOrder(null);
+     if(upgrade)setQuote(undefined);
+     setPaymentNote(t('未生成收银台，已解除购买限制；请重新点击购买。','No cashier was issued. You may start a new purchase.'));
+   }else if(cause instanceof ApiError&&cause.order&&typeof cause.order==='object'&&'id' in cause.order&&typeof cause.order.id==='string'&&orderPattern.test(cause.order.id)){
+     showOrder(cause.order as SubscriptionOrder);
    }
-   if(action==='create'&&cause instanceof ApiError&&['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_RENEWAL_QUEUED','SUBSCRIPTION_ORDER_CONFLICT'].includes(cause.code)){
+   if(!canRetry&&action==='create'&&cause instanceof ApiError&&['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_RENEWAL_QUEUED','SUBSCRIPTION_ORDER_CONFLICT'].includes(cause.code)){
     try{
      const result=await api<{orders:SubscriptionOrder[]}>('/v1/subscriptions/orders');
      const unresolved=result.orders.find(item=>['pending','unknown','manual_review','refund_pending'].includes(item.status))
@@ -107,6 +114,7 @@ export default function SubscriptionCheckout(){
    <p className="break-all">{t('订单号','Order')}: {order.id}</p>
    <p className="uppercase">{order.planCode} · {price(order.amountFen)}</p>
    <p>{subscriptionStatus(order,language)}</p>
+   {order.retryAvailable?<a className="button secondary" href={'/subscription-checkout/?plan='+encodeURIComponent(order.planCode)+(order.kind==='upgrade'?'&upgrade=1':'')}>{t('重新购买订阅','Purchase subscription again')}</a>:null}
    {paymentNote?<p role="status">{paymentNote}</p>:null}
    {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer">{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
@@ -137,6 +145,7 @@ export default function SubscriptionCheckout(){
 
 export function subscriptionStatus(order:SubscriptionOrder,language:'zh'|'en'){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
+ if(order.status==='unknown'&&order.retryAvailable)return t('原单未生成收银台，可重新购买；原单仍保留等待可信核验。','No cashier was issued. You may buy again; the original remains available for verification.');
  switch(order.status){
   case 'paid': return order.checkout.paymentConfirmed?(order.periodStatus==='queued'?t('付款已核验，下一期订阅已排队，将在当前订阅期满后生效。','Payment verified. Your next period is queued and starts after the current subscription ends.'):t('付款已核验，权益已处理。','Payment verified and entitlement processed.')):t('权益待核验。','Entitlement verification pending.');
   case 'pending': return t('待付款。付款后请查验原单。','Awaiting payment. Verify the original order after paying.');

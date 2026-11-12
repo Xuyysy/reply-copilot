@@ -6,7 +6,8 @@ import { response } from './http';
 import { paymentControl, type PaymentChannel } from './payment-policy';
 import { Mk99Client, Mk99Error, mk99Config, type Mk99Config } from './mk99';
 import { configuredXiaodouMerchant } from './xiaodou-merchant';
-import { inspectCheckoutResponse } from './payment-checkout';
+import { inspectCheckoutResponse,CheckoutValidationError } from './payment-checkout';
+import { subscriptionRetryableSql,subscriptionBlocksNewCheckoutSql } from './subscription-retry-release.js';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
 import { orderById, querySubscriptionPayment } from './subscription-settlement';
@@ -26,9 +27,9 @@ type Pending={
  status:string;transaction_status:string;risk_state:string;checkout_state:string;
  cashier_url:string|null;provider_trade_id:string;provider_payment_id:string|null;
  merchant_account:string|null;notification_sign_type:string|null;merchant_provider:string;paid_at:number|null;
- verified_paid:number;quote_id:string|null;period_status:string|null;
+ verified_paid:number;checkout_retryable:number;quote_id:string|null;period_status:string|null;
 };
-const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,(SELECT p.status FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id LIMIT 1) period_status,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
+const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id) quote_id,${subscriptionRetryableSql('o')} checkout_retryable,(SELECT p.status FROM subscription_periods p WHERE p.source_order_id=o.id AND p.user_id=o.user_id LIMIT 1) period_status,o.id,o.user_id,o.operation_id,o.kind,o.plan_version_id,v.plan_code,o.amount_fen,t.payment_channel,o.status,t.status transaction_status,t.risk_state,t.checkout_state,t.cashier_url,t.provider_trade_id,t.provider_payment_id,t.merchant_account,t.notification_sign_type,t.merchant_provider,o.paid_at,CASE WHEN
    o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL
    AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear'
    AND t.merchant_provider IN ('mk99','xiaodou') AND t.currency='CNY' AND t.amount_fen=o.amount_fen
@@ -40,7 +41,7 @@ const RESULT_FIELDS=`(SELECT id FROM subscription_upgrade_quotes WHERE order_id=
      AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
    THEN 1 ELSE 0 END verified_paid`;
 async function existingFor(env:Env,userId:string,operationId:string):Promise<Pending|null>{
- return env.DB.prepare("SELECT "+RESULT_FIELDS+" FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND (o.operation_id=? OR o.status IN ('pending','unknown','manual_review','refund_pending')) ORDER BY CASE WHEN o.operation_id=? THEN 0 ELSE 1 END,o.created_at DESC LIMIT 1")
+ return env.DB.prepare("SELECT "+RESULT_FIELDS+` FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND (o.operation_id=? OR ${subscriptionBlocksNewCheckoutSql('o')}) ORDER BY CASE WHEN o.operation_id=? THEN 0 ELSE 1 END,o.created_at DESC LIMIT 1`)
    .bind(userId,operationId,operationId).first<Pending>();
 }
 async function orderFor(env:Env,orderId:string):Promise<Pending|null>{
@@ -60,7 +61,7 @@ function snapshot(row:Pending,config:Mk99Config|null){
  else if(row.merchant_provider==='xiaodou'&&row.checkout_state==='ready'&&row.status==='pending'&&row.transaction_status==='pending'&&row.risk_state==='clear'&&row.cashier_url){
    try{const url=new URL(row.cashier_url);if(url.protocol==='https:'&&!url.username&&!url.password&&row.cashier_url.length<=8192)paymentUrl=row.cashier_url;}catch{/* Ignore invalid historical URL. */}
  }
- return {id:row.id,planCode:row.plan_code,kind:row.kind,merchantProvider:row.merchant_provider,periodStatus:row.verified_paid===1?row.period_status:null,amountFen:row.amount_fen,currency:'CNY',
+ return {id:row.id,planCode:row.plan_code,kind:row.kind,merchantProvider:row.merchant_provider,periodStatus:row.verified_paid===1?row.period_status:null,retryAvailable:Number(row.checkout_retryable)===1,amountFen:row.amount_fen,currency:'CNY',
   channel:row.payment_channel,status:row.status,riskState:row.risk_state,checkout:{
    outcome:paymentUrl?'ready':row.verified_paid===1?'confirmed':'unknown',paymentUrl,
    // MK99 cashier creation is never a payment fact.
@@ -177,8 +178,8 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
  const queued=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=subscription_periods.source_order_id AND o.status<>'refunded') LIMIT 1").bind(session.user_id).first();
  const kind=quoteId?'upgrade':hasPredecessor?'renewal':'purchase';
 
- // Resolve existing/ambiguous checkout before creating anything new. A new
- // idempotency key never bypasses a pending or UNKNOWN provider transaction.
+ // An idempotency key never re-drives the same provider transaction. A fresh
+ // key only bypasses linkless first-attempt UNKNOWNs with no financial proof.
  const existing=await existingFor(env,session.user_id,operationId);
  if(existing){
    if(existing.quote_id!==(quoteId??null)||!sameOrder(existing,plan.id,channel,existing.operation_id===operationId?existing.kind:kind,merchantProvider,merchantAccount,signType))
@@ -190,7 +191,8 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    if(existing.status==='paid'&&!result.checkout.paymentConfirmed)
      return response({...body,ok:false,code:'SUBSCRIPTION_PAYMENT_UNCONFIRMED'},409,env,request);
    if(!result.checkout.paymentConfirmed&&(existing.checkout_state==='unknown'||existing.checkout_state==='preparing'||existing.checkout_state==='unprepared'))
-     return response({...body,ok:false,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED'},409,env,request);
+     return response({...body,ok:false,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED',
+       message:result.retryAvailable?'付款链接未生成，原订单仍待核验；可以使用新的请求标识再次购买。':'原订单结果未确认，请勿重复付款。'},409,env,request);
    return response(body,200,env,request);
  }
  if(queued&&!quoteId)throw new ApiFailure(409,'SUBSCRIPTION_RENEWAL_QUEUED','已有待生效的续购，请先使用该周期。');
@@ -219,13 +221,13 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
        AND source.status='paid' AND source.applied_at IS NOT NULL AND paid.status='paid' AND paid.risk_state='clear'
        AND v.id=? AND v.current=1 AND v.active=1 AND v.daily_limit>p.daily_limit
        AND u.status='active' AND u.archived_at IS NULL
-       AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=q.user_id AND x.status IN ('pending','unknown','manual_review','refund_pending'))`)
+       AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=q.user_id AND ${subscriptionBlocksNewCheckoutSql('x')})`)
      .bind(id,now,now,operationId,quote.id,session.user_id,now,now,SUBSCRIPTION_DAY_MS,plan.id):env.DB.prepare(
    "INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) "+
    "SELECT ?,?,?,?,?,'pending',?,?,?,?,? FROM subscription_plan_versions v "+
    "WHERE v.id=? AND v.current=1 AND v.active=1 AND v.price_fen=? AND v.duration_days=30 "+
    "AND EXISTS(SELECT 1 FROM users u WHERE u.id=? AND u.status='active' AND u.archived_at IS NULL) "+
-   "AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=? AND x.status IN ('pending','unknown','manual_review','refund_pending')) "+
+   `AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=? AND ${subscriptionBlocksNewCheckoutSql('x')}) `+
    "AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=p.source_order_id AND o.status<>'refunded')) "+
    "AND ((?='renewal' AND EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status IN ('active','refund_pending','revoked') AND p.start_at<=? AND p.end_at>?)) "+
    "OR (?='purchase' AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.user_id=? AND p.status IN ('active','refund_pending','revoked') AND p.start_at<=? AND p.end_at>?)))"
@@ -246,7 +248,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    "WHERE o.id=? AND o.user_id=? AND o.operation_id=? AND o.status='pending' AND "+
    "o.plan_version_id=? AND o.amount_fen=? AND t.id=? AND t.checkout_state='preparing' "+
    "AND t.merchant_provider=? AND t.merchant_account=? AND t.provider_trade_id=? AND t.amount_fen=o.amount_fen) "+
-   "AND (SELECT COUNT(*) FROM subscription_orders x WHERE x.user_id=? AND x.status IN ('pending','unknown','manual_review','refund_pending'))=1 THEN 1 ELSE 0 END"
+   `AND (SELECT COUNT(*) FROM subscription_orders x WHERE x.user_id=? AND ${subscriptionBlocksNewCheckoutSql('x')})=1 THEN 1 ELSE 0 END`
   ).bind(claim,id,session.user_id,operationId,plan.id,amountFen,transactionId,merchantProvider,merchantAccount,tradeNo,session.user_id),
   env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(claim)
  ];
@@ -257,6 +259,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    throw new ApiFailure(409,'SUBSCRIPTION_ORDER_CONFLICT','订阅状态已变化，请重新查看账户。');
  }
  let issued:{tradeNo:string;payUrl:string}|null=null;
+ let signedProviderId:string|null=null,needsReview=false;
  let problem=isXiaodou?'XIAODOU_NETWORK_UNCERTAIN':'MK99_NETWORK_UNCERTAIN';
  if(isXiaodou){
    try{
@@ -269,16 +272,28 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
      const checked=inspectCheckoutResponse(result,{outTradeNo:tradeNo,amountFen});
      if(result.channel!=='ALIPAY_H5'||typeof result.openOrderId!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(result.openOrderId))
        throw new Error('XIAODOU_CHECKOUT_IDENTITY_UNCONFIRMED');
+     // Signed provider identity (even without cashier) is evidence that must
+     // BLOCK fresh checkout until the original provider payment is reconciled.
+     signedProviderId=result.openOrderId;
      if(checked.outcome==='ready'&&checked.paymentUrl)issued={tradeNo:result.openOrderId,payUrl:checked.paymentUrl};
      else problem=checked.issue;
-   }catch{problem='XIAODOU_CHECKOUT_UNCONFIRMED';}
+   }catch(error){
+     problem='XIAODOU_CHECKOUT_UNCONFIRMED';
+     if(error instanceof CheckoutValidationError||
+        (error instanceof Error&&error.message==='XIAODOU_CHECKOUT_IDENTITY_UNCONFIRMED'))needsReview=true;
+   }
  }else{
    try{issued=await new Mk99Client(config!).create({
       outTradeNo:tradeNo,amountFen,subject:'Reply Copilot '+planCode.toUpperCase()+(quote?' upgrade':' 30 days'),
       paytype:channel==='WECHAT_H5'?'wxpay':'alipay',clientIp,
       notifyUrl:env.API_ORIGIN+'/v1/payments/mk99/subscriptions/notify',
       returnUrl:new URL('/subscription-checkout/?order='+encodeURIComponent(id),env.WEB_ORIGIN).href
-   });}catch(error){if(error instanceof Mk99Error)problem=error.code;}
+   });}catch(error){
+     if(error instanceof Mk99Error){
+       problem=error.code;
+       if(!['MK99_TIMEOUT','MK99_NETWORK_ERROR','MK99_HTTP_ERROR','MK99_REQUEST_REJECTED'].includes(error.code))needsReview=true;
+     }
+   }
  }
  if(issued){
    await env.DB.prepare(
@@ -288,7 +303,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    ).bind(issued.tradeNo,issued.payUrl,nowMs(),nowMs(),transactionId,issued.tradeNo).run();
  }else{
    await env.DB.batch([
-    env.DB.prepare("UPDATE subscription_payment_transactions SET checkout_state='unknown',status=CASE WHEN status='pending' THEN 'unknown' ELSE status END,updated_at=? WHERE id=? AND checkout_state='preparing' AND status IN ('pending','unknown')").bind(nowMs(),transactionId),
+    env.DB.prepare("UPDATE subscription_payment_transactions SET checkout_state='unknown',status=CASE WHEN status='pending' THEN 'unknown' ELSE status END,provider_payment_id=COALESCE(provider_payment_id,?),risk_state=CASE WHEN ?=1 THEN 'manual_review' ELSE risk_state END,updated_at=? WHERE id=? AND checkout_state='preparing' AND status IN ('pending','unknown')").bind(signedProviderId,needsReview?1:0,nowMs(),transactionId),
     env.DB.prepare("UPDATE subscription_orders SET status='unknown',updated_at=? WHERE id=? AND status='pending' AND EXISTS(SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=subscription_orders.id AND t.checkout_state='unknown' AND t.status='unknown')").bind(nowMs(),id)
    ]);
  }
@@ -299,7 +314,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
    return response({ok:true,order:result,resumed:false},201,env,request);
  if(result.checkout.outcome==='confirmed')
    return response({ok:true,order:result,resumed:false},201,env,request);
- return response({ok:false,order:result,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED',message:'原订单创建结果待确认，请先查询原订单，不要重复付款。',providerIssue:problem},502,env,request);
+ return response({ok:false,order:result,code:'SUBSCRIPTION_CHECKOUT_UNCONFIRMED',message:result.retryAvailable?'付款链接未生成；本地重复购买限制已解除。请用新的请求标识购买；如有扣款请核对原单。':'原订单创建结果待确认，请先查询原订单，不要重复付款。',providerIssue:problem},502,env,request);
 }
 
 

@@ -99,23 +99,19 @@ test('same idempotency key and concurrent second submit never trigger another MK
  }finally{f.sql.close();}
 });
 
-test('provider network uncertainty stores one recoverable order and NEVER redrives it',async()=>{
- const f=ready();
- try{
-  const uncertain=await checkout(f,request(),()=>{throw new Error('simulated provider timeout');});
-  assert.equal(uncertain.status,502);
-  assert.equal(uncertain.calls,1);
-  assert.equal(uncertain.body.code,'SUBSCRIPTION_CHECKOUT_UNCONFIRMED');
-  assert.ok(uncertain.body.order.id);
-  const state=f.sql.prepare("SELECT status,checkout_state,cashier_url FROM subscription_payment_transactions").get();
-  assert.equal(state.checkout_state,'unknown');
-  assert.equal(state.status,'unknown');
-  assert.equal(state.cashier_url,null);
-  const again=await checkout(f);
-  assert.equal(again.status,409);
-  assert.equal(again.calls,0);
-  assert.equal(again.body.order.id,uncertain.body.order.id);
-  assert.deepEqual(metrics(f),{orders:1,transactions:1,events:0,credits:0,legacy:0,periods:0});
+test('MK99 linkless UNKNOWN preserves original evidence while a fresh key can buy a subscription',async()=>{
+ const f=ready();try{
+  const old=await checkout(f,request(),()=>{throw new Error('simulated provider timeout');});
+  assert.equal(old.status,502);assert.equal(old.calls,1);assert.equal(old.body.order.retryAvailable,true);
+  const same=await checkout(f);
+  assert.equal(same.status,409);assert.equal(same.calls,0);assert.equal(same.body.order.id,old.body.order.id);
+  const again=await checkout(f,request('basic','checkout-request-0002'));
+  assert.equal(again.status,201,JSON.stringify(again.body));
+  assert.notEqual(again.body.order.id,old.body.order.id);
+  assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id=?").get(old.body.order.id).status,'unknown');
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_orders").get().n,2);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_payment_events").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_periods").get().n,0);
  }finally{f.sql.close();}
 });
 

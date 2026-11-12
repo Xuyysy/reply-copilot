@@ -114,21 +114,20 @@ test('Xiaodou WeChat remains hidden even if a dashboard release bit was set',asy
  }finally{f.sql.close();}
 });
 
-test('ambiguous RSA2 creation retains one local transaction and cannot reissue cashier',async()=>{
- const f=ready();
- try{
-  const a=await withProvider(()=>{throw new Error('synthetic transport timeout');},()=>f.call('/v1/subscriptions/orders',{body:req('xd-timeout-0001')}));
-  assert.equal(a.status,502,JSON.stringify(a.body));
-  assert.equal(a.body.code,'SUBSCRIPTION_CHECKOUT_UNCONFIRMED');
-  assert.equal(metrics(f).subscriptionOrders,1);
-  assert.equal(metrics(f).events,0);
-  assert.equal(metrics(f).periods,0);
-  const b=await withProvider(()=>{throw new Error('must not call create twice');},()=>f.call('/v1/subscriptions/orders',{body:req('xd-timeout-0001')}));
-  assert.equal(b.status,409,JSON.stringify(b.body));
-  assert.equal(metrics(f).subscriptionOrders,1);
+test('Xiaodou linkless UNKNOWN keeps the original order while new buyer key permits subscription retry',async()=>{
+ const f=ready();try{
+  const old=await withProvider(()=>{throw new Error('synthetic transport timeout');},()=>f.call('/v1/subscriptions/orders',{body:req('xd-timeout-0001')}));
+  assert.equal(old.status,502,JSON.stringify(old.body));assert.equal(old.body.order.retryAvailable,true);
+  const repeated=await withProvider(()=>{throw new Error('must not call create twice');},()=>f.call('/v1/subscriptions/orders',{body:req('xd-timeout-0001')}));
+  assert.equal(repeated.status,409);assert.equal(repeated.body.order.retryAvailable,true);
+  const fresh=await create(f,req('xd-timeout-0002'));
+  assert.equal(fresh.status,201,JSON.stringify(fresh.body));assert.notEqual(fresh.body.order.id,old.body.order.id);
+  assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id=?").get(old.body.order.id).status,'unknown');
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_orders").get().n,2);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_payment_events").get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_periods").get().n,0);
  }finally{f.sql.close();}
 });
-
 
 test('a real signed Xiaodou subscription webhook settles through a separate signed GET',async()=>{
  const f=ready();
