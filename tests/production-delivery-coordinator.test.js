@@ -125,7 +125,7 @@ test('new post starts without waiting for an old hung client request',async()=>{
  assert.equal(result,'fresh-result');
  assert.ok(Date.now()-startedAt<45,'new request must not wait for the old 50ms deadline');
  assert.deepEqual(calls,[['generate','old'],['abandon','old',true],['generate','new']]);
- assert.equal(data.pendingAiDelivery.input.requestId,'new','late old result cannot clear the new pending record');
+ assert.equal(data.pendingAiDelivery,null,'the new request must settle and clear its own local pending record');
  await assert.rejects(old,e=>e.code==='GENERATION_RECOVERY_REQUIRED');
 });
 test('new post abandons a server-running orphan once before new generation',async()=>{
