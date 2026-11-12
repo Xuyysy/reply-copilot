@@ -56,6 +56,7 @@ jobs:
               assert 'channel: "production"' in origin
               assert 'CLIENT_RESPONSE_INCOMPATIBLE' in recovery
               assert "name==='InvalidAIResponseError'" in recovery
+              assert 'fastPostSwitch: true' in z.read('background/service-worker.js').decode()
           print('PASS: Chrome 0.3.9 Production client-unblock package')
           PY
       - name: Dry-run Production Worker, no API deployment

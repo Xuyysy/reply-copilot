@@ -16,8 +16,8 @@ function envelope(input){
   return JSON.parse(JSON.stringify(Object.fromEntries(['requestId','sourceText','sourceUrl','voiceProfile','recentHistory','styleStats','replyStyle'].map(key=>[key,input[key]]))));
 }
 export class DeliveryCoordinator {
-  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.mostRecentRequestId=null;
+  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null,fastPostSwitch=false}){
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.mostRecentRequestId=null;this.fastPostSwitch=fastPostSwitch;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
@@ -26,9 +26,10 @@ export class DeliveryCoordinator {
     // Different posts must not wait behind an old request's 35-second UI
     // deadline. The server's authenticated recovery/abandon contract remains
     // authoritative for quotas, idempotency and any uncertain provider work.
-    const recoveryCapable=typeof this.createClient().recoverGeneration==='function';
+    // Opt in only for the real hosted Chrome runtime. Legacy unit fixtures
+    // and non-hosted clients preserve their established serialized protocol.
     const sameRequest=this.mostRecentRequestId===frozen.requestId;
-    const previous=sameRequest||!recoveryCapable?this.tail.catch(()=>{}):Promise.resolve();
+    const previous=sameRequest||!this.fastPostSwitch?this.tail.catch(()=>{}):Promise.resolve();
     this.mostRecentRequestId=frozen.requestId;
     const run=previous.then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
     let timer;
@@ -59,7 +60,7 @@ export class DeliveryCoordinator {
         // safely retire a running old request with the existing fenced, rate-
         // limited endpoint. A ready valid result still requires normal ACK.
         const different=pending.input.requestId!==input.requestId;
-        const client=different?this.createClient():null;
+        const client=different&&this.fastPostSwitch?this.createClient():null;
         const recovered=different&&typeof client?.recoverGeneration==='function'
           ?await this.finishSuperseded(pending,completed,client,performanceTrace)
           :await this.deliver(pending,completed,performanceTrace,canStart);

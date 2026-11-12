@@ -116,7 +116,7 @@ test('new post starts without waiting for an old hung client request',async()=>{
  const calls=[],data={},owner='account-a';
  const storage={get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))};
  let oldStarted;const started=new Promise(r=>oldStarted=r),unresolved=new Promise(()=>{});
- const c=new DeliveryCoordinator({storage,getAccountId:async()=>owner,createClient:()=>({
+ const c=new DeliveryCoordinator({fastPostSwitch:true,storage,getAccountId:async()=>owner,createClient:()=>({
    recoverGeneration:async(id,abandon)=>{calls.push(['abandon',id,abandon]);return {state:'released',requestId:id};},
    generateReplies:async(input)=>{calls.push(['generate',input.requestId]);if(input.requestId==='old'){oldStarted();return unresolved;}return 'fresh-result';}
  }),waitTimeoutMs:50});
@@ -132,7 +132,7 @@ test('new post starts without waiting for an old hung client request',async()=>{
 test('new post abandons a server-running orphan once before new generation',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let abandon=0,generate=0;
- const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))},
+ const c=new DeliveryCoordinator({fastPostSwitch:true,storage:{get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))},
    getAccountId:async()=> 'account-a',createClient:()=>({
    recoverGeneration:async(id,flag)=>{assert.equal(id,'old');assert.equal(flag,true);abandon++;return {state:'released',requestId:id};},
    generateReplies:async input=>{assert.equal(input.requestId,'new');generate++;return 'fresh-result';}
@@ -143,7 +143,7 @@ test('new post abandons a server-running orphan once before new generation',asyn
 test('new post does not regenerate an old missing request or repeat an old AI call',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  const calls=[];
- const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
+ const c=new DeliveryCoordinator({fastPostSwitch:true,storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
    getAccountId:async()=> 'account-a',createClient:()=>({
    recoverGeneration:async(id,abandon)=>{calls.push(['retire',id,abandon]);return {state:'released',requestId:id};},
    generateReplies:async input=>{calls.push(['generate',input.requestId]);return 'fresh-result';}
@@ -154,7 +154,7 @@ test('new post does not regenerate an old missing request or repeat an old AI ca
 test('unconfirmed old provider or abandon failure forbids automatic charged new attempt',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let generated=0;
- const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
+ const c=new DeliveryCoordinator({fastPostSwitch:true,storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
    getAccountId:async()=> 'account-a',createClient:()=>({
    recoverGeneration:async()=>{throw Object.assign(new Error('unsafe'),{code:'RECOVERY_NOT_SAFE'});},
    generateReplies:async()=>{generated++;return 'should-not-execute';}
