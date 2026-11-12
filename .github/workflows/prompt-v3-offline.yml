@@ -1,0 +1,39 @@
+name: Prompt V3 offline comparison (zero AI calls)
+
+on:
+  push:
+    branches:
+      - experiment/staging-prompt-v3-speed-first-20261112
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Four-language prompt build and synthetic latency only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Verify backward compatibility and four-language invariants
+        run: node --test tests/prompt-v3-experiment.test.js tests/prompt-builder.test.js tests/multilingual-compat.test.js
+      - name: Compare 120 synthetic fixtures with ZERO network or AI calls
+        run: node scripts/benchmark-prompt-v3.mjs --out dist/prompt-v3-offline.json
+      - name: Upload offline-only result JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: prompt-v3-offline-${{ github.sha }}
+          path: dist/prompt-v3-offline.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: No live user impact
+        run: |
+          echo "No AI requests, no remote D1, no Worker deployment or production change." >> "$GITHUB_STEP_SUMMARY"
+          echo "Synthetic prompt-construction timings are NOT model latency or human likeness evidence." >> "$GITHUB_STEP_SUMMARY"
