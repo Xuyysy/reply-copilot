@@ -48,13 +48,15 @@ test('account shows subscription bucket independently with used, reserved, reset
 });
 
 const home=readFileSync(new URL('../src/pages/index.astro',import.meta.url),'utf8');
-test('homepage swaps credit-first to subscription-first only after valid server catalog',()=>{
+test('homepage prioritizes subscriptions after valid catalog while showing dynamic CNY permanent credits',()=>{
  assert.match(home,/id="home-subscriptions"[^>]*hidden/);
  assert.match(home,/id="home-legacy-pricing"/);
  assert.match(home,/\/v1\/subscriptions\/plans/);
  assert.match(home,/homeSubscriptions=data.plans/);
  assert.match(home,/document\.getElementById\('home-legacy-pricing'\)!\.hidden=true/);
- assert.match(home,/if\(homeSubscriptions\)\{container\.hidden=true;return;\}/);
+ assert.match(home,/id="home-credit-packages"/);
+ assert.match(home,/renderFeaturedPackages\(document,container,featuredSource/);
+ assert.doesNotMatch(home,/if\(homeSubscriptions\)\{container\.hidden=true;return;\}/);
  assert.match(home,/订阅结账尚未开放/);
  assert.match(home,/reply-copilot-language',renderHomeSubscriptions/);
 });

@@ -5,7 +5,7 @@ import Base from "../layouts/Base.astro";
   <div class="container page-hero">
     <div class="eyebrow" data-zh="安全结账">Secure checkout</div>
     <h1 data-zh="永久额度包结账">Permanent credit pack checkout</h1>
-    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。美元标价与人民币实付金额将分别展示，付款前请核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Prices are shown in USD, with the final CNY payment shown before checkout.</p>
+    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。官网标价以人民币显示，结账实付金额与官网展示一致；请在付款前核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Website prices are shown in CNY, matching the final amount charged. Verify the amount before paying.</p>
   </div>
   <section class="container" style="padding-bottom:100px">
     <div class="content-card" style="max-width:680px">
@@ -40,10 +40,12 @@ import Base from "../layouts/Base.astro";
       </div>
       <details id="checkout-extra-actions" class="checkout-extra-actions" hidden>
         <summary data-zh="付款遇到问题？">Having trouble with payment?</summary>
-        <p class="checkout-extra-hint" data-zh="仅在支付方式失效或旧订单状态异常时使用。重新发起付款会创建另一笔订单，请先确认旧订单未付款。">Use only if the cashier fails or the old order status is unclear. Restarting can create another order; verify the original before doing so.</p>
+        <p class="checkout-extra-hint" data-zh="仅在原付款入口失效、支付状态异常或需要放弃旧订单时使用。">Use these options only when the original cashier fails, the payment status is unclear, or you need to abandon an unpaid order.</p>
         <p id="restart-notice" class="notice" hidden data-zh="重新发起会创建新的独立订单，旧订单不会取消。请勿同时支付多笔订单。">Restarting creates a separate order and does not cancel earlier orders. Do not pay multiple orders unintentionally.</p>
         <div class="button-row">
           <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
+          <button id="relaunch-rsa2" class="button secondary" type="button" hidden data-zh="重新生成原订单二维码">Generate a fresh QR code for this order</button>
+          <button id="cancel-unpaid-order" class="button secondary" type="button" hidden data-zh="关闭未支付旧订单">Close unpaid order</button>
         </div>
       </details>
       <p class="checkout-back-link"><a href="/pricing" data-zh="返回套餐">Back to plans</a></p>
@@ -52,6 +54,7 @@ import Base from "../layouts/Base.astro";
   <style>
     .checkout-main-actions { margin-top: 14px; }
     .checkout-extra-actions { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
+    /* Site-wide .button rules must never override the collapsed details state. */
     .checkout-extra-actions:not([open]) > :not(summary) { display: none !important; }
     .checkout-extra-actions summary { width: fit-content; cursor: pointer; font-size: 14px; color: var(--muted-foreground); }
     .checkout-extra-actions summary:hover { color: var(--foreground); }
@@ -73,6 +76,7 @@ import Base from "../layouts/Base.astro";
     import { checkoutOrderMessage, checkoutOrderFromError, mergeCheckoutRead, canUseCashierLink } from "../lib/checkout-status.mjs";
     import {checkoutResumeId,loadOrderCheckout} from "../lib/checkout-resume.mjs";
     import {safeMk99Cashier} from "../lib/payment-resume.mjs";
+    import {lookupUnresolvedCreditOrder} from "../lib/credit-order-discovery.mjs";
     type Channel="ALIPAY_H5"|"WECHAT_H5";
     type PaymentMethod={provider:"xiaodou"|"xiaodou_epay"|"mk99"|"local_mock";channel:Channel};
     type Package = { id:string; name_zh:string; name_en:string; credits:number; price_cents:number; promo_price_cents:number|null; currency:string; price_cny_fen:number|null; service_fee_fen:number|null; total_payment_fen:number|null; fee_rate_bps:number; merchant_pricing?:{feeBearer:string;rateBps:number;costCoverageFen:number;status:string}; description_zh?:string; description_en?:string };
@@ -155,13 +159,16 @@ import Base from "../layouts/Base.astro";
       const rejectedUnresolvedOrder=!order&&restartAvailable&&selectedProvider==="xiaodou_epay";
       const canRestart=paymentAvailable&&paymentMethods.some(method=>method.provider==="xiaodou_epay")&&(restartableOrder||rejectedUnresolvedOrder);
       show("restart-payment",canRestart);show("restart-notice",canRestart);byId<HTMLButtonElement>("restart-payment").disabled=busy;
-      const extras=byId<HTMLDetailsElement>("checkout-extra-actions");
-      show("checkout-extra-actions",canRestart);
-      if(!canRestart)extras.open=false;
+      const rsa2Recovery=order?.paymentProtocol==="rsa2"&&["pending","unknown"].includes(order.status);
+      const extraActions=byId<HTMLDetailsElement>("checkout-extra-actions");
+      show("checkout-extra-actions",Boolean(canRestart||rsa2Recovery));
+      if(!canRestart&&!rsa2Recovery)extraActions.open=false;
       if(!selected){byId("package-name").textContent=label("套餐不存在或已下架。","Package not found or unavailable.");return;}
       byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
-      byId("package-usd").textContent=label("美元价格：$"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2),"USD price: $"+((selected.promo_price_cents??selected.price_cents)/100).toFixed(2));
+      byId("package-usd").textContent=selected.total_payment_fen&&Number.isSafeInteger(selected.total_payment_fen)
+        ?label("官网标价：¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY","Website price: ¥"+(selected.total_payment_fen/100).toFixed(2)+" CNY")
+        :label("当前套餐暂未配置人民币价格。","CNY price is currently unavailable.");
       byId("package-description").textContent=(document.documentElement.lang==="en"?selected.description_en:selected.description_zh)||"";
       const pricingSummary=packageSummary(selected,document.documentElement.lang==="en"?"en":"zh");
       byId("package-fee").textContent=pricingSummary.fee;
@@ -180,13 +187,41 @@ import Base from "../layouts/Base.astro";
       const mk99=next.paymentProtocol==="mk99";
       const cashierAllowed=canUseCashierLink(next)&&(!mk99||(confirmedMk99OrderId===next.id&&Boolean(safeMk99Cashier(next,next.id))));
       show("cashier-link",cashierAllowed);byId<HTMLAnchorElement>("cashier-link").href=cashierAllowed?next.paymentUrl!:"";
+      // Normal checkout stays minimal. If the original cashier cannot be opened,
+      // surface the existing provider-verified recovery actions automatically.
+      if(next.paymentProtocol==="rsa2"&&next.status==="pending"&&!cashierAllowed)
+        byId<HTMLDetailsElement>("checkout-extra-actions").open=true;
       if(mk99&&next.status==="paid"&&!next.creditedAt)setStatus("付款已确认，额度到账仍待核对，请勿再次付款。","Payment is confirmed; credit settlement is still being checked. Do not pay again.");
       show("epay-submit",next.paymentProtocol==="epay"&&next.status==="pending"&&paymentAvailable);
       byId<HTMLButtonElement>("epay-submit").disabled=busy;
       show("epay-pay-label",Boolean(next.paymentForm));show("epay-restore-label",!next.paymentForm);
       show("simulate-payment",next.paymentMode==="mock"&&next.status==="pending");
       show("refresh-order",next.status==="unknown"||(next.status==="pending"&&(next.paymentProtocol==="rsa2"||next.paymentProtocol==="epay"||next.paymentProtocol==="mk99")));
+      show("relaunch-rsa2",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
+      byId<HTMLButtonElement>("relaunch-rsa2").disabled=busy;
+      show("cancel-unpaid-order",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
+      byId<HTMLButtonElement>("cancel-unpaid-order").disabled=busy;
       show("create-order",false);
+    }
+    // Abandoned checkout: re-open the existing order instead of posting a
+    // second order. The account list is only a locator; GET /orders/:id is
+    // authoritative for current state and immutable original price.
+    async function resumeExistingCreditOrder(){
+      if(!selected?.id||!selectedProvider||!selectedChannel)return false;
+      const found=await lookupUnresolvedCreditOrder({packageId:selected.id,provider:selectedProvider,channel:selectedChannel,request:api});
+      if(!found)return false;
+      const saved=await loadOrderCheckout(found.id,api);
+      const prior=saved.order as Order;
+      if(prior.id!==found.id||!["pending","unknown"].includes(prior.status))return false;
+      confirmedMk99OrderId=saved.verified?found.id:null;
+      selected={id:prior.packageId||selected.id,name_zh:prior.packageName,name_en:prior.packageName,credits:prior.credits,
+        price_cents:prior.displayPriceCents,promo_price_cents:null,currency:"USD",price_cny_fen:prior.baseAmountFen,
+        service_fee_fen:prior.serviceFeeFen,total_payment_fen:prior.amountFen,fee_rate_bps:prior.feeRateBps,
+        merchant_pricing:prior.merchantPricing??undefined};
+      showOrder(prior);
+      setStatus("已找到上次未完成的订单。请继续原订单付款，或先查验／关闭旧订单；无需重新购买。",
+        "Your original unpaid order was found. Continue its cashier, or verify/close it safely; no new purchase is needed.");
+      return true;
     }
     async function load(){
       try{
@@ -202,6 +237,9 @@ import Base from "../layouts/Base.astro";
         }
         render();
         if(!selected){setStatus("套餐不存在或已下架。","Package not found or unavailable.");return;}
+        // Read-only restore on entry. A provider failure here does not imply
+        // it is safe to open a second transaction.
+        try{if(await resumeExistingCreditOrder())return;}catch{/* No auto-payment attempt on page load. */}
         if(!paymentAvailable)setStatus("支付暂未开放，目前不能创建订单。","Checkout is not open yet; an order cannot be created.");
         else if(provider==="local_mock")setStatus("本地模拟支付仅用于开发，不会扣款。","Local mock checkout is for development only; it will not charge you.");
       }catch(error){if(error instanceof ApiError&&error.status===401)show("login-link",true);setStatus(resumeOrderId?"无法读取原订单，请确认登录账户后重试或联系客服。":"暂时无法读取套餐，请稍后重试。",resumeOrderId?"Cannot read the original order. Check the signed-in account, retry or contact support.":"Unable to load packages. Please retry later.");}
@@ -232,7 +270,7 @@ import Base from "../layouts/Base.astro";
         paymentAvailable=false;
         if(!order)render();
         show("restart-payment",false);show("restart-notice",false);show("epay-submit",false);
-        show("checkout-extra-actions",false);
+        if(!order)show("checkout-extra-actions",false);
       }finally{availabilityInFlight=false;}
     }
     function scheduleAvailabilityRefresh(){
@@ -246,14 +284,28 @@ import Base from "../layouts/Base.astro";
       if(!selected||busy||(!restart&&order)||!paymentAvailable)return;
       if(restart&&(order?order.paymentProtocol!=="epay":selectedProvider!=="xiaodou_epay"))return;
       busy=true;render();setStatus("正在创建订单…","Creating order…");let failureMessage:string|null=null;
-      try{const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
+      try{
+        if(!restart){try{if(await resumeExistingCreditOrder())return;}catch{/* Fall through to server atomic duplicate guard. */}}
+        const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
         if(result.order.paymentProtocol==="mk99"&&result.order.status==="pending"){
           const saved=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(result.order.id));
           if(saved.order.id!==result.order.id)throw new Error("ORDER_MISMATCH");
           const latest=mergeCheckoutRead(order,saved.order) as Order;
           confirmedMk99OrderId=safeMk99Cashier(latest,result.order.id)?latest.id:null;showOrder(latest);
         }else showOrder(result.order);}
-      catch(error){const saved=checkoutOrderFromError(error);if(saved)showOrder(saved as Order);else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}else{if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";failureMessage=error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"?"UNRESOLVED_ORDER_EXISTS":error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");}}
+      catch(error){
+        const saved=checkoutOrderFromError(error);
+        if(saved)showOrder(saved as Order);
+        else if(error instanceof ApiError&&error.status===401){show("login-link",true);failureMessage=label("请先登录官网账户，再继续充值。","Sign in to your website account to continue.");}
+        else if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS"&&selectedProvider!=="xiaodou_epay"){
+          try{
+            if(!await resumeExistingCreditOrder())failureMessage="UNRESOLVED_ORDER_EXISTS";
+          }catch{failureMessage="UNRESOLVED_ORDER_EXISTS";}
+        }else{
+          if(error instanceof ApiError&&error.code==="UNRESOLVED_ORDER_EXISTS")restartAvailable=selectedProvider==="xiaodou_epay";
+          failureMessage=error instanceof Error?error.message:label("订单创建失败，请稍后重试。","Could not create order. Please retry.");
+        }
+      }
       finally{busy=false;render();if(order)showOrder(order);if(failureMessage&&failureMessage.includes("UNRESOLVED_ORDER_EXISTS"))failureMessage=label("该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。","This package has an unpaid or unconfirmed order. Check the original order first. Other packages can still be purchased.");if(failureMessage)byId("checkout-status").textContent=failureMessage;}
     }
     byId("create-order").addEventListener("click",()=>{void startOrder();});
@@ -288,6 +340,53 @@ import Base from "../layouts/Base.astro";
         submitEpayForm(order.paymentForm);
       }
       catch(error){busy=false;byId<HTMLButtonElement>("epay-submit").disabled=false;setStatus(error instanceof Error?error.message:label("付款表单不可用，请保留订单联系支持，不要重新下单。","The checkout form is unavailable. Keep this order and contact support; do not place another order."));}
+    });
+    // RSA2 can resume an old order without creating a second purchase. The
+    // backend uses the Xiaodou attempts endpoint and preserves its order ID.
+    byId("relaunch-rsa2").addEventListener("click",async()=>{
+      if(busy||!order||order.paymentProtocol!=="rsa2"||!["pending","unknown"].includes(order.status))return;
+      const original=order;busy=true;
+      byId<HTMLButtonElement>("relaunch-rsa2").disabled=true;
+      show("cashier-link",false);
+      setStatus("正在确认原订单并生成新的付款入口…","Checking original order and generating a new cashier…");
+      try{
+        const attempt=await api<{ok:boolean;orderStatus:string;paymentUrl:string|null;checkout?:Order["checkout"]}>(`/v1/orders/${encodeURIComponent(original.id)}/attempts`,{method:"POST",body:"{}"});
+        const read=await api<{order:Order}>(`/v1/orders/${encodeURIComponent(original.id)}`);
+        if(read.order.id!==original.id)throw new Error("ORDER_MISMATCH");
+        if(read.order.status!=="pending"){showOrder(read.order);setStatus("原订单状态已变化，请查验支付状态。","Original order status changed. Check payment status.");return;}
+        const fresh={...read.order,paymentUrl:attempt.paymentUrl,checkout:attempt.checkout??read.order.checkout};
+        if(!attempt.ok||attempt.orderStatus!=="pending"||!canUseCashierLink(fresh))
+          throw new Error("PAYMENT_CASHIER_UNCONFIRMED");
+        showOrder(fresh);
+        setStatus("新的原订单付款入口已生成，旧二维码请勿再使用。","A fresh cashier for the same order is ready. Do not reuse the previous QR code.");
+      }catch(error){
+        show("cashier-link",false);
+        if(error instanceof ApiError&&error.code==="PROVIDER_HTTP_ERROR"){
+          setStatus("小豆平台查单返回上游错误，原订单已保留；请稍后再查验，勿重复下单或付款。","Xiaodou's order query returned an upstream error. Your original order remains unchanged; do not retry payment blindly.");
+        }else{
+          setStatus("新付款入口暂无法确认，请先刷新原订单状态，勿重复创建订单。","Could not confirm a new cashier. Refresh the original order; do not create another purchase.");
+        }
+      }finally{busy=false;byId<HTMLButtonElement>("relaunch-rsa2").disabled=false;}
+    });
+    byId("cancel-unpaid-order").addEventListener("click",async()=>{
+      if(busy||!order||order.paymentProtocol!=="rsa2"||!["pending","unknown"].includes(order.status))return;
+      if(!window.confirm(label("确定放弃原订单付款并向小豆申请安全关单？只有平台确认未支付才会关闭。","Request provider-confirmed cancellation of this original order? Paid orders cannot be closed.")))return;
+      const orderId=order.id;busy=true;show("cashier-link",false);
+      byId<HTMLButtonElement>("cancel-unpaid-order").disabled=true;
+      setStatus("正在向小豆确认并关闭原订单…","Requesting provider-confirmed closure of the original order…");
+      try{
+        const result=await api<{ok:boolean;orderStatus:string}>("/v1/orders/"+encodeURIComponent(orderId)+"/close",{method:"POST",body:"{}"});
+        if(!result.ok||result.orderStatus!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        const detail=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(orderId));
+        if(detail.order.id!==orderId||detail.order.status!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        showOrder(detail.order);
+        setStatus("原订单已安全关闭，可以返回套餐重新购买。","Original order safely closed. Return to plans to buy again.");
+      }catch(error){
+        setStatus(error instanceof ApiError&&error.code==="PROVIDER_HTTP_ERROR"
+          ?"小豆关单暂时不可用，原订单仍保留，请勿重复付款。"
+          :"平台尚未确认安全关单，原订单保留，请查验或联系客服。",
+          "Provider closure is not confirmed. The original order is preserved; verify its status before purchasing.");
+      }finally{busy=false;if(order)render();}
     });
     byId("simulate-payment").addEventListener("click",async()=>{
       if(!order||busy)return;busy=true;show("simulate-payment",false);setStatus("正在模拟本地支付…","Simulating local payment…");

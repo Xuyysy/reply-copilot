@@ -45,7 +45,7 @@ export async function activateQueuedSubscriptionForUser(env:Env,userId:string,no
             AND t.amount_fen=o.amount_fen AND t.currency='CNY'
             AND v.daily_limit=subscription_periods.daily_limit
             AND v.id=subscription_periods.plan_version_id
-            AND (?<>'production' OR t.merchant_provider='mk99')
+            AND (?<>'production' OR t.merchant_provider IN ('mk99','xiaodou'))
             AND EXISTS (SELECT 1 FROM subscription_payment_events e
               WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
               AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen
