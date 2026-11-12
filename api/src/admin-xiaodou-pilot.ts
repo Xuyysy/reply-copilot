@@ -21,6 +21,7 @@ async function status(env:Env,actor:Session){
  let amountFen:number|null=null;
  try{if(pkg)amountFen=projectXiaodouSellerPricing(pkg).totalPaymentFen;}catch{/* Fail closed on changing prices. */}
  const recent=await env.DB.prepare("SELECT count(*) n FROM admin_operations WHERE actor_user_id=? AND action='xiaodou_production_pilot_checkout' AND created_at>=?").bind(actor.user_id,nowMs()-PILOT_INTERVAL_MS).first<{n:number}>();
+ const latest=await env.DB.prepare("SELECT o.id,o.status,o.created_at,t.status payment_status FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.user_id=? AND o.package_name LIKE '【小豆生产验收】%' AND t.merchant_provider='xiaodou' ORDER BY o.created_at DESC LIMIT 1").bind(actor.user_id).first<{id:string;status:string;created_at:number;payment_status:string}>();
  const blockers:string[]=[];
  if(env.ENVIRONMENT!=='production')blockers.push('production_only');
  if(env.XIAODOU_PRODUCTION_PILOT_ENABLED!=='1')blockers.push('pilot_disabled');
@@ -33,7 +34,7 @@ async function status(env:Env,actor:Session){
  if(!xiaodouNetworkReady(env)||env.XIAODOU_WEBHOOKS_ENABLED!=='1')blockers.push('network_or_webhook_unavailable');
  if(amountFen===null||amountFen<1||amountFen>PILOT_MAX_FEN)blockers.push('starter_price_exceeds_limit');
  if(Number(recent?.n??0)>0)blockers.push('daily_test_attempt_used');
- return {eligible:blockers.length===0,blockers,packageId:PILOT_PACKAGE,packageName:pkg?.name_zh??null,credits:pkg?.credits??null,amountFen,limitFen:PILOT_MAX_FEN,attemptsPer24h:1,activeMerchant:control.activeMerchant};
+ return {eligible:blockers.length===0,blockers,packageId:PILOT_PACKAGE,packageName:pkg?.name_zh??null,credits:pkg?.credits??null,amountFen,limitFen:PILOT_MAX_FEN,attemptsPer24h:1,activeMerchant:control.activeMerchant,lastOrder:latest?{id:latest.id,status:latest.status,paymentStatus:latest.payment_status,createdAt:latest.created_at}:null};
 }
 
 export async function adminXiaodouPilotStatus(request:Request,env:Env):Promise<Response>{
