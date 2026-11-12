@@ -1,0 +1,76 @@
+name: Chrome 0.3.8 Production Store candidate (build only)
+on:
+  push:
+    branches:
+      - chatgpt/production-chrome-038-staging-accepted-20261112
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build fixed Store-ID Production ZIP
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+        run: |
+          set -euo pipefail
+          npm run build:production
+          python3 scripts/package-production-ci.py
+      - name: Verify immutable package identity, version and origins
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,zipfile
+          root=pathlib.Path('dist/production-ci/extension')
+          prov=json.loads((root/'provenance.json').read_text())
+          assert prov['sourceSha']==os.environ['SOURCE_SHA']
+          assert prov['version']=='0.3.8'
+          assert prov['extensionId']=='fgfjajofkapebgphfidblngcjomkbdaj'
+          arc=root/prov['archive']
+          assert arc.name=='reply-copilot-production-0.3.8.zip'
+          assert arc.is_file() and hashlib.sha256(arc.read_bytes()).hexdigest()==prov['sha256']
+          with zipfile.ZipFile(arc) as z:
+              assert z.testzip() is None
+              assert 'manifest.json' in z.namelist() and 'config/runtime.js' in z.namelist()
+              assert not any(x.startswith('staging/') for x in z.namelist())
+              d=json.loads(z.read('manifest.json'))
+              runtime=z.read('config/runtime.js').decode()
+              key=json.loads(pathlib.Path('config/extension-store-identity.json').read_text())['publicKey']
+              assert d['version']=='0.3.8' and d['key']==key
+              assert d['host_permissions']==['https://api.x-reply-helper.top/*']
+              assert d['externally_connectable']=={'matches':['https://app.x-reply-helper.top/*']}
+              assert d['background']['service_worker']=='background/service-worker.js'
+              assert d['permissions']==['contextMenus','storage','sidePanel','clipboardWrite']
+              assert 'channel: "production"' in runtime and 'https://api.x-reply-helper.top' in runtime
+              assert 'POST_REPLY_LINGER_MS = 30_000' in z.read('content/content-script.js').decode()
+              assert 'enterPostReplyMode' in z.read('content/inline-assistant.js').decode()
+          print('PASS: Chrome 0.3.8 identity, SHA, origin, 30s lingering UI')
+          PY
+      - name: Dry-run Production API Worker build only (NO deploy)
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run typecheck
+          (cd api && ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --dry-run)
+      - name: Upload immutable ZIP candidate only
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-038-production-candidate-${{ github.sha }}
+          path: dist/production-ci/extension/
+          if-no-files-found: error
+          retention-days: 30
+      - name: No-release guard
+        run: |
+          echo 'Candidate only; no deployment, CWS upload, review or publication.' >> "$GITHUB_STEP_SUMMARY"
+          echo "Source: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
