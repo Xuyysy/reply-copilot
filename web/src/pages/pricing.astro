@@ -54,6 +54,7 @@ import Base from "../layouts/Base.astro";
     const subscriptionNames=new Set(['basic','pro','max','ultra']);
     type BuyerState={state:'loading'|'guest'|'none'|'active'|'unavailable';plan:string|null;expiresAt:string|null;pendingOrderId:string|null;queuedOrderId:string|null};
     let subscriptionBuyer:BuyerState={state:'loading',plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
+    let buyerRequestSequence=0;
     function renderSubscriptions(){
       if(!subscriptionPlans)return;
       const en=document.documentElement.lang==='en';
@@ -128,12 +129,13 @@ import Base from "../layouts/Base.astro";
       }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
     }
     async function loadSubscriptionBuyer(){
+      const request=++buyerRequestSequence;
       subscriptionBuyer={state:'loading',plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
       renderSubscriptions();
       try{
         const result=await api<{subscription?:{status:string;plan:string|null;expiresAt:string|null}}>('/v1/usage');
         const sub=result.subscription;
-        const state=sub?.status==='active'&&subscriptionNames.has(sub.plan??'')?'active':sub?.status==='none'?'none':'unavailable';
+        const state:BuyerState['state']=sub?.status==='active'&&subscriptionNames.has(sub.plan??'')?'active':sub?.status==='none'?'none':'unavailable';
         const candidate:BuyerState={state,plan:state==='active'?sub!.plan:null,
           expiresAt:state==='active'?sub!.expiresAt:null,pendingOrderId:null,queuedOrderId:null};
         if(state!=='unavailable'){
@@ -146,8 +148,10 @@ import Base from "../layouts/Base.astro";
           candidate.pendingOrderId=pending?.id??null;
           candidate.queuedOrderId=queued?.id??null;
         }
+        if(request!==buyerRequestSequence)return;
         subscriptionBuyer=candidate;
       }catch(error){
+        if(request!==buyerRequestSequence)return;
         subscriptionBuyer={state:error instanceof ApiError&&error.status===401?'guest':'unavailable',
           plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
       }
