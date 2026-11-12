@@ -43,6 +43,7 @@ async function broadcastMomentum() {
 }
 
 const deliveryCoordinator = new DeliveryCoordinator({
+  fastPostSwitch: true,
   storage: chrome.storage.local,
   getAccountId: () => accountStates.getOwnerId(),
   createClient: () => new HostedAIClient({ accountClient }),
