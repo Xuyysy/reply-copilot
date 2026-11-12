@@ -6,20 +6,32 @@ const PENDING='pendingAiDelivery';
 const COMPLETED='completedAiDeliveries';
 const UNCERTAIN=new Set(['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN','GENERATION_RECOVERY_REQUIRED']);
 const RELEASED=new Set(['GENERATION_FAILED','IDEMPOTENCY_RESULT_EXPIRED','GENERATION_ABANDONED','DELIVERY_NOT_AVAILABLE']);
+// A client parser rejection is conclusive for this extension, but does NOT
+// mean the server's delivery reservation was released or debited. Never ACK it.
+const LOCAL_UNREADABLE='CLIENT_RESPONSE_INCOMPATIBLE';
+const CAN_ADVANCE=new Set([...RELEASED,LOCAL_UNREADABLE]);
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const sameSource=(a,b)=>a.requestId===b.requestId&&a.sourceText===b.sourceText&&a.sourceUrl===b.sourceUrl;
 function envelope(input){
   return JSON.parse(JSON.stringify(Object.fromEntries(['requestId','sourceText','sourceUrl','voiceProfile','recentHistory','styleStats','replyStyle'].map(key=>[key,input[key]]))));
 }
 export class DeliveryCoordinator {
-  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
+  constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null,fastPostSwitch=false}){
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.mostRecentRequestId=null;this.fastPostSwitch=fastPostSwitch;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
     const frozen=envelope(input),signal=input.signal;
     const deadline={expired:false};
-    const run=this.tail.catch(()=>{}).then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
+    // Different posts must not wait behind an old request's 35-second UI
+    // deadline. The server's authenticated recovery/abandon contract remains
+    // authoritative for quotas, idempotency and any uncertain provider work.
+    // Opt in only for the real hosted Chrome runtime. Legacy unit fixtures
+    // and non-hosted clients preserve their established serialized protocol.
+    const sameRequest=this.mostRecentRequestId===frozen.requestId;
+    const previous=sameRequest||!this.fastPostSwitch?this.tail.catch(()=>{}):Promise.resolve();
+    this.mostRecentRequestId=frozen.requestId;
+    const run=previous.then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
     let timer;
     const bounded=Promise.race([run,new Promise((_,reject)=>{timer=setTimeout(()=>{deadline.expired=true;reject(fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。可以恢复上一条，或放弃并重新生成。'));},this.waitTimeoutMs);})]).finally(()=>clearTimeout(timer));
     this.tail=bounded.catch(()=>{});return bounded;
@@ -43,12 +55,21 @@ export class DeliveryCoordinator {
     if(pending){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
-        const recovered=await this.deliver(pending,completed,performanceTrace,canStart);
+        // On a different post, do NOT regenerate a missing old request and do
+        // NOT wait for its client-side generation promise. Ask the server to
+        // safely retire a running old request with the existing fenced, rate-
+        // limited endpoint. A ready valid result still requires normal ACK.
+        const different=pending.input.requestId!==input.requestId;
+        const client=different&&this.fastPostSwitch?this.createClient():null;
+        const recovered=different&&typeof client?.recoverGeneration==='function'
+          ?await this.finishSuperseded(pending,completed,client,performanceTrace)
+          :await this.deliver(pending,completed,performanceTrace,canStart);
         completed=recovered.completed;
-        if(pending.input.requestId===input.requestId)return recovered.raw;
+        if(!different)return recovered.raw;
       }catch(error){
-        // Only a conclusive server result permits advancing past an old request.
-        if(!RELEASED.has(error?.code))throw error;
+        // A fully resolved or unusable old request must never poison the next.
+        // Network and unconfirmed settlement remain fenced to prevent double debit.
+        if(!CAN_ADVANCE.has(error?.code))throw error;
         if(pending.input.requestId===input.requestId)throw error;
       }
     }
@@ -62,6 +83,44 @@ export class DeliveryCoordinator {
     // authoritative after restart. Do not discard an otherwise usable draft.
     await this.writeLocked(()=>this.storage.set({[PENDING]:record})).catch(()=>{});
     return (await this.deliver(record,completed,performanceTrace,canStart,false)).raw;
+  }
+
+  async finishSuperseded(record,completed,client,performanceTrace){
+    let state;
+    try{
+      // This is an explicit new-post user action, not a background retry.
+      // Server verifies ownership and protects active provider work via its
+      // existing idempotent/rate-limited abandonment transaction.
+      state=await client.recoverGeneration(record.input.requestId,true);
+    }catch(error){
+      // The server may have completed or rejected abandonment; never assume
+      // credits were released when the outcome is uncertain.
+      throw error;
+    }
+    if(['released','missing','expired'].includes(state?.state)){
+      await this.clearResolved(record);
+      return {completed};
+    }
+    if(state?.state==='delivered'&&!state.raw){
+      await this.clearResolved(record);
+      return {completed};
+    }
+    if(!['ready','delivered'].includes(state?.state)||!state.raw)
+      throw fail('GENERATION_RECOVERY_REQUIRED','上一条仍未安全结束，请恢复上一条后继续。');
+    let raw;
+    try{raw=await client.receiveDelivery(state);}
+    catch(error){
+      if(error?.name==='InvalidAIResponseError'){
+        await this.clearResolved(record);
+        return {completed};
+      }
+      throw error;
+    }
+    this.lastQuota=client.lastQuota||null;this.lastSubscription=client.lastSubscription??null;
+    const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),
+      {...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
+    await (performanceTrace?performanceTrace.measure('delivery_persist',()=>this.remember(record,retained)):this.remember(record,retained));
+    return {completed:retained};
   }
   async deliver(record,completed,performanceTrace,canStart=()=>true,recover=true){
     const client=this.createClient();
@@ -83,10 +142,18 @@ export class DeliveryCoordinator {
       await (performanceTrace?performanceTrace.measure("delivery_persist",()=>this.remember(record,retained)):this.remember(record,retained));
       return {raw,completed:retained};
     }catch(error){
-      if(RELEASED.has(error?.code))await this.clearResolved(record);
-      // Unknown transport/parser/storage errors retain the recovery envelope.
-      else if(error?.code&&!UNCERTAIN.has(error.code)&&!['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING'].includes(error.code))await this.clearResolved(record);
-      throw error;
+      // A strict old-client parser can reject a server-valid language tag.
+      // This old raw result is never deliverable by this extension, so retire
+      // its LOCAL recovery envelope instead of poisoning every newer post.
+      // Leave the server-side quota reservation to its existing expiry/ACK
+      // protocol; never acknowledge, debit, or auto-regenerate this result.
+      const resolved=error?.name==='InvalidAIResponseError'
+        ? fail(LOCAL_UNREADABLE,'本次 AI 回复无法被当前插件识别。已解除本地阻塞，请更新插件后使用新帖子重试。')
+        : error;
+      if(CAN_ADVANCE.has(resolved?.code))await this.clearResolved(record);
+      // Unknown network/ACK errors retain the original pending request.
+      else if(resolved?.code&&!UNCERTAIN.has(resolved.code)&&!['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING'].includes(resolved.code))await this.clearResolved(record);
+      throw resolved;
     }
   }
   writeLocked(action){const run=this.storageTail.catch(()=>{}).then(action);this.storageTail=run.catch(()=>{});return run;}
