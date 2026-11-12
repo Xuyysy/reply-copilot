@@ -111,3 +111,54 @@ test('ambiguous recovery/network failures still preserve the old request fence',
  assert.equal(count,0,'do not start new paid generation while delivery is uncertain');
  assert.equal(data.pendingAiDelivery.input.requestId,'old');
 });
+
+test('new post starts without waiting for an old hung client request',async()=>{
+ const calls=[],data={},owner='account-a';
+ const storage={get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))};
+ let oldStarted;const started=new Promise(r=>oldStarted=r),unresolved=new Promise(()=>{});
+ const c=new DeliveryCoordinator({storage,getAccountId:async()=>owner,createClient:()=>({
+   recoverGeneration:async(id,abandon)=>{calls.push(['abandon',id,abandon]);return {state:'released',requestId:id};},
+   generateReplies:async(input)=>{calls.push(['generate',input.requestId]);if(input.requestId==='old'){oldStarted();return unresolved;}return 'fresh-result';}
+ }),waitTimeoutMs:50});
+ const old=c.generateReplies(makeInput('old'));await started;
+ const startedAt=Date.now(),result=await c.generateReplies(makeInput('new'));
+ assert.equal(result,'fresh-result');
+ assert.ok(Date.now()-startedAt<45,'new request must not wait for the old 50ms deadline');
+ assert.deepEqual(calls,[['generate','old'],['abandon','old',true],['generate','new']]);
+ assert.equal(data.pendingAiDelivery.input.requestId,'new','late old result cannot clear the new pending record');
+ await assert.rejects(old,e=>e.code==='GENERATION_RECOVERY_REQUIRED');
+});
+test('new post abandons a server-running orphan once before new generation',async()=>{
+ const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
+ let abandon=0,generate=0;
+ const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))},
+   getAccountId:async()=> 'account-a',createClient:()=>({
+   recoverGeneration:async(id,flag)=>{assert.equal(id,'old');assert.equal(flag,true);abandon++;return {state:'released',requestId:id};},
+   generateReplies:async input=>{assert.equal(input.requestId,'new');generate++;return 'fresh-result';}
+ })});
+ assert.equal(await c.generateReplies(fresh),'fresh-result');
+ assert.equal(abandon,1);assert.equal(generate,1);
+});
+test('new post does not regenerate an old missing request or repeat an old AI call',async()=>{
+ const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
+ const calls=[];
+ const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
+   getAccountId:async()=> 'account-a',createClient:()=>({
+   recoverGeneration:async(id,abandon)=>{calls.push(['retire',id,abandon]);return {state:'released',requestId:id};},
+   generateReplies:async input=>{calls.push(['generate',input.requestId]);return 'fresh-result';}
+ })});
+ assert.equal(await c.generateReplies(fresh),'fresh-result');
+ assert.deepEqual(calls,[['retire','old',true],['generate','new']]);
+});
+test('unconfirmed old provider or abandon failure forbids automatic charged new attempt',async()=>{
+ const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
+ let generated=0;
+ const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
+   getAccountId:async()=> 'account-a',createClient:()=>({
+   recoverGeneration:async()=>{throw Object.assign(new Error('unsafe'),{code:'RECOVERY_NOT_SAFE'});},
+   generateReplies:async()=>{generated++;return 'should-not-execute';}
+ })});
+ await assert.rejects(c.generateReplies(fresh),e=>e.code==='RECOVERY_NOT_SAFE');
+ assert.equal(generated,0,'never risk double charge if old reservation is uncertain');
+ assert.equal(data.pendingAiDelivery.input.requestId,'old');
+});
