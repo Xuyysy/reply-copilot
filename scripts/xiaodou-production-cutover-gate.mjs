@@ -19,7 +19,7 @@ const stages = Object.freeze([
    requirements:['explicit_separate_merchant_switch_approval'],requires:['Separate, fresh authorized real-payment acceptance and merchant-switch permission']}
 ]);
 function safeEvidence(value){
-  if(value===undefined) return {};
+  if(value===undefined || (value && typeof value==='object' && !Array.isArray(value) && Object.keys(value).length===0)) return {};
   if(!value || typeof value!=='object' || Array.isArray(value) || value.schemaVersion!==1)
     throw new Error('SANITIZED_EVIDENCE_SCHEMA_REQUIRED');
   // Reject top-level free-form content. Do not read, print or persist secret-like values.
