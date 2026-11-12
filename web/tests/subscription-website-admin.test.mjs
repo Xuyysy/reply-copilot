@@ -68,7 +68,9 @@ test('pricing and checkout distinguish 30-day daily subscriptions from permanent
    assert.ok(pricing.includes(marker),'pricing missing '+marker);
  assert.match(pricing,/id="permanent-credits"/);
  assert.match(pricing,/id="packages"/);
- assert.match(pricing,/购买或续购/);
+ assert.match(pricing,/本期升档 · 获取补差价报价/);
+ assert.match(pricing,/购买下一期 · 全价 ¥/);
+ assert.doesNotMatch(pricing,/buy\.textContent=txt\('购买或续购'/);
  assert.match(pricing,/查看额度包/);
  assert.match(pricing,/Permanent credit packs/);
  assert.match(pricing,/Unused daily allowance does not roll over/);

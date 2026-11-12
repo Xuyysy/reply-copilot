@@ -19,6 +19,7 @@ export default function SubscriptionCheckout(){
  const upgrade=params.get('upgrade')==='1';
  const [id,setId]=useState(params.get('order')??'');
  const [catalog,setCatalog]=useState<Catalog>();
+ const [currentSubscription,setCurrentSubscription]=useState<{status:string;plan:string|null;expiresAt:string|null}|null>(null);
  const [order,setOrder]=useState<SubscriptionOrder>();
  const [payUrl,setPayUrl]=useState<string|null>(null);
  const [paymentNote,setPaymentNote]=useState('');
@@ -35,8 +36,8 @@ export default function SubscriptionCheckout(){
   let active=true;
   const read=id
    ? (orderPattern.test(id)?api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id).then(result=>{if(active){setOrder(result.order);setPayUrl(result.order.status==='pending'&&!result.order.checkout.paymentConfirmed?result.order.checkout.paymentUrl:null);}}):Promise.reject(new ApiError('订单编号无效。','INVALID_ORDER_ID',400)))
-   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api('/v1/usage')]).then(([result])=>{
-     if(active){setCatalog(result);setChannel(result.paymentMethods[0]??'');}
+   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api<{subscription?:{status:string;plan:string|null;expiresAt:string|null}}>('/v1/usage')]).then(([result,usage])=>{
+     if(active){setCatalog(result);setChannel(result.paymentMethods[0]??'');setCurrentSubscription(usage.subscription??null);}
    });
   void read.catch(cause=>{if(active)setError(cause);}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
@@ -101,6 +102,10 @@ export default function SubscriptionCheckout(){
   history.replaceState(null,'','/subscription-checkout/?order='+encodeURIComponent(value.id));
  }
  const signedOut=error instanceof ApiError&&error.status===401;
+ const tierOrder=['basic','pro','max','ultra'];
+ const higherTier=currentSubscription?.status==='active'&&tierOrder.indexOf(target)>tierOrder.indexOf(currentSubscription.plan??'')&&tierOrder.indexOf(currentSubscription.plan??'')>=0;
+ const canUpgradeNow=Boolean(higherTier&&currentSubscription?.expiresAt&&
+   new Date(currentSubscription.expiresAt).getTime()-Date.now()>=24*60*60*1000);
  return <div className="space-y-5">
   {loading?<p role="status">{t('正在读取订阅…','Loading subscription…')}</p>:null}
   {error?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
@@ -127,7 +132,13 @@ export default function SubscriptionCheckout(){
    <h2>{language==='en'?plan.name_en:plan.name_zh}</h2>
    {upgrade?<p>{quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
     :t('先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a quote first. With less than 24 hours remaining, purchase the next period.')}</p>
-    :<p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>}
+    :<>
+     <p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>
+     {currentSubscription?.status==='active'&&<p role="status" className="notice">{t('注意：你已有 '+(currentSubscription.plan??'').toUpperCase()+' 订阅。这里按完整价格购买下一期 '+target.toUpperCase()+'，当前订阅不会立即变更。','You already have '+(currentSubscription.plan??'').toUpperCase()+'. This purchases the NEXT '+target.toUpperCase()+' period at full price; your current subscription stays unchanged.')}</p>}
+     {canUpgradeNow&&<p>{t('想立即升档并按本期剩余时间补差价？','Want to upgrade your current period for a prorated amount instead?')}{' '}
+      <a className="button secondary" href={'/subscription-checkout/?plan='+encodeURIComponent(target)+'&upgrade=1'}>{t('改为本期升档（服务端报价）','Upgrade this period (server quote)')}</a></p>}
+     {higherTier&&!canUpgradeNow&&<p className="fineprint">{t('本期剩余不足 24 小时，不能升档；只能购买下一期。','Less than 24 hours remain. You can only buy the next period.')}</p>}
+    </>}
    {upgrade&&!quote?<button className="button" disabled={busy} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
     {quote?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
     <fieldset disabled={busy}><legend>{t('支付方式','Payment method')}</legend>
