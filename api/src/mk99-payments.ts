@@ -6,6 +6,7 @@ import {applyPaymentEvent,type PaymentTransaction} from './payments';
 import {Mk99Client,Mk99Error,mk99Config,parseMk99Form,verifyAndParseMk99Notification,canonicalMk99,type Mk99PaymentEvent,type Mk99NotifyField,type Mk99NotifyFieldCheck} from './mk99';
 import {requireAdminSession} from './admin-auth';
 import {nowMs,uuid} from './security';
+import {releaseUnusableCreditCheckout} from './payment-retry-release.js';
 
 function client(env:Env){try{return new Mk99Client(mk99Config(env));}catch{throw new ApiFailure(503,'MK99_NOT_READY','支付协议或金额规则尚未确认，暂不可付款。');}}
 function safeProviderError(error:unknown):never{throw new ApiFailure(502,error instanceof Mk99Error?error.code:'MK99_UNCONFIRMED','支付平台暂时无法确认订单，请保留原订单并稍后核对。');}
@@ -25,7 +26,12 @@ export async function createMk99Checkout(request:Request,env:Env,t:PaymentTransa
  ]);
  const current=await env.DB.prepare('SELECT t.status,t.risk_state,t.provider_payment_id,o.credited_at FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=?').bind(t.id).first<{status:string;risk_state:string;provider_payment_id:string|null;credited_at:number|null}>();
  const ready=!!data&&current?.status==='pending'&&current.risk_state==='clear'&&current.provider_payment_id===data.tradeNo;
- return response({ok:ready||current?.status==='paid',paymentProvider:'mk99',requestId:snapshot.requestId,...(!ready&&current?.status!=='paid'?{code:'PAYMENT_CHECKOUT_UNAVAILABLE',message:'付款链接未生成，订单结果待核对，请勿重复下单。'}:{}),order:{...snapshot,id:t.order_id,amountFen:t.amount_fen,currency:'CNY',displayCurrency:'USD',paymentProvider:'mk99',paymentProtocol:'mk99',paymentChannel:t.payment_channel,riskState:current?.risk_state??'unknown',status:current?.status??'unknown',creditedAt:current?.credited_at??null,paymentUrl:ready?data?.payUrl:null,checkout:{outcome:ready?'ready':'unknown',issue:ready?'MK99_PAY_URL_READY':current?.risk_state!=='clear'?'MK99_MANUAL_REVIEW':issue}}},ready||current?.status==='paid'?201:502,env,request);
+ let retryAvailable=false;
+ if(!data&&current?.status==='unknown'){
+  try {retryAvailable=await releaseUnusableCreditCheckout(env,{userId:t.order_user_id!,merchant:'mk99',orderId:t.order_id});}
+  catch {console.warn({event:'credit_checkout_retry_release_error',merchant:'mk99',stage:'postcreate'});}
+ }
+ return response({ok:ready||current?.status==='paid',paymentProvider:'mk99',requestId:snapshot.requestId,...(!ready&&current?.status!=='paid'?{code:'PAYMENT_CHECKOUT_UNAVAILABLE',message:retryAvailable?'本次未生成付款链接，已解除本地重试限制，可以重新下单；如发生实际扣款请联系客服核对。':'付款链接未生成，订单结果待核对，请勿重复下单。'}:{}),order:{...snapshot,id:t.order_id,amountFen:t.amount_fen,currency:'CNY',displayCurrency:'USD',paymentProvider:'mk99',paymentProtocol:'mk99',paymentChannel:t.payment_channel,retryAvailable,riskState:current?.risk_state??'unknown',status:current?.status??'unknown',creditedAt:current?.credited_at??null,paymentUrl:ready?data?.payUrl:null,checkout:{outcome:ready?'ready':'unknown',issue:ready?'MK99_PAY_URL_READY':current?.risk_state!=='clear'?'MK99_MANUAL_REVIEW':issue}}},ready||current?.status==='paid'?201:502,env,request);
 }
 function validateMatch(t:PaymentTransaction,p:Mk99PaymentEvent,env:Env,notification:boolean){
  const config=mk99Config(env),expectedPaytype=t.payment_channel==='WECHAT_H5'?'wxpay':'alipay';
