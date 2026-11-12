@@ -19,6 +19,27 @@
   let bindingTimer = null;
   let settingsRevision = 0;
   let pendingActivation = null;
+  // After a completed draft's native editor closes, keep only the floating UI
+  // available for review. The old editor, request and association are retired
+  // immediately; this copy-only surface cannot generate or insert again.
+  const POST_REPLY_LINGER_MS = 30_000; // Inactivity timeout, reset by interactions.
+  let lingeringHost = null;
+  let lingeringSession = null;
+  let lingeringTimer = null;
+  function clearLingeringHost() {
+    if (lingeringTimer !== null) clearTimeout(lingeringTimer);
+    lingeringTimer = null;
+    lingeringHost?.remove();
+    lingeringHost = null;
+    lingeringSession = null;
+  }
+  function resetLingeringTimer() {
+    if (lingeringTimer !== null) clearTimeout(lingeringTimer);
+    const host = lingeringHost;
+    lingeringTimer = host ? setTimeout(() => {
+      if (lingeringHost === host) clearLingeringHost();
+    }, POST_REPLY_LINGER_MS) : null;
+  }
   // Local-only, text-free troubleshooting for disappearing reply windows.
   // No post text, URL, account data or telemetry is captured.
   const associationEvents=[];
@@ -40,6 +61,7 @@
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    clearLingeringHost();
     momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
@@ -99,7 +121,24 @@
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
-    current.assistant?.host?.remove();
+    clearLingeringHost();
+    const host = current.assistant?.host;
+    if (reason === 'reply_closed' && current.appliedText && host?.isConnected) {
+      // The old native editor and request are already cancelled. Preserve a
+      // fully interactive copy-only panel, never a live composer binding.
+      current.assistant?.enterPostReplyMode?.();
+      host.style.pointerEvents = '';
+      host.style.opacity = '';
+      lingeringHost = host;
+      lingeringSession = {
+        assistant: current.assistant,
+        requestId: current.requestId,
+        sourceText: current.post?.sourceText,
+        sourceUrl: current.post?.sourceUrl,
+        autoGenerateOnReply: current.preferences?.autoGenerateOnReply,
+      };
+      resetLingeringTimer();
+    } else host?.remove();
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     active=null;pendingActivation=null;
     if (reason === 'quiescent_recovery' || reason === 'reply_closed') { recoveryRequired=false; recoveryReason=null; }
@@ -166,6 +205,7 @@
   function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
     if (!hasRuntimeContext()) return;
+    clearLingeringHost(); // A new reply always starts with a clean visual surface.
     if (active?.requestId) void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: active.requestId });
     if (bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
@@ -419,8 +459,54 @@
       if (active?.requestId === requestId) { current.assistant?.setStatus(localizeError(error.message || "")); current.assistant?.showRetry(); if(current.retrySameRequestId)current.assistant?.showRecovery?.(); }
     }
   }
+  function handleLingeringAction(action, data) {
+    const session = lingeringSession;
+    if (!session || (action !== 'dismiss' && !lingeringHost?.isConnected)) return;
+    if (action === 'dismiss') { clearLingeringHost(); return; }
+    if (!hasRuntimeContext()) return;
+    resetLingeringTimer();
+    if (action === 'linger_interaction') return;
+    if (action === 'settings') { void safeSend({type:'REPLY_COPILOT_OPEN_SETTINGS'}); return; }
+    if (action === 'sidepanel' || action === 'momentum_details') {
+      if (session.panelOpenPending) return;
+      session.panelOpenPending = true;
+      const payload = action === 'sidepanel'
+        ? {sourceText:session.sourceText,sourceUrl:session.sourceUrl} : {momentumDetails:true};
+      void safeSend({type:'REPLY_COPILOT_OPEN_SIDEPANEL',...payload}).then(response => {
+        if (lingeringSession === session) session.assistant?.showPanelError?.(response?.ok ? '' : response?.error || '无法打开侧边栏，请重试。');
+      }).finally(() => {session.panelOpenPending = false;});
+      return;
+    }
+    if (action === 'position_changed') {
+      void safeSend({type:'REPLY_COPILOT_SET_FLOATING_POSITION',left:data.left,top:data.top}); return;
+    }
+    if (action === 'toggle_auto_generate' && typeof data.enabled === 'boolean') {
+      const previous = session.autoGenerateOnReply;
+      session.autoGenerateOnReply = data.enabled;
+      void safeSend({type:'REPLY_COPILOT_SET_AUTO_GENERATE',enabled:data.enabled}).then(response => {
+        if (!response?.ok && lingeringSession === session) {
+          session.autoGenerateOnReply = previous;
+          session.assistant?.setAutoGenerate?.(previous);
+          session.assistant?.setStatus?.('设置保存失败，请重试。');
+        }
+      });
+      return;
+    }
+    if (action === 'selected' || action === 'copied') {
+      void safeSend({type:'REPLY_COPILOT_HISTORY',requestId:session.requestId,
+        sourceText:session.sourceText,sourceUrl:session.sourceUrl,event:action,style:data.style,reply:data.reply});
+      return;
+    }
+    if (action === 'feedback') {
+      void safeSend({type:'REPLY_COPILOT_FEEDBACK',requestId:session.requestId,...data}); return;
+    }
+    if (action === 'momentum_original') { void safeSend({type:'REPLY_COPILOT_OPEN_ORIGINAL'}); return; }
+    // An expired native reply editor must never be reused for generate,
+    // regeneration, recovery, or automatic insertion (even after a click).
+    session.assistant?.setStatus?.('本次回复窗口已关闭。请点击帖子下方的回复按钮开始新的回复。');
+  }
   function handleAction(action, data) {
-    if (!active) return;
+    if (!active) { handleLingeringAction(action, data); return; }
     const current = active;
     if (action === "dismiss") {
       current.cancelled = true; current.dismissed = true;

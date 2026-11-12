@@ -72,5 +72,5 @@ Local style preference counts (context only): ${JSON.stringify(styleStats)}`;
       ? `Reply in the original post's language when Chinese (zh), English (en), Japanese (ja) or Korean (ko); the local script hint is ${scriptHint}. Ignore the Chrome UI language and writing samples when deciding the post's language. For other languages use English. Use one consistent language across all three replies and any quoteCandidate, and return its tag in JSON.`
       : `Write all three replies and any quoteCandidate in ${requestedLanguage} and return that same language tag in JSON.`
     : `Legacy client output supports zh or en only. Keep the original post's language when it is Chinese or English; otherwise use English. Return only zh or en as the JSON language tag for all three replies and any quoteCandidate.`;
-  return { system: `${system}\n\nREPLY LANGUAGE POLICY\n${languagePolicy}`, user };
+  return { system: `${system}\n\nREPLY LANGUAGE POLICY\n${languagePolicy}`, user: outputSchemaVersion === 2 ? `${user}\n\nFINAL REPLY LANGUAGE: ${requestedLanguage === "auto" ? (scriptHint !== "auto" ? scriptHint : /\p{Script=Han}/u.test(postText) ? "match the original X post language" : "en") : requestedLanguage}. Use this language in all three replies; Chinese writing samples and recent replies are style examples, not a language setting.` : user };
 }

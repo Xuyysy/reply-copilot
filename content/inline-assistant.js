@@ -24,7 +24,7 @@
     shadow.append(root);
     (document.documentElement || document.body).append(host);
     if (preferences.rememberFloatingPosition && preferences.floatingPosition) setPosition(preferences.floatingPosition.left, preferences.floatingPosition.top);
-    let candidates = [], index = 0, cycled = false, drag = null, appliedValue = null;
+    let candidates = [], index = 0, cycled = false, drag = null, appliedValue = null, postReplyMode = false;
     const dismissTimer = dismissAfterMs ? setTimeout(() => host.remove(), dismissAfterMs) : null;
     const status = root.querySelector(".status"), reply = root.querySelector(".reply"), actions = root.querySelector(".actions");
     const accountBadge = document.createElement("span"); accountBadge.className = "account-badge"; accountBadge.setAttribute("aria-live", "polite");
@@ -60,6 +60,18 @@
       root.querySelector('[data-action="generate"]').classList.add('hidden');
     }
     function showLoading(message = "正在生成回复建议…") { clearRecovery(); setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
+    function enterPostReplyMode() {
+      postReplyMode = true;
+      clearRecovery();
+      root.querySelector('[data-action="generate"]').classList.add('hidden');
+      root.querySelector('[data-action="retry"]').classList.add('hidden');
+      const change = root.querySelector('[data-action="change"]');
+      change.textContent = '换一个 ↻';
+      const selected = candidates[index]?.[1] || '';
+      reply.textContent = selected;
+      reply.classList.toggle('hidden', !selected);
+      setStatus('回复窗口已关闭。仍可切换风格、复制建议或打开设置。');
+    }
     function showApplied() {
       appliedValue = candidates[index]?.[1] || null;
       reply.textContent = ""; reply.classList.add("hidden");
@@ -80,9 +92,10 @@
     }
     function selectStyle(key) {
       const selected = candidates.findIndex(([candidate]) => candidate === key); if (selected < 0) return;
-      index = selected; const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", value === appliedValue);
+      index = selected; const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", !postReplyMode && value === appliedValue);
       markSelectedStyle(style);
-      if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
+      if (postReplyMode) setStatus('回复窗口已关闭。可复制当前建议。');
+      else if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
       onAction("selected", { style, reply: value, userGesture: true });
     }
     function showRecovery(){showRetry();root.querySelector('[data-action="retry"]').textContent='恢复上一条';root.querySelector('[data-action="retry"]').dataset.recovery='true';root.querySelector('[data-action="abandon-generation"]').classList.remove('hidden');}
@@ -177,13 +190,15 @@
         else if(!event.shiftKey&&shadow.activeElement===last){event.preventDefault();first.focus();}
       }
     });
+    root.addEventListener('pointerdown', () => { if (postReplyMode) onAction('linger_interaction', {}); });
+    root.addEventListener('keydown', () => { if (postReplyMode) onAction('linger_interaction', {}); });
     root.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-action]"); if (!button) return;
       const action = button.dataset.action;
       if((action==='abandon-generation'||(action==='retry'&&button.dataset.recovery))&&!event.isTrusted)return;
       if (action === "settings") { onAction("settings", {}); return; }
       if (["register", "login", "pricing", "check-account"].includes(action)) { onAction(action, {}); return; }
-      if (action === "minimize") { root.classList.toggle("collapsed"); button.textContent = root.classList.contains("collapsed") ? "+" : "−"; button.title = root.classList.contains("collapsed") ? "展开悬浮框" : "收起悬浮框"; button.setAttribute("aria-label", button.title); return; }
+      if (action === "minimize") { root.classList.toggle("collapsed"); button.textContent = root.classList.contains("collapsed") ? "+" : "−"; button.title = root.classList.contains("collapsed") ? "展开悬浮框" : "收起悬浮框"; button.setAttribute("aria-label", button.title); if(postReplyMode)onAction('linger_interaction',{}); return; }
       if (action === "dismiss") { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); onAction("dismiss", {}); return; }
       if(action==='momentum-gate-continue'||action==='momentum-gate-dnd'){
         if(gatePreview){hideMomentumGate();return;}
@@ -192,11 +207,12 @@
       }
       if (action === "generate") { onAction("generate", { userGesture: true }); return; }
       if (action === "change" && candidates.length) {
-        if (cycled) { onAction("regenerate", { userGesture: true }); cycled = false; return; }
+        if (cycled && !postReplyMode) { onAction("regenerate", { userGesture: true }); cycled = false; return; }
         index = nextCandidateIndex(index, candidates.length); if (index === 0) cycled = true;
-        const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", value === appliedValue); markSelectedStyle(style); onAction("selected", { style, reply: value, userGesture: true });
-        if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
-        button.textContent = cycled ? "再生成" : "换一个 ↻";
+        const [style, value] = candidates[index]; reply.textContent = value; reply.classList.toggle("hidden", !postReplyMode && value === appliedValue); markSelectedStyle(style); onAction("selected", { style, reply: value, userGesture: true });
+        if (postReplyMode) setStatus('回复窗口已关闭。可复制当前建议。');
+        else if (appliedValue && value !== appliedValue) setStatus("可复制此建议，原草稿保持不变。");
+        button.textContent = postReplyMode ? "换一个 ↻" : cycled ? "再生成" : "换一个 ↻";
       } else if (action === "copy" && candidates.length) { const [style, value] = candidates[index]; try { await navigator.clipboard.writeText(value.trim()); setStatus("已复制，请检查后再发送。"); onAction("copied", { style, reply: value }); } catch { setStatus("复制失败，请手动选择文字。"); } }
       else if(action === "abandon-generation") onAction("abandon-generation",{userGesture:true});
       else if (action === "retry") onAction(button.dataset.recovery?"recover-generation":"regenerate", { userGesture: true });
@@ -215,7 +231,7 @@
       }
       notice.textContent = message;
     }
-    return { showPanelError, isMomentumPreview: () => gatePreview, previewMomentum: data => showMomentumGate(data, data, true), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, showMomentumGate, resolveMomentumGate(){hideMomentumGate();}, momentumGateError(message){setGateBusy(false,message||'暂时无法确认，请重试。');}, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { enterPostReplyMode, showPanelError, isMomentumPreview: () => gatePreview, previewMomentum: data => showMomentumGate(data, data, true), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, showMomentumGate, resolveMomentumGate(){hideMomentumGate();}, momentumGateError(message){setGateBusy(false,message||'暂时无法确认，请重试。');}, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };
