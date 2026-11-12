@@ -60,5 +60,5 @@ export async function adminXiaodouPilotCheckout(request:Request,env:Env):Promise
    {packageId:PILOT_PACKAGE,amountFen:gate.amountFen,channel:'ALIPAY_H5',result:'reserved_no_charge_yet'});
  const internalRequest=new Request(request.url,{method:'POST',headers:request.headers,
    body:JSON.stringify({packageId:PILOT_PACKAGE,channel:'ALIPAY_H5'})});
- return createOrder(internalRequest,env,{pilot:{actorUserId:actor.user_id,operationId:op.id}});
+ return createOrder(internalRequest,env,{pilot:{actorUserId:actor.user_id,operationId:op.id,expectedAmountFen:gate.amountFen!}});
 }
