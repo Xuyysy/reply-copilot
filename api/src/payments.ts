@@ -200,17 +200,29 @@ export async function packages(request:Request,env:Env):Promise<Response>{
   const localMock=isLocalMock(env,request),paymentAvailable=localMock||control.effectiveEnabled;
   return response({packages:priced,paymentAvailable,paymentProvider:localMock?"local_mock":control.defaultMethod?.provider??null,paymentMethods:localMock?[{provider:"local_mock",channel:"ALIPAY_H5"}]:control.methods},200,env,request);
 }
-export async function createOrder(request:Request,env:Env):Promise<Response>{
-  const session=await webSession(request,env,true),body=await jsonBody(request,1024),packageId=cleanId(body.packageId,/^[a-z0-9_-]{1,64}$/i),mock=isLocalMock(env,request),control=await paymentControl(env),real=control.effectiveEnabled;
+export async function createOrder(request:Request,env:Env,options?:{pilot?:{actorUserId:string;operationId:string;expectedAmountFen:number}}):Promise<Response>{
+  const session=await webSession(request,env,true),body=await jsonBody(request,1024),packageId=cleanId(body.packageId,/^[a-z0-9_-]{1,64}$/i),mock=isLocalMock(env,request),control=await paymentControl(env),pilot=options?.pilot??null;
+  if(pilot&&(
+    env.ENVIRONMENT!=='production'||env.XIAODOU_PRODUCTION_PILOT_ENABLED!=='1'||
+    env.XIAODOU_PRODUCTION_PILOT_TRADE_APPROVED!=='1'||
+    session.user_id!==pilot.actorUserId||!/^[-0-9a-f]{36}$/i.test(pilot.operationId)||
+    control.activeMerchant!=='mk99'||!control.environmentReady||!control.operatorEnabled||
+    !control.providers.rsa2.enabled||!control.providers.rsa2.credentialsConfigured||
+    !control.channels.rsa2.alipay.enabled||!xiaodouNetworkReady(env)||
+    env.XIAODOU_WEBHOOKS_ENABLED!=='1'||mock||packageId!=='starter'||body.channel!=='ALIPAY_H5'))
+    throw new ApiFailure(409,'XIAODOU_PILOT_NOT_READY','仅允许已明确批准的生产管理员测试订单。');
+  const real=pilot?(control.environmentReady&&control.operatorEnabled):control.effectiveEnabled;
   if(!mock&&!real)throw new ApiFailure(503,"PAYMENT_UNAVAILABLE","支付尚未开放，暂不能创建订单。");
   const channel=(body.channel??control.defaultMethod?.channel??"ALIPAY_H5") as PaymentChannel;
   if(!["ALIPAY_H5","WECHAT_H5"].includes(channel))throw new ApiFailure(400,"INVALID_PAYMENT_CHANNEL","请选择可用的支付方式。");
-  const selected=mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&(body.provider===undefined?control.activeMerchant==='xiaodou':method.provider===body.provider));
+  const selected=pilot?{provider:"xiaodou" as const,channel:"ALIPAY_H5" as const}:mock?{provider:"local_mock" as const,channel:"ALIPAY_H5" as const}:control.methods.find(method=>method.channel===channel&&(body.provider===undefined?control.activeMerchant==='xiaodou':method.provider===body.provider));
   if(!selected)throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","该支付方式暂不可用。");
   const paymentProvider=selected.provider as PaymentProvider|"local_mock";
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
   if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","套餐不存在或已下架。");
   const feeSnapshot=paymentProvider==="mk99"?projectMk99Pricing(pkg):paymentProvider==="xiaodou"?projectXiaodouSellerPricing(pkg):projectPackagePricing(pkg),amountFen=feeSnapshot.totalPaymentFen;
+  if(pilot&&(paymentProvider!=='xiaodou'||channel!=='ALIPAY_H5'||amountFen<1||amountFen>1000||amountFen!==pilot.expectedAmountFen))
+    throw new ApiFailure(409,'PILOT_PRICE_EXCEEDS_LIMIT','正式验收仅允许固定入门包，单笔付款不超过 ¥10。');
   const mk99=real&&paymentProvider==="mk99",mkConfig=mk99?mk99Config(env):null;
   const epay=real&&paymentProvider==="xiaodou_epay";
   if(body.restartPayment!==undefined&&(typeof body.restartPayment!=="boolean"||!epay))throw new ApiFailure(400,"INVALID_REQUEST","仅易支付支持主动重新发起订单。");
@@ -219,12 +231,12 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   const unresolvedProtocol=" AND EXISTS(SELECT 1 FROM payment_transactions existing WHERE existing.order_id=recharge_orders.id AND existing.payment_protocol=? AND existing.merchant_provider=?)";
   const client=real&&!epay&&!mk99?paymentClient(env):null;
   // Release only an original first-attempt linkless checkout, never payment facts.
-  const retryMerchant=mk99?'mk99':real&&paymentProvider==='xiaodou'?'xiaodou':null;
+  const retryMerchant=pilot?null:mk99?'mk99':real&&paymentProvider==='xiaodou'?'xiaodou':null;
   if(retryMerchant){
     try{await releaseUnusableCreditCheckout(env,{userId:session.user_id,merchant:retryMerchant,packageId:pkg.id});}
     catch{console.warn({event:'credit_checkout_retry_release_error',merchant:retryMerchant,stage:'precreate'});}
   }
-  const id=uuid(),now=nowMs(),amountCents=pkg.promo_price_cents??pkg.price_cents,provider=mock?"local_mock":"xiaodou",outTradeNo=`XRH_${id.replaceAll("-","")}`,transactionId=uuid(),attemptId=uuid(),requestId=`xrh-${uuid()}`;
+  const id=uuid(),now=nowMs(),amountCents=pkg.promo_price_cents??pkg.price_cents,provider=mock?"local_mock":"xiaodou",outTradeNo=`XRH_${id.replaceAll("-","")}`,transactionId=uuid(),attemptId=uuid(),requestId=`xrh-${uuid()}`,packageName=pilot?`【小豆生产验收】${pkg.name_zh}`:pkg.name_zh;
   let paymentForm:ReturnType<typeof epayCheckout>|null=null;
   if(epay){
     try{paymentForm=epayCheckout(epayConfig(env),{orderId:id,outTradeNo,amountFen,name:`x-Reply-Helper ${pkg.credits}次`});}
@@ -232,27 +244,31 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   }
   const merchant=mk99?'mk99':'xiaodou';
   const gateKeys=mk99?['payment_mk99_enabled',channel==='WECHAT_H5'?'payment_mk99_wechat_enabled':'payment_mk99_alipay_enabled',channel==='WECHAT_H5'?'payment_mk99_wechat_released':'payment_mk99_alipay_released']:epay?['payment_epay_enabled','payment_epay_alipay_enabled','payment_epay_alipay_released']:['payment_rsa2_enabled',channel==='WECHAT_H5'?'payment_rsa2_wechat_enabled':'payment_rsa2_alipay_enabled',channel==='WECHAT_H5'?'payment_rsa2_wechat_released':'payment_rsa2_alipay_released'];
-  const creationGate=" AND (?=1 OR (EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value=?) AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1') AND (SELECT count(*) FROM system_settings WHERE key IN (?,?,?) AND value='1')=3))";
+  const creationGate=pilot
+    ? " AND EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value='mk99') AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1') AND (SELECT count(*) FROM system_settings WHERE key IN ('payment_rsa2_enabled','payment_rsa2_alipay_enabled') AND value='1')=2 AND EXISTS(SELECT 1 FROM site_administrator WHERE id=1 AND user_id=?) AND EXISTS(SELECT 1 FROM admin_operations WHERE id=? AND actor_user_id=? AND action='xiaodou_production_pilot_checkout') AND NOT EXISTS(SELECT 1 FROM recharge_orders older WHERE older.user_id=? AND older.package_name LIKE '【小豆生产验收】%' AND older.created_at>=?)"
+    : " AND (?=1 OR (EXISTS(SELECT 1 FROM system_settings WHERE key='active_merchant' AND value=?) AND EXISTS(SELECT 1 FROM system_settings WHERE key='purchase_enabled' AND value='1') AND (SELECT count(*) FROM system_settings WHERE key IN (?,?,?) AND value='1')=3))";
+  const creationArgs=pilot?[session.user_id,pilot.operationId,session.user_id,session.user_id,now-86400000]:[mock?1:0,merchant,...gateKeys];
   const created=await env.DB.batch([
-    env.DB.prepare(`INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND (?=1 OR NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND package_id=? AND status IN ('pending','awaiting_payment')${unresolvedProtocol}))${creationGate}`).bind(id,session.user_id,pkg.id,pkg.name_zh,pkg.credits,amountCents,mk99?"mk99":provider,outTradeNo,now,session.user_id,restart?1:0,session.user_id,pkg.id,paymentProtocol,mk99?"mk99":mock?"local_mock":"xiaodou",mock?1:0,merchant,...gateKeys),
+    env.DB.prepare(`INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment',?,?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND (?=1 OR NOT EXISTS(SELECT 1 FROM recharge_orders WHERE user_id=? AND package_id=? AND status IN ('pending','awaiting_payment')${unresolvedProtocol}))${creationGate}`).bind(id,session.user_id,pkg.id,packageName,pkg.credits,amountCents,pilot?'xiaodou_pilot':mk99?"mk99":provider,outTradeNo,now,session.user_id,restart?1:0,session.user_id,pkg.id,paymentProtocol,mk99?"mk99":mock?"local_mock":"xiaodou",...creationArgs),
     env.DB.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,epay_pid,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,merchant_pricing_snapshot) SELECT ?,?,?,'CNY',?,?,?,?, 'fee-v1',CASE WHEN ?='xiaodou' THEN 'pending' ELSE 'not_applicable' END,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM recharge_orders WHERE id=? AND user_id=?)").bind(transactionId,id,provider,amountFen,feeSnapshot.baseAmountFen,feeSnapshot.serviceFeeFen,feeSnapshot.feeRateBps,epay?"epay":mk99?"mk99":provider,outTradeNo,now,now,paymentProtocol,channel,epay?env.XIAODOU_EPAY_PID:null,feeSnapshot.settlementMode,feeSnapshot.exchangeRateMicros,mk99?"mk99":mock?"local_mock":"xiaodou",mk99?mkConfig!.pid:(!epay&&!mock?env.XIAODOU_APP_ID??null:null),mk99?mkConfig!.notifySignType:(!epay&&!mock?env.XIAODOU_KEY_ID??null:null),(mk99||(!epay&&!mock&&paymentProvider==="xiaodou"))?"CNY_EXACT_BUYER_TOTAL":null,mk99?amountFen:null,mk99?JSON.stringify((feeSnapshot as ReturnType<typeof projectMk99Pricing>).merchantPricing):null,id,session.user_id),
     env.DB.prepare("INSERT INTO payment_attempts(id,transaction_id,attempt_number,provider_request_id,state,created_at,updated_at) SELECT ?,?,1,?,'prepared',?,? WHERE EXISTS(SELECT 1 FROM payment_transactions WHERE id=?)").bind(attemptId,transactionId,requestId,now,now,transactionId),
   ]);
   if(created[0].meta.changes!==1){
+    if(pilot)throw new ApiFailure(409,"PILOT_LIMIT_REACHED","已有验收订单或管理员操作记录，请核对原订单，勿重复付款。");
     if(!mock&&!(await paymentControl(env)).methods.some(method=>method.provider===selected.provider&&method.channel===channel))throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","支付方式状态已变化，请重新选择。");
     throw new ApiFailure(409,"UNRESOLVED_ORDER_EXISTS",mk99?"该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。":"该套餐在当前通道已有待支付或待确认订单。请查看原订单，或主动选择重新发起支付；旧订单仍保留。");
   }
-  if(mk99)return await createMk99Checkout(request,env,(await transactionForOrder(env,id))!,{attemptId,requestId,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,...feeSnapshot});
-  if(mock)return response({paymentAvailable:true,paymentProvider:"local_mock",order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",baseAmountFen:feeSnapshot.baseAmountFen,serviceFeeFen:feeSnapshot.serviceFeeFen,feeRateBps:feeSnapshot.feeRateBps,amountFen,currency:"CNY",status:"pending",paymentMode:"mock",message:"本地模拟订单，不会产生真实扣款。"}},201,env,request);
+  if(mk99)return await createMk99Checkout(request,env,(await transactionForOrder(env,id))!,{attemptId,requestId,packageName:packageName,credits:pkg.credits,displayPriceCents:amountCents,...feeSnapshot});
+  if(mock)return response({paymentAvailable:true,paymentProvider:"local_mock",order:{id,packageName:packageName,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",baseAmountFen:feeSnapshot.baseAmountFen,serviceFeeFen:feeSnapshot.serviceFeeFen,feeRateBps:feeSnapshot.feeRateBps,amountFen,currency:"CNY",status:"pending",paymentMode:"mock",message:"本地模拟订单，不会产生真实扣款。"}},201,env,request);
   if(paymentForm){
     const checkout:CheckoutResult={outcome:"ready",issue:"EPAY_FORM_PREPARED",paymentUrl:null,paymentStatus:"pending"};
     let prepared=true;
     try{await persistCheckout(env,transactionId,attemptId,checkout);}catch{prepared=false;}
-    return response({ok:prepared,paymentProvider:"xiaodou_epay",order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:"pending",paymentProtocol:"epay",paymentChannel:channel,paymentForm:prepared?paymentForm:null,checkout:prepared?{outcome:"ready",issue:"EPAY_FORM_PREPARED"}:{outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED"}},requestId},prepared?201:503,env,request);
+    return response({ok:prepared,paymentProvider:"xiaodou_epay",order:{id,packageName:packageName,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:"pending",paymentProtocol:"epay",paymentChannel:channel,paymentForm:prepared?paymentForm:null,checkout:prepared?{outcome:"ready",issue:"EPAY_FORM_PREPARED"}:{outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED"}},requestId},prepared?201:503,env,request);
   }
   let checkout:CheckoutResult,providerError:unknown;
   try {
-    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${pkg.name_zh} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
+    const result=await client!.createPayment({outTradeNo,channel,amountFen,currency:"CNY",subject:`x-Reply-Helper ${packageName} ${pkg.credits}次`,payerClientIp:request.headers.get("cf-connecting-ip")||"",...(env.XIAODOU_TRADE_SCOPE?{tradeScope:env.XIAODOU_TRADE_SCOPE}:{}),...(env.XIAODOU_RETURN_URL?{returnUrl:env.XIAODOU_RETURN_URL}:{})},{requestId});
     checkout=inspectCheckoutResponse(result,{outTradeNo,amountFen});
     // Show a verified buyer cashier even if the independent seller-fee
     // projection needs accounting review; never change the buyer amount.
@@ -262,14 +278,14 @@ export async function createOrder(request:Request,env:Env):Promise<Response>{
   catch { checkout={outcome:"unknown",issue:"CHECKOUT_PERSISTENCE_UNCONFIRMED",paymentUrl:null,paymentStatus:"unknown"}; }
   const current=await transactionForOrder(env,id);
   let retryAvailable=false;
-  if(paymentProvider==='xiaodou'&&checkout.outcome!=='ready'&&checkout.outcome!=='confirmation_required'){
+  if(!pilot&&paymentProvider==='xiaodou'&&checkout.outcome!=='ready'&&checkout.outcome!=='confirmation_required'){
     try{retryAvailable=await releaseUnusableCreditCheckout(env,{userId:session.user_id,merchant:'xiaodou',orderId:id});}
     catch{console.warn({event:'credit_checkout_retry_release_error',merchant:'xiaodou',stage:'postcreate'});}
   }
   const settled=current&&["paid","refunded","closed","failed"].includes(current.status);
   const diagnostic=providerError&&env.ENVIRONMENT==="staging"?refreshProviderFailure(providerError,requestId):null;
   return response({ok:checkout.outcome==="ready",...(checkout.outcome!=="ready"?{code:"PAYMENT_CHECKOUT_UNAVAILABLE",message:retryAvailable?"付款链接未生成；本地重试限制已解除，可以重新下单；如发生实际扣款请联系客服核对。":"付款链接未生成，请保留订单并核对结果，不要重复下单。"}:{}),
-    order:{id,packageName:pkg.name_zh,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:settled?current.status:checkout.paymentStatus,
+    order:{id,packageName:packageName,credits:pkg.credits,displayPriceCents:amountCents,displayCurrency:"USD",...feeSnapshot,amountFen,currency:"CNY",status:settled?current.status:checkout.paymentStatus,
       paymentUrl:!settled&&checkout.outcome==="ready"?checkout.paymentUrl:null,checkout:{outcome:checkout.outcome,issue:checkout.issue},paymentLinkUnavailable:checkout.outcome!=="ready",retryAvailable,paymentProtocol,paymentChannel:channel},
     requestId,...(diagnostic?{diagnostic:{stage:diagnostic.stage,upstreamHttpStatus:diagnostic.upstreamHttpStatus,...(diagnostic.providerResponse?{providerResponse:diagnostic.providerResponse}:{})}}:{})},checkoutHttpStatus(checkout),env,request);
 }
