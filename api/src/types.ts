@@ -54,6 +54,10 @@ export interface Env {
   XIAODOU_RSA2_SUBSCRIPTIONS_READY?: string;
   XIAODOU_WECHAT_MERCHANT_APPROVED?: string;
   XIAODOU_TRADE_SCOPE?: string;
+  /** Explicit owner-only Production test enabling; defaults disabled. */
+  XIAODOU_PRODUCTION_PILOT_ENABLED?: string;
+  /** Separate merchant Alipay + declared trade-scope approval attestation. */
+  XIAODOU_PRODUCTION_PILOT_TRADE_APPROVED?: string;
   /** Only exercised with the reserved api-staging.example.test fixture hostname. */
   XIAODOU_EPAY_TEST_COMPAT?: string;
 }
