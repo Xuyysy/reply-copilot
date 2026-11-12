@@ -17,13 +17,20 @@ function envelope(input){
 }
 export class DeliveryCoordinator {
   constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.mostRecentRequestId=null;
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
     const frozen=envelope(input),signal=input.signal;
     const deadline={expired:false};
-    const run=this.tail.catch(()=>{}).then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
+    // Different posts must not wait behind an old request's 35-second UI
+    // deadline. The server's authenticated recovery/abandon contract remains
+    // authoritative for quotas, idempotency and any uncertain provider work.
+    const recoveryCapable=typeof this.createClient().recoverGeneration==='function';
+    const sameRequest=this.mostRecentRequestId===frozen.requestId;
+    const previous=sameRequest||!recoveryCapable?this.tail.catch(()=>{}):Promise.resolve();
+    this.mostRecentRequestId=frozen.requestId;
+    const run=previous.then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
     let timer;
     const bounded=Promise.race([run,new Promise((_,reject)=>{timer=setTimeout(()=>{deadline.expired=true;reject(fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。可以恢复上一条，或放弃并重新生成。'));},this.waitTimeoutMs);})]).finally(()=>clearTimeout(timer));
     this.tail=bounded.catch(()=>{});return bounded;
@@ -47,11 +54,20 @@ export class DeliveryCoordinator {
     if(pending){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
-        const recovered=await this.deliver(pending,completed,performanceTrace,canStart);
+        // On a different post, do NOT regenerate a missing old request and do
+        // NOT wait for its client-side generation promise. Ask the server to
+        // safely retire a running old request with the existing fenced, rate-
+        // limited endpoint. A ready valid result still requires normal ACK.
+        const different=pending.input.requestId!==input.requestId;
+        const client=different?this.createClient():null;
+        const recovered=different&&typeof client?.recoverGeneration==='function'
+          ?await this.finishSuperseded(pending,completed,client,performanceTrace)
+          :await this.deliver(pending,completed,performanceTrace,canStart);
         completed=recovered.completed;
-        if(pending.input.requestId===input.requestId)return recovered.raw;
+        if(!different)return recovered.raw;
       }catch(error){
-        // Only a conclusive server result permits advancing past an old request.
+        // A fully resolved or unusable old request must never poison the next.
+        // Network and unconfirmed settlement remain fenced to prevent double debit.
         if(!CAN_ADVANCE.has(error?.code))throw error;
         if(pending.input.requestId===input.requestId)throw error;
       }
@@ -66,6 +82,44 @@ export class DeliveryCoordinator {
     // authoritative after restart. Do not discard an otherwise usable draft.
     await this.writeLocked(()=>this.storage.set({[PENDING]:record})).catch(()=>{});
     return (await this.deliver(record,completed,performanceTrace,canStart,false)).raw;
+  }
+
+  async finishSuperseded(record,completed,client,performanceTrace){
+    let state;
+    try{
+      // This is an explicit new-post user action, not a background retry.
+      // Server verifies ownership and protects active provider work via its
+      // existing idempotent/rate-limited abandonment transaction.
+      state=await client.recoverGeneration(record.input.requestId,true);
+    }catch(error){
+      // The server may have completed or rejected abandonment; never assume
+      // credits were released when the outcome is uncertain.
+      throw error;
+    }
+    if(['released','missing','expired'].includes(state?.state)){
+      await this.clearResolved(record);
+      return {completed};
+    }
+    if(state?.state==='delivered'&&!state.raw){
+      await this.clearResolved(record);
+      return {completed};
+    }
+    if(!['ready','delivered'].includes(state?.state)||!state.raw)
+      throw fail('GENERATION_RECOVERY_REQUIRED','上一条仍未安全结束，请恢复上一条后继续。');
+    let raw;
+    try{raw=await client.receiveDelivery(state);}
+    catch(error){
+      if(error?.name==='InvalidAIResponseError'){
+        await this.clearResolved(record);
+        return {completed};
+      }
+      throw error;
+    }
+    this.lastQuota=client.lastQuota||null;this.lastSubscription=client.lastSubscription??null;
+    const retained=[...completed.filter(row=>row.input.requestId!==record.input.requestId),
+      {...record,raw,quota:this.lastQuota,completedAt:this.clock()}].slice(-4);
+    await (performanceTrace?performanceTrace.measure('delivery_persist',()=>this.remember(record,retained)):this.remember(record,retained));
+    return {completed:retained};
   }
   async deliver(record,completed,performanceTrace,canStart=()=>true,recover=true){
     const client=this.createClient();
