@@ -20,6 +20,7 @@ const paymentProviders = {
  * For immediate post-create release pass orderId; for stale blocked checkout
  * discovery pass packageId. Both scopes always constrain the same user.
  */
+/** @param {any} env @param {{userId:string,merchant:'mk99'|'xiaodou',orderId?:string,packageId?:string}} options */
 export async function releaseUnusableCreditCheckout(env, { userId, merchant, orderId, packageId }) {
   const rule = paymentProviders[merchant];
   if (!rule || typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) throw new Error('INVALID_RETRY_RELEASE_SCOPE');
