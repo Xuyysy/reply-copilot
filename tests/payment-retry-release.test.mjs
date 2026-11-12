@@ -83,3 +83,9 @@ test('released failure does not latch browser checkout and customer sees retry m
  assert.match(checkoutOrderMessage({...order,retryAvailable:true},'zh'),/重新购买/);
  assert.match(checkoutOrderMessage({...order,retryAvailable:true},'en'),/buy again/);
 });
+
+test('legacy and test accounts use bound non-UUID user IDs without diagnostic warnings',async()=>{
+ const f=fixture();f.db.prepare("UPDATE recharge_orders SET user_id='test-user'").run();
+ assert.equal(await releaseUnusableCreditCheckout(f.env,{userId:'test-user',merchant:'mk99',packageId:'starter'}),true);
+ assert.equal(f.orderStatus(),'expired');
+});

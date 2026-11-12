@@ -23,7 +23,7 @@ const paymentProviders = {
 /** @param {any} env @param {{userId:string,merchant:'mk99'|'xiaodou',orderId?:string,packageId?:string}} options */
 export async function releaseUnusableCreditCheckout(env, { userId, merchant, orderId, packageId }) {
   const rule = paymentProviders[merchant];
-  if (!rule || typeof userId !== 'string' || !/^[0-9a-f-]{36}$/i.test(userId)) throw new Error('INVALID_RETRY_RELEASE_SCOPE');
+  if (!rule || typeof userId !== 'string' || userId.length<1 || userId.length>128) throw new Error('INVALID_RETRY_RELEASE_SCOPE');
   const byOrder = orderId !== undefined;
   if (byOrder === (packageId !== undefined)) throw new Error('INVALID_RETRY_RELEASE_SCOPE');
   if (byOrder && (typeof orderId !== 'string' || !/^[0-9a-f-]{36}$/i.test(orderId))) throw new Error('INVALID_RETRY_RELEASE_SCOPE');
