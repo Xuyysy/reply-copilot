@@ -1,6 +1,7 @@
 // Checkout availability is separate from the conservative payment state.
 export function checkoutOrderMessage(order, language) {
   const en = language === "en";
+  if(order?.retryAvailable===true)return en ? "No payment link was issued. This local checkout has been released; you can return to plans and buy again. Any actual charge still needs provider verification." : "未生成有效付款链接，本地购买限制已自动解除。可返回套餐重新购买；如有实际扣款仍需核对。";
   if(order.paymentProtocol==='mk99'&&order.riskState==='manual_review')return en ? "Payment is under manual review. Do not continue paying." : "正在人工核对，请勿继续付款。";
   if(order.paymentProtocol==='epay'&&order.status==='pending')return en
     ? "Checkout form prepared. Continue to the Alipay cashier; payment is confirmed only after a verified notification."
@@ -33,6 +34,8 @@ export function checkoutOrderMessage(order, language) {
 // so the customer cannot submit a second purchase after a rejected checkout.
 export function checkoutOrderFromError(error) {
   const order=error?.order;
+  // A released linkless first attempt must not latch the checkout page.
+  if(order?.retryAvailable===true)return null;
   if (!order || typeof order !== 'object' || !/^[a-f0-9-]{36}$/i.test(order.id || '')
     || !['pending','unknown','paid','refunded'].includes(order.status)
     || !Number.isSafeInteger(order.amountFen) || order.amountFen < 1

@@ -64,7 +64,35 @@ test('MK99 queried numeric amount different from local order is rejected with no
 test('MK99 forged and mismatched callbacks do not write orders, events or quota',async()=>{const f=mkFixture();try{const {r,params}=await create(f);assert.equal(r.status,201);const before=f.sql.prepare('SELECT * FROM payment_transactions').get();for(const p of [{...payment(params),total_amount:'10.07'},{...payment(params),pid:'20889999'},{...payment(params),paytype_code:'alipay'},{...payment(params),trade_no:'different'},{...payment(params),currency:'USD'}]){assert.ok((await notify(f,p)).status>=400);}assert.equal((await notify(f,payment(params),true)).status,401);assert.deepEqual(f.sql.prepare('SELECT * FROM payment_transactions').get(),before);assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);}finally{f.sql.close();}});
 test('MK99 risk freeze/unfreeze and refund notifications are audited, never produce negative balance or grant',async()=>{const f=mkFixture();try{const {r,params}=await create(f);assert.equal(r.status,201);await notify(f,payment(params));for(const state of ['TRADE_FREEZE','TRADE_UNFREEZE','TRADE_REFUND']){assert.equal((await notify(f,{...payment(params,state),refund_amount:'10.43'})).status,200);}assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,400);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,1);assert.equal(f.sql.prepare('SELECT status FROM credit_batches WHERE source_kind=\'purchase\'').get().status,'manual_review');assert.equal(f.sql.prepare('SELECT count(*) n FROM mk99_risk_events').get().n,3);}finally{f.sql.close();}});
 
-test('MK99 timeout/HTTP rejection never grants; unknown create blocks duplicate creation',async()=>{const f=mkFixture();try{let calls=0;await withProvider(()=>{calls++;throw new TypeError('private marker');},async()=>{const a=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});assert.equal(a.status,502);assert.equal(a.body.order.status,'unknown');assert.equal(a.body.order.paymentUrl,null);const b=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});assert.equal(b.status,409);});assert.equal(calls,1);assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,1);assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);const id=f.sql.prepare('SELECT id FROM recharge_orders').get().id;for(const status of [401,403,503]){await withProvider(()=>new Response('private provider body',{status}),async()=>{const r=await f.call('/v1/orders/'+id+'/refresh');assert.equal(r.status,502);assert.equal(r.body.code,'MK99_HTTP_ERROR');assert.ok(!JSON.stringify(r.body).includes('private'));});}assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);}finally{f.sql.close();}});
+test('MK99 timeout releases only linkless local orders so an independent same-package retry is possible',async()=> {
+ const f=mkFixture();try{
+  let calls=0,original;
+  await withProvider(()=>{calls++;throw new TypeError('private marker');},async()=>{
+   const a=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(a.status,502);assert.equal(a.body.order.status,'unknown');
+   assert.equal(a.body.order.retryAvailable,true);assert.equal(a.body.order.paymentUrl,null);
+   original=a.body.order.id;
+   const b=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(b.status,502);assert.equal(b.body.order.retryAvailable,true);assert.equal(b.body.order.paymentUrl,null);
+   assert.notEqual(a.body.order.id,b.body.order.id);
+  });
+  assert.equal(calls,2,'one provider attempt per explicitly requested order');
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,2);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM recharge_orders WHERE status='expired'").get().n,2);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM payment_transactions WHERE status='unknown'").get().n,2);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM provider_payment_events").get().n,0);
+  assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);
+  for(const status of [401,403,503]){
+   await withProvider(()=>new Response('private provider body',{status}),async()=>{
+    const q=await f.call('/v1/orders/'+original+'/refresh');
+    assert.equal(q.status,502);assert.equal(q.body.code,'MK99_HTTP_ERROR');
+    assert.ok(!JSON.stringify(q.body).includes('private'));
+   });
+  }
+  assert.equal(f.sql.prepare('SELECT count(*) n FROM provider_payment_events').get().n,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+ }finally{f.sql.close();}
+});
 
 test('MK99 query and callback race grants once; old CLOSED notification cannot undo payment',async()=>{const f=mkFixture();try{const {r,params}=await create(f);await withProvider(()=>Response.json({code:1,data:{trade_no:'MK99_mock_1',out_trade_no:params.out_trade_no,total_amount:'10.43',trade_status:'TRADE_SUCCESS'}}),async()=>{const results=await Promise.all([notify(f,payment(params)),f.call('/v1/orders/'+r.body.order.id+'/refresh')]);assert.equal(results[0].status,200);assert.equal(results[1].status,200);});assert.equal((await notify(f,payment(params,'TRADE_CLOSED'))).status,200);assert.equal(f.sql.prepare('SELECT status FROM payment_transactions').get().status,'paid');assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,400);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,1);}finally{f.sql.close();}});
 
@@ -118,20 +146,35 @@ test('different MK99 packages create independent orders while the same package i
  assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,2400);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,2);assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_batches WHERE source_kind='purchase'").get().n,2);assert.equal(f.sql.prepare('SELECT count(DISTINCT provider_trade_id) n FROM payment_transactions').get().n,2);
  }finally{f.sql.close();}
 });
-test('uncertain MK99 creation blocks only that package; explicit trusted closure permits the same package again',async()=>{
+test('uncertain MK99 create does not block retry; original remains open for a later authenticated CLOSED event',async()=>{
  const f=mkFixture();try{
- let failed;
- await withProvider(()=>{throw new TypeError('mock network lost');},async()=>{failed=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});assert.equal(failed.status,502);});
- let calls=0;
- await withProvider(req=>{calls++;const p=Object.fromEntries(new URLSearchParams(req.body));return Response.json({code:1,data:{trade_no:'T_'+p.out_trade_no,out_trade_no:p.out_trade_no,pay_url:'https://cashier.example.test/pay'}});},async()=>{
- const same=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});assert.equal(same.status,409);
- const other=await f.call('/v1/orders',{body:{packageId:'large',provider:'mk99',channel:'WECHAT_H5'}});assert.equal(other.status,201);assert.equal(calls,1);
- });
- const old=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(failed.body.order.id);
- assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(failed.body.order.id).status,'unknown');
- const closed={...payment({out_trade_no:old.provider_trade_id},'TRADE_CLOSED'),trade_no:'T_'+old.provider_trade_id};assert.equal((await notify(f,closed)).status,200);
- const {r}=await create(f);assert.equal(r.status,201);assert.notEqual(r.body.order.id,failed.body.order.id);assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(failed.body.order.id).status,'closed');
- assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);
+  let failed;
+  await withProvider(()=>{throw new TypeError('mock network lost');},async()=>{
+   failed=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(failed.status,502);assert.equal(failed.body.order.retryAvailable,true);
+  });
+  let calls=0,same;
+  await withProvider(req=>{
+   calls++;const p=Object.fromEntries(new URLSearchParams(req.body));
+   return Response.json({code:1,data:{trade_no:'T_'+p.out_trade_no,out_trade_no:p.out_trade_no,pay_url:'https://cashier.example.test/pay'}});
+  },async()=>{
+   same=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(same.status,201);assert.notEqual(same.body.order.id,failed.body.order.id);
+   const other=await f.call('/v1/orders',{body:{packageId:'large',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(other.status,201);assert.equal(calls,2);
+   // A usable cashier remains duplicate protected even after an older linkless failure.
+   const stillBlocked=await f.call('/v1/orders',{body:{packageId:'starter',provider:'mk99',channel:'WECHAT_H5'}});
+   assert.equal(stillBlocked.status,409);assert.equal(calls,2);
+  });
+  const old=f.sql.prepare('SELECT provider_trade_id FROM payment_transactions WHERE order_id=?').get(failed.body.order.id);
+  assert.equal(f.sql.prepare('SELECT status FROM recharge_orders WHERE id=?').get(failed.body.order.id).status,'expired');
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(failed.body.order.id).status,'unknown');
+  const closed={...payment({out_trade_no:old.provider_trade_id},'TRADE_CLOSED'),trade_no:'T_'+old.provider_trade_id};
+  assert.equal((await notify(f,closed)).status,200);
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(failed.body.order.id).status,'closed');
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE order_id=?').get(same.body.order.id).status,'pending');
+  assert.equal(f.sql.prepare('SELECT paid_balance FROM credit_accounts').get().paid_balance,0);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
  }finally{f.sql.close();}
 });
 

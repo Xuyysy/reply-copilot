@@ -14,14 +14,27 @@ test('V2 signed creation validates snapshot and releases only a verified cashier
  });}finally{f.sql.close();}
 });
 
-test('V2 explicit HTTP rejection differs from uncertain creation and remains duplicate-protected',async()=>{
+test('V2 explicit rejection and unknown create are linkless; local retry is permitted without granting credits',async()=>{
  for(const [status,code] of [[401,'OPEN_API_SIGNATURE_INVALID'],[403,'OPEN_API_SOURCE_IP_REJECTED'],[404,'OPEN_API_RESOURCE_NOT_FOUND'],[422,'OPEN_API_CHANNEL_UNAVAILABLE'],[503,'OPEN_API_GUARD_UNAVAILABLE']]){
   const f=fixture();try{await withProvider(req=>providerResponse(req,{code,message:'private upstream text',details:{reason:'HEADER_CONFLICT'}},{status,signed:false}),async calls=>{
-    const r=await f.call('/v1/orders');assert.ok(r.status>=400);assert.equal(r.body.order.checkout.outcome,status<500?'rejected':'unknown');assert.equal(r.body.order.status,'unknown');assert.equal(r.body.order.paymentUrl,null);
-    assert.equal(r.body.diagnostic.upstreamHttpStatus,status);assert.doesNotMatch(JSON.stringify(r.body),/private upstream text|BEGIN.*KEY/);
-    assert.equal((await f.call('/v1/orders')).body.code,'UNRESOLVED_ORDER_EXISTS');assert.equal(calls.length,1);
-    const stored=await f.call(`/v1/orders/${r.body.order.id}`,{method:'GET'});assert.equal(stored.body.order.checkout.outcome,r.body.order.checkout.outcome);
-    noGrant(f.sql);
+   const r=await f.call('/v1/orders');
+   assert.ok(r.status>=400);
+   assert.equal(r.body.order.checkout.outcome,status<500?'rejected':'unknown');
+   assert.equal(r.body.order.status,'unknown');
+   assert.equal(r.body.order.retryAvailable,true);
+   assert.equal(r.body.order.paymentUrl,null);
+   assert.equal(r.body.diagnostic.upstreamHttpStatus,status);
+   assert.doesNotMatch(JSON.stringify(r.body),/private upstream text|BEGIN.*KEY/);
+   const next=await f.call('/v1/orders');
+   assert.ok(next.status>=400);
+   assert.equal(next.body.order.retryAvailable,true);
+   assert.notEqual(next.body.order.id,r.body.order.id);
+   assert.equal(calls.length,2,'no hidden provider call beyond the two buyer-requested attempts');
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM recharge_orders WHERE status='expired'").get().n,2);
+   const stored=await f.call(`/v1/orders/${r.body.order.id}`,{method:'GET'});
+   assert.equal(stored.body.order.checkout.outcome,r.body.order.checkout.outcome);
+   assert.equal(stored.body.order.retryAvailable,true);
+   noGrant(f.sql);
   });}finally{f.sql.close();}
  }
 });
