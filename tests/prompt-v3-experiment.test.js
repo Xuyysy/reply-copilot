@@ -47,15 +47,15 @@ test("V3 keeps the complete original V2 language policy, JSON schema and user in
 });
 
 test("V3 preserves auto + manual language routing, profile samples and prompt injection containment",()=>{
-  for(const [text,hint] of [
-    ["I love this update!","en"],
-    ["今日はいい天気ですね。","ja"],
-    ["오늘은 정말 좋은 날","ko"],
+  for(const [text,hint,scriptHint] of [
+    ["I love this update!","en","auto"],
+    ["今日はいい天気ですね。","ja","ja"],
+    ["오늘은 정말 좋은 날","ko","ko"],
   ]){
     const args={...OPTIONS,postContext:{text},voiceProfile:{...DEFAULT_VOICE_PROFILE,language:"auto",writingSamples:["太牛了哈哈"]}};
     const v3=buildStagingV3Prompts(args);
     assert.ok(v3.user.includes("FINAL REPLY LANGUAGE: "+hint));
-    assert.ok(v3.system.includes("local script hint is "+hint));
+    assert.ok(v3.system.includes("local script hint is "+scriptHint));
     assert.ok(v3.system.includes("太牛了哈哈"),"writing samples are preserved");
   }
   for(const language of ["zh","en","ja","ko"]) {
