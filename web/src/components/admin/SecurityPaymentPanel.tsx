@@ -50,8 +50,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
   mutationGuard.current=true;
   setPlatformChecking(true);
   setPending(true);
-  setPlatformCheck(null);
-  setPlatformCheckError('');
+  setPlatformCheck(null);setPlatformCheckError('');
   setNotice(t('正在调用小豆 RSA2 只读接口并验证签名…','Checking the Xiaodou RSA2 read-only API and signature…'));
   try{
    // This action is read-only at the backend but uses the shared admin write
