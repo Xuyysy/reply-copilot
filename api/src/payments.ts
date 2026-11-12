@@ -3,6 +3,7 @@ import {orderById,querySubscriptionPayment} from './subscription-settlement';
 export {mk99Notify,adminMk99Check};
 import {mk99Config} from './mk99';
 import { paymentControl, type PaymentChannel, type PaymentProvider } from "./payment-policy";
+import {xiaodouNetworkReady} from './xiaodou-merchant';
 import { CUSTOMER_FEE_RATE_BPS, projectMk99Pricing, projectPackagePricing, projectXiaodouSellerPricing, type PackagePricing } from "./pricing";
 export { projectPaymentFee } from "./pricing";
 import type { Env, Session } from "./types";
@@ -40,7 +41,7 @@ async function checkoutAllowedFor(env:Env,transaction:PaymentTransaction):Promis
     const channelSettings=control.channels.rsa2[channel==="WECHAT_H5"?"wechat":"alipay"];
     return control.environmentReady&&control.operatorEnabled&&control.providers.rsa2.enabled
       &&control.providers.rsa2.credentialsConfigured&&channelSettings.enabled&&channelSettings.platformReleased
-      &&env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==="1"&&env.XIAODOU_SOURCE_IP_CONFIRMED==="1"
+      &&env.XIAODOU_RSA2_SUBSCRIPTIONS_READY==="1"&&xiaodouNetworkReady(env)
       &&env.XIAODOU_WEBHOOKS_ENABLED==="1"
       &&(channel!=="WECHAT_H5"||env.XIAODOU_WECHAT_MERCHANT_APPROVED==="1")
       &&(!transaction.merchant_account||transaction.merchant_account===env.XIAODOU_APP_ID);

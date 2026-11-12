@@ -40,32 +40,40 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
  async function saveSettings(){await mutate(async()=>{await write('/v1/admin/payment-control',{settings,reason});await load();setNotice(t('支付接口和通道设置已保存。平台开通确认是独立条件，未确认的通道不会显示给用户。','Payment provider and channel settings saved. Platform release is a separate gate; unconfirmed channels stay hidden.'));});}
  async function togglePurchase(enabled:boolean){await mutate(async()=>{await write('/v1/admin/payment-control',{enabled,reason});setConfirmEnable(false);await load();setNotice(enabled?t('全站购买开关已开启；实际可用方式仍取决于配置和平台放行。','Purchase switch enabled; available methods still depend on credentials and platform release.'):t('新订单购买已关闭，已有订单的回调与核对仍可处理。','New purchases are disabled; existing order callbacks and reconciliation remain available.'));});}
  async function checkPlatform(){
-  if(busy||mutationGuard.current)return;
+  if(platformChecking)return;
+  // A shared admin operation can temporarily hold the write guard. Report that
+  // state rather than silently discarding the operator's connectivity check.
+  if(busy||mutationGuard.current){
+   setPlatformCheckError(t('页面正在处理其他操作，请稍后重试。','Another admin operation is in progress. Please retry.'));
+   return;
+  }
+  mutationGuard.current=true;
   setPlatformChecking(true);
+  setPending(true);
+  setPlatformCheck(null);setPlatformCheckError('');
+  setNotice(t('正在调用小豆 RSA2 只读接口并验证签名…','Checking the Xiaodou RSA2 read-only API and signature…'));
   try{
-   await mutate(async()=>{
-    setPlatformCheck(null);setPlatformCheckError('');
-    try{
-     // The shared admin write adapter requires an audit reason for every POST.
-     // This read-only diagnostic has a stable, non-secret reason and still
-     // requires the backend's normal admin auth/CSRF/reauth checks.
-     const result=await write('/v1/admin/payment-platform-check',{reason:'Xiaodou RSA2 read-only connectivity diagnostic'});
-     setPlatformCheck(result);
-     setNotice(result.ok?t('RSA2 只读接口响应已验签；这不代表具体支付通道已获准。','The RSA2 read-only response signature verified. This does not confirm any payment channel is released.'):t('RSA2 只读检查未通过；请查看安全错误码。','RSA2 read-only check did not pass. Review the safe error code.'));
-    }catch(e){
-     const issue=e&&typeof e==='object'?e as {message?:unknown;code?:unknown;requestId?:unknown;diagnostic?:{upstreamHttpStatus?:unknown}}:null;
-     const safeCode=typeof issue?.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(issue.code)?issue.code:null;
-     const safeId=typeof issue?.requestId==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(issue.requestId)?issue.requestId:null;
-     const http=issue?.diagnostic?.upstreamHttpStatus;
-     const safeHttp=typeof http==='number'&&Number.isInteger(http)&&http>=100&&http<=599?http:null;
-     const hint=safeCode==='OPEN_API_SOURCE_IP_REJECTED'
-       ?t('小豆拒绝当前服务器来源 IP，请核对平台与应用白名单。','Xiaodou rejected the server source IP. Check platform and app allowlists.')
-       :safeCode==='PROVIDER_CONFIG_ERROR'?t('小豆 RSA2 凭据未配置齐全。','Xiaodou RSA2 credentials are incomplete.'):null;
-     setPlatformCheckError([hint??(e instanceof Error?e.message:t('连接检查失败','Connection check failed')),
-       safeCode,safeHttp?'HTTP '+safeHttp:null,safeId?'requestId '+safeId:null].filter(Boolean).join(' · '));
-    }
-   });
-  }finally{setPlatformChecking(false);}
+   // This action is read-only at the backend but uses the shared admin write
+   // adapter for existing CSRF and administrator reauthentication.
+   const result=await write('/v1/admin/payment-platform-check',{reason:'Xiaodou RSA2 read-only connectivity diagnostic'});
+   setPlatformCheck(result);
+   setNotice(result.ok?t('RSA2 只读接口响应已验签；这不代表具体支付通道已获准。','The RSA2 response signature verified; channel approval remains separate.'):t('RSA2 只读检查未通过；请查看安全错误码。','The RSA2 read-only check did not pass. Review the safe error code.'));
+  }catch(e){
+   const issue=e&&typeof e==='object'?e as {message?:unknown;code?:unknown;requestId?:unknown;diagnostic?:{upstreamHttpStatus?:unknown}}:null;
+   const safeCode=typeof issue?.code==='string'&&/^[A-Z0-9_]{1,80}$/.test(issue.code)?issue.code:null;
+   const safeId=typeof issue?.requestId==='string'&&/^[A-Za-z0-9_-]{1,100}$/.test(issue.requestId)?issue.requestId:null;
+   const http=issue?.diagnostic?.upstreamHttpStatus;
+   const safeHttp=typeof http==='number'&&Number.isInteger(http)&&http>=100&&http<=599?http:null;
+   const hint=safeCode==='OPEN_API_SOURCE_IP_REJECTED'
+     ?t('小豆拒绝当前服务器来源 IP，请核对平台与应用白名单。','Xiaodou rejected the server source IP. Check platform and app allowlists.')
+     :safeCode==='PROVIDER_CONFIG_ERROR'?t('小豆 RSA2 凭据未配置齐全。','Xiaodou RSA2 credentials are incomplete.'):null;
+   setPlatformCheckError([hint??(e instanceof Error?e.message:t('连接检查失败','Connection check failed')),
+     safeCode,safeHttp?'HTTP '+safeHttp:null,safeId?'requestId '+safeId:null].filter(Boolean).join(' · '));
+  }finally{
+   mutationGuard.current=false;
+   setPending(false);
+   setPlatformChecking(false);
+  }
  }
  async function changePassword(){await mutate(async()=>{await write('/v1/admin/security/password',{oldPassword,newPassword,confirmPassword,reason});setOld('');setNew('');setConfirm('');setNotice(t('密码已修改，其他会话已退出。下次敏感操作需要重新验证。','Password changed. Other sessions are signed out; verify again for the next sensitive action.'));});}
  async function revoke(){await mutate(async()=>{await write('/v1/admin/security/sessions/revoke-others',{reason});setNotice(t('其他所有会话已退出，当前会话保留。','All other sessions are signed out. This session stays active.'));});}
@@ -82,7 +90,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
    </section>
     <section className="rounded-xl border p-4"><h3 className="font-semibold">{t('检查小豆 RSA2 连接（只读）','Check Xiaodou RSA2 (read-only)')}</h3><p className="mt-1 text-xs text-muted-foreground">{t('不创建订单，当前使用 MK99 也能检测。无需填写原因，可能需要管理员密码验证。','No payment created. Works while MK99 is active. No typed reason is needed; admin password verification may be required.')}</p>
      <div className="space-y-3 pt-3"><p>{t('环境支付保护','Environment safety ceiling')}: {status(control.environmentReady)} · {t('数据库购买设置','Database purchase setting')}: {status(control.operatorEnabled)}</p>
-      <Button variant="outline" disabled={locked} aria-busy={platformChecking} onClick={()=>void checkPlatform()}>{platformChecking?t('正在检查小豆 RSA2…','Checking Xiaodou RSA2…'):t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
+      <Button type="button" variant="outline" disabled={locked} aria-busy={platformChecking} onClick={()=>void checkPlatform()}>{platformChecking?t('正在检查小豆 RSA2…','Checking Xiaodou RSA2…'):platformCheckError?t('检查失败 · 点击重试','Check failed · retry'):platformCheck?.ok?t('RSA2 验签通过 · 再次检查','RSA2 verified · check again'):t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
       {platformChecking&&<p role="status">{t('正在连接小豆接口并验证签名；无需切换当前收款商家。','Connecting to Xiaodou and verifying the signature; no merchant switch is needed.')}</p>}
       {platformCheckError&&<p role="alert" className="text-sm text-red-700">{t('检测失败：','Check failed: ')}{platformCheckError}</p>}
       {platformCheck&&<p role="status">{platformCheck.ok?t(`响应验签通过 · requestId ${platformCheck.requestId}`,'Response signature verified · requestId '+platformCheck.requestId):t(`未通过：${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'无响应'} · requestId ${platformCheck.requestId}`,`Not verified: ${platformCheck.errorCode} · HTTP ${platformCheck.upstreamHttpStatus??'no response'} · requestId ${platformCheck.requestId}`)}</p>}
