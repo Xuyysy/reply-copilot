@@ -44,7 +44,7 @@ test('pricing page fetches server-owned subscriber status and orders; checkout r
  const checkout=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
  for(const marker of [
   "subscriptionPricingChoices","/v1/usage","/v1/subscriptions/orders","待核验的原订单",
-  "本期升档 · 获取补差价报价","购买下一期 · 全价 ¥","当前订阅不会立即变更"
+  "本期升档 · 获取补差价报价","购买下一期 · 全价 ¥","不会立即改变当前订阅"
  ])assert.ok(pricing.includes(marker),marker);
  assert.ok(checkout.includes('&upgrade=1'));
  assert.ok(checkout.includes("quoteId:quote?.id"));
