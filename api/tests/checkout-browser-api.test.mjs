@@ -36,7 +36,7 @@ test('browser API safely releases linkless rejection and permits another buyer-i
    assert.ok(again instanceof ApiError);assert.equal(again.status,502);
    assert.equal(again.order.retryAvailable,true);
    assert.notEqual(again.order.id,caught.order.id);
-   assert.equal(creates,2);assert.equal(csrfCalls,1);
+   assert.equal(creates,2);assert.equal(csrfCalls,2,'each explicit POST obtains a fresh CSRF token');
    assert.equal(f.sql.prepare('SELECT count(*) n FROM recharge_orders').get().n,2);
    assert.equal(f.sql.prepare("SELECT count(*) n FROM recharge_orders WHERE status='expired'").get().n,2);
    assert.equal(f.sql.prepare('SELECT paid_balance n FROM credit_accounts').get().n,0);
