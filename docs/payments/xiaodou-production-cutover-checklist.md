@@ -75,6 +75,24 @@ This is an **end-to-end isolated local-only rehearsal** to be executed as one mo
 
 The local backup test is **not** a verified Cloudflare D1 export, Production Time Travel bookmark, restore test of real data, or permission to migrate; the security, consistency and downtime risks of Production must be evaluated separately. Use the previously authorized aggregate audit as a baseline, not as a substitute for a fresh separately approved post-migration audit. Any **new** SQL proposal change creates a new hash and requires a new explicit migration approval.
 
+## One-command five-stage offline Production cutover gate
+
+Run `node scripts/xiaodou-production-cutover-gate.mjs` from the project root.
+For a sanitized **unverified operator evidence packet** use
+`node scripts/xiaodou-production-cutover-gate.mjs --evidence docs/payments/xiaodou-production-readiness.example.json`.
+
+This command now combines the existing 0025 readiness assessment with the **complete synthetic-only local backup, migration, two rollback paths and historical MK99 preservation** exercise. It returns a single machine-readable JSON report grouping every remaining blocker into these five dependent phases:
+
+1. Source consistency, offline migration and local recovery;
+2. Production D1 audited structure, **separately authorized** protected backup and exact-hash 0025 migration;
+3. All five Production RSA2 secrets, merchant network setting, signed provider query/webhook and historic MK99 settlement;
+4. Exact `release/production` CI/Production immutable build, **independently authorized** compatible Worker release, MK99 still selected;
+5. Signed real payment acceptance and a fresh, separate approval to switch new-order routing.
+
+**Every call exits 2 (NO-GO) even with completely green operator-supplied claims.** No input is authenticated merely because an operator submits JSON, and the report has no authority to perform D1 SQL, export, backup, migration, secret updates, Worker/Pages deployment, merchant flip or real charges. A completed offline synthetic exercise cannot prove Production backup or exact real schema migration. The release executor remains the existing protected Production workflow, which must receive distinct explicit approval after its own independent integrity checks.
+
+For implementation regression coverage, run `node --test tests/xiaodou-production-cutover-gate.test.mjs`. The output contains only non-sensitive blocker identifiers and instructions, not secrets, private keys, signed payloads or customer records. **Do not write merchant secrets into the evidence JSON.**
+
 ## Unresolved release blockers
 
 - Production D1 seven-group *read-only audit completed*. No approved backup/recovery validation, no 0025 migration execution, and no permission for further remote SQL.
