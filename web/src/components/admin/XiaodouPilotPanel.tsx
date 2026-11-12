@@ -3,7 +3,7 @@ import {Button} from '../ui/button';
 import type {Language} from '../../lib/language';
 
 type PilotStatus={eligible:boolean;blockers:string[];packageId:string;packageName:string|null;
-  credits:number|null;amountFen:number|null;limitFen:number;attemptsPer24h:number;activeMerchant:string};
+  credits:number|null;amountFen:number|null;limitFen:number;attemptsPer24h:number;activeMerchant:string;lastOrder:{id:string;status:string;paymentStatus:string;createdAt:number}|null};
 type Checkout={order?:{id?:string;paymentUrl?:string|null;amountFen?:number;status?:string;
   checkout?:{outcome?:string;issue?:string}};requestId?:string;ok?:boolean;message?:string;code?:string};
 type Props={language:Language;busy:boolean;read:(path:string)=>Promise<any>;
@@ -41,7 +41,7 @@ export default function XiaodouPilotPanel({language,busy,read,write}:Props){
    finally{setWorking(false);void load();}
  }
  async function refresh(){
-  const id=checkout?.order?.id;if(!id||working||busy)return;
+  const id=checkout?.order?.id??state?.lastOrder?.id;if(!id||working||busy)return;
   setWorking(true);setVerifiedStatus('');setError('');
   try{
    const r=await write('/v1/orders/'+encodeURIComponent(id)+'/refresh',{reason:'管理员主动执行小豆验收订单签名查单'});
@@ -57,6 +57,7 @@ export default function XiaodouPilotPanel({language,busy,read,write}:Props){
    <p className="text-sm font-medium">{t('不会自动扣款；请仅在核实商户已批准支付宝及当前交易经营范围后开启测试。','No automatic charge. Verify merchant approval for Alipay and the declared trade scope before enabling this pilot.')}</p>
    {loading?<p role="status">{t('读取测试门禁…','Checking pilot readiness…')}</p>:state&&<>
      <p className="text-sm">{t('当前商户：','Live merchant: ')}{state.activeMerchant.toUpperCase()} · {t('测试金额：','Test amount: ')}{state.amountFen!==null?'¥'+(state.amountFen/100).toFixed(2):'—'} · {t('额度：','Credits: ')}{state.credits??'—'}</p>
+     {state.lastOrder&&<div className="rounded border p-3 text-sm space-y-2"><p>{t('已记录的原始测试订单：','Existing test order: ')}{state.lastOrder.id} · {state.lastOrder.status} / {state.lastOrder.paymentStatus}</p><Button type="button" variant="outline" disabled={busy||working} onClick={()=>void refresh()}>{t('签名查原订单（不要重新下单）','Signed lookup of original order (do not recreate)')}</Button></div>}
      {!state.eligible&&<p role="status" className="text-sm text-amber-800">{t('尚不能创建真实订单：','Not ready for paid checkout: ')}{state.blockers.map(c=>zh?(descriptions[c]??c):c).join('；')}</p>}
      {state.eligible&&<label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)} disabled={busy||working}/><span>{t('我已核实平台交易许可，并确认要创建一笔真实支付宝测试订单，金额按页面所示。','I verified the merchant approval and agree to create a real-money test order at the displayed price.')}</span></label>}
      <div className="flex flex-wrap gap-2">
