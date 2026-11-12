@@ -1,4 +1,5 @@
 import MerchantPaymentSettings from './MerchantPaymentSettings';
+import XiaodouPilotPanel from './XiaodouPilotPanel';
 import {useEffect,useRef,useState} from 'react';
 import {Button} from '../ui/button';
 import {Input} from '../ui/input';
@@ -88,6 +89,7 @@ export default function SecurityPaymentPanel({language,busy,read,write}:Props){
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">{t('买家当前可选择','Available to buyers')}</h3><span className="text-xs text-muted-foreground">{t('已保存的实际配置','Saved configuration')}</span></div>
     <div className="mt-3 flex flex-wrap gap-2">{control.methods.length?control.methods.map(method=><span key={method.provider+'-'+method.channel} className="rounded-lg border bg-background px-3 py-2 text-sm font-medium">{method.channel==='ALIPAY_H5'?t('支付宝','Alipay'):method.channel==='WECHAT_H5'?t('微信支付','WeChat Pay'):method.channel}<span className="ml-2 text-xs font-normal text-muted-foreground">{method.provider==='mk99'?'MK99':method.provider==='xiaodou'?t('小豆 RSA2','Xiaodou RSA2'):t('历史协议','Legacy')}</span></span>):<p className="text-sm text-amber-800">{t('暂无可用新订单支付方式。旧订单仍由原商家处理。','No new-order payment methods. Old orders remain with their original merchant.')}</p>}</div>
    </section>
+    <XiaodouPilotPanel language={language} busy={busy} read={read} write={write}/>
     <section className="rounded-xl border p-4"><h3 className="font-semibold">{t('检查小豆 RSA2 连接（只读）','Check Xiaodou RSA2 (read-only)')}</h3><p className="mt-1 text-xs text-muted-foreground">{t('不创建订单，当前使用 MK99 也能检测。无需填写原因，可能需要管理员密码验证。','No payment created. Works while MK99 is active. No typed reason is needed; admin password verification may be required.')}</p>
      <div className="space-y-3 pt-3"><p>{t('环境支付保护','Environment safety ceiling')}: {status(control.environmentReady)} · {t('数据库购买设置','Database purchase setting')}: {status(control.operatorEnabled)}</p>
       <Button type="button" variant="outline" disabled={locked} aria-busy={platformChecking} onClick={()=>void checkPlatform()}>{platformChecking?t('正在检查小豆 RSA2…','Checking Xiaodou RSA2…'):platformCheckError?t('检查失败 · 点击重试','Check failed · retry'):platformCheck?.ok?t('RSA2 验签通过 · 再次检查','RSA2 verified · check again'):t('RSA2 只读连通性检查','RSA2 read-only connectivity check')}</Button>
