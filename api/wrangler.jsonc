@@ -43,6 +43,7 @@
       "vars": {
         "ENVIRONMENT": "staging",
         "AI_MODE": "production",
+        "AI_PROMPT_V3_EXPERIMENT": "1",
         "ADMIN_PORTAL_ENABLED": "1",
         "XIAODOU_NETWORK_DIAGNOSTIC_ENABLED": "0",
         "DEEPSEEK_INPUT_USD_PER_MILLION": "0.30",

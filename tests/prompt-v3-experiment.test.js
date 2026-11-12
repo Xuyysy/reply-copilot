@@ -76,3 +76,14 @@ test("V3 only replaces instruction text; no extra model call, network dependency
   assert.equal((apiSource.match(/executeAiGeneration\(\{/g)||[]).length,1);
   assert.equal((apiSource.match(/requestConfiguredModel\(\{/g)||[]).length,1);
 });
+
+test("Staging Wrangler config opts into V3 without enabling Production or altering origins",()=>{
+  const config=JSON.parse(readFileSync(new URL("../api/wrangler.jsonc",import.meta.url),"utf8"));
+  assert.equal(config.env.staging.vars.ENVIRONMENT,"staging");
+  assert.equal(config.env.staging.vars.AI_PROMPT_V3_EXPERIMENT,"1");
+  assert.equal(config.env.staging.vars.API_ORIGIN,"https://api-staging.x-reply-helper.top");
+  assert.equal(config.env.production.vars.AI_PROMPT_V3_EXPERIMENT,undefined);
+  assert.equal(config.env.production.vars.ENVIRONMENT,"production");
+  assert.equal(config.env.production.vars.API_ORIGIN,"https://api.x-reply-helper.top");
+  assert.notEqual(config.env.staging.d1_databases[0].database_id,config.env.production.d1_databases[0].database_id);
+});
