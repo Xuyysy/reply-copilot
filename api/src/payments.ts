@@ -200,7 +200,7 @@ export async function packages(request:Request,env:Env):Promise<Response>{
   const localMock=isLocalMock(env,request),paymentAvailable=localMock||control.effectiveEnabled;
   return response({packages:priced,paymentAvailable,paymentProvider:localMock?"local_mock":control.defaultMethod?.provider??null,paymentMethods:localMock?[{provider:"local_mock",channel:"ALIPAY_H5"}]:control.methods},200,env,request);
 }
-export async function createOrder(request:Request,env:Env,options?:{pilot?:{actorUserId:string;operationId:string}}):Promise<Response>{
+export async function createOrder(request:Request,env:Env,options?:{pilot?:{actorUserId:string;operationId:string;expectedAmountFen:number}}):Promise<Response>{
   const session=await webSession(request,env,true),body=await jsonBody(request,1024),packageId=cleanId(body.packageId,/^[a-z0-9_-]{1,64}$/i),mock=isLocalMock(env,request),control=await paymentControl(env),pilot=options?.pilot??null;
   if(pilot&&(
     env.ENVIRONMENT!=='production'||env.XIAODOU_PRODUCTION_PILOT_ENABLED!=='1'||
@@ -221,7 +221,7 @@ export async function createOrder(request:Request,env:Env,options?:{pilot?:{acto
   const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1").bind(packageId).first<{id:string;name_zh:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;price_cny_fen:number|null}&PackagePricing>();
   if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","套餐不存在或已下架。");
   const feeSnapshot=paymentProvider==="mk99"?projectMk99Pricing(pkg):paymentProvider==="xiaodou"?projectXiaodouSellerPricing(pkg):projectPackagePricing(pkg),amountFen=feeSnapshot.totalPaymentFen;
-  if(pilot&&(paymentProvider!=='xiaodou'||channel!=='ALIPAY_H5'||amountFen<1||amountFen>1000))
+  if(pilot&&(paymentProvider!=='xiaodou'||channel!=='ALIPAY_H5'||amountFen<1||amountFen>1000||amountFen!==pilot.expectedAmountFen))
     throw new ApiFailure(409,'PILOT_PRICE_EXCEEDS_LIMIT','正式验收仅允许固定入门包，单笔付款不超过 ¥10。');
   const mk99=real&&paymentProvider==="mk99",mkConfig=mk99?mk99Config(env):null;
   const epay=real&&paymentProvider==="xiaodou_epay";
