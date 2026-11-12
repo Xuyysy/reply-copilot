@@ -74,3 +74,40 @@ test('a timed-out queued operation never starts an unseen provider request later
  let finish,enter,phase='missing';const started=new Promise(r=>enter=r),calls=[];const data={};const c=new DeliveryCoordinator({waitTimeoutMs:15,storage:{get:async()=>structuredClone(data),set:async x=>Object.assign(data,structuredClone(x))},getAccountId:async()=> 'a',createClient:()=>({recoverGeneration:async id=>({state:id?phase:'missing',requestId:id||null}),generateReplies:async input=>{phase='running';calls.push(input.requestId);enter();await new Promise(r=>finish=r);return 'raw';}})});
  const first=c.generateReplies(makeInput('one'));await started;const second=c.generateReplies(makeInput('two'));await Promise.allSettled([first,second]);finish();await new Promise(r=>setTimeout(r,5));assert.deepEqual(calls,['one']);
 });
+
+test('invalid legacy-client output unblocks the next post without ACK, retry, or debit',async()=>{
+ const {InvalidAIResponseError}=await import('../utils/errors.js');
+ const old=makeInput('old'),next=makeInput('next'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
+ const storage={get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))};
+ const calls={status:0,ack:0,generate:[]};
+ const coordinator=new DeliveryCoordinator({storage,getAccountId:async()=> 'account-a',createClient:()=>({
+   recoverGeneration:async id=>{calls.status++;return {state:'ready',requestId:id,raw:'invalid-for-v1'};},
+   receiveDelivery:async()=>{throw new InvalidAIResponseError('DeepSeek returned an invalid structured response. Try again.');},
+   generateReplies:async input=>{calls.generate.push(input.requestId);return 'next-valid-reply';}
+ })});
+ assert.equal(await coordinator.generateReplies(next),'next-valid-reply');
+ assert.deepEqual(calls.generate,['next'],'old request was NOT regenerated');
+ assert.equal(calls.status,1,'at most one old-status recovery check');
+ assert.equal(calls.ack,0,'invalid result was never confirmed/charged');
+ assert.equal(data.pendingAiDelivery,null,'unusable old result does not block the next post');
+});
+test('invalid newly generated reply is retired locally; a future post can proceed',async()=>{
+ const {InvalidAIResponseError}=await import('../utils/errors.js');
+ const old=makeInput('old'),next=makeInput('next'),calls=[];
+ const f=fixture(async input=>{calls.push(input.requestId);if(input.requestId==='old')throw new InvalidAIResponseError('invalid response');return 'good';});
+ await assert.rejects(f.coordinator.generateReplies(old),e=>e.code==='CLIENT_RESPONSE_INCOMPATIBLE');
+ assert.equal(f.data.pendingAiDelivery,null);
+ assert.equal(await f.coordinator.generateReplies(next),'good');
+ assert.deepEqual(calls,['old','next'],'no implicit extra paid generation');
+});
+test('ambiguous recovery/network failures still preserve the old request fence',async()=>{
+ const old=makeInput('old'),next=makeInput('next'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
+ let count=0;
+ const c=new DeliveryCoordinator({storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},getAccountId:async()=> 'account-a',createClient:()=>({
+  recoverGeneration:async()=>{throw Object.assign(new Error('unconfirmed network'),{code:'NETWORK_ERROR'});},
+  generateReplies:async()=>{count++;return 'unexpected';}
+ })});
+ await assert.rejects(c.generateReplies(next),e=>e.code==='NETWORK_ERROR');
+ assert.equal(count,0,'do not start new paid generation while delivery is uncertain');
+ assert.equal(data.pendingAiDelivery.input.requestId,'old');
+});

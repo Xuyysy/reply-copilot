@@ -43,6 +43,16 @@ export function serializeModelOutput(raw) {
   return JSON.stringify(parsed);
 }
 
+// Legacy 0.3.6 and earlier clients only understand zh, en and auto.
+// Reject an incompatible language tag BEFORE storing the result or settling
+// its delivery reservation. This adds zero calls and is not a translation.
+export function serializeOutputForClientVersion(raw, outputSchemaVersion = 1) {
+  const normalized = serializeModelOutput(raw);
+  if (outputSchemaVersion !== 2 && !["auto", "zh", "en"].includes(JSON.parse(normalized).language))
+    throw new Error("legacy_reply_language_incompatible");
+  return normalized;
+}
+
 export function buildChatCompletionRequest(config, system, user, { testMode = false } = {}) {
   const body = {
     model: config.modelId,

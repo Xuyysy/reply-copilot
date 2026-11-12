@@ -6,6 +6,10 @@ const PENDING='pendingAiDelivery';
 const COMPLETED='completedAiDeliveries';
 const UNCERTAIN=new Set(['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN','GENERATION_RECOVERY_REQUIRED']);
 const RELEASED=new Set(['GENERATION_FAILED','IDEMPOTENCY_RESULT_EXPIRED','GENERATION_ABANDONED','DELIVERY_NOT_AVAILABLE']);
+// A client parser rejection is conclusive for this extension, but does NOT
+// mean the server's delivery reservation was released or debited. Never ACK it.
+const LOCAL_UNREADABLE='CLIENT_RESPONSE_INCOMPATIBLE';
+const CAN_ADVANCE=new Set([...RELEASED,LOCAL_UNREADABLE]);
 const fail=(code,message)=>Object.assign(new Error(message),{code});
 const sameSource=(a,b)=>a.requestId===b.requestId&&a.sourceText===b.sourceText&&a.sourceUrl===b.sourceUrl;
 function envelope(input){
@@ -48,7 +52,7 @@ export class DeliveryCoordinator {
         if(pending.input.requestId===input.requestId)return recovered.raw;
       }catch(error){
         // Only a conclusive server result permits advancing past an old request.
-        if(!RELEASED.has(error?.code))throw error;
+        if(!CAN_ADVANCE.has(error?.code))throw error;
         if(pending.input.requestId===input.requestId)throw error;
       }
     }
@@ -83,10 +87,18 @@ export class DeliveryCoordinator {
       await (performanceTrace?performanceTrace.measure("delivery_persist",()=>this.remember(record,retained)):this.remember(record,retained));
       return {raw,completed:retained};
     }catch(error){
-      if(RELEASED.has(error?.code))await this.clearResolved(record);
-      // Unknown transport/parser/storage errors retain the recovery envelope.
-      else if(error?.code&&!UNCERTAIN.has(error.code)&&!['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING'].includes(error.code))await this.clearResolved(record);
-      throw error;
+      // A strict old-client parser can reject a server-valid language tag.
+      // This old raw result is never deliverable by this extension, so retire
+      // its LOCAL recovery envelope instead of poisoning every newer post.
+      // Leave the server-side quota reservation to its existing expiry/ACK
+      // protocol; never acknowledge, debit, or auto-regenerate this result.
+      const resolved=error?.name==='InvalidAIResponseError'
+        ? fail(LOCAL_UNREADABLE,'本次 AI 回复无法被当前插件识别。已解除本地阻塞，请更新插件后使用新帖子重试。')
+        : error;
+      if(CAN_ADVANCE.has(resolved?.code))await this.clearResolved(record);
+      // Unknown network/ACK errors retain the original pending request.
+      else if(resolved?.code&&!UNCERTAIN.has(resolved.code)&&!['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING'].includes(resolved.code))await this.clearResolved(record);
+      throw resolved;
     }
   }
   writeLocked(action){const run=this.storageTail.catch(()=>{}).then(action);this.storageTail=run.catch(()=>{});return run;}
