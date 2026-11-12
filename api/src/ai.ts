@@ -107,8 +107,8 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   // The original V1/V2 production prompt, request hash, billing and ACK paths stay unchanged.
   const promptArgs = { postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 };
   const prompts = shouldUseStagingV3(env.ENVIRONMENT, env.AI_PROMPT_V3_EXPERIMENT, promptArgs.outputSchemaVersion)
-    ? buildStagingV3Prompts(promptArgs)
-    : buildPrompts(promptArgs);
+    ? buildStagingV3Prompts(promptArgs as any)
+    : buildPrompts(promptArgs as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
