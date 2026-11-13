@@ -20,8 +20,9 @@
   function findReplyControl(targetOrEvent) {
     // Bilingual translators and browser translation can retarget DOM events.
     // Accept only the same verified X Reply controls along the composed path.
-    const path=typeof targetOrEvent?.composedPath==="function"
-      ? targetOrEvent.composedPath():[targetOrEvent];
+    const composed=typeof targetOrEvent?.composedPath==="function" ? targetOrEvent.composedPath() : null;
+    const fallback=targetOrEvent?.target || targetOrEvent;
+    const path=composed?.length ? [...composed,fallback] : [fallback];
     for(const node of path) {
       const control=node?.closest?.('button,[role="button"],a');
       if(isReplyControl(control))return control;
