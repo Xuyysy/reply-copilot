@@ -1,0 +1,170 @@
+name: One-time Staging unified entitlement ledger Pages
+
+on:
+  push:
+    branches: [chatgpt/staging-entitlement-ledger-pages-release-20261113]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-staging-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging-entitlement-pages:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/chatgpt/staging-entitlement-ledger-pages-release-20261113' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'release(staging): approved immutable unified entitlement ledger Pages'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top
+    env:
+      SOURCE_SHA: 'b5f50ec3efd095ba0d81bc381d144abc1fa2c13d'
+      CI_RUN_ID: '43442633655'
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Confirm exact immutable source CI succeeded
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 48); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/staging-entitlements-ci.json"
+            state="$(jq -r '.status' "$RUNNER_TEMP/staging-entitlements-ci.json")"
+            verdict="$(jq -r '.conclusion // "pending"' "$RUNNER_TEMP/staging-entitlements-ci.json")"
+            if [[ "$state" == "completed" ]]; then
+              test "$verdict" = "success" || { echo "Full CI $verdict"; exit 1; }
+              break
+            fi
+            test "$attempt" != "48" || { echo "CI timeout"; exit 1; }
+            sleep 10
+          done
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .status == "completed" and .conclusion == "success"
+            and .event == "push" and .head_repository.full_name == $repo
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/staging-entitlements-ci.json"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/chatgpt/staging-entitlement-pages-overlay-20261113" --jq '.commit.sha')" = "$SOURCE_SHA"
+          echo 'PASS exact Staging source and full CI.'
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-b5f50ec3efd095ba0d81bc381d144abc1fa2c13d
+          run-id: 43442633655
+          github-token: ${{ github.token }}
+          path: web/dist
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-b5f50ec3efd095ba0d81bc381d144abc1fa2c13d
+          run-id: 43442633655
+          github-token: ${{ github.token }}
+          path: dist/ci
+
+      - name: Verify all immutable files, target domain and new UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          base=pathlib.Path.cwd()
+          site=(base/'web/dist').resolve()
+          manifest=json.loads((base/'dist/ci/release-manifest.json').read_text())
+          expected={'sourceSha':os.environ['SOURCE_SHA'],'channel':'staging',
+                    'pagesProject':'x-reply-helper-staging',
+                    'pagesDomain':'https://staging.x-reply-helper.top',
+                    'stagingApi':'https://api-staging.x-reply-helper.top',
+                    'extensionId':'kaaehkpihjenlhjjfjcopkjhegmfmchk'}
+          for key,value in expected.items():
+              if manifest.get(key)!=value: raise SystemExit('Wrong source/target: '+key)
+          expected_files={}
+          for line in (base/'dist/ci/web-files.sha256').read_text().splitlines():
+              match=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',line)
+              if not match: raise SystemExit('Invalid checksum manifest')
+              digest,rel=match.groups()
+              file=(base/rel).resolve()
+              if not file.is_relative_to(site) or not file.is_file() or file.is_symlink() or rel in expected_files: raise SystemExit('Unsafe build file')
+              expected_files[rel]=digest
+          actual={}
+          for file in site.rglob('*'):
+              if file.is_symlink(): raise SystemExit('Symlink forbidden')
+              if file.is_file(): actual[file.relative_to(base).as_posix()]=hashlib.sha256(file.read_bytes()).hexdigest()
+          if not actual or actual!=expected_files or len(actual)!=manifest.get('webFileCount'): raise SystemExit('Static build SHA256 mismatch')
+          for file in ('index.html','admin/index.html'):
+              if not (site/file).is_file(): raise SystemExit('Missing static page: '+file)
+          if any(x.name in ('_worker.js','_routes.json') for x in site.rglob('*')): raise SystemExit('Unexpected Pages Function/Worker')
+          javascript=' '.join(f.read_text(errors='replace') for f in site.rglob('*.js'))
+          for value in ('https://api-staging.x-reply-helper.top','/v1/admin/entitlement-activity','订阅失败释放预占'):
+              if value not in javascript: raise SystemExit('Missing Staging entitlement UI/API binding: '+value)
+          print('PASS checked',len(actual),'immutable Staging static files and new entitlement UI.')
+          PY
+
+      - name: Verify Staging Worker route and unchanged existing Pages before release
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/staging-entitlement-worker.json"
+          jq -e '.success and .result.deployments[0].id == "2c854803-afb1-47cc-bd19-98bb8ae896f4" and
+            (.result.deployments[0].versions | any(.version_id=="76da684d-3156-452c-a695-52aa64f3ba65" and .percentage==100))' "$RUNNER_TEMP/staging-entitlement-worker.json"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1&env=production" > "$RUNNER_TEMP/staging-entitlement-pages.json"
+          jq -e '.success and .result[0].id=="e3d8c195-69a1-4c08-8f3f-2709aec9c30f" and
+           .result[0].deployment_trigger.metadata.commit_hash=="97bd8e865c55d0eaf43bb3555ade68d6b8f78f9f" and
+           .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/staging-entitlement-pages.json"
+          curl --fail --silent --show-error --retry 3 https://api-staging.x-reply-helper.top/health | jq -e '.ok==true'
+          code="$(curl --silent --show-error --output "$RUNNER_TEMP/staging-noauth-ledger.json" -w '%{http_code}' https://api-staging.x-reply-helper.top/v1/admin/entitlement-activity)"
+          test "$code" = "401"
+          jq -e '.code=="AUTH_REQUIRED"' "$RUNNER_TEMP/staging-noauth-ledger.json"
+          echo 'PASS Staging API route and admin auth; previously deployed Pages unchanged.'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install pinned Staging Pages deployment CLI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/staging-entitlements-deploy" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+
+      - name: Deploy only Staging static Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/staging-entitlements-deploy/node_modules/.bin/wrangler" pages deploy web/dist \
+            --project-name x-reply-helper-staging \
+            --branch codex/v0.4-credits \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Staging read-only unified entitlement ledger $SOURCE_SHA"
+
+      - name: Postflight Staging Pages commit, Worker unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1&env=production" > "$RUNNER_TEMP/staging-entitlement-postflight-pages.json"
+          jq -e --arg expected "$SOURCE_SHA" '.success and .result[0].deployment_trigger.metadata.commit_hash==$expected and .result[0].latest_stage.status=="success"' "$RUNNER_TEMP/staging-entitlement-postflight-pages.json"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "$root/workers/scripts/reply-copilot-api-staging/deployments" |
+            jq -e '.success and .result.deployments[0].id=="2c854803-afb1-47cc-bd19-98bb8ae896f4"'
+          echo 'PASS Staging Pages deployed without changing Worker, D1 or Production.'
