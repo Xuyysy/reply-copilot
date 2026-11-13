@@ -45,9 +45,14 @@ test("signup copy gives concise account-connection guidance without exposing cla
   const pricingSource=readFileSync(path.join(root,"src/pages/pricing.astro"),"utf8");
   // The marketing hero was intentionally removed; verify the real registration form copy instead.
   assert.doesNotMatch(login,/public-inner-hero|auth-hero-visual/);
-  assert.match(auth,/验证邮箱后即可创建账户。首次连接插件后，新人免费额度将发放到账户/);
-  assert.match(auth,/Verify your email to create an account\. Your welcome credits will be added after you connect the extension/);
+  assert.match(auth,/验证邮箱完成注册，首次绑定插件可领 200 次免费额度/);
+  assert.match(auth,/好友邀请福利：首次绑定插件领 200 次免费额度/);
+  assert.match(auth,/成功收到第一条 AI 回复再送 50 次，合计 250 次/);
+  assert.match(auth,/Verify your email to register, then get 200 free credits on your first extension connection/);
+  assert.match(auth,/Friend invite: get 200 free credits when you first connect the extension/);
+  assert.match(auth,/data-registration-email-tip/);
   assert.match(auth,/垃圾邮箱或广告邮件文件夹/);
+  assert.match(auth,/data-email-delivery-tip/);
   assert.match(auth,/spam or promotions folder/);
   assert.match(auth,/t\("验证邮箱", "Verify email"\)/);
   assert.doesNotMatch([auth,layout,home,pricingSource].join("\n"),/每个安装实例|One welcome grant per installation|Each installation can claim once|eligible extension installation/);
