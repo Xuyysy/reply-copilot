@@ -1,0 +1,40 @@
+name: Production PR119 authenticated boundary smoke (no provider calls)
+on:
+  push:
+    branches: [chatgpt/production-referrals119-api-smoke-20261113]
+permissions:
+  contents: read
+concurrency:
+  group: referral119-production-public-smoke
+  cancel-in-progress: false
+jobs:
+  readonly-http:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'ci-lite: owner-approved Production referral HTTP smoke after Worker hotpatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Verify actual Production HTTP responses from independent runner (no DB, AI or payments)
+        run: |
+          node <<'NODE'
+          const origin='https://api.x-reply-helper.top';
+          const requests=[
+            {path:'/health',status:200},
+            {path:'/v1/referrals/me',status:401,code:'AUTH_REQUIRED'},
+            {path:'/v1/admin/referrals',status:401,code:'AUTH_REQUIRED'},
+            {path:'/v1/me',status:401,code:'AUTH_REQUIRED'},
+            {path:'/v1/subscriptions/plans',status:200}
+          ];
+          for(const entry of requests){
+            const response=await fetch(origin+entry.path,{signal:AbortSignal.timeout(25000),headers:{Origin:'https://app.x-reply-helper.top'}});
+            const body=await response.json().catch(()=>({}));
+            console.log(entry.path,'status',response.status,'code',body.code||'-');
+            if(response.status!==entry.status)throw new Error('Production HTTP failure at '+entry.path);
+            if(entry.code && body.code!==entry.code)throw new Error('Authentication gate missing at '+entry.path);
+          }
+          console.log('PASS: all Production HTTP routes, existing subscription read endpoint and referral access controls');
+          NODE
