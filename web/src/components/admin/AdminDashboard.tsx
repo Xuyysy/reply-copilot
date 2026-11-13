@@ -7,6 +7,7 @@ import AdminOperationsInsights from './AdminOperationsInsights';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { RefreshCw, Search } from "lucide-react";
 import CampaignPanel from "./CampaignPanel";
+import ReferralAdminPanel from "./ReferralAdminPanel";
 import SiteEditor from "./SiteEditor";
 import SecurityPaymentPanel from "./SecurityPaymentPanel";
 import AIModelManagementPanel from "./AIModelManagementPanel";
@@ -184,7 +185,7 @@ export default function AdminDashboard() {
   }
   const workspaces: Array<[string,Array<[string,string]>]> = [
     [t("运营总览","Overview"),[["overview",t("经营指标","Business metrics")]]],
-    [t("用户中心","Users"),[["users",t("用户管理","User management")],["campaigns",t("福利发放","Campaigns")]]],
+    [t("用户中心","Users"),[["users",t("用户管理","User management")],["campaigns",t("福利发放","Campaigns")],["referrals",t("邀请奖励","Referral rewards")]]],
     [t("订单与财务","Orders & finance"),[["orders",t("全部订单","All orders")],["subscriptions",t("订阅高级管理","Subscription controls")],["packages",t("商品与定价","Products & pricing")]]],
     [t("AI 使用分析","AI insights"),[["ledger",t("消费流水","Usage ledger")],["cost",t("模型成本","AI costs")],["ai-models",t("模型管理","Model management")]]],
     [t("运营内容","Content & growth"),[["creator",t("互动势能","Creator momentum")],["content",t("官网内容","Site content")]]],
@@ -358,6 +359,7 @@ export default function AdminDashboard() {
       <TabsContent value="ai-models"><AIModelManagementPanel language={language} busy={busy} read={read} write={write} refresh={refresh} confirm={(title,description,action)=>setConfirm({title,description,action})}/></TabsContent>
       <TabsContent value="settings"><Card><CardHeader><CardTitle>{t("系统设置", "System settings")}</CardTitle></CardHeader><CardContent className="space-y-4">{data.settings.filter(item => item.key !== "announcement").map(item => <SettingRow key={item.key} setting={item} language={language} onSave={value => saveSetting(item, value)} />)}</CardContent></Card></TabsContent>
       <TabsContent value="campaigns"><CampaignPanel busy={busy} write={write} selected={selected} run={run} confirm={(title,description,action)=>setConfirm({title,description,action})}/></TabsContent>
+      <TabsContent value="referrals"><ReferralAdminPanel active={tab==="referrals"} language={language}/></TabsContent>
       <TabsContent value="security"><SecurityPaymentPanel language={language} busy={busy} read={read} write={securityWrite}/></TabsContent>
       <TabsContent value="content">{contentLoaded ? <SiteEditor content={content} pending={busy} language={language} loadHistory={()=>read("/v1/admin/content/history")} onSave={next=>setConfirm({title:"保存网站装修",description:"公开文案与导航保存后立即生效。",action:async()=>{await write("/v1/admin/content",{content:next});await refresh();}})} onRestore={versionId=>setConfirm({title:"恢复网站版本",description:"将选中的内容保存为一个新版本，历史记录继续保留。",action:async()=>{await write("/v1/admin/content/restore",{versionId});await refresh();}})}/> : <p role="status" className="py-8 text-sm text-muted-foreground">{t("正在读取网站编辑内容…","Loading website editor data…")}</p>}</TabsContent>
       <TabsContent value="audits">{auditsLoaded ? <Card><CardHeader><CardTitle>{t("操作审计", "Operation audit")}</CardTitle></CardHeader><CardContent><Table><TableHeader><TableRow>{[t("时间", "Time"), t("操作", "Action"), t("对象", "Target"), t("原因", "Reason"), t("操作编号", "Operation ID")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{audits.map(a => <TableRow key={a.id}><TableCell>{date(a.created_at, language)}</TableCell><TableCell>{a.action}</TableCell><TableCell>{a.target_id || "—"}</TableCell><TableCell>{a.reason}</TableCell><TableCell className="break-all">{a.operation_id || a.id}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card> : <p role="status" className="py-8 text-sm text-muted-foreground">{t("正在读取审计记录…","Loading audit log…")}</p>}</TabsContent>
