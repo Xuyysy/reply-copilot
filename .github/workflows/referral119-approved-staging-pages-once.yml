@@ -24,8 +24,8 @@ jobs:
       github.ref == 'refs/heads/chatgpt/referral119-staging-pages-approved-once-20261113' &&
       github.repository == 'Xuyysy/reply-copilot' &&
       github.actor == 'Xuyysy' &&
-      github.event.head_commit.message == 'release(staging): PR119 Pages owner-approved YAML guard fix' &&
-      contains(github.event.head_commit.modified, '.github/workflows/referral119-approved-staging-pages-once.yml')
+      github.event.before == '75e8a7146c4ae9f914068138780956716a7fa9bb' &&
+      github.event.head_commit.message == 'release(staging): PR119 owner approved pinned Pages execute'
     name: One-time owner-approved immutable Staging Pages ONLY
     runs-on: ubuntu-24.04
     timeout-minutes: 25
