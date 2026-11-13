@@ -1,0 +1,343 @@
+name: PR119 concise signup and inbox tip Staging Pages verified release
+
+# Owner explicitly approved 2026-11-13. This dedicated release signal is
+# NOT the generic CI push; it is guarded by exact branch, actor, message and
+# newly added workflow file. No ongoing automatic Staging deploy path.
+on:
+  push:
+    branches: [chatgpt/referral119-staging-signup-copy-release-verified-20261113]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-staging-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    # The credentials live only in the staging environment. A manual run on main
+    # must be explicitly requested; never execute this job on a feature branch.
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/chatgpt/referral119-staging-signup-copy-release-verified-20261113' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'release(staging): PR119 verified concise signup copy and spam tip'
+    name: One-time owner-approved immutable Staging Pages ONLY
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top
+    env:
+      SOURCE_SHA: 97bd8e865c55d0eaf43bb3555ade68d6b8f78f9f
+      CI_RUN_ID: 43405495598
+      DEPLOY_WORKER: 'false'
+      EXPECTED_WORKER_VERSION: ''
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check successful CI run and exact source SHA
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo 'Invalid 40-character SHA'; exit 1; }
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || { echo 'Invalid numeric CI run ID'; exit 1; }
+          if [[ "$DEPLOY_WORKER" == "true" ]]; then
+            [[ "$GITHUB_ACTOR" == "Xuyysy" ]] || { echo 'Worker release restricted to repository owner'; exit 1; }
+            [[ "$SOURCE_SHA" == "61a597f368a50e1853a4805eaad8e060b9401417" ]] || { echo 'Worker release is pinned to PR39 approved SHA'; exit 1; }
+            [[ "$EXPECTED_WORKER_VERSION" =~ ^[a-f0-9-]{36}$ ]] || { echo 'Expected 36-char Staging Worker version required'; exit 1; }
+          fi
+          # Wait only for the immutable, exact-SHA Staging Pages full CI.
+          # A failed/cancelled or missing run never authorizes a release.
+          for attempt in $(seq 1 36); do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/approved-ci-run.json"
+            state="$(jq -r '.status' "$RUNNER_TEMP/approved-ci-run.json")"
+            result="$(jq -r '.conclusion // "pending"' "$RUNNER_TEMP/approved-ci-run.json")"
+            if [[ "$state" == "completed" ]]; then
+              if [[ "$result" != "success" ]]; then
+                echo "Pinned Staging CI completed without success: $result"
+                exit 1
+              fi
+              break
+            fi
+            if [[ "$attempt" == "36" ]]; then
+              echo "Timed out checking pinned Pages CI; refusing deploy"
+              exit 1
+            fi
+            sleep 10
+          done
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha
+            and .status == "completed"
+            and .conclusion == "success"
+            and .event == "push"
+            and .head_repository.full_name == $repo
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/approved-ci-run.json"
+
+      # Never check out or execute scripts from the input source_sha.
+      # Only use a trusted main-branch workflow and downloaded static artifacts.
+      - name: Checkout trusted main branch for locked Wrangler dependencies
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Download Pages build from verified CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-97bd8e865c55d0eaf43bb3555ade68d6b8f78f9f
+          run-id: 43405495598
+          github-token: ${{ github.token }}
+          path: web/dist
+
+      - name: Download checksums and provenance from same CI run
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-97bd8e865c55d0eaf43bb3555ade68d6b8f78f9f
+          run-id: 43405495598
+          github-token: ${{ github.token }}
+          path: dist/ci
+
+      - name: Independently verify all downloaded static files and Staging target
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, re
+          root=pathlib.Path.cwd()
+          web=(root/'web/dist')
+          manifest=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          sha=os.environ['SOURCE_SHA']
+          allowed={
+            'sourceSha':sha,
+            'channel':'staging',
+            'pagesProject':'x-reply-helper-staging',
+            'pagesDomain':'https://staging.x-reply-helper.top',
+            'stagingApi':'https://api-staging.x-reply-helper.top',
+            'extensionId':'kaaehkpihjenlhjjfjcopkjhegmfmchk'
+          }
+          for key,value in allowed.items():
+              if manifest.get(key)!=value: raise SystemExit(f'Provenance/target mismatch: {key}')
+          hashes=(root/'dist/ci/web-files.sha256').read_text().splitlines()
+          expected={}
+          for entry in hashes:
+              matched=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',entry)
+              if not matched: raise SystemExit('Invalid checksum entry')
+              digest,rel=matched.groups()
+              p=(root/rel).resolve()
+              if not p.is_relative_to(web.resolve()) or not p.is_file() or p.is_symlink() or rel in expected:
+                  raise SystemExit('Unsafe or duplicate build entry')
+              expected[rel]=digest
+          actual={}
+          for p in web.rglob('*'):
+              if p.is_symlink(): raise SystemExit('Build contains symlinks')
+              if p.is_file():
+                  rel=p.relative_to(root).as_posix()
+                  actual[rel]=hashlib.sha256(p.read_bytes()).hexdigest()
+          if not actual or actual!=expected or len(actual)!=manifest.get('webFileCount'):
+              raise SystemExit('Web build file list or SHA-256 verification failed')
+          if not (web/'index.html').is_file() or not (web/'admin/index.html').is_file():
+              raise SystemExit('Staging homepage/admin page missing')
+          if any(p.name in ('_worker.js','_routes.json') for p in web.rglob('*')):
+              raise SystemExit('Unexpected Pages Functions or Worker artifact')
+          if not any(allowed['stagingApi'] in p.read_text(errors='replace') for p in web.rglob('*.js')):
+              raise SystemExit('Wrong Staging API origin')
+          if not any('challenges.cloudflare.com/turnstile/v0/api.js' in p.read_text(errors='replace') for p in web.rglob('*.html')):
+              raise SystemExit('Staging Turnstile widget missing')
+          print(f'PASS: {len(actual)} immutable static files verified from {sha}')
+          PY
+
+      - name: Configure Node.js for trusted deployment tooling
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Main intentionally contains only the approved deployment workflow.
+      # Do not run scripts from candidate source; install the reviewed CLI
+      # in a throwaway directory to avoid a missing main-branch lockfile.
+      - name: Install pinned Wrangler for Pages Direct Upload
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/staging-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" --version
+
+      # The optional Worker release is an explicitly pinned one-time staging change.
+      # Build it without any Cloudflare credentials; release credentials are scoped
+      # to the later deployment and read-only verification steps.
+      - name: Checkout pinned Worker candidate separately (no credentials)
+        if: false
+        uses: actions/checkout@v4
+        with:
+          ref: 97bd8e865c55d0eaf43bb3555ade68d6b8f78f9f
+          path: release-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify PR39 exact diff and Staging Worker binding identity
+        if: false
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-source
+          baseline=340c4276a943c6876b44b43a734ffa300daed6e8
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git merge-base --is-ancestor "$baseline" HEAD
+          # Do not deploy any runtime, configuration or payment change beyond PR39.
+          git diff --name-only "$baseline" HEAD | sort > "$RUNNER_TEMP/actual-pr39-files"
+          cat > "$RUNNER_TEMP/expected-pr39-files" <<'FILES'
+          api/src/creator-momentum-insights.ts
+          api/src/index.ts
+          api/tests/creator-momentum-insights.test.mjs
+          domain/creator-momentum-intelligence.js
+          tests/momentum/intelligence-model.test.mjs
+          web/src/components/account/AccountDashboard.tsx
+          web/src/components/account/CreatorMomentumIntelligence.tsx
+          web/src/styles/global.css
+          web/tests/creator-momentum-intelligence.test.mjs
+          FILES
+          diff -u "$RUNNER_TEMP/expected-pr39-files" "$RUNNER_TEMP/actual-pr39-files"
+          git diff --exit-code "$baseline" HEAD -- api/wrangler.jsonc api/src/creator-momentum.ts api/src/quota.ts
+          node - <<'NODE'
+          const c=JSON.parse(require("node:fs").readFileSync("./api/wrangler.jsonc","utf8"));
+          const stage=c.env?.staging;
+          if (stage?.name!=="reply-copilot-api-staging" ||
+              stage.vars?.ENVIRONMENT!=="staging" ||
+              stage.vars?.WEB_ORIGIN!=="https://staging.x-reply-helper.top" ||
+              stage.vars?.API_ORIGIN!=="https://api-staging.x-reply-helper.top" ||
+              stage.vars?.PAYMENTS_ENABLED!=="1" ||
+              stage.d1_databases?.length!==1 ||
+              stage.d1_databases[0]?.database_id!=="cd44bb44-b525-42c4-b286-2cc84dae7fdb" ||
+              stage.vars?.EXTENSION_ORIGIN!=="chrome-extension://kaaehkpihjenlhjjfjcopkjhegmfmchk")
+              throw Error("Unexpected Staging Worker target or bindings");
+          if (c.env?.production?.name!=="reply-copilot-api-production")
+              throw Error("Production config unexpectedly changed");
+          console.log("PASS: pinned PR39 source; Staging only; payment and D1 settings unchanged.");
+          NODE
+
+      - name: Install locked Worker dependencies and dry-run compile
+        if: false
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix release-source/api ci
+          npm --prefix release-source/api run typecheck
+          (
+            cd release-source/api
+            ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/pr39-worker-bundle"
+          )
+          test -s "$RUNNER_TEMP/pr39-worker-bundle/index.js"
+          ! grep -q 'api.x-reply-helper.top/account' "$RUNNER_TEMP/pr39-worker-bundle/index.js"
+          echo "PASS: Worker build verified; no Cloudflare mutation performed."
+
+      - name: Verify Staging Worker current version before any change
+        if: false
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+            > "$RUNNER_TEMP/staging-worker-before.json"
+          jq -e --arg expected "$EXPECTED_WORKER_VERSION" \
+            '.success == true and (.result.deployments[0].versions | any(.percentage == 100 and .version_id == $expected))' \
+            "$RUNNER_TEMP/staging-worker-before.json"
+          echo "PASS: Staging Worker running expected previous version."
+
+      - name: Deploy ONLY PR39 Staging Worker (no migrations, keep existing vars and secrets)
+        if: false
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd release-source/api
+            ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict
+          )
+
+      - name: Verify new Staging Worker version and authenticated API boundary
+        if: false
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+            > "$RUNNER_TEMP/staging-worker-after.json"
+          jq -e --arg previous "$EXPECTED_WORKER_VERSION" \
+            '.success == true and (.result.deployments[0].versions | any(.percentage == 100 and .version_id != $previous))' \
+            "$RUNNER_TEMP/staging-worker-after.json"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors \
+            https://api-staging.x-reply-helper.top/health | jq -e '.ok == true'
+          # Unauthenticated access must be refused by the new paid-only endpoint.
+          code=$(curl --silent --show-error --retry 5 --retry-all-errors -o "$RUNNER_TEMP/pr39-auth-gate.json" \
+            -w "%{http_code}" https://api-staging.x-reply-helper.top/v1/creator-momentum/insights)
+          [[ "$code" == "401" ]] || { echo "Staging momentum endpoint did not enforce login (HTTP $code)"; exit 1; }
+          jq -e '.code == "AUTH_REQUIRED"' "$RUNNER_TEMP/pr39-auth-gate.json"
+          echo "PASS: new Staging Worker active, healthy, and auth-protected. Pages may now deploy."
+
+      - name: Verify existing Staging PR119 Worker before Pages-only deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl --fail --silent --show-error --retry 3             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments"             > "$RUNNER_TEMP/ref119-worker-before-pages.json"
+          jq -e --arg expected '19b19a8a-6de9-435d-a9b2-c02284ab459a'             '.success == true and (.result.deployments[0].versions | any(.percentage == 100 and .version_id == $expected))'             "$RUNNER_TEMP/ref119-worker-before-pages.json"
+          echo 'PASS: expected Staging referral Worker 100%, no Worker release by this workflow.'
+          # Refuse to overwrite another in-flight Staging Pages release.
+          curl --fail --silent --show-error --retry 3 \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/x-reply-helper-staging/deployments?per_page=1&env=production" \
+            > "$RUNNER_TEMP/ref119-pages-before.json"
+          jq -e --arg previous 'de69edbc2517ac7f1ced830b8bbc8865f724311c' \
+            '.success == true and .result[0].deployment_trigger.metadata.commit_hash == $previous and .result[0].latest_stage.status == "success"' \
+            "$RUNNER_TEMP/ref119-pages-before.json"
+          echo 'PASS: existing Staging Pages SHA exactly matches approved previous deployment.'
+
+
+      - name: Deploy only x-reply-helper-staging Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" pages deploy web/dist \
+            --project-name x-reply-helper-staging \
+            --branch codex/v0.4-credits \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Approved RC1 Staging Pages $SOURCE_SHA"
+
+      - name: Deployment summary
+        if: success()
+        shell: bash
+        run: |
+          echo "### Staging Pages deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Project: x-reply-helper-staging" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Domain: https://staging.x-reply-helper.top" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- CI run: $CI_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$DEPLOY_WORKER" == "true" ]]; then
+            echo "- Worker: PR39 Staging API updated and auth gate verified" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Staging D1/migrations, Production, payment configuration: unchanged" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Production/Worker/D1 unchanged" >> "$GITHUB_STEP_SUMMARY"
+          fi
