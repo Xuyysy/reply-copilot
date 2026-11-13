@@ -17,6 +17,7 @@ test("My Account includes V1 referrals beside existing free and paid credit bala
  assert.match(card,/\/v1\/referrals\/link/);
  assert.match(card,/method:"POST"/);
  assert.match(card,/navigator\.clipboard\.writeText/);
+ assert.match(card,/referral-ineligible-explanation/);
  assert.match(card,/免费额度/);
  assert.match(card,/50 次/);
  assert.doesNotMatch(card,/\/v1\/admin\/users.*\/credits/);

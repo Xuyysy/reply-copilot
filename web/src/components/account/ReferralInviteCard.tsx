@@ -46,6 +46,7 @@ export default function ReferralInviteCard({language}:{language:Language}){
   <CardHeader><CardTitle className="flex items-center gap-2"><Gift size={20}/>{t("邀请好友 · 双方各送 50 次","Invite friends · 50 free replies each")}</CardTitle></CardHeader>
   <CardContent className="space-y-4">
    <p className="text-sm text-muted-foreground">{t("好友通过你的链接注册、验证邮箱、绑定插件，并成功收到第一条 AI 回复后，你们各获得 50 次免费额度，不主动过期。","When a friend registers using your link, verifies email, connects the extension and receives their first AI reply, both of you get 50 free credits with no automatic expiry.")}</p>
+   {data.canInvite===false&&<p role="status" data-testid="referral-ineligible-explanation" className="text-sm text-muted-foreground">{t("当前账号尚不符合邀请资格。请确认账号已验证邮箱、未被冻结且不是测试账号。","Your account is not eligible to invite yet. Verify your email and make sure your account is active and not marked for testing.")}</p>}
    {data.canInvite&&<div className="space-y-2">
     {data.link?<div className="flex flex-wrap items-center gap-2">
       <input aria-label={t("我的邀请链接","My invite link")} readOnly value={data.link} onFocus={e=>e.target.select()} className="min-w-0 flex-1 rounded-md border bg-muted/30 p-2 text-xs"/>
