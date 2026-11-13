@@ -22,6 +22,8 @@ test("My Account includes V1 referrals beside existing free and paid credit bala
  assert.match(card,/50 次/);
  assert.match(card,/原有的 200 次新人免费额度/);
  assert.match(card,/合计 250 次/);
+ assert.match(card,/30 天内最多奖励 20 位有效邀请/);
+ assert.match(card,/Up to 20 rewarded referrals per rolling 30 days/);
  assert.doesNotMatch(card,/\/v1\/admin\/users.*\/credits/);
 });
 test("registration accepts a bounded link attribution, never a raw URL or existing account relink",()=>{

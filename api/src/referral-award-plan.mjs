@@ -4,7 +4,7 @@
  * No paid credit, subscription period, or historical allocation is updated.
  */
 export const REFERRAL_BONUS=50;
-export const REFERRAL_MONTHLY_LIMIT=10;
+export const REFERRAL_MONTHLY_LIMIT=20;
 export const REFERRAL_WINDOW_MS=30*86400_000;
 export function normalizeReferralCode(value) {
  return typeof value==="string" && /^[0-9a-fA-F]{16}$/.test(value) ? value.toLowerCase() : null;

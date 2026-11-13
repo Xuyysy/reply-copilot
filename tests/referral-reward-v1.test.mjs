@@ -68,7 +68,7 @@ test("V1 migration is schema-only, gated OFF, historical credit types unchanged"
 test("only 16-hex codes accepted, no user-supplied URLs can become redirect destinations",()=>{
  assert.equal(normalizeReferralCode("A0bcdef012345678"),"a0bcdef012345678");
  for(const value of ["",null,"http://evil.test","../../login","ABC","a".repeat(2048),{},undefined]) assert.equal(normalizeReferralCode(value),null);
- assert.equal(REFERRAL_BONUS,50);assert.equal(REFERRAL_MONTHLY_LIMIT,10);
+ assert.equal(REFERRAL_BONUS,50);assert.equal(REFERRAL_MONTHLY_LIMIT,20);
 });
 test("delivered ACK + granted signup claim awards exact 50+50, preserves paid balance, retry is idempotent",()=>{
  const db=setup();
@@ -115,9 +115,18 @@ test("administrator cannot be rewarded as invitee",()=>{
  verifyNoGrant(db);
  db.close();
 });
-test("rolling 30-day cap blocks reward #11 and can later unblock, without rewriting old grants",()=>{
+test("rolling 30-day cap allows #20, blocks #21 and later unblocks, without rewriting grants",()=>{
+ const first=setup();
+ for(let i=0;i<19;i++){
+  const user="eligible-"+i;
+  first.db.prepare("INSERT INTO users VALUES(?,?,'user','active',0,1000)").run(user,user+"@example.test");
+  first.db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,status,reward_claim,registered_at,rewarded_at) VALUES(?,\'inviter\',\'0123456789abcdef\',\'rewarded\',?,?,?)").run(user,"eligible-claim"+i,now-100,now-100);
+ }
+ assert.equal(run(first.db,"nonce-20th")[0].changes,1);
+ assert.equal(get(first.db,"SELECT COUNT(*) n FROM referral_awards WHERE invited_user_id=\'invitee\'").n,2);
+ first.db.close();
  const db=setup();
- for(let i=0;i<10;i++){
+ for(let i=0;i<20;i++){
   const user="other-"+i;
   db.prepare("INSERT INTO users VALUES(?,?,'user','active',0,1000)").run(user,user+"@example.test");
   db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,status,reward_claim,registered_at,rewarded_at) VALUES(?,'inviter','0123456789abcdef','rewarded',?,?,?)").run(user,"old-claim"+i,now-100,now-100);

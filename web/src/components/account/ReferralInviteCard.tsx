@@ -53,7 +53,7 @@ export default function ReferralInviteCard({language}:{language:Language}){
       <Button type="button" size="sm" variant="outline" onClick={()=>void copy()}><Copy size={15}/>{t("复制链接","Copy link")}</Button>
      </div>:
       <Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button>}
-    <p className="text-xs text-muted-foreground">{t("30 天内最多奖励 10 位有效邀请。仅新注册用户可通过链接建立邀请关系。","Up to 10 rewarded referrals per rolling 30 days. Only newly created accounts can be attributed.")}</p>
+    <p className="text-xs text-muted-foreground">{t("30 天内最多奖励 20 位有效邀请。仅新注册用户可通过链接建立邀请关系。","Up to 20 rewarded referrals per rolling 30 days. Only newly created accounts can be attributed.")}</p>
    </div>}
    <div className="grid grid-cols-3 gap-2">
     {[[t("邀请注册","Registered"),data.registered],[t("奖励成功","Rewarded"),data.rewarded],[t("累计获赠","Credits earned"),data.earnedCredits]].map(([label,n])=>
