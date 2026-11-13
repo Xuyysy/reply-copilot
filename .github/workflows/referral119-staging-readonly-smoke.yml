@@ -26,9 +26,9 @@ jobs:
           health="$(curl --max-time 25 --retry 2 --retry-delay 2 --silent --show-error --output "$RUNNER_TEMP/ref119-health.json" --write-out '%{http_code}' "$origin/health")"
           echo "/health HTTP $health"
           test "$health" = '200'
-          node -e "const j=require(process.argv[1]); if(typeof j!=='object'||j===null) process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-health.json")"
+          node -e "const j=JSON.parse(process.argv[1]); if(typeof j!=='object'||j===null) process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-health.json")"
           referral="$(curl --max-time 25 --retry 2 --retry-delay 2 --silent --show-error --output "$RUNNER_TEMP/ref119-noauth.json" --write-out '%{http_code}' "$origin/v1/referrals/me")"
           echo "/v1/referrals/me (no auth) HTTP $referral"
           test "$referral" = '401'
-          node -e "const x=require(process.argv[1]); if(x.code!=='AUTH_REQUIRED')process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-noauth.json")"
+          node -e "const x=JSON.parse(process.argv[1]); if(x.code!=='AUTH_REQUIRED')process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-noauth.json")"
           echo 'PASS: Staging Worker serves referral route and rejects unauthenticated requests.'
