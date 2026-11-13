@@ -52,6 +52,10 @@
   const TRANSLATION_ADDITIONS=[
     ".immersive-translate-translation",
     ".immersive-translate-translation-wrapper",
+    // Current Immersive Translate page CSS uses these target wrappers.
+    ".immersive-translate-target-translation-block-wrapper",
+    ".immersive-translate-target-translation-inline-wrapper",
+    "[data-imt-translation-only='1']",
     "[data-immersive-translate-translation]",
     "[data-immersive-translate-translation-element]"
   ].join(",");
