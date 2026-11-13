@@ -77,7 +77,7 @@ export function patchLiveStagingWorker(script,typescriptSource,planSource){
    "  await bestEffortReferralAward(env,userId);\n  return response({ ok: true, alreadyConfirmed: false, requestId, quota: await balance(env, userId) }, 200, env, request);","ACK new success");
   return section;
  },"ACK");
- script=segment(script,"var index_default = {","__name(index_default",section=>{
+ {
   const needle='      if (request.method === "POST" && path === "/v1/feedback") return await feedback(request, env);';
   const insert=[
    '      if (request.method === "GET" && path === "/v1/referrals/me") return await myReferrals(request,env);',
@@ -85,8 +85,8 @@ export function patchLiveStagingWorker(script,typescriptSource,planSource){
    '      if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);',
    needle
   ].join("\n");
-  return one(section,needle,insert,"referral HTTP routes");
- },"route");
+  script=one(script,needle,insert,"referral HTTP routes");
+ }
  script=one(script,"var index_default = {",injection+"var index_default = {","module functions");
  if(!script.includes("STAGING_V3_HOTPATCH_20261112")||!script.includes("REFERRAL119_STAGING_RUNTIME_OVERLAY_20261113"))throw Error("Ref119 output markers missing");
  return {script,patchId:"REFERRAL119_STAGING_RUNTIME_OVERLAY_20261113"};
