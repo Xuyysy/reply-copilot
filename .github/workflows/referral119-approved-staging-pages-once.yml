@@ -19,7 +19,13 @@ jobs:
   deploy-staging:
     # The credentials live only in the staging environment. A manual run on main
     # must be explicitly requested; never execute this job on a feature branch.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/referral119-staging-pages-approved-once-20261113' && github.repository == 'Xuyysy/reply-copilot' && github.actor == 'Xuyysy' && github.event.head_commit.message == 'release(staging): PR119 Pages immutable artifact owner-approved' && contains(github.event.head_commit.added, '.github/workflows/referral119-approved-staging-pages-once.yml')
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/chatgpt/referral119-staging-pages-approved-once-20261113' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.head_commit.message == 'release(staging): PR119 Pages owner-approved YAML guard fix' &&
+      contains(github.event.head_commit.modified, '.github/workflows/referral119-approved-staging-pages-once.yml')
     name: One-time owner-approved immutable Staging Pages ONLY
     runs-on: ubuntu-24.04
     timeout-minutes: 25
