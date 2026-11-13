@@ -21,6 +21,9 @@ test("My Account includes V1 referrals beside existing free and paid credit bala
  assert.match(card,/免费额度/);
  assert.match(card,/50 次/);
  assert.match(card,/原有的 200 次新人免费额度/);
+ assert.match(card,/双方各得 50 次，新人另领 200 次/);
+ assert.match(card,/你和好友各额外获得 50 次/);
+ assert.match(card,/both you and your friend earn 50 extra credits each/);
  assert.match(card,/合计 250 次/);
  assert.match(card,/30 天内最多奖励 20 位有效邀请/);
  assert.match(card,/Up to 20 rewarded referrals per rolling 30 days/);
