@@ -632,7 +632,7 @@
       if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
-    const control=api.replyDetector.findReplyControl(event);
+    const control=api.replyDetector.findReplyControl(event.target,event);
     if (recoveryRequired) recoverAfterQuiescence();
     // X's composer has its own Reply/submit controls, but a media viewer
     // may ALSO be a dialog containing a genuine post Reply button.
@@ -676,7 +676,7 @@
   function onDocumentClick(event) {
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
-    const control=api.replyDetector.findReplyControl(event);
+    const control=api.replyDetector.findReplyControl(event.target,event);
     if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;

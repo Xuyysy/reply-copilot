@@ -13,10 +13,10 @@ test("translation wrapper retargets pointer: genuine reply remains discoverable 
  const reply={matches:s=>s.includes("button"),getAttribute:n=>n==="data-testid"?"reply":null,innerText:"翻译后的标签"};
  const translatedChild={closest:()=>reply};
  const outer={closest:()=>null};
- assert.equal(replyDetector.findReplyControl({target:outer,composedPath:()=>[translatedChild,reply,outer]}),reply);
- assert.equal(replyDetector.findReplyControl({target:outer,composedPath:()=>[outer]}),null);
+ assert.equal(replyDetector.findReplyControl(outer,{composedPath:()=>[translatedChild,reply,outer]}),reply);
+ assert.equal(replyDetector.findReplyControl(outer,{composedPath:()=>[outer]}),null);
  const like={matches:s=>s.includes("button"),getAttribute:n=>n==="data-testid"?"like":null,innerText:"点赞"};
- assert.equal(replyDetector.findReplyControl({composedPath:()=>[{closest:()=>like}]}),null);
+ assert.equal(replyDetector.findReplyControl(outer,{composedPath:()=>[{closest:()=>like}]}),null);
 });
 test("bilingual Immersive Translate additions are omitted while keeping original post and ID",()=>{
  const {postExtractor}=moduleApi("post-extractor");
@@ -37,7 +37,7 @@ test("translation only changes one input attempt, not all subsequent posts",()=>
  const widget=readFileSync(new URL("../content/inline-assistant.js",import.meta.url),"utf8");
  assert.ok(!source.includes("nativeInputHealthy"));
  assert.ok(source.includes("event.target?.closest?.('[contenteditable"));
- assert.ok(source.includes("api.replyDetector.findReplyControl(event)"));
+ assert.ok(source.includes("api.replyDetector.findReplyControl(event.target,event)"));
  assert.ok(widget.includes('host.setAttribute("translate","no")'));
  assert.ok(widget.includes('host.classList.add("notranslate")'));
 });
