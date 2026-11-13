@@ -693,10 +693,14 @@
   }
   function refreshAssociation(){active?.refreshAssociation?.();}
   function onBeforeInput(event) {
-    // Only genuine X reply-composer typing can stop editor acquisition.
+    // Do not let translator/search-field input cancel an awaiting reply.
+    // Real DOM events identify a reply dialog editor; synthetic/custom editor
+    // nodes without .closest still use the original baseline identity fence.
+    if(!event.isTrusted||!active||active.cancelled||active.editor)return;
     const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]');
-    if(event.isTrusted&&editor?.closest?.('[role="dialog"]')&&active&&!active.cancelled&&!active.editor)
-      rejectAssociation('user_input_before_binding');
+    const genuine=Boolean(editor?.closest?.('[role="dialog"]')) ||
+      (!event.target?.closest && api.composerAssociation.baseline(document).baselineEditors.includes(event.target));
+    if(genuine)rejectAssociation('user_input_before_binding');
   }
   function setMomentumEntry(show) {
     if (!contextAlive) return;
