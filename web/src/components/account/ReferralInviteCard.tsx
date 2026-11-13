@@ -43,9 +43,9 @@ export default function ReferralInviteCard({language}:{language:Language}){
  if(loading)return <div data-testid="referral-user-loading" role="status" className="text-sm text-muted-foreground">{t("正在读取邀请奖励…","Loading referral rewards…")}</div>;
  if(!data?.enabled)return null;
  return <Card data-testid="account-referral-rewards" className="border-primary/25">
-  <CardHeader><CardTitle className="flex items-center gap-2"><Gift size={20}/>{t("邀请好友 · 双方各送 50 次","Invite friends · 50 free replies each")}</CardTitle></CardHeader>
+  <CardHeader><CardTitle className="flex items-center gap-2"><Gift size={20}/>{t("邀请好友 · 新人可领 200 + 50 次免费额度","Invite friends · 200 welcome + 50 bonus credits")}</CardTitle></CardHeader>
   <CardContent className="space-y-4">
-   <p className="text-sm text-muted-foreground">{t("好友通过你的链接注册、验证邮箱、绑定插件，并成功收到第一条 AI 回复后，你们各获得 50 次免费额度，不主动过期。","When a friend registers using your link, verifies email, connects the extension and receives their first AI reply, both of you get 50 free credits with no automatic expiry.")}</p>
+   <p className="text-sm text-muted-foreground">{t("好友通过邀请链接注册并验证邮箱后，首次绑定插件可正常领取原有的 200 次新人免费额度；成功接收第一条 AI 回复后，再加赠 50 次邀请奖励，合计 250 次。额外邀请奖励不主动过期。","A friend joining through your link still receives the usual 200 welcome credits after first connecting the extension. Once they have verified their email and received their first AI reply, they can earn another 50 referral credits, totaling 250. The extra referral credits do not expire automatically.")}</p>
    {data.canInvite===false&&<p role="status" data-testid="referral-ineligible-explanation" className="text-sm text-muted-foreground">{t("当前账号尚不符合邀请资格。请确认账号已验证邮箱、未被冻结且不是测试账号。","Your account is not eligible to invite yet. Verify your email and make sure your account is active and not marked for testing.")}</p>}
    {data.canInvite&&<div className="space-y-2">
     {data.link?<div className="flex flex-wrap items-center gap-2">

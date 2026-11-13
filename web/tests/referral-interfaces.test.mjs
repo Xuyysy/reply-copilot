@@ -20,6 +20,8 @@ test("My Account includes V1 referrals beside existing free and paid credit bala
  assert.match(card,/referral-ineligible-explanation/);
  assert.match(card,/免费额度/);
  assert.match(card,/50 次/);
+ assert.match(card,/原有的 200 次新人免费额度/);
+ assert.match(card,/合计 250 次/);
  assert.doesNotMatch(card,/\/v1\/admin\/users.*\/credits/);
 });
 test("registration accepts a bounded link attribution, never a raw URL or existing account relink",()=>{
@@ -27,6 +29,9 @@ test("registration accepts a bounded link attribution, never a raw URL or existi
  assert.match(login,/\/\^\[0-9a-f\]\{16\}\$\//);
  assert.match(login,/referralCode:validReferralCode/);
  assert.match(login,/referral-signup-notice/);
+ assert.match(login,/新人原有的 200 次免费额度照常发放/);
+ assert.match(login,/额外获得 50 次，合计 250 次免费额度/);
+ assert.doesNotMatch(login,/双方各可获得额外 50 次免费额度/);
  assert.match(login,/\/v1\/auth\/register/);
  assert.doesNotMatch(login,/\/v1\/referrals\/claim/);
 });
