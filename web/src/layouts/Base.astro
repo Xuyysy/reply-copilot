@@ -108,6 +108,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
     <script>
       import { api, ApiError } from "../lib/api";
       import { createSiteContentLoader, applySiteContent, shouldHideAccountCta } from "../lib/site-content.mjs";
+      import { replyAssistantCta } from "../lib/reply-assistant-cta.mjs";
       const loadSiteContent = createSiteContentLoader(() => api("/v1/site"));
       let siteContent = {};
       const renderSiteContent = () => applySiteContent(document, siteContent, document.documentElement.lang === "en" ? "en" : "zh");
@@ -155,6 +156,15 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
           const mobileLabel=mobileEntry.querySelector("span");
           if(mobileLabel)mobileLabel.textContent=accountState==="error"?(en?"Check account status":"检查账户状态"):label.textContent;
         }
+        // Hero reply-assistant entry shares the existing authenticated /v1/me
+        // check. While loading or on transient failure, use the safe /account/
+        // fallback rather than accidentally sending a signed-in user to register.
+        const replyCta=replyAssistantCta(accountState,en?"en":"zh");
+        document.querySelectorAll<HTMLAnchorElement>("[data-reply-assistant-cta]").forEach(link=>{
+          link.href=replyCta.href;
+          const text=link.querySelector("span");
+          if(text)text.textContent=replyCta.label;
+        });
         document.querySelectorAll<HTMLAnchorElement>("[data-account-cta]").forEach((link)=>{
           link.hidden=shouldHideAccountCta(accountState,link.dataset.sitePrimaryOverride);
           link.href=accountState==="guest"?"/login?mode=register":accountState==="empty"?"/pricing":"/account";
@@ -194,6 +204,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
       window.addEventListener("reply-copilot-language",updateAccountLinks);
       document.addEventListener("reply-copilot-primary-cta",updateAccountLinks);
       document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&Date.now()-lastAccountCheck>15000)void loadAccountLinks();});
+      window.addEventListener("pageshow",event=>{if(event.persisted)void loadAccountLinks();});
       void loadAccountLinks();
     </script>
   </body>

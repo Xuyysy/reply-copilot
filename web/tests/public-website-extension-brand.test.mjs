@@ -70,7 +70,8 @@ test("momentum-first first-fold replaces generic reply hero while retaining CMS 
   assert.match(firstFoldSource, /AI REPLY ASSISTANT/);
   assert.match(firstFoldSource, /data-zh="示意草稿 · 由你确认发送"/);
   assert.match(firstFoldSource, /data-zh="AI 回复助手 · 实用功能"/);
-  assert.match(firstFoldSource, /href="\/login\?mode=register" class="button momentum-v2-primary"/);
+  assert.match(firstFoldSource, /href="\/account\/" data-reply-assistant-cta class="button momentum-v2-primary"/);
+  assert.doesNotMatch(firstFoldSource, /href="\/login\?mode=register" class="button momentum-v2-primary"/);
   assert.match(firstFoldSource, /href="#momentum-framework" class="button secondary momentum-v2-secondary"/);
 
   assert.match(home, /数据/); // research copy is retained with the narrative below
