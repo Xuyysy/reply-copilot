@@ -8,7 +8,7 @@
 - Only newly verified email accounts can be attributed, once, during registration. Resending verification cannot overwrite the original pending referral code.
 - After the invitee verifies email, connects a qualified Chrome extension installation, receives their existing signup grant, AND has a confirmed first AI reply delivery ACK, both users receive exactly 50 free generations, with no automatic expiry.
 - Referral rewards do not change purchased credits, paid balances, subscriptions, daily caps, payment/order/merchant state, or historical credits.
-- Only active, verified, non-test, non-admin inviter and invitee accounts qualify. An invitee is attributed once; rolling 30-day cap is 10 completed referrals per inviter. Matching claimed installation prevents awards. Device evidence is only a defensive signal; it is not proof of unique persons.
+- Eligible inviters are active, verified, non-test regular users **or administrators**. Invitees must remain verified, non-test regular users and cannot be administrators. An invitee is attributed once; rolling 30-day cap is 10 completed referrals per inviter. Matching claimed installation prevents awards. Device evidence is only a defensive signal; it is not proof of unique persons.
 - One D1.batch transaction exclusively claims the invite and inserts two free credit batches, two mirrored free balances, two credit_ledger entries, two provenance entries in referral_awards, then checks strict invariants. No partial grant is allowed. Replay ACKs remain idempotent.
 - A transient failed award does not invalidate an already completed AI reply; repeat ACK or invitee account refresh can retry.
 

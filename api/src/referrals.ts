@@ -19,9 +19,9 @@ export async function eligibleReferralCode(env: Env, value: unknown): Promise<st
   if(!code || !await referralsEnabled(env))return null;
   const eligible=await env.DB.prepare(
     "SELECT 1 FROM referral_codes c JOIN users u ON u.id=c.user_id "+
-    "WHERE c.code=? AND u.role='user' AND u.status='active' AND u.is_test_account=0 "+
+    "WHERE c.code=? AND u.role IN ('user','admin') AND u.status='active' AND u.is_test_account=0 "+
     "AND u.email_verified_at IS NOT NULL "+
-    "AND NOT EXISTS(SELECT 1 FROM site_administrator a WHERE a.user_id=u.id)"
+    "AND u.archived_at IS NULL"
   ).bind(code).first();
   return eligible?code:null;
 }
@@ -32,9 +32,9 @@ export function referralRegistrationStatement(env:Env, invitedId:string, code:st
     "INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,status,registered_at) "+
     "SELECT ?,c.user_id,c.code,'pending',? FROM referral_codes c "+
     "JOIN users u ON u.id=c.user_id "+
-    "WHERE c.code=? AND c.user_id<>? AND u.role='user' AND u.status='active' "+
+    "WHERE c.code=? AND c.user_id<>? AND u.role IN ('user','admin') AND u.status='active' "+
     "AND u.email_verified_at IS NOT NULL AND u.is_test_account=0 "+
-    "AND NOT EXISTS(SELECT 1 FROM site_administrator a WHERE a.user_id=c.user_id) "+
+    "AND u.archived_at IS NULL "+
     "ON CONFLICT(invited_user_id) DO NOTHING"
   ).bind(invitedId,now,code,invitedId);
 }
@@ -72,9 +72,9 @@ function linkFor(env:Env, code:string|null):string|null {
 }
 async function eligibleOwner(env:Env,userId:string):Promise<boolean> {
   return Boolean(await env.DB.prepare(
-    "SELECT 1 FROM users u WHERE u.id=? AND u.role='user' AND u.status='active' "+
+    "SELECT 1 FROM users u WHERE u.id=? AND u.role IN ('user','admin') AND u.status='active' "+
     "AND u.email_verified_at IS NOT NULL AND u.is_test_account=0 "+
-    "AND NOT EXISTS(SELECT 1 FROM site_administrator a WHERE a.user_id=u.id)"
+    "AND u.archived_at IS NULL"
   ).bind(userId).first());
 }
 
@@ -114,7 +114,7 @@ export async function createReferralLink(request:Request,env:Env):Promise<Respon
   return response({enabled:true,link:linkFor(env,assigned.code),bonus:REFERRAL_BONUS},200,env,request);
 }
 
-/** Admin V2: read-only, bounded; excludes admin/test accounts from growth KPIs. */
+/** Admin V2: read-only, bounded; permits verified admins as inviters, but never test/admin invitees. */
 export async function adminReferralOverview(request:Request,env:Env):Promise<Response> {
   await requireAdminSession(request,env);
   if(!await referralsEnabled(env))return response({enabled:false},200,env,request);
@@ -124,16 +124,16 @@ export async function adminReferralOverview(request:Request,env:Env):Promise<Res
   if(query.length>120)throw new ApiFailure(400,"INVALID_QUERY","搜索内容过长。");
   const base="FROM referral_invites i JOIN users inviter ON inviter.id=i.inviter_user_id "+
     "JOIN users invited ON invited.id=i.invited_user_id "+
-    "WHERE inviter.role='user' AND invited.role='user' AND inviter.is_test_account=0 AND invited.is_test_account=0 "+
-    "AND NOT EXISTS(SELECT 1 FROM site_administrator x WHERE x.user_id IN (inviter.id,invited.id))";
+    "WHERE inviter.role IN ('user','admin') AND invited.role='user' AND inviter.is_test_account=0 AND invited.is_test_account=0 "+
+    "AND NOT EXISTS(SELECT 1 FROM site_administrator x WHERE x.user_id=invited.id)";
   const [stats,awards,rows]=await Promise.all([
     env.DB.prepare("SELECT COUNT(*) registrations,COUNT(DISTINCT i.inviter_user_id) inviters,"+
       "COALESCE(SUM(CASE WHEN i.status='rewarded' THEN 1 ELSE 0 END),0) activated "+base).first<{registrations:number;inviters:number;activated:number}>(),
     env.DB.prepare("SELECT COALESCE(SUM(a.amount),0) issued "+
       "FROM referral_awards a JOIN referral_invites i ON i.invited_user_id=a.invited_user_id "+
       "JOIN users inviter ON inviter.id=i.inviter_user_id JOIN users invited ON invited.id=i.invited_user_id "+
-      "WHERE inviter.role='user' AND invited.role='user' AND inviter.is_test_account=0 AND invited.is_test_account=0 "+
-      "AND NOT EXISTS(SELECT 1 FROM site_administrator x WHERE x.user_id IN (inviter.id,invited.id))").first<{issued:number}>(),
+      "WHERE inviter.role IN ('user','admin') AND invited.role='user' AND inviter.is_test_account=0 AND invited.is_test_account=0 "+
+      "AND NOT EXISTS(SELECT 1 FROM site_administrator x WHERE x.user_id=invited.id)").first<{issued:number}>(),
     env.DB.prepare("SELECT i.invited_user_id,i.inviter_user_id,inviter.email inviter_email,invited.email invited_email,"+
       "i.status,i.registered_at,i.rewarded_at "+base+
       " AND (?='' OR inviter.id=? OR invited.id=? OR inviter.email=? OR invited.email=?) "+

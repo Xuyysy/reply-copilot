@@ -91,12 +91,29 @@ test("registration alone, pending delivery, unclaimed installation cannot grant 
   verifyNoGrant(db);db.close();
  }
 });
-test("same extension installation and test/admin accounts are not eligible",()=>{
- for(const variant of [{deviceSame:true},{testInvitee:true},{testInviter:true},{adminInviter:true}]){
+test("same extension and test accounts cannot receive referral awards",()=>{
+ for(const variant of [{deviceSame:true},{testInvitee:true},{testInviter:true}]){
   const db=setup(variant);
   assert.equal(run(db,"nonce4")[0].changes,0);
   verifyNoGrant(db);db.close();
  }
+});
+test("eligible administrator can invite regular user and still earns exactly 50+50",()=>{
+ const db=setup({adminInviter:true});
+ db.prepare("UPDATE users SET role='admin' WHERE id='inviter'").run();
+ assert.equal(run(db,"admin-inviter")[0].changes,1);
+ assert.equal(get(db,"SELECT free_balance FROM credit_accounts WHERE user_id='inviter'").free_balance,50);
+ assert.equal(get(db,"SELECT free_balance FROM credit_accounts WHERE user_id='invitee'").free_balance,250);
+ assert.equal(run(db,"admin-replay")[0].changes,0);
+ db.close();
+});
+test("administrator cannot be rewarded as invitee",()=>{
+ const db=setup();
+ db.prepare("UPDATE users SET role='admin' WHERE id='invitee'").run();
+ db.prepare("INSERT INTO site_administrator VALUES(2,'invitee')").run();
+ assert.equal(run(db,"admin-invitee")[0].changes,0);
+ verifyNoGrant(db);
+ db.close();
 });
 test("rolling 30-day cap blocks reward #11 and can later unblock, without rewriting old grants",()=>{
  const db=setup();
