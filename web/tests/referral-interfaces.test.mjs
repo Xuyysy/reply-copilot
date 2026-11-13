@@ -29,9 +29,14 @@ test("registration accepts a bounded link attribution, never a raw URL or existi
  assert.match(login,/\/\^\[0-9a-f\]\{16\}\$\//);
  assert.match(login,/referralCode:validReferralCode/);
  assert.match(login,/referral-signup-notice/);
- assert.match(login,/新人原有的 200 次免费额度照常发放/);
- assert.match(login,/额外获得 50 次，合计 250 次免费额度/);
+ assert.match(login,/好友邀请福利：首次绑定插件领 200 次免费额度/);
+ assert.match(login,/成功收到第一条 AI 回复再送 50 次，合计 250 次/);
  assert.doesNotMatch(login,/双方各可获得额外 50 次免费额度/);
+ assert.doesNotMatch(login,/你正通过好友邀请注册：新人原有的 200 次免费额度照常发放/);
+ assert.match(login,/\{!validReferralCode&&<p/);
+ assert.match(login,/data-registration-email-tip/);
+ assert.match(login,/请检查垃圾邮箱或广告邮件文件夹/);
+ assert.match(login,/data-email-delivery-tip/);
  assert.match(login,/\/v1\/auth\/register/);
  assert.doesNotMatch(login,/\/v1\/referrals\/claim/);
 });
