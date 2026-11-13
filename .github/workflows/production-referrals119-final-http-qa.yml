@@ -1,0 +1,42 @@
+name: Production PR119 post-activation public acceptance (read-only)
+on:
+  push:
+    branches: [chatgpt/production-referrals119-final-http-qa-20261113]
+permissions:
+  contents: read
+concurrency:
+  group: production-referral119-postflight
+  cancel-in-progress: false
+jobs:
+  public-readonly-postflight:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/chatgpt/production-referrals119-final-http-qa-20261113' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'ci-lite: production PR119 final public route and website acceptance'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Verify deployed Production website, referral authentication, payment plan read
+        run: |
+          node <<'NODE'
+          const urls=[
+            ['https://api.x-reply-helper.top/health',200],
+            ['https://api.x-reply-helper.top/v1/referrals/me',401,'AUTH_REQUIRED'],
+            ['https://api.x-reply-helper.top/v1/admin/referrals',401,'AUTH_REQUIRED'],
+            ['https://api.x-reply-helper.top/v1/me',401,'AUTH_REQUIRED'],
+            ['https://api.x-reply-helper.top/v1/subscriptions/plans',200],
+            ['https://app.x-reply-helper.top/login/',200],
+            ['https://app.x-reply-helper.top/account/',200],
+            ['https://app.x-reply-helper.top/pricing/',200]
+          ];
+          for(const [url,status,code] of urls){
+            const r=await fetch(url,{signal:AbortSignal.timeout(25000),headers:{Origin:'https://app.x-reply-helper.top'},redirect:'follow'});
+            let body={};if(code)body=await r.json().catch(()=>({}));
+            console.log(new URL(url).pathname,'HTTP',r.status,code?('code='+body.code):'');
+            if(r.status!==status || (code && body.code!==code))throw new Error('Production postflight failed at '+url);
+          }
+          console.log('PASS: Production site, Worker, referral auth, and existing subscription plan read route');
+          NODE
