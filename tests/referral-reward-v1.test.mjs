@@ -119,12 +119,12 @@ test("rolling 30-day cap allows #20, blocks #21 and later unblocks, without rewr
  const first=setup();
  for(let i=0;i<19;i++){
   const user="eligible-"+i;
-  first.db.prepare("INSERT INTO users VALUES(?,?,'user','active',0,1000)").run(user,user+"@example.test");
-  first.db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,status,reward_claim,registered_at,rewarded_at) VALUES(?,\'inviter\',\'0123456789abcdef\',\'rewarded\',?,?,?)").run(user,"eligible-claim"+i,now-100,now-100);
+  first.prepare("INSERT INTO users VALUES(?,?,'user','active',0,1000)").run(user,user+"@example.test");
+  first.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,status,reward_claim,registered_at,rewarded_at) VALUES(?,'inviter','0123456789abcdef','rewarded',?,?,?)").run(user,"eligible-claim"+i,now-100,now-100);
  }
- assert.equal(run(first.db,"nonce-20th")[0].changes,1);
- assert.equal(get(first.db,"SELECT COUNT(*) n FROM referral_awards WHERE invited_user_id=\'invitee\'").n,2);
- first.db.close();
+ assert.equal(run(first,"nonce-20th")[0].changes,1);
+ assert.equal(get(first,"SELECT COUNT(*) n FROM referral_awards WHERE invited_user_id='invitee'").n,2);
+ first.close();
  const db=setup();
  for(let i=0;i<20;i++){
   const user="other-"+i;
