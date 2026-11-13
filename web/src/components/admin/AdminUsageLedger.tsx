@@ -7,7 +7,15 @@ import {Button} from '../ui/button';
 import {Input} from '../ui/input';
 import {Table,TableHeader,TableRow,TableHead,TableBody,TableCell} from '../ui/table';
 
-type LegacyLedger={id:string;email:string;kind:string;free_delta:number;paid_delta:number;reason:string|null;created_at:number};
+type EntitlementRow={
+ id:string;user_id:string;email:string;occurred_at:number;
+ source:'subscription'|'free'|'paid'|'mixed'|'unknown';event_type:string;
+ free_delta:number;paid_delta:number;subscription_delta:number|null;
+ plan_code:string|null;daily_limit:number|null;day_index:number|null;
+ amount_fen:number|null;order_status:string|null;reference_id:string|null;reason:string|null;
+};
+type EntitlementResult={items:EntitlementRow[];hasMore:boolean;nextCursor:string|null};
+type EntitlementSource='all'|'subscription'|'free'|'paid'|'mixed'|'unknown';
 type Usage={
   request_id:string;user_id:string;email:string;created_at:number;
   source:'subscription'|'free'|'paid'|'unknown';source_evidence:string;
@@ -25,8 +33,15 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
  const [search,setSearch]=useState('');
  const [query,setQuery]=useState('');
  const [items,setItems]=useState<Usage[]>([]);
- const [legacyLedger,setLegacyLedger]=useState<LegacyLedger[]>([]);
- const [legacyLoading,setLegacyLoading]=useState(false);
+ const [changeSource,setChangeSource]=useState<EntitlementSource>('all');
+ const [changeSearch,setChangeSearch]=useState('');
+ const [changeQuery,setChangeQuery]=useState('');
+ const [changeDays,setChangeDays]=useState(30);
+ const [changeAnchor,setChangeAnchor]=useState(()=>Date.now());
+ const [changeItems,setChangeItems]=useState<EntitlementRow[]>([]);
+ const [changeNextCursor,setChangeNextCursor]=useState<string|null>(null);
+ const [changeLoading,setChangeLoading]=useState(false);
+ const [changeMoreLoading,setChangeMoreLoading]=useState(false);
  const [nextCursor,setNextCursor]=useState<string|null>(null);
  const [loading,setLoading]=useState(false);
  const [moreLoading,setMoreLoading]=useState(false);
@@ -50,14 +65,31 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
   }).finally(()=>{if(mounted)setLoading(false);});
   return()=>{mounted=false;};
  },[active,mode,source,query,nonce]);
+ const changeParams=(cursor?:string|null)=>{
+  const p=new URLSearchParams({source:changeSource,from:String(changeAnchor-changeDays*86400000),to:String(changeAnchor+1)});
+  if(changeQuery.trim())p.set('q',changeQuery.trim());
+  if(cursor)p.set('cursor',cursor);
+  return '/v1/admin/entitlement-activity?'+p.toString();
+ };
  useEffect(()=>{
   if(!active||mode!=='changes')return;
-  let mounted=true;setLegacyLoading(true);setError('');
-  void api<{ledger:LegacyLedger[]}>('/v1/admin/ledger').then(data=>{if(mounted)setLegacyLedger(data.ledger);})
-   .catch(cause=>{if(mounted)setError(cause instanceof Error?cause.message:t('读取额度变动失败。','Unable to load credit changes.'));})
-   .finally(()=>{if(mounted)setLegacyLoading(false);});
+  let mounted=true;setChangeLoading(true);setError('');setChangeItems([]);setChangeNextCursor(null);
+  void api<EntitlementResult>(changeParams()).then(data=>{
+   if(mounted){setChangeItems(data.items);setChangeNextCursor(data.nextCursor);}
+  }).catch(cause=>{if(mounted)setError(cause instanceof Error?cause.message:t('读取权益流水失败。','Unable to load entitlement activity.'));})
+   .finally(()=>{if(mounted)setChangeLoading(false);});
   return()=>{mounted=false;};
- },[active,mode,nonce]);
+ },[active,mode,changeSource,changeQuery,changeDays,changeAnchor,nonce]);
+ async function loadMoreChanges(){
+  if(!changeNextCursor||changeLoading||changeMoreLoading)return;
+  setChangeMoreLoading(true);setError('');
+  try{
+   const data=await api<EntitlementResult>(changeParams(changeNextCursor));
+   setChangeItems(previous=>[...previous,...data.items]);
+   setChangeNextCursor(data.nextCursor);
+  }catch(cause){setError(cause instanceof Error?cause.message:t('加载更多失败。','Could not load more.'));}
+  finally{setChangeMoreLoading(false);}
+ }
  async function loadMore(){
   if(!nextCursor||loading||moreLoading)return;
   setMoreLoading(true);setError('');
@@ -74,19 +106,13 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
   paid:t('永久付费额度','Permanent credits'),
   unknown:t('历史未归属','Unattributed legacy')
  })[value];
- const eventName=(kind:string)=>({
-  signup_grant:t('新人赠额','Signup grant'),generation_debit:t('AI 消耗','AI debit'),
-  generation_refund:t('失败退还','Generation refund'),generation_release:t('预留释放','Reservation release'),
-  purchase_grant:t('购买到账','Purchase grant'),purchase_reversal:t('退款撤销','Purchase reversal'),
-  admin_adjustment:t('人工调额','Manual adjustment')
- } as Record<string,string>)[kind]||kind;
  const day=(time:number)=>new Date(time).toLocaleString(language==='zh'?'zh-CN':'en-US');
  return <Card data-testid="admin-unified-usage-ledger">
   <CardHeader className="space-y-3">
    <CardTitle>{t('统一使用与权益流水','Unified usage and entitlement activity')}</CardTitle>
    <div className="flex flex-wrap gap-2" role="group" aria-label={t('流水视图','Ledger view')}>
     <Button type="button" size="sm" variant={mode==='usage'?'default':'outline'} onClick={()=>setMode('usage')}>{t('AI 生成消费','AI delivery usage')}</Button>
-    <Button type="button" size="sm" variant={mode==='changes'?'default':'outline'} onClick={()=>setMode('changes')}>{t('额度变动','Credit adjustments & grants')}</Button>
+    <Button type="button" size="sm" variant={mode==='changes'?'default':'outline'} onClick={()=>setMode('changes')}>{t('全部权益流水','All entitlement activity')}</Button>
    </div>
   </CardHeader>
   <CardContent className="space-y-4">
@@ -132,18 +158,82 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
     {!loading&&!items.length&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('当前条件下没有已确认的生成消费。','No acknowledged usage for this selection.')}</p>}
     {nextCursor&&<Button type="button" variant="outline" disabled={loading||moreLoading} onClick={()=>void loadMore()}>{moreLoading?t('加载中…','Loading…'):t('加载更多','Load more')}</Button>}
    </>:<>
-    <p className="text-xs text-muted-foreground">{t('保留原信用账本的授予、扣减、返还、调整与退款审计。订阅不作为永久额度发放，此视图不会混入订阅消费。','Original credit grants, debits, reversals, refunds and adjustments remain auditable. Subscription usage is not a permanent credit grant.')}</p>
-    {legacyLoading&&<p role="status" className="text-sm">{t("正在读取原额度流水…","Loading credit history…")}</p>}
+    <p className="text-xs text-muted-foreground">{t('合并免费、永久付费和订阅事件，包含订阅订单入账、每日额度预占、成功消耗与失败释放。订阅每日上限不算永久额度；预占和释放不等于实际扣次。默认最近30天。','Combines free, permanent and subscription order and usage events. Subscription daily allowance is not a permanent grant; reservations and releases are not actual debits. Last 30 days by default.')}</p>
+    <form className="flex flex-wrap items-end gap-2" onSubmit={event=>{event.preventDefault();setChangeQuery(changeSearch.trim());}}>
+     <label className="min-w-36 flex-1 space-y-1 text-xs">{t('权益来源','Entitlement source')}
+      <select className="block h-9 w-full rounded-md border bg-background px-2 text-sm" aria-label={t('权益来源','Entitlement source')} value={changeSource} onChange={event=>setChangeSource(event.target.value as EntitlementSource)}>
+       <option value="all">{t('全部','All')}</option>
+       <option value="subscription">{t('订阅','Subscription')}</option>
+       <option value="free">{t('免费额度','Free credits')}</option>
+       <option value="paid">{t('永久付费额度','Permanent credits')}</option>
+       <option value="mixed">{t('免费及永久混合','Mixed credits')}</option>
+       <option value="unknown">{t('未归属（零变动）','Unattributed / zero-delta')}</option>
+      </select>
+     </label>
+     <label className="min-w-24 space-y-1 text-xs">{t('时间范围','Date range')}
+      <select className="block h-9 w-full rounded-md border bg-background px-2 text-sm" value={changeDays} onChange={event=>setChangeDays(Number(event.target.value))} aria-label={t('时间范围','Date range')}>
+       <option value={30}>{t('最近30天','Last 30 days')}</option>
+       <option value={90}>{t('最近90天','Last 90 days')}</option>
+       <option value={366}>{t('最近一年','Last year')}</option>
+      </select>
+     </label>
+     <label className="min-w-48 flex-[2] space-y-1 text-xs">{t('精确用户 ID 或邮箱','Exact user ID or email')}
+      <Input aria-label={t('权益流水用户查询','Search entitlement activity user')} value={changeSearch} maxLength={120} onChange={event=>setChangeSearch(event.target.value)} placeholder={t('不填显示所有用户','Blank for all users')} />
+     </label>
+     <Button type="submit" variant="outline" disabled={changeLoading}>{t('查询','Search')}</Button>
+     <Button type="button" variant="outline" disabled={changeLoading} onClick={()=>{setChangeAnchor(Date.now());setNonce(x=>x+1);}}>{t('刷新','Refresh')}</Button>
+    </form>
     {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
-    <div className="max-h-[36rem] overflow-auto rounded-md border" role="region" tabIndex={0}>
-     <Table className="min-w-[800px]"><TableHeader><TableRow>
-      {[t('时间','Time'),t('用户','User'),t('事件','Event'),t('免费变动','Free delta'),t('永久付费变动','Paid delta'),t('原因','Reason')].map(x=><TableHead key={x}>{x}</TableHead>)}
-     </TableRow></TableHeader><TableBody>{legacyLedger.map(row=><TableRow key={row.id}>
-      <TableCell className="whitespace-nowrap text-xs">{day(row.created_at)}</TableCell><TableCell className="break-all text-xs">{row.email}</TableCell><TableCell className="text-xs">{eventName(row.kind)}</TableCell>
-      <TableCell className="tabular-nums">{row.free_delta}</TableCell><TableCell className="tabular-nums">{row.paid_delta}</TableCell><TableCell className="text-xs">{row.reason||'—'}</TableCell>
-     </TableRow>)}</TableBody></Table>
-    </div>
-    {!legacyLedger.length&&<p role="status" className="text-sm text-muted-foreground">{t('暂无额度变动。','No credit changes.')}</p>}
+    {changeLoading?<p role="status" className="text-sm">{t('正在读取全部权益流水…','Loading entitlement activity…')}</p>:
+    <div className="data-table-wrap admin-list-scroll" role="region" tabIndex={0} aria-label={t('全部权益流水记录','All entitlement activity records')}>
+     <Table className="min-w-[1200px]"><TableHeader><TableRow>
+      {[t('事件时间','Time'),t('用户','User'),t('来源','Source'),t('事件','Event'),t('免费变动','Free delta'),t('永久付费变动','Paid delta'),t('订阅日额度','Subscription daily'),t('方案 / 订单 / 原因','Plan / order / detail')].map(x=><TableHead key={x}>{x}</TableHead>)}
+     </TableRow></TableHeader><TableBody>{changeItems.map(row=>{
+      const name=({
+       signup_grant:t('新人赠额','Signup grant'),
+       generation_debit:t('AI 消耗','AI debit'),
+       generation_refund:t('失败退还','Generation refund'),
+       generation_release:t('预留释放','Reservation release'),
+       purchase_grant:t('购买到账','Purchase grant'),
+       purchase_reversal:t('退款撤销','Purchase reversal'),
+       admin_adjustment:t('人工调额','Manual adjustment'),
+       subscription_purchase:t('订阅开通入账','Subscription purchase applied'),
+       subscription_renewal:t('订阅续费入账','Subscription renewal applied'),
+       subscription_upgrade:t('订阅升级入账','Subscription upgrade applied'),
+       subscription_reserve:t('订阅额度预占','Subscription reservation'),
+       subscription_consume:t('订阅 AI 成功扣次','Subscription AI consumed'),
+       subscription_release:t('订阅失败释放预占','Subscription reservation released'),
+       subscription_refund:t('订阅退款记录','Subscription refund record')
+      } as Record<string,string>)[row.event_type]||row.event_type;
+      const category=({
+       subscription:t('订阅','Subscription'),free:t('免费额度','Free'),
+       paid:t('永久付费','Permanent'),mixed:t('混合额度','Mixed'),
+       unknown:t('未归属','Unattributed')
+      })[row.source];
+      const subscriptionValue=row.event_type==='subscription_reserve'?t('预占 1 次（未扣）','Reserved 1 (not debited)'):
+       row.event_type==='subscription_release'?t('释放预占（未扣）','Reservation released (not debited)'):
+       row.event_type==='subscription_consume'?'−1':
+       row.event_type.startsWith('subscription_')&&row.daily_limit!=null?t('每日上限 ','Daily limit ')+row.daily_limit:'—';
+      return <TableRow key={row.id}>
+       <TableCell className="whitespace-nowrap text-xs">{day(row.occurred_at)}</TableCell>
+       <TableCell className="break-all text-xs">{row.email}</TableCell>
+       <TableCell className="whitespace-nowrap text-xs">{category}</TableCell>
+       <TableCell className="text-xs">{name}</TableCell>
+       <TableCell className="tabular-nums">{row.source==='subscription'?'—':row.free_delta}</TableCell>
+       <TableCell className="tabular-nums">{row.source==='subscription'?'—':row.paid_delta}</TableCell>
+       <TableCell className="whitespace-nowrap text-xs">{subscriptionValue}</TableCell>
+       <TableCell className="max-w-[24rem] break-all text-xs">
+        {row.plan_code&&<span className="font-semibold">{row.plan_code.toUpperCase()} · </span>}
+        {row.amount_fen!=null&&<span>{t('订单金额 ¥','Order ¥')}{(row.amount_fen/100).toFixed(2)} · </span>}
+        {row.order_status&&<span>{row.order_status} · </span>}
+        {row.reason&&<span>{row.reason} · </span>}
+        <span className="font-mono text-muted-foreground">{row.reference_id||'—'}</span>
+       </TableCell>
+      </TableRow>;
+     })}</TableBody></Table>
+    </div>}
+    {!changeLoading&&!changeItems.length&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('当前条件下没有权益流水记录。','No entitlement activity for this selection.')}</p>}
+    {changeNextCursor&&<Button type="button" variant="outline" disabled={changeLoading||changeMoreLoading} onClick={()=>void loadMoreChanges()}>{changeMoreLoading?t('加载中…','Loading…'):t('加载更多','Load more')}</Button>}
    </>}
   </CardContent>
  </Card>;
