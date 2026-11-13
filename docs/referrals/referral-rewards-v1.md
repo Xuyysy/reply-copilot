@@ -27,7 +27,7 @@ The existing credit_batches.source_kind and credit_ledger.kind CHECK enums have 
 
 ## Rollout gate
 
-1. Only validate source and the SQL migration locally. Migration file api/migrations/0026_referral_rewards_v1.sql deliberately reserves 0025 for the separate Xiaodou proposal.
+1. Only validate source and the SQL migration locally. Migration proposal api/sql-proposals/0026_referral_rewards_v1.sql deliberately reserves 0025 for the separate Xiaodou proposal.
 2. After **separate explicit approval**, apply the exact SQL hash to an isolated/Staging D1. The migration inserts system_settings.referrals_enabled=0, so it is OFF by default.
 3. Independently authorize Staging Worker/Pages deployment and signed-in/browser, extension ACK, negative fraud, replay and rollback acceptance.
 4. Separately authorize Production D1 protected backup/recovery and 0026 application, compatible exact-SHA Worker/Pages release, then explicitly enabling referrals_enabled=1.

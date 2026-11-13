@@ -92,8 +92,6 @@ export async function register(request: Request,env: Env,diagnostics?: Registrat
   const blocked = (env.DISPOSABLE_EMAIL_DOMAINS || "").split(",").map(v=>v.trim().toLowerCase()).filter(Boolean);
   if (blocked.includes(email.split("@")[1])) throw new ApiFailure(400,"EMAIL_NOT_ALLOWED","该邮箱暂不支持注册，请使用常用邮箱。");
   const now = nowMs();
-  const referralEnabled=await referralsEnabled(env);
-  const referralCode=referralEnabled?await eligibleReferralCode(env,body.referralCode):null;
   if (diagnostics) diagnostics.stage = "rate_limit";
   await rate(request,env,"register",email,now);
   if (diagnostics) diagnostics.stage = "registration_settings";
@@ -104,6 +102,8 @@ export async function register(request: Request,env: Env,diagnostics?: Registrat
   if (diagnostics) diagnostics.stage = "account_lookup";
   const taken = await env.DB.prepare(REGISTRATION_IDENTITY_SQL).bind(email,username).first();
   if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:false}:{})},200,env,request);
+  const referralEnabled=await referralsEnabled(env);
+  const referralCode=referralEnabled?await eligibleReferralCode(env,body.referralCode):null;
   if (diagnostics) diagnostics.stage = "registration_code_hash";
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
   if (diagnostics) diagnostics.stage = "password_hash";

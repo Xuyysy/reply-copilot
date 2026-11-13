@@ -4,7 +4,7 @@ import {readFileSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
 import {normalizeReferralCode,referralAwardPlan,REFERRAL_BONUS,REFERRAL_MONTHLY_LIMIT} from "../api/src/referral-award-plan.mjs";
 
-const migration=readFileSync(new URL("../api/migrations/0026_referral_rewards_v1.sql",import.meta.url),"utf8");
+const migration=readFileSync(new URL("../api/sql-proposals/0026_referral_rewards_v1.sql",import.meta.url),"utf8");
 const now=1_790_000_000_000;
 function setup({delivered=true,deviceSame=false,testInvitee=false,testInviter=false,adminInviter=false,signupGranted=true}={}){
  const db=new DatabaseSync(":memory:");

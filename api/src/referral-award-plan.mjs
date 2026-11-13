@@ -39,7 +39,7 @@ export function referralAwardPlan({inviteeId,nonce,now}) {
   const eligible="FROM referral_invites r WHERE r.invited_user_id=? AND r.status='rewarded' AND r.reward_claim=?";
   return [
    make("INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,granted_at,history_confidence,status)"+
-     " SELECT ?,r."+beneficiary+",'free','admin_adjustment',50,50,? "+eligible,ref,now,inviteeId,nonce),
+     " SELECT ?,r."+beneficiary+",'free','admin_adjustment',50,50,?,'tracked','active' "+eligible,ref,now,inviteeId,nonce),
    make("UPDATE credit_accounts SET free_balance=free_balance+50,version=version+1,updated_at=?"+
      " WHERE user_id=(SELECT "+beneficiary+" FROM referral_invites WHERE invited_user_id=? AND reward_claim=?)"+
      " AND EXISTS(SELECT 1 FROM credit_batches WHERE id=? AND remaining_credits=50 AND source_kind='admin_adjustment')",
