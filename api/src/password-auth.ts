@@ -1,5 +1,6 @@
 import {LOGIN_USER_SQL,REGISTRATION_IDENTITY_SQL} from "./admin-read-queries.js";
 import {futureCampaignStatements} from "./campaigns";
+import { eligibleReferralCode, referralRegistrationStatement, referralsEnabled } from "./referrals";
 import type { Env } from "./types";
 import { ApiFailure, type RegistrationDiagnostics } from "./types";
 import { sendCode, takeRate } from "./auth";
@@ -101,15 +102,22 @@ export async function register(request: Request,env: Env,diagnostics?: Registrat
   if (diagnostics) diagnostics.stage = "account_lookup";
   const taken = await env.DB.prepare(REGISTRATION_IDENTITY_SQL).bind(email,username).first();
   if (taken) return response({ok:true,message:"如果信息可用于注册，验证码已发送。",...(localFeedback?{codeLogged:false}:{})},200,env,request);
+  const referralEnabled=await referralsEnabled(env);
+  const referralCode=referralEnabled?await eligibleReferralCode(env,body.referralCode):null;
   if (diagnostics) diagnostics.stage = "registration_code_hash";
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
   if (diagnostics) diagnostics.stage = "password_hash";
   const passwordHash = await hashPassword(env,password);
   if (diagnostics) diagnostics.stage = "pending_registration_write";
   let inserted;
-  try { inserted = await env.DB.prepare(`INSERT INTO pending_registrations(email,username,password_hash,code_hash,created_at,expires_at,sent_at,attempts) VALUES(?,?,?,?,?,?,?,0)
-    ON CONFLICT(email) DO UPDATE SET username=excluded.username,password_hash=excluded.password_hash,code_hash=excluded.code_hash,created_at=excluded.created_at,expires_at=excluded.expires_at,sent_at=excluded.sent_at,attempts=0
-    WHERE pending_registrations.sent_at<=?`).bind(email,username,passwordHash,codeHash,now,now+600_000,now,now-60_000).run(); }
+  const referralColumn=referralEnabled?",referral_code":"";
+  const referralValue=referralEnabled?",?":"";
+  const immutableReferral=referralEnabled?",referral_code=COALESCE(pending_registrations.referral_code,excluded.referral_code)":"";
+  const registerSql="INSERT INTO pending_registrations(email,username,password_hash,code_hash,created_at,expires_at,sent_at,attempts"+referralColumn+") VALUES(?,?,?,?,?,?,?,0"+referralValue+") "+
+    "ON CONFLICT(email) DO UPDATE SET username=excluded.username,password_hash=excluded.password_hash,code_hash=excluded.code_hash,created_at=excluded.created_at,expires_at=excluded.expires_at,sent_at=excluded.sent_at,attempts=0"+
+    immutableReferral+" WHERE pending_registrations.sent_at<=?";
+  const registerValues=[email,username,passwordHash,codeHash,now,now+600_000,now,...(referralEnabled?[referralCode]:[]),now-60_000];
+  try { inserted=await env.DB.prepare(registerSql).bind(...registerValues).run(); }
   catch (error) {
     if (isPendingUsernameConflict(error)) throw new ApiFailure(409,"USERNAME_UNAVAILABLE","用户名暂不可用，请换一个。");
     throw error;
@@ -125,7 +133,8 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
   requireWebOrigin(request,env); const body = await jsonBody(request,1024);
   const email = emailFrom(body.email); const code = codeFrom(body.code); const now = nowMs();
   await rate(request,env,"verify-register",email,now);
-  const row = await env.DB.prepare("SELECT username,password_hash,code_hash,expires_at,attempts FROM pending_registrations WHERE email=?").bind(email).first<{username:string;password_hash:string;code_hash:string;expires_at:number;attempts:number}>();
+  const referralEnabled=await referralsEnabled(env);
+  const row = await env.DB.prepare("SELECT username,password_hash,code_hash,expires_at,attempts"+(referralEnabled?",referral_code":"")+" FROM pending_registrations WHERE email=?").bind(email).first<{username:string;password_hash:string;code_hash:string;expires_at:number;attempts:number;referral_code?:string|null}>();
   if (!row || row.expires_at<=now || row.attempts>=5 || row.code_hash!==await hmac(env,`register:${email}:${code}`)) {
     await env.DB.prepare("UPDATE pending_registrations SET attempts=attempts+1 WHERE email=? AND attempts<5").bind(email).run();
     throw new ApiFailure(400,"INVALID_CODE","验证码无效或已过期。");
@@ -144,6 +153,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
     env.DB.prepare("INSERT INTO signup_benefit_claims(user_id,grant_amount,status,created_at) VALUES(?,?,'pending',?)").bind(userId,grant,now),
     session.statement,
     ...futureGrants,
+    ...(referralEnabled&&row.referral_code?[referralRegistrationStatement(env,userId,row.referral_code,now)]:[]),
     env.DB.prepare("DELETE FROM pending_registrations WHERE email=? AND code_hash=?").bind(email,row.code_hash),
   ]); } catch { throw new ApiFailure(409,"REGISTRATION_CONFLICT","注册信息已被使用，请重新注册或登录。"); }
   return response({ok:true},200,env,request,{"Set-Cookie":sessionCookie(session.token,SESSION_MS/1000)});

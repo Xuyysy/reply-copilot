@@ -9,6 +9,7 @@ import {adminUnifiedUsage} from "./admin-unified-usage";
 import {adminCommerceOrders,adminCommerceSummary,adminCommerceUser} from "./admin-commerce-v2";
 import {adminOperationsInsights} from "./admin-operations-insights";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
+import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
 import {adminReauth,siteContent,updateContent,contentHistory,restoreContent} from "./admin-operations";
@@ -137,6 +138,9 @@ export default {
       const deliveryAck=path.match(/^\/v1\/ai\/requests\/([0-9a-f-]{36})\/delivered$/i);
       if(request.method==="POST"&&deliveryAck)return await acknowledgeDelivery(request,env,deliveryAck[1]);
       if (request.method === "POST" && path === "/v1/feedback") return await feedback(request, env);
+      if (request.method === "GET" && path === "/v1/referrals/me") return await myReferrals(request,env);
+      if (request.method === "POST" && path === "/v1/referrals/link") return await createReferralLink(request,env);
+      if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await filteredUsers(request,env);
       if (request.method === "GET" && path === "/v1/admin/packages") return await adminPackages(request,env);
