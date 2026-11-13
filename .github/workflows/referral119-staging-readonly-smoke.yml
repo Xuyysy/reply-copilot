@@ -1,0 +1,34 @@
+name: Staging referral PR119 public-route smoke (read-only)
+
+on:
+  push:
+    branches: [chatgpt/referral119-staging-worker-overlay-20261113]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: referral119-staging-route-smoke
+  cancel-in-progress: true
+
+jobs:
+  staging-public-routes:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Check Staging Worker /health and authenticated referral routes without login or AI calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin='https://api-staging.x-reply-helper.top'
+          echo 'Staging only, unauthenticated GET checks. No D1 SQL, registrations, payment, or AI generation.'
+          health="$(curl --max-time 25 --retry 2 --retry-delay 2 --silent --show-error --output "$RUNNER_TEMP/ref119-health.json" --write-out '%{http_code}' "$origin/health")"
+          echo "/health HTTP $health"
+          test "$health" = '200'
+          node -e "const j=require(process.argv[1]); if(typeof j!=='object'||j===null) process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-health.json")"
+          referral="$(curl --max-time 25 --retry 2 --retry-delay 2 --silent --show-error --output "$RUNNER_TEMP/ref119-noauth.json" --write-out '%{http_code}' "$origin/v1/referrals/me")"
+          echo "/v1/referrals/me (no auth) HTTP $referral"
+          test "$referral" = '401'
+          node -e "const x=require(process.argv[1]); if(x.code!=='AUTH_REQUIRED')process.exit(1);" "$(cat "$RUNNER_TEMP/ref119-noauth.json")"
+          echo 'PASS: Staging Worker serves referral route and rejects unauthenticated requests.'
