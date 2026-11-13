@@ -1,0 +1,35 @@
+name: PR119 Staging controlled referral bonus live QA
+on:
+  push:
+    branches: [chatgpt/referral119-staging-controlled-qa-20261113]
+permissions:
+  contents: read
+concurrency:
+  group: referral119-staging-qa
+  cancel-in-progress: false
+jobs:
+  controlled-referrals:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/chatgpt/referral119-staging-controlled-qa-20261113' &&
+      github.actor == 'Xuyysy' &&
+      github.event.head_commit.message == 'ci-lite: PR119 Staging synthetic referral QA one-time'
+    name: Staging-only synthetic bonus, then freeze test accounts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate Staging feature live without generating AI or real emails
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/referral119-staging-live-qa.mjs
