@@ -1,4 +1,7 @@
--- V1 referrals uses 0026 (0025 remains reserved for the pending Xiaodou SQL proposal).
+-- V1 referrals is proposal 0027. Proposal 0026 is reserved for Admin V2 read indexes.
+-- Staging D1 recorded 0025_subscription_xiaodou_rsa2.sql as applied as of 2026-11-13;
+-- this does not assert Production D1 status or authorize any D1 operations.
+-- Keep this proposal outside api/migrations until separate explicit operator approval.
 -- Requires separately authorized D1 application; no auto-backfill of old users.
 ALTER TABLE pending_registrations ADD COLUMN referral_code TEXT;
 CREATE TABLE referral_codes (

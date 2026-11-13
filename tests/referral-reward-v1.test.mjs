@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {readFileSync} from "node:fs";
+import {readFileSync,existsSync} from "node:fs";
 import {DatabaseSync} from "node:sqlite";
 import {normalizeReferralCode,referralAwardPlan,REFERRAL_BONUS,REFERRAL_MONTHLY_LIMIT} from "../api/src/referral-award-plan.mjs";
 
-const migration=readFileSync(new URL("../api/sql-proposals/0026_referral_rewards_v1.sql",import.meta.url),"utf8");
+const migration=readFileSync(new URL("../api/sql-proposals/0027_referral_rewards_v1.sql",import.meta.url),"utf8");
 const now=1_790_000_000_000;
 function setup({delivered=true,deviceSame=false,testInvitee=false,testInviter=false,adminInviter=false,signupGranted=true}={}){
  const db=new DatabaseSync(":memory:");
@@ -53,6 +53,10 @@ function verifyNoGrant(db){
  assert.equal(get(db,"SELECT free_balance FROM credit_accounts WHERE user_id='invitee'").free_balance,200);
 }
 
+test("referral SQL remains a manual proposal and 0026 is owned by Admin V2",()=>{
+ assert.equal(existsSync(new URL("../api/migrations/0027_referral_rewards_v1.sql",import.meta.url)),false);
+ assert.equal(existsSync(new URL("../api/sql-proposals/0026_admin_v2_read_indexes.sql",import.meta.url)),true);
+});
 test("V1 migration is schema-only, gated OFF, historical credit types unchanged",()=>{
  const db=setup();
  assert.equal(get(db,"SELECT value FROM system_settings WHERE key='referrals_enabled'").value,"0");

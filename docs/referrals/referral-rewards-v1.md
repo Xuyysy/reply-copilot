@@ -25,9 +25,17 @@ The existing credit_batches.source_kind and credit_ledger.kind CHECK enums have 
 - User: My Account referral card with link generation and copying, registered/activated/bonus stats.
 - Admin: Users -> Referral rewards, real-only metrics, invitee/inviter status, reward audit.
 
+## Migration number ownership and live Staging preflight (2026-11-13)
+
+- `0025_subscription_xiaodou_rsa2.sql` is recorded as applied on the isolated Staging D1 `reply-copilot-staging` (UUID `cd44bb44-b525-42c4-b286-2cc84dae7fdb`). Do not replay it. Production state has **not** been inferred or authorized.
+- Existing `api/sql-proposals/0026_admin_v2_read_indexes.sql` retains the 0026 proposal slot. Referral rewards is instead `api/sql-proposals/0027_referral_rewards_v1.sql`; both require separate operator review and migration order reconciliation before promotion into `api/migrations`.
+- Targeted **read-only** Staging schema inspection found the required user, pending registration, signup/device claim, credit account, batch, ledger, system setting, and operation assertion columns. All referral-specific tables and the `referrals_enabled` setting are currently absent. This is compatibility preflight **not** a live migration test.
+- Staging Pages deployment `d1dec995-fbf8-4e96-af07-489f187e520c` comes from source `e2a35723978f019d6443f1ed4c8e8034372a551a`; Staging Worker deployment `f125c2d9-57a6-43e8-b412-dcc3d140b160` serves Worker version `12657d15-6a30-4451-bc59-7a27b5771031` from PR #116 source `0e5a69d15e3816fddc9cc09ce940339c650f6964`. They are **different** baselines; do not deploy this PR's prebuilt Pages/Worker artifact directly over them.
+- Before any Staging deployment, prepare separately verified additive Worker and Pages overlays preserving current Prompt V3, Admin V2, and Staging-only site functionality. Keep `referrals_enabled=0` after any separately authorized migration until separately approved activation. No AI calls, payment actions, user grants or Production activity under this preflight.
+
 ## Rollout gate
 
-1. Only validate source and the SQL migration locally. Migration proposal api/sql-proposals/0026_referral_rewards_v1.sql deliberately reserves 0025 for the separate Xiaodou proposal.
+1. Only validate source and the SQL migration locally. Migration proposal api/sql-proposals/0027_referral_rewards_v1.sql deliberately reserves 0025 for the separate Xiaodou proposal.
 2. After **separate explicit approval**, apply the exact SQL hash to an isolated/Staging D1. The migration inserts system_settings.referrals_enabled=0, so it is OFF by default.
 3. Independently authorize Staging Worker/Pages deployment and signed-in/browser, extension ACK, negative fraud, replay and rollback acceptance.
 4. Separately authorize Production D1 protected backup/recovery and 0026 application, compatible exact-SHA Worker/Pages release, then explicitly enabling referrals_enabled=1.
