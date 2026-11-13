@@ -1,0 +1,177 @@
+name: One-time owner-approved PR119 Production Referral Pages only
+
+on:
+  push:
+    branches: [chatgpt/production-referrals-pages-119-once-20261113]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-production-release
+  cancel-in-progress: false
+
+jobs:
+  pages-only:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/chatgpt/production-referrals-pages-119-once-20261113' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'release(production): PR119 approved immutable referral Pages only'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment:
+      name: production
+      url: https://app.x-reply-helper.top
+    env:
+      SOURCE_SHA: 'bb34e3d7a15f88a648bb31dc4cddf0c817e2032e'
+      CI_RUN_ID: '43427424396'
+      BUILD_RUN_ID: '43427424602'
+      TARGET: pages
+      RELEASE_MODE: deploy
+      EXPECTED_CURRENT: 'c3c41a43-1abf-402f-bce7-80ac98ba92cd'
+      EXPECTED_DEPLOYMENT: ''
+      CONFIRMATION: DEPLOY_PAGES_TO_PRODUCTION
+      API_ORIGIN_TAKEOVER: deny
+      API_ORIGIN_TAKEOVER_CONFIRMATION: ''
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify immutable release/production source and independent CI/build
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$SOURCE_SHA" = 'bb34e3d7a15f88a648bb31dc4cddf0c817e2032e'
+          test "$CI_RUN_ID" = '43427424396'
+          test "$BUILD_RUN_ID" = '43427424602'
+          test "$(git rev-parse HEAD^)" = '0acd7e7883ad063855f0aa34c985c1c078389fea'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release/production" --jq '.object.sha')" = "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/pr119-prod-ci.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID" > "$RUNNER_TEMP/pr119-prod-build.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo and
+            .head_branch == "release/production" and .event == "push" and
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/pr119-prod-ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo and
+            .head_branch == "release/production" and .event == "push" and
+            .status == "completed" and .conclusion == "success" and
+            .path == ".github/workflows/production-build.yml"
+          ' "$RUNNER_TEMP/pr119-prod-build.json"
+          gh api "repos/$GITHUB_REPOSITORY/compare/95d2a46a24bbe732fed48d015ff8a97ba6a735ed...$SOURCE_SHA" > "$RUNNER_TEMP/pr119-prod-diff.json"
+          jq -e --argjson expected '["api/sql-proposals/0027_referral_rewards_v1.sql","api/src/index.ts","api/src/password-auth.ts","api/src/quota.ts","api/src/referral-award-plan.d.mts","api/src/referral-award-plan.mjs","api/src/referrals.ts","docs/referrals/referral-rewards-v1.md","tests/referral-reward-v1.test.mjs","web/src/components/account/AccountDashboard.tsx","web/src/components/account/ReferralInviteCard.tsx","web/src/components/admin/AdminDashboard.tsx","web/src/components/admin/ReferralAdminPanel.tsx","web/src/components/auth/AuthPanel.tsx","web/tests/pages.test.mjs","web/tests/referral-interfaces.test.mjs"]' '
+            .status == "ahead" and .behind_by == 0 and
+            ([.files[].filename]|sort) == ($expected|sort)
+          ' "$RUNNER_TEMP/pr119-prod-diff.json"
+          echo 'PASS: PR119 exact approved 16-file scope, CI, build and release identity.'
+
+      - name: Confirm source checkout is trusted main plus only this one-shot workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only HEAD^ HEAD)" = '.github/workflows/one-time-production-referrals-pages-119.yml'
+          python3 -m unittest discover -s tests -p 'test_production_api_origin_guard.py' -v
+
+      - name: Download independently built immutable Production bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: production-build-bb34e3d7a15f88a648bb31dc4cddf0c817e2032e
+          run-id: 43427424602
+          github-token: ${{ github.token }}
+          path: release
+
+      - name: Verify every file SHA256 and business-safe referral UI assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify-production-artifact.py release "$SOURCE_SHA"
+          test -f release/pages/login/index.html
+          test -f release/pages/account/index.html
+          test -f release/pages/admin/index.html
+          grep -RFq 'referral-signup-notice' release/pages
+          grep -RFq 'data-registration-email-tip' release/pages
+          grep -RFq 'account-referral-rewards' release/pages
+          echo 'PASS: immutable Pages bundle includes referral signup, 200+50 copy and inbox-tip UI.'
+
+      - name: Production Pages release preflight; guard paid Worker and Staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python3 scripts/guard-production-release.py before
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          authorization="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS --retry 3 -H "$authorization" "$root/workers/scripts/reply-copilot-api-production/deployments" > "$RUNNER_TEMP/pr119-prod-worker.json"
+          jq -e '.success and .result.deployments[0].id=="aedcee48-2f23-4693-b92d-43ed85d017b2" and
+            (.result.deployments[0].versions | any(.version_id=="793ff03e-9df5-43af-9a2d-a1db02c58fa4" and .percentage==100))' "$RUNNER_TEMP/pr119-prod-worker.json"
+          curl -fsS --retry 3 -H "$authorization" "$root/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/pr119-staging-worker.json"
+          jq -e '.success and .result.deployments[0].id=="1d5e3c9d-1e0b-4bb3-876d-40b51a295be9"' "$RUNNER_TEMP/pr119-staging-worker.json"
+          curl -fsS --retry 3 -H "$authorization" "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pr119-staging-pages.json"
+          jq -e '.success and .result[0].id=="e3d8c195-69a1-4c08-8f3f-2709aec9c30f"' "$RUNNER_TEMP/pr119-staging-pages.json"
+          echo 'PASS: current Production Pages, 100% patched Worker and independent Staging pinned.'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install isolated pinned Wrangler
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/pr119-production-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+          "$RUNNER_TEMP/pr119-production-tools/node_modules/.bin/wrangler" --version
+
+      - name: Deploy ONLY immutable Production Pages (NO Worker / D1 / payment)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/guard-production-release.py before
+          "$RUNNER_TEMP/pr119-production-tools/node_modules/.bin/wrangler" pages deploy release/pages \
+            --project-name x-reply-helper-production --branch main \
+            --commit-hash "$SOURCE_SHA" \
+            --commit-message "Owner-approved PR119 Production Referral Pages $SOURCE_SHA"
+
+      - name: Verify Pages canonical deployment and Worker billing bindings unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/guard-production-release.py after
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          authorization="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$authorization" "$root/workers/scripts/reply-copilot-api-production/deployments" |
+            jq -e '.success and .result.deployments[0].id=="aedcee48-2f23-4693-b92d-43ed85d017b2"'
+          curl -fsS -H "$authorization" "$root/workers/scripts/reply-copilot-api-staging/deployments" |
+            jq -e '.success and .result.deployments[0].id=="1d5e3c9d-1e0b-4bb3-876d-40b51a295be9"'
+          curl -fsS -H "$authorization" "$root/pages/projects/x-reply-helper-staging/deployments?per_page=1" |
+            jq -e '.success and .result[0].id=="e3d8c195-69a1-4c08-8f3f-2709aec9c30f"'
+          for n in 1 2 3 4 5 6 7 8; do
+            if curl -fsSL --max-time 15 https://app.x-reply-helper.top/login/ > /dev/null &&
+               curl -fsSL --max-time 15 https://app.x-reply-helper.top/account/ > /dev/null; then
+              echo 'PASS: Production invite signup and account Pages reachable.'
+              exit 0
+            fi
+            sleep 4
+          done
+          echo 'Production user login/account Pages health verification failed.' >&2
+          exit 1
+
+      - name: Record immutable Production referral Pages release
+        if: success()
+        run: |
+          echo '### Owner-approved PR119 Production Pages released' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production CI: $CI_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production build: $BUILD_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Worker, D1, payment bindings, Staging and Chrome Store unchanged by this workflow.' >> "$GITHUB_STEP_SUMMARY"
