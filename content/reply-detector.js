@@ -17,9 +17,16 @@
     }
     return false;
   }
-  function findReplyControl(target) {
-    const control = target?.closest?.('button,[role="button"],a');
-    return isReplyControl(control) ? control : null;
+  function findReplyControl(targetOrEvent) {
+    // Bilingual translators and browser translation can retarget DOM events.
+    // Accept only the same verified X Reply controls along the composed path.
+    const path=typeof targetOrEvent?.composedPath==="function"
+      ? targetOrEvent.composedPath():[targetOrEvent];
+    for(const node of path) {
+      const control=node?.closest?.('button,[role="button"],a');
+      if(isReplyControl(control))return control;
+    }
+    return null;
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.replyDetector = { isReplyControl, findReplyControl };

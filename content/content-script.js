@@ -15,7 +15,6 @@
     void safeSend({type:"REPLY_COPILOT_PERFORMANCE_SAMPLE",sample});
   }
   let contextAlive = true;
-  let nativeInputHealthy = true;
   let bindingTimer = null;
   let settingsRevision = 0;
   let pendingActivation = null;
@@ -364,7 +363,6 @@
       current.assistant?.setStatus("AI 建议本身含有重复文字，请换一种表达；这条未填入回复框。");
       return;
     }
-    if (!nativeInputHealthy) { current.assistant?.setStatus("本页面的自动填入已停止，可复制建议后粘贴。"); return; }
     if (current.initialComposerText || current.userTouchedComposer || api.composerAdapter.hasContent(current.editor)) {
       current.assistant?.setStatus("回复框已有内容，已保留原文；可以复制建议后自行调整。");
       return;
@@ -387,8 +385,9 @@
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
     if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
-      nativeInputHealthy = false;
-      current.assistant?.setStatus("X 回复框显示与候选不一致。请关闭这个草稿并刷新 X 后再试；当前建议可复制。");
+      // A translator can mutate one editor. Fence THIS request, not all future posts.
+      // insertOnce prevents duplicate insertion for the same requestId.
+      current.assistant?.setStatus("本条回复框与建议文字不一致，可复制建议；下一条帖子可继续尝试。");
       return;
     }
     current.trace?.mark("editor_verified");
@@ -633,7 +632,7 @@
       if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
-    const control=api.replyDetector.findReplyControl(event.target);
+    const control=api.replyDetector.findReplyControl(event);
     if (recoveryRequired) recoverAfterQuiescence();
     // X's composer has its own Reply/submit controls, but a media viewer
     // may ALSO be a dialog containing a genuine post Reply button.
@@ -656,7 +655,11 @@
     if (recoveryRequired && control) {pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
-      if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
+      // Translation overlays and unrelated page clicks must not poison the
+      // pending reply. A second real composer action still cancels safely.
+      if(active&&!active.cancelled&&!active.editor&&
+         event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]'))
+        rejectAssociation('competing_activation');
       return;
     }
     if (active&&!active.cancelled) {
@@ -673,7 +676,7 @@
   function onDocumentClick(event) {
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
-    const control=api.replyDetector.findReplyControl(event.target);
+    const control=api.replyDetector.findReplyControl(event);
     if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
@@ -690,7 +693,10 @@
   }
   function refreshAssociation(){active?.refreshAssociation?.();}
   function onBeforeInput(event) {
-    if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
+    // Only genuine X reply-composer typing can stop editor acquisition.
+    const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    if(event.isTrusted&&editor?.closest?.('[role="dialog"]')&&active&&!active.cancelled&&!active.editor)
+      rejectAssociation('user_input_before_binding');
   }
   function setMomentumEntry(show) {
     if (!contextAlive) return;
