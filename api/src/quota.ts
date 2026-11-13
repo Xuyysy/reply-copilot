@@ -6,6 +6,7 @@ import { sessionFor, takeRate } from "./auth";
 import { response } from "./http";
 import {subscriptionAccount,subscriptionsEnabled} from "./subscription-account";
 import {reserveSubscribedGeneration,confirmSubscribedDelivery,failSubscribedGeneration,cleanupSubscribedReservations,abandonStaleSubscribedGeneration} from "./subscription-generation";
+import { bestEffortReferralAward } from "./referrals";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
 export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string };
@@ -229,13 +230,14 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
   if(session.kind!=="extension")throw new ApiFailure(403,"FORBIDDEN","仅绑定的插件可以确认回复已接收。");
   const userId=session.user_id,now=nowMs(),operationId=uuid();
   const state=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
-  if(state?.status==="succeeded"&&state.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+  if(state?.status==="succeeded"&&state.delivery_confirmation_id){await bestEffortReferralAward(env,userId);return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);}
   if(subscriptionsEnabled(env)){
-    if(await confirmSubscribedDelivery(env,userId,requestId,now))
+    if(await confirmSubscribedDelivery(env,userId,requestId,now)){
+      await bestEffortReferralAward(env,userId);
       return response({ok:true,alreadyConfirmed:false,requestId,subscription:await subscriptionAccount(env,userId)},200,env,request);
+    }
     const after=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
-    if(after?.status==='succeeded'&&after.delivery_confirmation_id)
-      return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+    if(after?.status==='succeeded'&&after.delivery_confirmation_id){await bestEffortReferralAward(env,userId);return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);}
   }
   const allocation=await env.DB.prepare("SELECT credit_batch_id FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='reserved'").bind(userId,requestId).first<{credit_batch_id:string}>();
   if(!allocation)throw new ApiFailure(409,"DELIVERY_NOT_AVAILABLE","这条回复无法确认或已过期，请重新生成。");
@@ -266,10 +268,11 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
     ]);
   } catch {
     const current=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
-    if(current?.status==="succeeded"&&current.delivery_confirmation_id)return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);
+    if(current?.status==="succeeded"&&current.delivery_confirmation_id){await bestEffortReferralAward(env,userId);return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);}
     throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   }
   if(batch[5].meta.changes!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
+  await bestEffortReferralAward(env,userId);
   return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId)},200,env,request);
 }
 
