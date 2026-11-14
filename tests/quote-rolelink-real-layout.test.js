@@ -145,7 +145,8 @@ test("captioned quote unverified modal text waits for target identity instead of
  const s=modalOfQuoted(a,p,{includeParent:false,includeCard:false,unverifiedText:"Intermediate X placeholder"});
  assert.equal(s.facts.editors[0].contextStatusId,null);
  assert.equal(s.facts.editors[0].contextMatches,null);
- assert.equal(s.facts.editors[0].contextDetail,"awaiting_parent_or_original_text");
+ assert.equal(p.hasCapturedQuote,true);
+ assert.equal(s.facts.editors[0].contextDetail,"awaiting_captioned_quote_parent");
  assert.equal(s.result.state,"waiting");
 });
 test("captioned quote rejects explicit wrong parent status even if modal text is loading",()=>{
