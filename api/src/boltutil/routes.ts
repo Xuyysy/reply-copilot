@@ -131,6 +131,12 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
   if(existing){
     if(existing.network!==network||existing.product_type!==productType)
       throw new ApiFailure(409,"BOLTUTIL_IDEMPOTENCY_CONFLICT","原订单已绑定另一条网络或商品，请核对原单。");
+    const matched=productType==="credits"
+      ? await env.DB.prepare("SELECT 1 FROM recharge_orders WHERE id=? AND user_id=? AND package_id=?")
+          .bind(existing.credit_order_id,user.user_id,sku).first()
+      : await env.DB.prepare("SELECT 1 FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id WHERE o.id=? AND o.user_id=? AND v.plan_code=? AND COALESCE((SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id),'')=?")
+          .bind(existing.subscription_order_id,user.user_id,sku,quoteId??"").first();
+    if(!matched)throw new ApiFailure(409,"BOLTUTIL_IDEMPOTENCY_CONFLICT","原订单与本次商品或报价不一致。");
     return response({order:snapshot(existing),resumed:true},200,env,request);
   }
   const now=nowMs();
@@ -140,8 +146,15 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
   let baseFen:number,priceCents=0,credits=0,packageName="",planVersion="";
   let subKind:"purchase"|"renewal"|"upgrade"="purchase",periodId:string|null=null;
   if(productType==="credits"){
+    const unresolved=await env.DB.prepare("SELECT 1 FROM boltutil_orders b JOIN recharge_orders o ON o.id=b.credit_order_id WHERE b.user_id=? AND o.package_id=? AND b.status IN ('creating','pending','unknown','manual_review') LIMIT 1")
+      .bind(user.user_id,sku).first();
+    if(unresolved)throw new ApiFailure(409,"BOLTUTIL_UNRESOLVED_ORDER","该额度包已有未完成的 USDT 订单，请先查看原单。");
     const pkg=await env.DB.prepare("SELECT id,name_zh,credits,price_cents,promo_price_cents,currency,price_cny_fen,settlement_mode,exchange_rate_micros,fee_rate_bps FROM recharge_packages WHERE id=? AND active=1")
-      .bind(sku).first<Record<string,any>>();
+      .bind(sku).first<{
+        id:string;name_zh:string;credits:number;price_cents:number;
+        promo_price_cents:number|null;currency:string;price_cny_fen:number|null;
+        settlement_mode:string|null;exchange_rate_micros:number|null;fee_rate_bps:number|null;
+      }>();
     if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","额度包已下架。");
     const price=projectMk99Pricing(pkg);
     baseFen=price.totalPaymentFen;priceCents=pkg.promo_price_cents??pkg.price_cents;
@@ -206,7 +219,7 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
        typeof pay.rawAmount!=="string"||!/^(0|[1-9][0-9]*)$/.test(pay.rawAmount)||
        typeof provider.checkoutUrl!=="string"||
        !/^https:\/\/([a-z0-9-]+\.)*boltutil\.com\//i.test(provider.checkoutUrl)||
-       !time||!Number.isSafeInteger(time.expireTimestamp)||time.expireTimestamp<=now)
+       !time||typeof time.expireTimestamp!=="number"||!Number.isSafeInteger(time.expireTimestamp)||time.expireTimestamp<=now)
       throw new Error("untrusted create reply");
     const payable=decimalMicros(pay.amount);
     if(payable<quoted||pay.rawAmount!==tokenRawUnits(payable,network).toString())

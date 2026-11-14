@@ -38,9 +38,17 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
   const order=await localOrder(env,externalId);
   if(!order)throw new ApiFailure(404,"BOLTUTIL_ORDER_NOT_FOUND","订单不存在。");
   if(order.status==="paid"&&order.applied_at!==null){
-    if(callback&&(callback.txHash!==order.tx_hash||callback.network!==order.network))
+    if(callback&&(String(callback.txHash).toLowerCase()!==order.tx_hash||callback.network!==order.network))
       throw new ApiFailure(409,"BOLTUTIL_TX_CONFLICT","付款证据不一致。");
     return;
+  }
+  if(order.payable_usdt_micros===null||order.receiving_address===null||order.payable_token_raw===null)
+    throw new ApiFailure(503,"BOLTUTIL_SNAPSHOT_UNREADY","原始收银台快照尚未可靠保存，请保留原单重试查单。");
+  const activeUser=await env.DB.prepare("SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL")
+    .bind(order.user_id).first();
+  if(!activeUser){
+    await failReview(env,order,nowMs());
+    throw new ApiFailure(409,"BOLTUTIL_ACCOUNT_HELD","账户无法接受新权益，已进入人工复核。");
   }
   if(order.status==="manual_review"||order.status==="closed")
     throw new ApiFailure(409,"BOLTUTIL_PAYMENT_REVIEW","此订单需要人工核对。");
@@ -81,7 +89,7 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
         Number(trusted.amountMicros),order.network,trusted.address,trusted.txHash,externalId,order.network,trusted.txHash)
   ];
   // Use explicit paid proof in every write; no fiat payment_transactions rows are created.
-  const paidProof="EXISTS(SELECT 1 FROM boltutil_orders b JOIN boltutil_payment_events e ON e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash WHERE b.id=? AND b.status='paid' AND b.tx_hash=? AND b.payable_usdt_micros=? AND b.network=? AND lower(b.receiving_address)=lower(?))";
+  const paidProof="EXISTS(SELECT 1 FROM boltutil_orders b JOIN boltutil_payment_events e ON e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash WHERE b.id=? AND b.status='paid' AND b.tx_hash=? AND b.payable_usdt_micros=? AND b.network=? AND lower(b.receiving_address)=lower(?) AND EXISTS(SELECT 1 FROM users u WHERE u.id=b.user_id AND u.status='active' AND u.archived_at IS NULL))";
   const args=[order.id,trusted.txHash,Number(trusted.amountMicros),order.network,trusted.address];
   if(order.product_type==="credits"){
     statements.push(

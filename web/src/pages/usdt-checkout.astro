@@ -27,10 +27,10 @@ import Base from "../layouts/Base.astro";
     <p class="fineprint" style="margin-top:24px"><a href="/account/">查看账户权益与历史订单</a> · <a href="/pricing/">返回套餐</a></p>
   </section>
   <script>
-    import {api,ApiError} from "../lib/api";
+    import {api} from "../lib/api";
     type Network="TRC20"|"POLYGON"|"BEP20";
     type Order={id:string;productType:string;creditOrderId:string|null;subscriptionOrderId:string|null;status:string;network:Network;tokenContract:string;tokenDecimals:number;
-      quotedAmount:string;amount:string|null;address:string|null;currency:string;network:string;
+      quotedAmount:string;amount:string|null;address:string|null;currency:string;
       checkoutUrl:string|null;expiresAt:number|null;entitlementApplied:boolean};
     const qs=new URLSearchParams(location.search),existing=qs.get("order"),productType=qs.get("productType"),
       sku=qs.get("sku"),upgrade=qs.get("upgrade")==="1";
@@ -55,7 +55,6 @@ import Base from "../layouts/Base.astro";
       product.textContent=order.productType==="credits"?t("永久额度包","Permanent credits"):t("30 天订阅","30-day subscription");
       const chainLabel=order.network==="TRC20"?"TRON / TRC20":order.network==="POLYGON"?"Polygon PoS":"BNB Smart Chain / BEP20";
       value.textContent=(order.amount??order.quotedAmount)+" USDT · "+chainLabel;
-      if(order.tokenContract)wallet.textContent=t("代币合约：","Token contract: ")+order.tokenContract;
       wallet.textContent=order.address?t("收款地址：","Receiving address: ")+order.address+" · "+t("代币合约：","Token contract: ")+order.tokenContract:"";
       expiry.textContent=order.expiresAt?t("付款有效期：","Payment expires: ")+new Date(order.expiresAt).toLocaleString():"";
       report(order.entitlementApplied?"付款已核实且权益已入账。":order.status==="manual_review"?"此笔需要人工核对，请勿重复转账。":
@@ -101,7 +100,11 @@ import Base from "../layouts/Base.astro";
       }catch(e){
         report(e instanceof Error?e.message:"订单未创建，请检查原订单后再试。",
           "Could not create or confirm order. Review existing orders first.");
-      }finally{busy=false;render();}
+      }finally{
+        busy=false;
+        if(order)render();
+        else control(t("查询原单或重新尝试建单","Check prior order / retry"),()=>void create(),true);
+      }
     }
     async function init(){
       if(existing){
@@ -129,7 +132,7 @@ import Base from "../layouts/Base.astro";
         value.textContent=t("金额以平台生成的精确 USDT 报价为准。","Exact USDT amount is provided by checkout.");
         buttons.replaceChildren();
         control(t("创建 USDT 订单","Create USDT invoice"),()=>void create());
-        report("请确认已了解 TRC20 网络风险后再创建订单。","Confirm the TRC20 network before proceeding.");
+        report("请确认已了解所选 USDT 网络风险后再创建订单。","Confirm the selected USDT network before proceeding.");
       }catch{report("无法确认 USDT 通道状态。","USDT channel unavailable.");}
     }
     void init();
