@@ -7,7 +7,7 @@ permissions:
   actions: read
   pull-requests: read
 concurrency:
-  group: reply-copilot-staging-pages
+  group: one-shot-boltutil-usdt-visibility-pr130-20261114
   cancel-in-progress: false
 jobs:
   deploy-staging:
