@@ -1,0 +1,70 @@
+name: One-shot Staging Pages asset export (NO deployment)
+on:
+  push:
+    branches: [chatgpt/staging-boltutil-pages-export-20261114]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            web/package-lock.json
+      - name: Build Staging site exactly with pinned deps and env
+        run: |
+          npm --prefix api ci
+          npm --prefix web ci
+          npm --prefix web run build:staging
+      - name: Export BLAKE3 Pages asset manifest and compressed file bytes (NO upload)
+        shell: bash
+        run: |
+          cd api
+          node --input-type=module <<'JS'
+          import {hash as blake3} from 'blake3-wasm';
+          import {readFileSync,readdirSync,statSync} from 'node:fs';
+          import {extname,relative,resolve,join} from 'node:path';
+          import {gzipSync} from 'node:zlib';
+          import {createHash} from 'node:crypto';
+          const root=resolve('../web/dist');
+          const mime={'.html':'text/html;charset=UTF-8','.js':'application/javascript','.css':'text/css;charset=UTF-8',
+            '.json':'application/json','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg',
+            '.jpeg':'image/jpeg','.webp':'image/webp','.gif':'image/gif','.ico':'image/x-icon',
+            '.txt':'text/plain;charset=UTF-8','.xml':'application/xml','.woff':'font/woff',
+            '.woff2':'font/woff2','.ttf':'font/ttf','.otf':'font/otf','.avif':'image/avif'};
+          const files=[];
+          function visit(dir){
+            for(const n of readdirSync(dir).sort()){
+              const p=join(dir,n);const stat=statSync(p);
+              if(stat.isDirectory())visit(p);
+              else if(stat.isFile()){
+                const data=readFileSync(p);
+                const ext=extname(p);
+                const assetHash=blake3(data.toString('base64')+ext.slice(1)).toString('hex').slice(0,32);
+                files.push({path:'/'+relative(root,p).replaceAll('\\','/'),hash:assetHash,mime:mime[ext]||'application/octet-stream',base64:data.toString('base64')});
+              }
+            }
+          }
+          visit(root);
+          if(files.length<10||files.length>2000||!files.some(x=>x.path==='/index.html')||
+            !files.some(x=>x.path==='/pricing/index.html')||!files.some(x=>x.path==='/usdt-checkout/index.html'))
+            throw new Error('Missing expected Staging site assets');
+          const payload=Buffer.from(JSON.stringify({source:process.env.GITHUB_SHA,files}));
+          const compressed=gzipSync(payload,{level:9,mtime:0});
+          const b64=compressed.toString('base64');
+          console.log('PAGES_EXPORT_FILE_COUNT',files.length);
+          console.log('PAGES_EXPORT_RAW_SHA256',createHash('sha256').update(payload).digest('hex'));
+          console.log('PAGES_EXPORT_RAW_SIZE',payload.length);
+          console.log('PAGES_EXPORT_COMPRESSED_SIZE',compressed.length);
+          console.log('PAGES_EXPORT_START');
+          for(let i=0;i<b64.length;i+=8000)console.log('PAGES_B64',b64.slice(i,i+8000));
+          console.log('PAGES_EXPORT_END');
+          JS
