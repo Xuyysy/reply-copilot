@@ -158,7 +158,7 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
     {!loading&&!items.length&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('当前条件下没有已确认的生成消费。','No acknowledged usage for this selection.')}</p>}
     {nextCursor&&<Button type="button" variant="outline" disabled={loading||moreLoading} onClick={()=>void loadMore()}>{moreLoading?t('加载中…','Loading…'):t('加载更多','Load more')}</Button>}
    </>:<>
-    <p className="text-xs text-muted-foreground">{t('合并免费、永久付费和订阅事件，包含订阅订单入账、每日额度预占、成功消耗与失败释放。订阅每日上限不算永久额度；预占和释放不等于实际扣次。默认最近30天。','Combines free, permanent and subscription order and usage events. Subscription daily allowance is not a permanent grant; reservations and releases are not actual debits. Last 30 days by default.')}</p>
+    <p className="text-xs text-muted-foreground">{t('合并免费、永久付费和订阅流水，展示订阅订单、成功扣次及失败释放。临时预占记录已隐藏，不影响后台审计；订阅每日上限不算永久额度。默认最近30天。','Combines free, permanent and subscription order, consumption, and failed-release events. Temporary reservation rows are hidden, but retained in the audit trail. Daily subscription allowance is not a permanent grant. Last 30 days by default.')}</p>
     <form className="flex flex-wrap items-end gap-2" onSubmit={event=>{event.preventDefault();setChangeQuery(changeSearch.trim());}}>
      <label className="min-w-36 flex-1 space-y-1 text-xs">{t('权益来源','Entitlement source')}
       <select className="block h-9 w-full rounded-md border bg-background px-2 text-sm" aria-label={t('权益来源','Entitlement source')} value={changeSource} onChange={event=>setChangeSource(event.target.value as EntitlementSource)}>
@@ -200,7 +200,6 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
        subscription_purchase:t('订阅开通入账','Subscription purchase applied'),
        subscription_renewal:t('订阅续费入账','Subscription renewal applied'),
        subscription_upgrade:t('订阅升级入账','Subscription upgrade applied'),
-       subscription_reserve:t('订阅额度预占','Subscription reservation'),
        subscription_consume:t('订阅 AI 成功扣次','Subscription AI consumed'),
        subscription_release:t('订阅失败释放预占','Subscription reservation released'),
        subscription_refund:t('订阅退款记录','Subscription refund record')
@@ -210,8 +209,7 @@ export default function AdminUsageLedger({active,language}:{active:boolean;langu
        paid:t('永久付费','Permanent'),mixed:t('混合额度','Mixed'),
        unknown:t('未归属','Unattributed')
       })[row.source];
-      const subscriptionValue=row.event_type==='subscription_reserve'?t('预占 1 次（未扣）','Reserved 1 (not debited)'):
-       row.event_type==='subscription_release'?t('释放预占（未扣）','Reservation released (not debited)'):
+      const subscriptionValue=row.event_type==='subscription_release'?t('释放预占（未扣）','Reservation released (not debited)'):
        row.event_type==='subscription_consume'?'−1':
        row.event_type.startsWith('subscription_')&&row.daily_limit!=null?t('每日上限 ','Daily limit ')+row.daily_limit:'—';
       return <TableRow key={row.id}>
