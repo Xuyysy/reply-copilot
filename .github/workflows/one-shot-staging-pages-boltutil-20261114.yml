@@ -1,0 +1,178 @@
+name: One-shot owner-approved BoltUtil Staging Pages release
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reply-copilot-staging-pages
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy' &&
+      github.event.comment.user.login == 'Xuyysy' &&
+      github.event.issue.number == 128 &&
+      github.event.issue.pull_request != null &&
+      github.event.comment.body == 'APPROVE_STAGING_PAGES_BOLTUTIL_F785BE1A_43583658909'
+    name: Owner-approved exact SHA Staging Pages ONLY
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top
+    env:
+      SOURCE_SHA: f785be1a84ebccee036577a97f81a58bf27dc98f
+      CI_RUN_ID: '43583658909'
+      PREVIOUS_PAGES_DEPLOYMENT: 6d3f1a6d-8c19-4e68-9b19-195801cc9246
+      EXPECTED_STAGING_WORKER: 1ecb0b33-0c8a-4f02-936e-50c31cec8267
+      EXPECTED_ACCOUNT: cb5fc919a9f05dcf39b3ca29c9538a1f
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify exact previous approved CI and file identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/approved-ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .event == "push" and .status == "completed"
+            and .conclusion == "success" and .head_repository.full_name == $repo
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/approved-ci.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/128" | jq -e '
+            .state == "open" and .draft == true and .head.sha == "2748918eb5a6dc3035e4f9e44bab1fc763d88b53"
+          '
+
+      - name: Checkout only trusted deployment tooling from main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Download verified Staging Pages files
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-pages-${{ env.SOURCE_SHA }}
+          run-id: ${{ env.CI_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: web/dist
+
+      - name: Download provenance and checksums from same CI
+        uses: actions/download-artifact@v4
+        with:
+          name: staging-extension-${{ env.SOURCE_SHA }}
+          run-id: ${{ env.CI_RUN_ID }}
+          github-token: ${{ github.token }}
+          path: dist/ci
+
+      - name: Independently verify EVERY asset, intended domain and Staging provenance
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re
+          root=pathlib.Path.cwd()
+          web=(root/'web/dist').resolve()
+          manifest=json.loads((root/'dist/ci/release-manifest.json').read_text())
+          allowed={
+            'sourceSha':os.environ['SOURCE_SHA'],
+            'channel':'staging',
+            'pagesProject':'x-reply-helper-staging',
+            'pagesDomain':'https://staging.x-reply-helper.top',
+            'stagingApi':'https://api-staging.x-reply-helper.top',
+            'extensionId':'kaaehkpihjenlhjjfjcopkjhegmfmchk'
+          }
+          for k,v in allowed.items():
+            if manifest.get(k)!=v: raise SystemExit('Invalid release provenance: '+k)
+          expected={}
+          for entry in (root/'dist/ci/web-files.sha256').read_text().splitlines():
+            m=re.fullmatch(r'([a-f0-9]{64})  (web/dist/[A-Za-z0-9_./-]+)',entry)
+            if not m: raise SystemExit('Bad SHA256 entry')
+            digest,rel=m.groups()
+            p=(root/rel).resolve()
+            if not p.is_relative_to(web) or not p.is_file() or p.is_symlink() or rel in expected:
+              raise SystemExit('Unsafe or duplicate path')
+            expected[rel]=digest
+          actual={}
+          for p in web.rglob('*'):
+            if p.is_symlink(): raise SystemExit('Symlink forbidden')
+            if p.is_file():
+              actual[p.relative_to(root).as_posix()]=hashlib.sha256(p.read_bytes()).hexdigest()
+          if actual!=expected or len(actual)!=47 or len(actual)!=manifest.get('webFileCount'):
+            raise SystemExit('Static artifact hash manifest mismatch')
+          for required in ('index.html','admin/index.html','account/index.html','pricing/index.html','usdt-checkout/index.html'):
+            if not (web/required).is_file(): raise SystemExit('Missing '+required)
+          if any(p.name in ('_worker.js','_routes.json') for p in web.rglob('*')):
+            raise SystemExit('Unexpected dynamic code')
+          if not any('https://api-staging.x-reply-helper.top' in p.read_text(errors='replace') for p in web.rglob('*.js')):
+            raise SystemExit('Staging API URL missing')
+          print('PASS: validated',len(actual),'immutable Pages static assets')
+          PY
+
+      - name: Install isolated pinned Wrangler 4.151.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: |
+          npm install --prefix "$RUNNER_TEMP/staging-deploy-tools" --no-save --package-lock=false --no-audit --no-fund wrangler@4.151.0
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" --version
+
+      - name: Fail closed if target Pages deployment or Staging Worker drifted
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test "$CLOUDFLARE_ACCOUNT_ID" = "$EXPECTED_ACCOUNT"
+          api="https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT"
+          curl -fsS --retry 2 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-before.json"
+          jq -e --arg old "$PREVIOUS_PAGES_DEPLOYMENT" '
+            .success == true and .result[0].id == $old and .result[0].latest_stage.status == "success"
+          ' "$RUNNER_TEMP/pages-before.json"
+          curl -fsS --retry 2 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/worker-before.json"
+          jq -e --arg wanted "$EXPECTED_STAGING_WORKER" '
+            .success == true and .result.deployments[0].versions == [{"version_id":$wanted,"percentage":100}]
+          ' "$RUNNER_TEMP/worker-before.json"
+
+      - name: Deploy ONLY previously validated static assets to existing Staging Pages
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/staging-deploy-tools/node_modules/.bin/wrangler" pages deploy web/dist             --project-name x-reply-helper-staging             --branch codex/v0.4-credits             --commit-hash "$SOURCE_SHA"             --commit-message "Owner-approved BoltUtil Staging Pages from validated SHA $SOURCE_SHA"
+
+      - name: Verify Pages deployment SHA; Staging Worker unchanged
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/$EXPECTED_ACCOUNT"
+          curl -fsS --retry 2 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/pages/projects/x-reply-helper-staging/deployments?per_page=1" > "$RUNNER_TEMP/pages-after.json"
+          jq -e --arg sha "$SOURCE_SHA" '
+            .success == true and .result[0].deployment_trigger.metadata.commit_hash == $sha
+          ' "$RUNNER_TEMP/pages-after.json"
+          curl -fsS --retry 2 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             "$api/workers/scripts/reply-copilot-api-staging/deployments?per_page=1" > "$RUNNER_TEMP/worker-after.json"
+          jq -e --arg wanted "$EXPECTED_STAGING_WORKER" '
+            .success == true and .result.deployments[0].versions == [{"version_id":$wanted,"percentage":100}]
+          ' "$RUNNER_TEMP/worker-after.json"
+          jq -r '.result[0] | "Deployed Staging Pages: "+.id+" source SHA "+.deployment_trigger.metadata.commit_hash' "$RUNNER_TEMP/pages-after.json"
+
+      - name: One-time Staging approval audit
+        if: success()
+        shell: bash
+        run: |
+          echo "### Owner-approved, one-time Staging Pages deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Project: x-reply-helper-staging" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Full Push CI: $CI_RUN_ID" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Previous Pages deployment: $PREVIOUS_PAGES_DEPLOYMENT" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Staging Worker, D1, Secrets, USDT merchant flags, Production: unchanged" >> "$GITHUB_STEP_SUMMARY"
