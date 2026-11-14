@@ -30,13 +30,18 @@
     if (!article?.matches?.("article")) return null;
     // The author's timestamp is more reliable than a random /status/ link:
     // quote cards, media and link previews can contain OTHER tweet IDs.
+    const timed=new Map();
     for (const time of article.querySelectorAll("time")) {
       if (time.closest("article") !== article || isQuoteContent(time, article)) continue;
       const link = time.closest('a[href*="/status/"]');
       if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
       const identity = statusLink(link);
-      if (identity) return identity;
+      if (identity) timed.set(identity.statusId,identity);
+      // If a quote card loses its wrapper marker, never guess its timestamp
+      // belongs to the outer post. Conflicting IDs fail closed.
+      if (timed.size>1) return null;
     }
+    if(timed.size===1)return timed.values().next().value;
     // Older X layouts may lack a time element. Fall back only if there is
     // exactly one possible post ID; never guess between a post and its quote.
     const candidates = new Map();
@@ -77,12 +82,25 @@
       .find(node=>node.closest("article")===article&&!isQuoteContent(node,article));
     return originalPostText(primary);
   }
+  function quoteText(article) {
+    // Fast path for normal tweets: only read nested content if a real X
+    // quote card exists. No permalink lookup, network, or unrelated card.
+    const card=article?.querySelector?.('[data-testid="quoteTweet"]');
+    if (!card || card===article || !article.contains?.(card)) return "";
+    const quoted=card.querySelector?.('[data-testid="tweetText"]');
+    return originalPostText(quoted);
+  }
   function extractPost(article) {
     if (!article?.matches?.("article")) return { ok: false, reason: "no-post" };
     const identity = postIdentity(article);
-    const sourceText = postText(article);
+    const ownText = postText(article);
+    // A quote-only post has a canonical OUTER post ID but no own tweetText.
+    // Use the visibly attached quote as context, never its ID as the target.
+    const quotedText = ownText ? "" : quoteText(article);
+    const sourceText = ownText || quotedText;
     if (!identity || !sourceText) return { ok: false, reason: "post-context-incomplete" };
-    return { ok: true, article, ...identity, sourceText };
+    return { ok: true, article, ...identity, sourceText,
+      quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent };
