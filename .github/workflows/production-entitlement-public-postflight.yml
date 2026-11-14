@@ -1,0 +1,41 @@
+name: Production unified entitlement public HTTP postflight (read-only)
+on:
+  push:
+    branches: [chatgpt/production-entitlement-public-postflight-20261114]
+permissions:
+  contents: read
+concurrency:
+  group: production-unified-entitlement-postflight
+  cancel-in-progress: false
+jobs:
+  public-api:
+    if: >-
+      github.event_name == 'push' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/chatgpt/production-entitlement-public-postflight-20261114' &&
+      github.actor == 'Xuyysy' &&
+      github.event.before == '0acd7e7883ad063855f0aa34c985c1c078389fea' &&
+      github.event.head_commit.message == 'ci-lite: owner approved Production entitlement public HTTP postflight'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 7
+    steps:
+      - name: Verify Production public website, authenticated admin boundary and billing read routes
+        shell: bash
+        run: |
+          node <<'NODE'
+          const routes=[
+            {url:'https://api.x-reply-helper.top/health',status:200},
+            {url:'https://api.x-reply-helper.top/v1/admin/entitlement-activity',status:401,code:'AUTH_REQUIRED'},
+            {url:'https://api.x-reply-helper.top/v1/admin/usage-ledger',status:401,code:'AUTH_REQUIRED'},
+            {url:'https://api.x-reply-helper.top/v1/subscriptions/plans',status:200},
+            {url:'https://app.x-reply-helper.top/admin/',status:200},
+            {url:'https://app.x-reply-helper.top/account/',status:200}
+          ];
+          for(const route of routes){
+            const response=await fetch(route.url,{signal:AbortSignal.timeout(25000),headers:{Origin:'https://app.x-reply-helper.top'},redirect:'follow'});
+            const body=route.code?await response.json().catch(()=>({})):{};
+            console.log(new URL(route.url).pathname,'status',response.status,'code',body.code||'-');
+            if(response.status!==route.status || (route.code && body.code!==route.code)) throw Error('Production public read-only smoke mismatch '+route.url);
+          }
+          console.log('PASS Production new read-only entitlement route, existing subscription routes and protected admin pages');
+          NODE
