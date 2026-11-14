@@ -30,13 +30,18 @@
     if (!article?.matches?.("article")) return null;
     // The author's timestamp is more reliable than a random /status/ link:
     // quote cards, media and link previews can contain OTHER tweet IDs.
+    const timed=new Map();
     for (const time of article.querySelectorAll("time")) {
       if (time.closest("article") !== article || isQuoteContent(time, article)) continue;
       const link = time.closest('a[href*="/status/"]');
       if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
       const identity = statusLink(link);
-      if (identity) return identity;
+      if (identity) timed.set(identity.statusId,identity);
+      // If a quote card loses its wrapper marker, never guess its timestamp
+      // belongs to the outer post. Conflicting IDs fail closed.
+      if (timed.size>1) return null;
     }
+    if(timed.size===1)return timed.values().next().value;
     // Older X layouts may lack a time element. Fall back only if there is
     // exactly one possible post ID; never guess between a post and its quote.
     const candidates = new Map();

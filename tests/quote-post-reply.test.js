@@ -66,8 +66,8 @@ test("only quote text without a genuine quoteTweet card must not be treated as a
   const api=await buildApi();
   const post=api.postExtractor.extractPost(articleFixture({quotedCard:false}).outer);
   // Without a card marker, a text node is not reliable evidence of the quote.
-  assert.equal(post.ok,true);
-  assert.equal(post.quoteOnly,false);
+  assert.equal(post.ok,false);
+  assert.equal(post.reason,"post-context-incomplete");
 });
 test("quote-only reply binds when original parent ID and exact quote card agree",async()=>{
   const api=await buildApi();
