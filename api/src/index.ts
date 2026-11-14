@@ -6,6 +6,8 @@ import {createSubscriptionCheckout,createSubscriptionUpgradeQuote,subscriptionOr
 import {adminSubscriptionPlans,adminSubscriptionUsers,adminSubscriptionOrders,publicSubscriptionPlans,publishSubscriptionPlan,holdSubscriptionOrder,adminSubscriptionFinance,reviewSubscriptionPayment} from './admin-subscriptions';
 import {filteredUsers,filteredOrders,saveUserNote,adminOrderDetail,exportAdminCsv} from "./admin-reporting";
 import {adminUnifiedUsage} from "./admin-unified-usage";
+import {createAdminEntitlementActivity} from "./admin-entitlement-activity.mjs";
+import {requireAdminSession} from "./admin-auth";
 import {adminCommerceOrders,adminCommerceSummary,adminCommerceUser} from "./admin-commerce-v2";
 import {adminOperationsInsights} from "./admin-operations-insights";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
@@ -40,6 +42,8 @@ async function feedback(request: Request, env: Env): Promise<Response> {
   await env.DB.prepare("INSERT INTO feedback(id,user_id,message,created_at) VALUES(?,?,?,?)").bind(uuid(), session.user_id, message, nowMs()).run();
   return response({ ok: true }, 200, env, request);
 }
+
+const adminEntitlementActivity=createAdminEntitlementActivity({requireAdminSession,response,ApiFailure});
 
 export default {
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); },
@@ -148,6 +152,7 @@ export default {
       if (request.method === "GET" && path === "/v1/admin/settings") return await adminSettings(request,env);
       if (request.method === "GET" && path === "/v1/admin/ledger") return await adminLedger(request,env);
       if (request.method === "GET" && path === "/v1/admin/usage-ledger") return await adminUnifiedUsage(request,env);
+      if (request.method === "GET" && path === "/v1/admin/entitlement-activity") return await adminEntitlementActivity(request,env);
       if (request.method === "GET" && path === "/v1/admin/commerce/orders") return await adminCommerceOrders(request,env);
       if (request.method === "GET" && path === "/v1/admin/commerce/summary") return await adminCommerceSummary(request,env);
       if (request.method === "GET" && path === "/v1/admin/ops-insights") return await adminOperationsInsights(request,env);

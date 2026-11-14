@@ -17,12 +17,23 @@ test('Admin V2 puts subscription deliveries and credit usage in one lazily loade
  assert.match(ledger,/ACK/);
 });
 
-test('Legacy grant and refund ledger remains accessible only on demand',()=>{
+test('Staging all entitlement view hides temporary reservation, retains release and debit, without balance mixing',()=>{
  assert.match(ledger,/mode==='changes'/);
- assert.match(ledger,/\/v1\/admin\/ledger/);
+ assert.match(ledger,/\/v1\/admin\/entitlement-activity/);
+ assert.match(ledger,/subscription_purchase/);
+ assert.match(ledger,/subscription_renewal/);
+ assert.match(ledger,/subscription_upgrade/);
+ assert.match(ledger,/subscription_consume/);
+ assert.match(ledger,/subscription_release/);
+ assert.doesNotMatch(ledger,/subscription_reserve/);
+ assert.doesNotMatch(ledger,/预占 1 次（未扣）/);
+ assert.match(ledger,/临时预占记录已隐藏/);
  assert.match(ledger,/purchase_reversal/);
  assert.match(ledger,/admin_adjustment/);
- assert.doesNotMatch(admin,/read<\{ ledger: Ledger\[\] \}>\("\/v1\/admin\/ledger"\)/);
+ assert.match(ledger,/changeNextCursor/);
+ assert.match(ledger,/changeSource/);
+ assert.match(ledger,/changeDays/);
+ assert.doesNotMatch(ledger,/api<\{ledger:LegacyLedger\[\]\}>/);
 });
 
 test('Admin views keep existing financial and security panels isolated',()=>{
