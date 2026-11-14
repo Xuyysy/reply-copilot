@@ -20,10 +20,10 @@
     if(!card || card===article || !article?.contains?.(card) ||
        !card.querySelector?.('[data-testid="User-Name"]') ||
        !card.querySelector?.('[data-testid="tweetText"]')) return false;
-    // A separate outer timestamp is necessary to keep outer identity
-    // independent of the embedded quoted author's timestamp.
-    return [...article.querySelectorAll("time")].some(time=>
-      time.closest("article")===article && !card.contains(time));
+    // A quote card is not proof of the OUTER post identity. If no distinct
+    // parent timestamp/link exists, the postIdentity extractor still fails
+    // closed rather than reusing the quoted author's status ID.
+    return true;
   }
   function quoteCard(article) {
     const marked=article?.querySelector?.('[data-testid="quoteTweet"]');
