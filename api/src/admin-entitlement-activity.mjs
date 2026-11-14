@@ -18,7 +18,7 @@ export function createAdminEntitlementActivity({requireAdminSession,response,Api
    NULL AS amount_fen,NULL AS order_status,e.request_id AS reference_id,NULL AS reason
    FROM subscription_usage_events e JOIN subscription_periods sp ON sp.id=e.period_id
    JOIN subscription_plan_versions pv ON pv.id=sp.plan_version_id
-   WHERE e.created_at>=? AND e.created_at<?`,
+   WHERE e.created_at>=? AND e.created_at<? AND e.event_type<>'reserve'`,
   `SELECT 'order:'||o.id AS id,o.user_id,o.applied_at AS occurred_at,
    'subscription' AS source,'subscription_'||o.kind AS event_type,
    0 AS free_delta,0 AS paid_delta,NULL AS subscription_delta,
@@ -70,6 +70,6 @@ export function createAdminEntitlementActivity({requireAdminSession,response,Api
   const rows=(await env.DB.prepare(query).bind(...args,limit+1).all()).results||[];
   const items=rows.slice(0,limit),hasMore=rows.length>limit,last=items.at(-1);
   return response({items,hasMore,nextCursor:hasMore&&last?last.occurred_at+':'+last.id:null,
-   range:{from,to},limit,definition:'Event audit only: subscription orders, reservations, releases and consumed daily allowance are not permanent credits. Failed releases do not debit a user.'},200,env,request);
+   range:{from,to},limit,definition:'Event audit only: subscription orders, releases and consumed daily allowance are not permanent credits. Temporary subscription reservations are hidden from this view, but remain in source audit data. Failed releases do not debit a user.'},200,env,request);
  };
 }

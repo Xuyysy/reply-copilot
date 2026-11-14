@@ -30,11 +30,13 @@ test('admin entitlement activity merges free, permanent, subscription orders, co
   const result=await f.call('/v1/admin/entitlement-activity',{method:'GET'});
   assert.equal(result.status,200,JSON.stringify(result.body));
   const rows=result.body.items;
-  assert.equal(rows.length,9);
+  assert.equal(rows.length,8);
   assert.ok(rows.every((r,i)=>i===0||rows[i-1].occurred_at>=r.occurred_at));
-  assert.deepEqual(new Set(rows.map(x=>x.event_type)),new Set(['signup_grant','generation_debit','generation_release','subscription_purchase','subscription_renewal','subscription_upgrade','subscription_reserve','subscription_release','subscription_consume']));
+  assert.deepEqual(new Set(rows.map(x=>x.event_type)),new Set(['signup_grant','generation_debit','generation_release','subscription_purchase','subscription_renewal','subscription_upgrade','subscription_release','subscription_consume']));
   assert.equal(rows.find(x=>x.event_type==='subscription_consume').subscription_delta,-1);
   assert.equal(rows.find(x=>x.event_type==='subscription_release').subscription_delta,0);
+  assert.ok(rows.every(x=>x.event_type!=='subscription_reserve'));
+  assert.equal(f.sql.prepare("SELECT COUNT(*) AS n FROM subscription_usage_events WHERE event_type='reserve'").get().n,1,'underlying reservation audit is preserved');
   assert.equal(rows.find(x=>x.event_type==='subscription_purchase').daily_limit,500);
   assert.equal(rows.find(x=>x.event_type==='subscription_upgrade').daily_limit,1000);
   assert.equal(rows.find(x=>x.event_type==='generation_release').source,'unknown');
@@ -52,7 +54,7 @@ test('read-only activity respects admin authorization, exact email and bounded f
  try{
   seed(f);
   let res=await f.call('/v1/admin/entitlement-activity?q=v2%40example.test',{method:'GET'});
-  assert.equal(res.status,200);assert.equal(res.body.items.length,9);
+  assert.equal(res.status,200);assert.equal(res.body.items.length,8);
   res=await f.call('/v1/admin/entitlement-activity?q=wrong%40example.test',{method:'GET'});
   assert.equal(res.status,200);assert.equal(res.body.items.length,0);
   for(const q of ['source=bogus','cursor=garbage','from=10&to=9','q='+('x'.repeat(121))]){
