@@ -163,6 +163,12 @@
         if(text)candidates.push({article:null,id:null,text});
       }
       const matching=candidates.filter(item=>item.id===post.statusId);
+      // Only quote-only posts need this extra DOM check. X can show the
+      // outer author/timestamp without an outer tweetText in the modal.
+      // Require BOTH the verified outer ID and the same quoted preview.
+      const quotedPreviewMatches=Boolean(post.quoteOnly && post.quotedText &&
+        [...dialog.querySelectorAll('[data-testid="quoteTweet"] [data-testid="tweetText"]')]
+          .some(node=>normalized(node.innerText||node.textContent)===normalized(post.quotedText)));
       const exactText=candidates.filter(item=>sameContext(post,item.text));
       // X sometimes omits the parent permalink in a quote/video reply modal,
       // while leaving a separate quoted article. A UNIQUE source-text match
@@ -181,7 +187,7 @@
       // missing modal context should WAIT for React, not be rejected.
       const contextMatches=!candidates.length?null
         :matching.length>1?false
-        :matching.length===1?Boolean(normalized(text))
+        :matching.length===1?(Boolean(normalized(text)) || (post.quoteOnly && quotedPreviewMatches))
         :uniqueText&&!uniqueText.id&&exactText.length===1?true
         :candidates.length===1&&!normalized(text)&&!statusId?null
         :false;

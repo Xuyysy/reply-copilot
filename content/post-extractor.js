@@ -77,12 +77,25 @@
       .find(node=>node.closest("article")===article&&!isQuoteContent(node,article));
     return originalPostText(primary);
   }
+  function quoteText(article) {
+    // Fast path for normal tweets: only read nested content if a real X
+    // quote card exists. No permalink lookup, network, or unrelated card.
+    const card=article?.querySelector?.('[data-testid="quoteTweet"]');
+    if (!card || card===article || !article.contains?.(card)) return "";
+    const quoted=card.querySelector?.('[data-testid="tweetText"]');
+    return originalPostText(quoted);
+  }
   function extractPost(article) {
     if (!article?.matches?.("article")) return { ok: false, reason: "no-post" };
     const identity = postIdentity(article);
-    const sourceText = postText(article);
+    const ownText = postText(article);
+    // A quote-only post has a canonical OUTER post ID but no own tweetText.
+    // Use the visibly attached quote as context, never its ID as the target.
+    const quotedText = ownText ? "" : quoteText(article);
+    const sourceText = ownText || quotedText;
     if (!identity || !sourceText) return { ok: false, reason: "post-context-incomplete" };
-    return { ok: true, article, ...identity, sourceText };
+    return { ok: true, article, ...identity, sourceText,
+      quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent };
