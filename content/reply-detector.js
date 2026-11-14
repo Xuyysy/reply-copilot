@@ -17,9 +17,18 @@
     }
     return false;
   }
-  function findReplyControl(target) {
-    const control = target?.closest?.('button,[role="button"],a');
-    return isReplyControl(control) ? control : null;
+  function findReplyControl(target, event) {
+    // Preserve the original element API for existing callers. Only when the
+    // event target is retargeted by translation/shadow wrappers, inspect the
+    // original browser event's composed path for a verified X Reply control.
+    const direct=target?.closest?.('button,[role="button"],a');
+    if(isReplyControl(direct))return direct;
+    const path=typeof event?.composedPath==="function" ? event.composedPath():[];
+    for(const node of path) {
+      const control=node?.closest?.('button,[role="button"],a');
+      if(isReplyControl(control))return control;
+    }
+    return null;
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.replyDetector = { isReplyControl, findReplyControl };

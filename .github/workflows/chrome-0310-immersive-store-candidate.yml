@@ -1,0 +1,65 @@
+name: Chrome 0.3.10 immutable Production upload candidate
+
+on:
+  push:
+    branches:
+      - release/chrome-0310-immersive-store-candidate-20261114
+
+permissions:
+  contents: read
+
+jobs:
+  production-zip:
+    name: Build and verify the existing Web Store extension (no upload)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout pinned candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Use Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Run focused translation and production UI regression
+        run: |
+          node --test --test-concurrency=1 \
+            tests/content-scripts.test.js \
+            tests/production-dom-flow.test.js \
+            tests/multilingual-compat.test.js \
+            tests/translator-interop.test.js \
+            tests/extension-identity.test.js
+      - name: Build the PRODUCTION extension against official API
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+          REPLY_COPILOT_EXTENSION_ID: fgfjajofkapebgphfidblngcjomkbdaj
+        run: npm run build:production
+      - name: Package official Web Store ZIP with provenance
+        run: python3 scripts/package-production-rc.py
+      - name: Verify artifact isolation and manifest version
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          const m=JSON.parse(fs.readFileSync('dist/production/manifest.json','utf8'));
+          const runtime=fs.readFileSync('dist/production/config/runtime.js','utf8');
+          if(m.version!=='0.3.10'||m.version_name!=='0.3.10')throw Error('wrong release version');
+          if(!m.key||m.host_permissions?.join()!= 'https://api.x-reply-helper.top/*')throw Error('not production manifest');
+          if(m.externally_connectable?.matches?.join()!== 'https://app.x-reply-helper.top/*')throw Error('wrong origin');
+          if(runtime.includes('api-staging.')||runtime.includes('staging.x-reply-helper.')||!runtime.includes('channel: "production"'))throw Error('Staging runtime accidentally packaged');
+          if(fs.existsSync('dist/production/staging'))throw Error('Staging code accidentally packaged');
+          if(fs.existsSync('dist/production/prompts/prompt-v3-experiment.js'))throw Error('Staging V3 experiment accidentally packaged');
+          console.log('Production package identity, locale and source isolation OK');
+          NODE
+      - name: Save immutable ZIP and checksum metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-webstore-production-0.3.10-${{ github.sha }}
+          path: dist/production-rc/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Log release boundary
+        run: |
+          echo 'ZIP is for Chrome Web Store dashboard upload. No Chrome Web Store publishing, Production API deploy, D1, or secrets were performed.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Production API still controls prompt behavior; Staging-only Prompt V3 hotpatch is not included.' >> "$GITHUB_STEP_SUMMARY"
