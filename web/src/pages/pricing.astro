@@ -47,16 +47,12 @@ import Base from "../layouts/Base.astro";
   <script>
     import {api, ApiError} from "../lib/api";
     import {packageSummary} from "../lib/package-summary.mjs";
-    import {subscriptionPricingChoices} from "../lib/subscription-pricing-choices.mjs";
     type SubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;description_zh:string;description_en:string};
     let checkoutAvailable=false;
     let boltutilAvailable=false;
     let fiatCreditAvailable=false;
     let subscriptionPlans:SubscriptionPlan[]|null=null;
     const subscriptionNames=new Set(['basic','pro','max','ultra']);
-    type BuyerState={state:'loading'|'guest'|'none'|'active'|'unavailable';plan:string|null;expiresAt:string|null;pendingOrderId:string|null;queuedOrderId:string|null};
-    let subscriptionBuyer:BuyerState={state:'loading',plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
-    let buyerRequestSequence=0;
     function renderSubscriptions(){
       if(!subscriptionPlans)return;
       const en=document.documentElement.lang==='en';
@@ -71,67 +67,32 @@ import Base from "../layouts/Base.astro";
       for(const p of subscriptionPlans){
         const card=document.createElement('div');
         card.className='pricing-card'+(p.plan_code==='pro'?' featured subscription-featured':'');
-        const label=document.createElement('p');label.className='eyebrow';label.textContent=subscriptionBuyer.state==='active'&&subscriptionBuyer.plan===p.plan_code?txt('当前订阅','Current plan'):p.plan_code==='pro'?txt('推荐方案','Recommended'):p.plan_code.toUpperCase();
+        const label=document.createElement('p');label.className='eyebrow';label.textContent=p.plan_code==='pro'?txt('推荐方案','Recommended'):p.plan_code.toUpperCase();
         const heading=document.createElement('h3');heading.textContent=en?p.name_en:p.name_zh;
         const price=document.createElement('div');price.className='price';price.textContent='¥'+(p.price_fen/100).toFixed(2);
         const period=document.createElement('p');period.textContent=txt('30 天订阅 · 每 24 小时重置','30-day subscription · Resets every 24h');
         const allowance=document.createElement('p');allowance.className='subscription-limit';allowance.textContent=p.daily_limit.toLocaleString()+' '+txt('次/天','generations/day');
         const description=document.createElement('p');description.textContent=(en?p.description_en:p.description_zh)||txt('每次生成三个候选回复','Three reply suggestions per generation');
-        const actions=document.createElement('div');actions.className='subscription-card-actions';
+        const unavailable=document.createElement('p');unavailable.className='notice';unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
         if(checkoutAvailable){
-          const choice=subscriptionPricingChoices({
-            targetPlan:p.plan_code,buyerStatus:subscriptionBuyer.state,currentPlan:subscriptionBuyer.plan,
-            expiresAt:subscriptionBuyer.expiresAt,pendingOrderId:subscriptionBuyer.pendingOrderId,
-            queuedOrderId:subscriptionBuyer.queuedOrderId,
-          });
-          const note=document.createElement('p');note.className='fineprint';
-          const notices:Record<string,string>={
-            loading:txt('正在检查你当前的订阅和订单…','Checking your subscription and existing orders…'),
-            unavailable:txt('暂时无法核实已有订阅或订单，请先到账户中心查看，避免误付。','Unable to verify your subscription or existing orders. Check your account before paying.'),
-            pending:txt('存在待付款或待核验的原订单。请先核对原单，不要重复付款。','An existing order is unpaid or awaiting verification. Check it before paying again.'),
-            queued:txt('已有一笔付款成功、等待到期生效的下一期订阅。','A paid renewal is already queued for the next period.'),
-            guest:txt('登录后可查看是否可按剩余时间升档。','Sign in to check whether a prorated upgrade is available.'),
-            purchase:txt('首次订阅：付款确认后开启 30 天。','First purchase: 30 days begin after verified payment.'),
-            upgrade_available:txt('升档按本期剩余时间补差价，原到期日不变；下一期按完整月费购买。','Upgrade is prorated for the current period without extending expiry; next period is billed at full price.'),
-            upgrade_final_day:txt('当前订阅剩余不足 24 小时，本期不可升档；可购买下一期。','Less than 24 hours remain, so this period cannot be upgraded. Buy the next period instead.'),
-            renew_same:txt('当前套餐续购：下一期到期后生效，按完整月费付款。','Renew your current tier at full price; the next period starts after expiry.'),
-            change_next:txt('这是下一期套餐变更，不会立即改变当前订阅；按完整月费付款。','This changes the next period only. Your current subscription stays unchanged until expiry.'),
-          };
-          note.textContent=notices[choice.mode]??'';
-          actions.append(note);
-          for(const action of choice.actions){
-            const link=document.createElement('a');link.href=action.href;
-            link.className=action.kind==='next'&&choice.mode==='upgrade_available'?'button secondary':'button';
-            link.textContent=action.kind==='upgrade'?txt('本期升档 · 获取补差价报价','Upgrade this period · Get prorated quote'):
-              action.kind==='next'?txt('购买下一期 · 全价 ¥','Buy next period · Full price ¥')+(p.price_fen/100).toFixed(2):
-              action.kind==='original'?txt('核对原订单（不要重新下单）','Review original order (do not repay)'):
-              action.kind==='account'?txt('查看账户订阅与订单','Review subscription and orders'):
-              subscriptionBuyer.state==='guest'?txt('登录后订阅','Sign in to subscribe'):txt('立即订阅 · ¥','Subscribe now · ¥')+(p.price_fen/100).toFixed(2);
-            actions.append(link);
-          }
-        }else if(!boltutilAvailable){
-          const unavailable=document.createElement('p');unavailable.className='notice';
-          unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
-          actions.append(unavailable);
+          const buy=document.createElement('a');buy.className='button';buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
+          buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
         }
-        // This payment rail is intentionally separate from active_merchant and fiat checkoutAvailable.
-        if(boltutilAvailable && subscriptionBuyer.state!=='loading'&&subscriptionBuyer.state!=='unavailable'&&!subscriptionBuyer.pendingOrderId&&!subscriptionBuyer.queuedOrderId){
-          const isHigher=subscriptionBuyer.state==='active'&&['basic','pro','max','ultra'].indexOf(p.plan_code)>['basic','pro','max','ultra'].indexOf(subscriptionBuyer.plan??'');
-          const eligibleUpgrade=isHigher&&Boolean(subscriptionBuyer.expiresAt)&&
-            (new Date(subscriptionBuyer.expiresAt!).getTime()-Date.now()>=24*60*60*1000);
-          if(eligibleUpgrade){
-            const upgradeLink=document.createElement('a');upgradeLink.className='button secondary';
-            upgradeLink.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code)+'&upgrade=1';
-            upgradeLink.textContent=txt('USDT · 本期升档','USDT · Upgrade now');
-            actions.append(upgradeLink);
-          }
-          const usdtLink=document.createElement('a');usdtLink.className='button secondary';
-          usdtLink.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code);
-          usdtLink.textContent=subscriptionBuyer.state==='active'?txt('USDT · 购买下一期','USDT · Buy next period'):
-            subscriptionBuyer.state==='guest'?txt('USDT · 登录后购买','USDT · Sign in to buy'):txt('USDT · TRC20 购买','USDT · TRC20 checkout');
-          actions.append(usdtLink);
+        card.append(label,heading,price,period,allowance,description,unavailable);
+        if(boltutilAvailable){
+          const usdt=document.createElement('a');
+          usdt.className='button secondary';
+          usdt.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code);
+          usdt.textContent=txt('USDT · 购买／续购','USDT · Buy / renew');
+          const upgrade=document.createElement('a');
+          upgrade.className='button secondary';
+          upgrade.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code)+'&upgrade=1';
+          upgrade.textContent=txt('USDT · 本期升档','USDT · Upgrade this period');
+          const actions=document.createElement('div');
+          actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';
+          actions.append(usdt,upgrade);
+          card.append(actions);
         }
-        card.append(label,heading,price,period,allowance,description,actions);
         box.append(card);
       }
     }
@@ -147,58 +108,30 @@ import Base from "../layouts/Base.astro";
         renderSubscriptions();
       }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
     }
-    async function loadSubscriptionBuyer(){
-      const request=++buyerRequestSequence;
-      subscriptionBuyer={state:'loading',plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
-      renderSubscriptions();
-      try{
-        const result=await api<{subscription?:{status:string;plan:string|null;expiresAt:string|null}}>('/v1/usage');
-        const sub=result.subscription;
-        const state:BuyerState['state']=sub?.status==='active'&&subscriptionNames.has(sub.plan??'')?'active':sub?.status==='none'?'none':'unavailable';
-        const candidate:BuyerState={state,plan:state==='active'?sub!.plan:null,
-          expiresAt:state==='active'?sub!.expiresAt:null,pendingOrderId:null,queuedOrderId:null};
-        if(state!=='unavailable'){
-          // The backend also blocks overlapping orders; show the original before offering any new charge.
-          const orders=await api<{orders:Array<{id:string;status:string;periodStatus?:string|null}>}>('/v1/subscriptions/orders');
-          if(!Array.isArray(orders.orders))throw new Error('Subscription orders could not be verified');
-          const valid=(id:string)=>/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(id);
-          const pending=orders.orders.find(o=>valid(o.id)&&['pending','unknown','manual_review','refund_pending'].includes(o.status));
-          const queued=orders.orders.find(o=>valid(o.id)&&o.status==='paid'&&o.periodStatus==='queued');
-          candidate.pendingOrderId=pending?.id??null;
-          candidate.queuedOrderId=queued?.id??null;
-        }
-        if(request!==buyerRequestSequence)return;
-        subscriptionBuyer=candidate;
-      }catch(error){
-        if(request!==buyerRequestSequence)return;
-        subscriptionBuyer={state:error instanceof ApiError&&error.status===401?'guest':'unavailable',
-          plan:null,expiresAt:null,pendingOrderId:null,queuedOrderId:null};
-      }
-      renderSubscriptions();
-    }
-    // BoltUtil availability does not use the MK99/Xiaodou merchant selector.
     void api<{available:boolean}>('/v1/boltutil/availability')
-      .then(r=>{boltutilAvailable=r.available===true;renderSubscriptions();render();})
+      .then(data=>{
+        boltutilAvailable=data.available===true;
+        document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;
+        renderSubscriptions();render();
+      })
       .catch(()=>{boltutilAvailable=false;renderSubscriptions();render();});
     void loadSubscriptions();
-    void loadSubscriptionBuyer();
     window.addEventListener('reply-copilot-language',renderSubscriptions);
 
     type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;fee_rate_bps:number;total_payment_fen?:number|null;merchant_pricing?:{feeBearer:string;rateBps:number;status:string};description_zh?:string;description_en?:string;featured?:boolean;recommended_label_zh?:string;recommended_label_en?:string};
     let packages:Package[]|null=null;
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
-    function render(){const box=document.getElementById("packages")!;box.replaceChildren();
-      document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);
+    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);
       if(boltutilAvailable){
         const usdt=document.createElement('a');usdt.className='button secondary';
         usdt.href='/usdt-checkout/?productType=credits&sku='+encodeURIComponent(pkg.id);
-        usdt.textContent=label('USDT · TRC20 购买','Buy with USDT · TRC20');
+        usdt.textContent=label('USDT · 三链支付','USDT · Pay on 3 networks');
         card.append(usdt);
       }
       box.append(card);}}
-    async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;fiatCreditAvailable=data.paymentAvailable===true;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
+    async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;fiatCreditAvailable=data.paymentAvailable===true;document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
     let refreshTimer:ReturnType<typeof setTimeout>|undefined;
-    window.addEventListener("focus",()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>{void load();void loadSubscriptionBuyer();},250);});
+    window.addEventListener("focus",()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void load(),250);});
     type Quota={quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};signupBenefit?:{status:"pending"|"granted";amount:number}|null};
     let freeState: "loading"|"guest"|"pending"|"ready"|"empty"|"error"="loading";
     let freeQuota:Quota["quota"]|null=null;
@@ -216,9 +149,6 @@ import Base from "../layouts/Base.astro";
   :global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}
   .subscription-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
   .subscription-featured{border:2px solid #2663ac}
-  :global(.subscription-card-actions){display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-top:12px}
-  :global(.subscription-card-actions .fineprint){margin:0;line-height:1.55}
-  :global(.subscription-card-actions .button){text-align:center}
   .subscription-limit{font-size:1.35rem;font-weight:700}
   .quota-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin-top:18px}
   .quota-rule{border:1px solid #dbe4ef;border-radius:16px;padding:16px;background:#f7f9fd}
