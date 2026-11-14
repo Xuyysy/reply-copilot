@@ -26,7 +26,7 @@ function roleLinkQuoted({caption="",outerId="101",quoteId="202",roleCard=true,ha
     }};
   const card={contains:n=>n===quoted||n===quoteTime||n===quotedLink,
     querySelector:q=>q==='[data-testid="User-Name"]'?hasAuthor?{}:null:q==='[data-testid="tweetText"]'?quoted:null};
-  const quotedLink={href:"https://x.com/quote/status/"+quoteId,closest:q=>q==="article"?tweet:null};
+  const quotedLink={href:"https://x.com/quote/status/"+quoteId,closest:q=>q==="article"?tweet:q==='div[role="link"]'?card:null};
   const outerLink={href:"https://x.com/original/status/"+outerId,closest:q=>q==="article"?tweet:null};
   const quoteTime={closest:q=>q==="article"?tweet:q==='div[role="link"]'?card:q.includes('a[href*="/status/"]')?quotedLink:null};
   const outerTime={closest:q=>q==="article"?tweet:q.includes('a[href*="/status/"]')?outerLink:null};
