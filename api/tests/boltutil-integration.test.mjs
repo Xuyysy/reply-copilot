@@ -286,3 +286,26 @@ test('concurrent same upgrade quote cannot issue two payable invoices',async()=>
    assert.equal(count(f,'boltutil_orders'),2);
  }finally{f.sql.close();}
 });
+
+for(const [network] of NETWORKS){
+  for(const [plan,dailyLimit] of [['basic',500],['pro',1000],['max',1500],['ultra',2000]]){
+    test(network+' '+plan+' entitlement matrix preserves all three credit ledgers',async()=>{
+      const f=setup();
+      try{
+        f.sql.prepare("UPDATE system_settings SET value='none' WHERE key='active_merchant'").run();
+        const order=await create(f,network,'subscription',plan);
+        assert.equal(order.status,201,JSON.stringify(order.body));
+        const result=await refresh(f,order.body.order);
+        assert.equal(result.status,200,JSON.stringify(result.body));
+        assert.equal(result.body.order.entitlementApplied,true);
+        const usage=await f.call('/v1/usage',{method:'GET'});
+        assert.equal(usage.body.subscription.plan,plan);
+        assert.equal(usage.body.subscription.dailyLimit,dailyLimit);
+        assert.equal(usage.body.subscription.remainingToday,dailyLimit);
+        assert.equal(row(f,"SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").paid_balance,0);
+        assert.equal(row(f,"SELECT free_balance FROM credit_accounts WHERE user_id='test-user'").free_balance,200);
+        assert.equal(count(f,'credit_batches'),1);
+      }finally{f.sql.close();}
+    });
+  }
+}
