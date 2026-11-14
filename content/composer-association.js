@@ -208,16 +208,23 @@
           :candidates.some(item=>Boolean(item.id))?false:null
         :!candidates.length?null
           :matching.length>1?false
-          :matching.length===1?Boolean(normalized(text))
+          // A uniquely verified parent status ID is the strongest evidence.
+        // X may hydrate its caption text later, especially around quotes.
+        :matching.length===1?true
+          // An explicit other parent/status identity must still fail closed.
+          :candidates.some(item=>Boolean(item.id))?false
+          // Preserve the original, unique exact-text fallback only when
+          // no conflicting status IDs appear in the opened reply dialog.
           :uniqueText&&!uniqueText.id&&exactText.length===1?true
-          :candidates.length===1&&!normalized(text)&&!statusId?null
-          :false;
+          // Unverified text can be a transient React/translation snapshot.
+          // Wait for the parent instead of rejecting after ~200 ms.
+          :null;
       const contextDetail=contextMatches===true?"verified_context"
         :matching.length>1?"duplicate_parent_identity"
         :matching.length===1&&post.quoteOnly&&quotePreview.seen&&!quotedPreviewMatches?"quote_preview_mismatch"
         :!candidates.length?"awaiting_parent_article"
         :matching.length===0&&candidates.some(item=>Boolean(item.id))?"different_parent_identity"
-        :post.quoteOnly?"awaiting_verified_parent":"unconfirmed_context";
+        :post.quoteOnly?"awaiting_verified_parent":"awaiting_parent_or_original_text";
       return {node,dialog,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,

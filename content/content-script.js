@@ -195,6 +195,15 @@
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
+    if (result.state==='waiting' && result.reason==='awaiting_reply_context') {
+      // Record only transitions between structural wait reasons, not each
+      // MutationObserver tick; never include content, URLs, IDs or handles.
+      const detail=facts.editors[0]?.contextDetail||'unclassified';
+      if(active.lastContextWait!==detail){
+        active.lastContextWait=detail;
+        traceAssociation('context_wait',detail);
+      }
+    }
     if (result.state==='rejected') {
       // Structural error codes only: never record IDs, URLs, text or handles.
       if(result.reason==='reply_context_unconfirmed')
@@ -217,6 +226,7 @@
     const requestId = crypto.randomUUID();
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
     traceAssociation('activated','trusted_reply_click');
+    traceAssociation('capture_kind',post.quoteOnly?'quote_only':'own_text');
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.trace = activation.trace;
