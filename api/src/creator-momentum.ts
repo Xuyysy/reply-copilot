@@ -23,7 +23,10 @@ export async function creatorFeature(env:Env,userId:string){
  AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id AND b.status IN ('refund_pending','manual_review'))) eligible`).bind(KEY,userId).first<{config:string|null;eligible:number}>();
  // A verified, currently active subscription also proves paid eligibility.
  // Never use available credit balance to infer that money was received.
- const eligible=row?.eligible===1 || (await subscriptionAccount(env,userId)).status==='active';
+ const cryptoPaid=env.ENVIRONMENT==='staging'&&env.BOLTUTIL_SCHEMA_READY==='1'
+   ? Boolean(await env.DB.prepare("SELECT 1 FROM boltutil_orders b JOIN recharge_orders o ON o.id=b.credit_order_id AND o.user_id=b.user_id JOIN credit_ledger l ON l.reference_id=o.id AND l.kind='purchase_grant' AND l.user_id=b.user_id JOIN credit_batches cb ON cb.source_order_id=o.id AND cb.user_id=b.user_id WHERE b.user_id=? AND b.product_type='credits' AND b.status='paid' AND b.applied_at IS NOT NULL AND b.tx_hash IS NOT NULL AND o.status='paid' AND o.credited_at IS NOT NULL AND cb.status='active' AND cb.permanently_revoked_credits=0 AND EXISTS(SELECT 1 FROM boltutil_payment_events e WHERE e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash) LIMIT 1").bind(userId).first())
+   : false;
+ const eligible=row?.eligible===1 || cryptoPaid || (await subscriptionAccount(env,userId)).status==='active';
  return {eligible,policy:parse(row?.config??undefined)};
 }
 async function history(env:Env){

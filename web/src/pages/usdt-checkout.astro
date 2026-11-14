@@ -1,0 +1,137 @@
+---
+import Base from "../layouts/Base.astro";
+---
+<Base title="USDT · TRC20 收款测试" titleEn="USDT TRC20 checkout">
+  <section class="container section" style="max-width:780px;margin:auto;padding:36px 16px">
+    <p class="eyebrow">BOLTUTIL · USDT · TRC20</p>
+    <h1 data-zh="USDT 支付" data-en="USDT checkout">USDT 支付</h1>
+    <p class="fineprint" data-zh="仅支持 TRON 网络的 USDT-TRC20。请勿转入其它网络或币种；跳转不等于付款成功。" data-en="Only USDT on TRON TRC20 is supported. Do not send another network or token; returning to this page does not confirm payment.">仅支持 TRON 网络的 USDT-TRC20。请勿转入其它网络或币种；跳转不等于付款成功。</p>
+    <div class="notice" role="note" data-zh="Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。" data-en="Staging: if connected to a real merchant, BoltUtil creates MAINNET invoices. Do not transfer without approval.">Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。</div>
+    <div id="bolt-chain-picker" class="pricing-card" style="margin-top:20px" hidden>
+      <label for="bolt-chain">USDT 收款网络 / Payment network</label>
+      <select id="bolt-chain" style="display:block;width:100%;max-width:420px;margin-top:10px;padding:10px;border:1px solid #dbe4ef;border-radius:8px">
+        <option value="TRC20">TRON · TRC20</option>
+        <option value="POLYGON">Polygon PoS · USDT</option>
+        <option value="BEP20">BNB Smart Chain · BEP20</option>
+      </select>
+      <p class="fineprint" style="margin-top:10px">不同网络上的 USDT 不是同一代币合约。请严格按订单指定网络付款；网络确认后不可更换。</p>
+    </div>
+    <div id="bolt-status" role="status" class="notice" style="margin-top:20px">正在查询支付状态…</div>
+    <div class="pricing-card" id="bolt-panel" style="margin-top:20px" hidden>
+      <h2 id="bolt-product"></h2>
+      <p id="bolt-value" style="font-size:1.4rem;font-weight:700"></p>
+      <p id="bolt-expiry" class="fineprint"></p>
+      <p id="bolt-wallet" style="overflow-wrap:anywhere"></p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px" id="bolt-buttons"></div>
+    </div>
+    <p class="fineprint" style="margin-top:24px"><a href="/account/">查看账户权益与历史订单</a> · <a href="/pricing/">返回套餐</a></p>
+  </section>
+  <script>
+    import {api,ApiError} from "../lib/api";
+    type Network="TRC20"|"POLYGON"|"BEP20";
+    type Order={id:string;productType:string;creditOrderId:string|null;subscriptionOrderId:string|null;status:string;network:Network;tokenContract:string;tokenDecimals:number;
+      quotedAmount:string;amount:string|null;address:string|null;currency:string;network:string;
+      checkoutUrl:string|null;expiresAt:number|null;entitlementApplied:boolean};
+    const qs=new URLSearchParams(location.search),existing=qs.get("order"),productType=qs.get("productType"),
+      sku=qs.get("sku"),upgrade=qs.get("upgrade")==="1";
+    const panel=document.getElementById("bolt-panel")!,message=document.getElementById("bolt-status")!,
+      product=document.getElementById("bolt-product")!,value=document.getElementById("bolt-value")!,
+      expiry=document.getElementById("bolt-expiry")!,wallet=document.getElementById("bolt-wallet")!,
+      buttons=document.getElementById("bolt-buttons")!;
+    const chainPicker=document.getElementById("bolt-chain-picker")!, chain=document.getElementById("bolt-chain") as HTMLSelectElement;
+    const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20"];
+    let order:Order|null=null,busy=false,operationKey=crypto.randomUUID();
+    const en=()=>document.documentElement.lang==="en";
+    const t=(zh:string,english:string)=>en()?english:zh;
+    function report(zh:string,english:string){message.textContent=t(zh,english);}
+    function control(label:string,handler:()=>void,secondary=false){
+      const button=document.createElement("button");button.type="button";button.className=secondary?"button secondary":"button";
+      button.textContent=label;button.disabled=busy;button.onclick=handler;buttons.append(button);
+    }
+    function render(){
+      if(!order)return;
+      panel.hidden=false;buttons.replaceChildren();
+      chainPicker.hidden=true;
+      product.textContent=order.productType==="credits"?t("永久额度包","Permanent credits"):t("30 天订阅","30-day subscription");
+      const chainLabel=order.network==="TRC20"?"TRON / TRC20":order.network==="POLYGON"?"Polygon PoS":"BNB Smart Chain / BEP20";
+      value.textContent=(order.amount??order.quotedAmount)+" USDT · "+chainLabel;
+      if(order.tokenContract)wallet.textContent=t("代币合约：","Token contract: ")+order.tokenContract;
+      wallet.textContent=order.address?t("收款地址：","Receiving address: ")+order.address+" · "+t("代币合约：","Token contract: ")+order.tokenContract:"";
+      expiry.textContent=order.expiresAt?t("付款有效期：","Payment expires: ")+new Date(order.expiresAt).toLocaleString():"";
+      report(order.entitlementApplied?"付款已核实且权益已入账。":order.status==="manual_review"?"此笔需要人工核对，请勿重复转账。":
+        order.status==="paid"?"付款已核实，权益正在核对。":order.status==="pending"?"等待付款：请使用原始收银台及完整应付金额。":"付款结果尚未确认，请保留原单。",
+        order.entitlementApplied?"Confirmed and entitlement granted.":order.status==="manual_review"?"Manual review required; do not pay again.":
+        order.status==="paid"?"Confirmed; entitlement check in progress.":order.status==="pending"?"Awaiting payment; use the original checkout.":"Payment status uncertain. Keep this order.");
+      if(order.status==="pending"&&order.checkoutUrl){
+        const link=document.createElement("a");link.className="button";link.target="_blank";link.rel="noopener noreferrer";
+        link.href=order.checkoutUrl;link.textContent=t("打开 BoltUtil 收银台","Open BoltUtil checkout");
+        buttons.append(link);
+      }
+      if(!order.entitlementApplied)control(t("向平台查单并刷新","Check payment status"),()=>void refresh(),true);
+      if(order.entitlementApplied){
+        const link=document.createElement("a");link.href="/account/";link.className="button";link.textContent=t("查看到账权益","View entitlements");buttons.append(link);
+      }
+    }
+    function setOrder(next:Order){
+      order=next;history.replaceState(null,"","/usdt-checkout/?order="+encodeURIComponent(next.id));render();
+    }
+    async function refresh(){
+      if(busy||!order)return;busy=true;report("正在安全查单…","Checking payment…");
+      try{
+        const result=await api<{order:Order}>("/v1/boltutil/orders/"+order.id+"/refresh",{method:"POST",body:"{}"});
+        setOrder(result.order);
+      }catch(e){report(e instanceof Error?e.message:"查单未完成，稍后再试。","Could not verify payment. Retry later.");}
+      finally{busy=false;render();}
+    }
+    async function create(){
+      if(busy)return;
+      if(!allowedNetworks.includes(chain.value as Network)){
+        report("请选择已开放的支付网络。","Choose an enabled payment network.");return;
+      }busy=true;buttons.replaceChildren();report("正在建立订单…","Creating order…");
+      try{
+        let quoteId:string|undefined;
+        if(upgrade){
+          const q=await api<{quote:{id:string;usdtEstimate:string}}>("/v1/boltutil/upgrade-quote",
+            {method:"POST",body:JSON.stringify({planCode:sku})});
+          quoteId=q.quote.id;
+        }
+        const result=await api<{order:Order}>("/v1/boltutil/orders",
+          {method:"POST",body:JSON.stringify({productType,sku,network:chain.value,idempotencyKey:operationKey,...(quoteId?{quoteId}:{})})});
+        setOrder(result.order);
+      }catch(e){
+        report(e instanceof Error?e.message:"订单未创建，请检查原订单后再试。",
+          "Could not create or confirm order. Review existing orders first.");
+      }finally{busy=false;render();}
+    }
+    async function init(){
+      if(existing){
+        if(!/^[0-9a-f-]{36}$/i.test(existing)){report("无效订单号。","Invalid order ID.");return;}
+        try{const result=await api<{order:Order}>("/v1/boltutil/orders/"+existing);setOrder(result.order);}
+        catch(e){report(e instanceof Error?e.message:"订单不可读取。","Order unavailable.");}
+        return;
+      }
+      if(!["credits","subscription"].includes(productType??"")||!sku||!/^[a-z0-9_-]{1,64}$/i.test(sku)){
+        report("套餐信息不正确。","Invalid product.");return;
+      }
+      try{
+        const availability=await api<{available:boolean;networks:Network[]}>("/v1/boltutil/availability");
+        if(!availability.available||!Array.isArray(availability.networks)||!availability.networks.some(n=>allowedNetworks.includes(n))){
+          report("USDT 测试通道暂未开放。","USDT checkout is not enabled.");return;
+        }
+        for(const option of Array.from(chain.options)){
+          option.disabled=!availability.networks.includes(option.value as Network);
+          option.hidden=option.disabled;
+        }
+        const requested=qs.get("network");
+        chain.value=requested&&availability.networks.includes(requested as Network)?requested:availability.networks[0];
+        chainPicker.hidden=false;
+        panel.hidden=false;product.textContent=t("确认 USDT 付款","Confirm USDT purchase");
+        value.textContent=t("金额以平台生成的精确 USDT 报价为准。","Exact USDT amount is provided by checkout.");
+        buttons.replaceChildren();
+        control(t("创建 USDT 订单","Create USDT invoice"),()=>void create());
+        report("请确认已了解 TRC20 网络风险后再创建订单。","Confirm the TRC20 network before proceeding.");
+      }catch{report("无法确认 USDT 通道状态。","USDT channel unavailable.");}
+    }
+    void init();
+  </script>
+</Base>
