@@ -1,13 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="USDT · TRC20 收款测试" titleEn="USDT TRC20 checkout">
+<Base title="USDT 三链支付测试" titleEn="USDT network checkout preview">
   <section class="container section" style="max-width:780px;margin:auto;padding:36px 16px">
-    <p class="eyebrow">BOLTUTIL · USDT · TRC20</p>
+    <p class="eyebrow">BOLTUTIL · USDT · TRC20 / POLYGON / BEP20</p>
     <h1 data-zh="USDT 支付" data-en="USDT checkout">USDT 支付</h1>
-    <p class="fineprint" data-zh="仅支持 TRON 网络的 USDT-TRC20。请勿转入其它网络或币种；跳转不等于付款成功。" data-en="Only USDT on TRON TRC20 is supported. Do not send another network or token; returning to this page does not confirm payment.">仅支持 TRON 网络的 USDT-TRC20。请勿转入其它网络或币种；跳转不等于付款成功。</p>
+    <p class="fineprint" data-zh="支持 TRON (TRC20)、Polygon PoS 和 BNB Smart Chain (BEP20) 的 USDT。每笔订单必须按指定网络与收款地址转账；返回页面不代表付款成功。" data-en="USDT on TRON (TRC20), Polygon PoS, and BNB Smart Chain (BEP20). Use the exact network and receiving address for each order; returning to this page does not confirm payment.">支持 TRON (TRC20)、Polygon PoS 和 BNB Smart Chain (BEP20) 的 USDT。每笔订单必须按指定网络与收款地址转账；返回页面不代表付款成功。</p>
     <div class="notice" role="note" data-zh="Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。" data-en="Staging: if connected to a real merchant, BoltUtil creates MAINNET invoices. Do not transfer without approval.">Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。</div>
-    <div id="bolt-chain-picker" class="pricing-card" style="margin-top:20px" hidden>
+    <div id="bolt-chain-picker" class="pricing-card" style="margin-top:20px">
       <label for="bolt-chain">USDT 收款网络 / Payment network</label>
       <select id="bolt-chain" style="display:block;width:100%;max-width:420px;margin-top:10px;padding:10px;border:1px solid #dbe4ef;border-radius:8px">
         <option value="TRC20">TRON · TRC20</option>
@@ -16,7 +16,7 @@ import Base from "../layouts/Base.astro";
       </select>
       <p class="fineprint" style="margin-top:10px">不同网络上的 USDT 不是同一代币合约。请严格按订单指定网络付款；网络确认后不可更换。</p>
     </div>
-    <div id="bolt-status" role="status" class="notice" style="margin-top:20px">正在查询支付状态…</div>
+    <div id="bolt-status" role="status" class="notice" style="margin-top:20px">正在确认 USDT 三链收款状态。商户未开放前，请勿转账。</div>
     <div class="pricing-card" id="bolt-panel" style="margin-top:20px" hidden>
       <h2 id="bolt-product"></h2>
       <p id="bolt-value" style="font-size:1.4rem;font-weight:700"></p>
@@ -39,6 +39,7 @@ import Base from "../layouts/Base.astro";
       expiry=document.getElementById("bolt-expiry")!,wallet=document.getElementById("bolt-wallet")!,
       buttons=document.getElementById("bolt-buttons")!;
     const chainPicker=document.getElementById("bolt-chain-picker")!, chain=document.getElementById("bolt-chain") as HTMLSelectElement;
+    chain.disabled=true;
     const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20"];
     let order:Order|null=null,busy=false,operationKey=crypto.randomUUID();
     const en=()=>document.documentElement.lang==="en";
@@ -114,12 +115,14 @@ import Base from "../layouts/Base.astro";
         return;
       }
       if(!["credits","subscription"].includes(productType??"")||!sku||!/^[a-z0-9_-]{1,64}$/i.test(sku)){
-        report("套餐信息不正确。","Invalid product.");return;
+        report("请选择套餐后再创建订单；当前页面可预览 TRON、Polygon 和 BNB 三条网络。","Select a plan before creating an invoice. You can preview the three supported networks here.");return;
       }
       try{
         const availability=await api<{available:boolean;networks:Network[]}>("/v1/boltutil/availability");
         if(!availability.available||!Array.isArray(availability.networks)||!availability.networks.some(n=>allowedNetworks.includes(n))){
-          report("USDT 测试通道暂未开放。","USDT checkout is not enabled.");return;
+          chainPicker.hidden=false;
+          chain.disabled=true;
+          report("支持 TRON (TRC20)、Polygon 和 BNB (BEP20)。当前商户收款未配置，三条网络仅供预览，不能创建订单或付款。","TRON, Polygon and BNB networks are supported. Merchant payments are not configured: preview only, no invoice or transfer.");return;
         }
         for(const option of Array.from(chain.options)){
           option.disabled=!availability.networks.includes(option.value as Network);
@@ -128,6 +131,7 @@ import Base from "../layouts/Base.astro";
         const requested=qs.get("network");
         chain.value=requested&&availability.networks.includes(requested as Network)?requested:availability.networks[0];
         chainPicker.hidden=false;
+        chain.disabled=false;
         panel.hidden=false;product.textContent=t("确认 USDT 付款","Confirm USDT purchase");
         value.textContent=t("金额以平台生成的精确 USDT 报价为准。","Exact USDT amount is provided by checkout.");
         buttons.replaceChildren();
