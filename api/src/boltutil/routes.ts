@@ -187,8 +187,10 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
     statements.push(env.DB.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at) SELECT ?,?,?,?, ?,?,'USD','awaiting_payment','boltutil',?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL)")
       .bind(targetId,user.user_id,sku,packageName,credits,priceCents,externalId,now,user.user_id));
   }else{
-    statements.push(env.DB.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,target_period_id,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) SELECT ?,?,?,?, ?,?,'pending',?,?,?, ?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL)")
-      .bind(targetId,user.user_id,planVersion,subKind,periodId,baseFen,now,now+300000,now,now,operationId,user.user_id));
+    // Re-check pending and queued state inside the D1 transaction: a preflight
+    // SELECT alone is not an atomic guard against two concurrent invoices.
+    statements.push(env.DB.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,target_period_id,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) SELECT ?,?,?,?, ?,?,'pending',?,?,?, ?,? WHERE EXISTS(SELECT 1 FROM users WHERE id=? AND status='active' AND archived_at IS NULL) AND NOT EXISTS(SELECT 1 FROM subscription_orders WHERE user_id=? AND status IN ('pending','unknown','manual_review','refund_pending')) AND NOT EXISTS(SELECT 1 FROM subscription_periods WHERE user_id=? AND status='queued')")
+      .bind(targetId,user.user_id,planVersion,subKind,periodId,baseFen,now,now+300000,now,now,operationId,user.user_id,user.user_id,user.user_id));
     if(subKind==="upgrade") statements.push(env.DB.prepare("UPDATE subscription_upgrade_quotes SET order_id=? WHERE id=? AND user_id=? AND order_id IS NULL AND expires_at>?")
       .bind(targetId,quoteId,user.user_id,now));
   }
@@ -196,12 +198,28 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
     .bind(id,externalId,user.user_id,operationId,productType,productType==="credits"?targetId:null,
       productType==="subscription"?targetId:null,network,NETWORKS[network].contract,NETWORKS[network].decimals,
       baseFen,rate,Number(quoted),now,now,user.user_id));
-  statements.push(env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND user_id=?) AND EXISTS(SELECT 1 FROM "+(productType==="credits"?"recharge_orders":"subscription_orders")+" WHERE id=? AND user_id=?) THEN 1 ELSE 0 END")
-    .bind("bolt-create:"+id,id,user.user_id,targetId,user.user_id));
+  // An upgrade quote is an immutable, single-use claim. A losing concurrent
+  // checkout must roll back before calling BoltUtil or charging the customer.
+  const quoteClaim=productType==="subscription"&&subKind==="upgrade";
+  const quoteClaimSql=quoteClaim
+    ?" AND EXISTS(SELECT 1 FROM subscription_upgrade_quotes WHERE id=? AND order_id=? AND user_id=? AND to_version_id=? AND expires_at>?)":"";
+  const quoteClaimArgs=quoteClaim?[quoteId,targetId,user.user_id,planVersion,now]:[];
+  statements.push(env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND user_id=?) AND EXISTS(SELECT 1 FROM "+(productType==="credits"?"recharge_orders":"subscription_orders")+" WHERE id=? AND user_id=?)"+quoteClaimSql+" THEN 1 ELSE 0 END")
+    .bind("bolt-create:"+id,id,user.user_id,targetId,user.user_id,...quoteClaimArgs));
   statements.push(env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind("bolt-create:"+id));
   try{await env.DB.batch(statements);}
-  catch{const retry=await orderByOperation(env,user.user_id,operationId);if(retry)return response({order:snapshot(retry),resumed:true},200,env,request);
-    throw new ApiFailure(409,"BOLTUTIL_ORDER_CONFLICT","订单状态冲突，请查询原订单。");}
+  catch{
+    const retry=await orderByOperation(env,user.user_id,operationId);
+    if(retry&&retry.network===network&&retry.product_type===productType){
+      const same=productType==="credits"
+        ?await env.DB.prepare("SELECT 1 FROM recharge_orders WHERE id=? AND user_id=? AND package_id=?")
+           .bind(retry.credit_order_id,user.user_id,sku).first()
+        :await env.DB.prepare("SELECT 1 FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id WHERE o.id=? AND o.user_id=? AND v.plan_code=? AND COALESCE((SELECT id FROM subscription_upgrade_quotes WHERE order_id=o.id),'')=?")
+           .bind(retry.subscription_order_id,user.user_id,sku,quoteId??"").first();
+      if(same)return response({order:snapshot(retry),resumed:true},200,env,request);
+    }
+    throw new ApiFailure(409,"BOLTUTIL_ORDER_CONFLICT","订单状态冲突，请查询原订单。");
+  }
   let provider:Record<string,unknown>;
   try{
     provider=await boltRequest(env,"/api/v1/order/create",{

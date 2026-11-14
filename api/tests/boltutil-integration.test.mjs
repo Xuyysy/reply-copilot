@@ -227,3 +227,62 @@ test('signed BoltUtil webhook validates raw body and replay id, then credits onc
    assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,400);
  }finally{f.sql.close();}
 });
+
+test('concurrent unique checkout keys cannot create two pending subscription invoices',async()=>{
+ const f=setup();
+ try{
+   const params={productType:'subscription',sku:'basic',network:'TRC20'};
+   let providerCreates=0;
+   const [one,two]=await withProvider(request=>{
+     providerCreates++;
+     return mockCreate(request);
+   },()=>Promise.all([
+     f.call('/v1/boltutil/orders',{body:{...params,idempotencyKey:crypto.randomUUID()}}),
+     f.call('/v1/boltutil/orders',{body:{...params,idempotencyKey:crypto.randomUUID()}})
+   ]));
+   assert.deepEqual([one.status,two.status].sort((a,b)=>a-b),[201,409],
+     JSON.stringify([one.body,two.body]));
+   assert.equal(providerCreates,1,'losing checkout cannot call provider');
+   assert.equal(count(f,'subscription_orders'),1);
+   assert.equal(count(f,'boltutil_orders'),1);
+ }finally{f.sql.close();}
+});
+
+test('one idempotency key cannot silently alias different chains during a race',async()=>{
+ const f=setup();
+ try{
+   const idempotencyKey=crypto.randomUUID();
+   const base={productType:'credits',sku:'starter',idempotencyKey};
+   let calls=0;
+   const [tron,bsc]=await withProvider(request=>{
+     calls++;return mockCreate(request);
+   },()=>Promise.all([
+     f.call('/v1/boltutil/orders',{body:{...base,network:'TRC20'}}),
+     f.call('/v1/boltutil/orders',{body:{...base,network:'BEP20'}})
+   ]));
+   assert.deepEqual([tron.status,bsc.status].sort((a,b)=>a-b),[201,409],
+     JSON.stringify([tron.body,bsc.body]));
+   assert.equal(count(f,'boltutil_orders'),1);
+   assert.equal(calls,1);
+ }finally{f.sql.close();}
+});
+test('concurrent same upgrade quote cannot issue two payable invoices',async()=>{
+ const f=setup();
+ try{
+   const original=await create(f,'TRC20','subscription','basic');
+   assert.equal(original.status,201,JSON.stringify(original.body));
+   assert.equal((await refresh(f,original.body.order)).status,200);
+   const q=await f.call('/v1/boltutil/upgrade-quote',{body:{planCode:'pro'}});
+   assert.equal(q.status,200,JSON.stringify(q.body));
+   const base={productType:'subscription',sku:'pro',network:'POLYGON',quoteId:q.body.quote.id};
+   let calls=0;
+   const [a,b]=await withProvider(request=>{calls++;return mockCreate(request);},()=>Promise.all([
+     f.call('/v1/boltutil/orders',{body:{...base,idempotencyKey:crypto.randomUUID()}}),
+     f.call('/v1/boltutil/orders',{body:{...base,idempotencyKey:crypto.randomUUID()}})
+   ]));
+   assert.deepEqual([a.status,b.status].sort((x,y)=>x-y),[201,409],JSON.stringify([a.body,b.body]));
+   assert.equal(calls,1);
+   assert.equal(count(f,'subscription_orders'),2); // original and one upgrade
+   assert.equal(count(f,'boltutil_orders'),2);
+ }finally{f.sql.close();}
+});
