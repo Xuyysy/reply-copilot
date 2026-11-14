@@ -196,6 +196,9 @@
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
     if (result.state==='rejected') {
+      // Structural error codes only: never record IDs, URLs, text or handles.
+      if(result.reason==='reply_context_unconfirmed')
+        traceAssociation('context_detail',facts.editors[0]?.contextDetail||'unclassified');
       if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0 && facts.visibleDialogCount===0) endSession('reply_closed');
       else rejectAssociation(result.reason);
     }

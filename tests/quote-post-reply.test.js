@@ -77,13 +77,16 @@ test("quote-only reply binds when original parent ID and exact quote card agree"
   assert.equal(s.facts.editors[0].contextMatches,true);
   assert.equal(s.matched.state,"bound");
 });
-test("quote-only reply never binds on wrong outer post ID or wrong quote",async()=>{
+test("quote-only reply rejects wrong outer parent ID and explicitly wrong quote preview",async()=>{
   const api=await buildApi();
   const post=api.composerAssociation.capturePost(api.postExtractor.extractPost(articleFixture().outer));
-  for(const change of [{parentId:"999"},{sameQuote:false},{includeQuote:false}]){
+  for(const change of [{parentId:"999"},{sameQuote:false}]){
     const s=modalSnapshot(api,post,change);
     assert.notEqual(s.matched.state,"bound");
   }
+  const noPreview=modalSnapshot(api,post,{includeQuote:false});
+  assert.equal(noPreview.facts.editors[0].contextStatusId,"101");
+  assert.equal(noPreview.matched.state,"bound");
 });
 test("quote recovery is local-only and does not add provider calls or scans for normal posts",()=>{
   const source=readFileSync(new URL("../content/post-extractor.js",import.meta.url),"utf8");
