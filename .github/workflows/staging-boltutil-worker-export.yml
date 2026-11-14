@@ -1,0 +1,46 @@
+name: One-shot Staging Worker bundle export (NO deployment)
+on:
+  push:
+    branches:
+      - chatgpt/staging-boltutil-worker-export-20261114
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Bundle exact staging Worker without deploying
+        run: |
+          npm --prefix api ci
+          cd api
+          npx --no-install wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/staging-boltutil-bundle"
+      - name: Export compressed verified script to private Actions log for controlled API upload
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import base64,gzip,hashlib,os,pathlib
+          root=pathlib.Path(os.environ["RUNNER_TEMP"])/"staging-boltutil-bundle"
+          items=[x for x in root.rglob("*.js") if x.is_file()]
+          assert len(items)==1,f"Expected exactly one bundled JS module; got {items!r}"
+          payload=items[0].read_bytes()
+          assert len(payload)<10_000_000, "Unexpectedly large Worker bundle"
+          text=payload.decode("utf-8")
+          assert "boltutil" in text.lower(),"BoltUtil integration not present in built Worker"
+          compressed=gzip.compress(payload,mtime=0)
+          b64=base64.b64encode(compressed).decode()
+          print("BOLTUTIL_EXPORT_FILE",items[0].name)
+          print("BOLTUTIL_EXPORT_RAW_SHA256",hashlib.sha256(payload).hexdigest())
+          print("BOLTUTIL_EXPORT_RAW_SIZE",len(payload))
+          print("BOLTUTIL_EXPORT_B64_START")
+          for i in range(0,len(b64),10000):print("BOLTUTIL_B64",b64[i:i+10000])
+          print("BOLTUTIL_EXPORT_B64_END")
+          PY
