@@ -117,12 +117,18 @@
       card?.querySelector?.('[data-testid="tweetText"]'));
   }
   function capturePost(post) {
+    // Captioned quotes require extra hydration patience, ordinary posts do not.
+    // Discover the quote only on the trusted capture, not on every modal scan.
+    const markedQuote=Boolean(post.article?.querySelector?.('[data-testid="quoteTweet"]'));
+    const roleLinkQuote=!markedQuote&&[...(post.article?.querySelectorAll?.('div[role="link"]')||[])]
+      .some(card=>card.querySelector?.('[data-testid="User-Name"]')&&card.querySelector?.('[data-testid="tweetText"]'));
+    const hasCapturedQuote=markedQuote||roleLinkQuote;
     const hasCapturedMedia=Boolean(post.article?.querySelector?.('[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]'));
     const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
       if(a.closest('article')!==post.article)return false;
       try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
     });
-    return {...post,hasCapturedPhoto,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
+    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
   }
   function sameContext(post,text) {
     const source=normalized(post.sourceText),copy=normalized(text);
@@ -208,8 +214,17 @@
           :candidates.some(item=>Boolean(item.id))?false:null
         :!candidates.length?null
           :matching.length>1?false
-          :matching.length===1?Boolean(normalized(text))
+          // A uniquely verified parent status ID is the strongest evidence.
+        // X may hydrate its caption text later, especially around quotes.
+        :matching.length===1?true
+          // An explicit other parent/status identity must still fail closed.
+          :candidates.some(item=>Boolean(item.id))?false
+          // Preserve the original, unique exact-text fallback only when
+          // no conflicting status IDs appear in the opened reply dialog.
           :uniqueText&&!uniqueText.id&&exactText.length===1?true
+          // Only captioned quote layouts get a hydration grace; unrelated
+          // non-quote or media text mismatches stay strict/fail-closed.
+          :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
       const contextDetail=contextMatches===true?"verified_context"
@@ -217,7 +232,8 @@
         :matching.length===1&&post.quoteOnly&&quotePreview.seen&&!quotedPreviewMatches?"quote_preview_mismatch"
         :!candidates.length?"awaiting_parent_article"
         :matching.length===0&&candidates.some(item=>Boolean(item.id))?"different_parent_identity"
-        :post.quoteOnly?"awaiting_verified_parent":"unconfirmed_context";
+        :post.quoteOnly?"awaiting_verified_parent"
+        :post.hasCapturedQuote?"awaiting_captioned_quote_parent":"unconfirmed_context";
       return {node,dialog,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,

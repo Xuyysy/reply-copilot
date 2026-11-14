@@ -37,7 +37,7 @@ function roleLinkQuoted({caption="",outerId="101",quoteId="202",roleCard=true,ha
   return {tweet,card,quoted,quoteTime,outerTime};
 }
 
-function modalOfQuoted(api,post,{parentId="101",quoteText="A useful original quoted post",includeCard=true,includeParent=true,nestedArticle=false,bareQuote=false}={}) {
+function modalOfQuoted(api,post,{parentId="101",quoteText="A useful original quoted post",includeCard=true,includeParent=true,nestedArticle=false,bareQuote=false,unverifiedText=""}={}) {
   const parent={isConnected:true,matches:q=>q==="article",getClientRects:()=>[{}],closest:()=>null,contains:()=>false,
     querySelectorAll:q=>q==="time"?[parentTime]:q.includes('a[href*="/status/"]')?[parentLink]:[]};
   const parentLink={href:"https://x.com/original/status/"+parentId,closest:q=>q==="article"?parent:null};
@@ -51,11 +51,13 @@ function modalOfQuoted(api,post,{parentId="101",quoteText="A useful original quo
   const quotedTime={closest:q=>q==='article'?quotedArticle:q==='div[role="link"]'?card:q.includes('a[href*="/status/"]')?quotedLink:null};
   const bareText={isConnected:true,getClientRects:()=>[{}],innerText:quoteText,textContent:quoteText,
     closest:q=>q==='div[role="link"]'?card:null};
+  const looseText={isConnected:true,getClientRects:()=>[{}],innerText:unverifiedText,textContent:unverifiedText,
+    closest:()=>null};
   const editor={isConnected:true,getClientRects:()=>[{}],closest:q=>q==='[role="dialog"]'?dialog:null};
   const dialog={isConnected:true,getClientRects:()=>[{}],closest:()=>null,
     querySelectorAll:q=>q==="article"?[...(includeParent?[parent]:[]),...(includeCard&&nestedArticle?[quotedArticle]:[])]:
       q==='div[role="link"]'?(includeCard?[card]:[]):
-      q==='[data-testid="tweetText"]'?(includeCard&&bareQuote?[bareText]:[]):
+      q==='[data-testid="tweetText"]'?[...(includeCard&&bareQuote?[bareText]:[]),...(unverifiedText?[looseText]:[])]:
       q.includes('contenteditable')?[editor]:[]};
   const document={activeElement:editor,querySelectorAll:q=>q==='[role="dialog"]'?[dialog]:[]};
   const facts=api.composerAssociation.snapshot(document,post,"https://x.com/home","https://x.com/home",50);
@@ -125,4 +127,38 @@ test("source only includes role-link fallback and no new request path or extra A
  assert.match(assoc,/quotedPreviewMatches/);
  assert.match(capture,/traceAssociation\("capture_failed",/);
  assert.doesNotMatch(src+assoc,/fetch\s*\(|XMLHttpRequest|requestConfiguredModel/);
+});
+
+test("captioned quote with exact verified parent ID binds even before outer caption text mounts",()=>{
+ const a=api(),f=roleLinkQuoted({caption:"Outer caption with a quote"});
+ const p=a.composerAssociation.capturePost(a.postExtractor.extractPost(f.tweet));
+ assert.equal(p.ok,true);
+ assert.equal(p.quoteOnly,false);
+ const s=modalOfQuoted(a,p,{includeCard:true});
+ assert.equal(s.facts.editors[0].contextStatusId,"101");
+ assert.equal(s.facts.editors[0].contextTextPresent,false);
+ assert.equal(s.facts.editors[0].contextMatches,true);
+ assert.equal(s.result.state,"bound");
+});
+test("captioned quote unverified modal text waits for target identity instead of instant rejection",()=>{
+ const a=api(),p=a.composerAssociation.capturePost(a.postExtractor.extractPost(roleLinkQuoted({caption:"Outer caption"}).tweet));
+ const s=modalOfQuoted(a,p,{includeParent:false,includeCard:false,unverifiedText:"Intermediate X placeholder"});
+ assert.equal(s.facts.editors[0].contextStatusId,null);
+ assert.equal(s.facts.editors[0].contextMatches,null);
+ assert.equal(p.hasCapturedQuote,true);
+ assert.equal(s.facts.editors[0].contextDetail,"awaiting_captioned_quote_parent");
+ assert.equal(s.result.state,"waiting");
+});
+test("captioned quote rejects explicit wrong parent status even if modal text is loading",()=>{
+ const a=api(),p=a.composerAssociation.capturePost(a.postExtractor.extractPost(roleLinkQuoted({caption:"Outer caption"}).tweet));
+ const s=modalOfQuoted(a,p,{parentId:"999",unverifiedText:"Outer caption"});
+ assert.notEqual(s.result.state,"bound");
+ assert.equal(s.facts.editors[0].contextDetail,"different_parent_identity");
+ assert.equal(s.result.reason,"reply_context_unconfirmed");
+});
+test("quote modal diagnostics classify own-text vs quote-only without recording tweet text or IDs",()=>{
+ const source=readFileSync(new URL("../content/content-script.js",import.meta.url),"utf8");
+ assert.match(source,/traceAssociation\('capture_kind',post\.quoteOnly\?'quote_only':'own_text'\)/);
+ assert.match(source,/traceAssociation\('context_wait',detail\)/);
+ assert.doesNotMatch(source,/traceAssociation\('context_wait',post\.sourceText\)/);
 });
