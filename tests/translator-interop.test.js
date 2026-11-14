@@ -39,5 +39,7 @@ test("translation only changes one input attempt, not all subsequent posts",()=>
  assert.ok(source.includes("event.target?.closest?.('[contenteditable"));
  assert.ok(source.includes("api.replyDetector.findReplyControl(event.target,event)"));
  assert.ok(widget.includes('host.setAttribute("translate","no")'));
- assert.ok(widget.includes('host.classList.add("notranslate")'));
+ assert.ok(!widget.includes('host.classList.add("notranslate")'));
+ assert.ok(!source.includes("Google Translate"));
+ assert.ok(!source.includes("chrome.i18n.detectLanguage"));
 });
