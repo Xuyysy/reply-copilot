@@ -166,9 +166,16 @@
       // Only quote-only posts need this extra DOM check. X can show the
       // outer author/timestamp without an outer tweetText in the modal.
       // Require BOTH the verified outer ID and the same quoted preview.
-      const quotedPreviewMatches=Boolean(post.quoteOnly && post.quotedText &&
-        [...dialog.querySelectorAll('[data-testid="quoteTweet"] [data-testid="tweetText"]')]
-          .some(node=>normalized(node.innerText||node.textContent)===normalized(post.quotedText)));
+      const quotedPreviewMatches=Boolean(post.quoteOnly && post.quotedText && (()=>{
+        // Only the exceptional quote-only path inspects quote cards. Support
+        // both data-testid=quoteTweet and X's author-bearing role=link card.
+        const marked=[...dialog.querySelectorAll('[data-testid="quoteTweet"] [data-testid="tweetText"]')];
+        const roleCards=[...dialog.querySelectorAll('div[role="link"]')]
+          .filter(card=>card.querySelector?.('[data-testid="User-Name"]'))
+          .map(card=>card.querySelector?.('[data-testid="tweetText"]')).filter(Boolean);
+        return [...new Set([...marked,...roleCards])].some(node=>
+          normalized(api.postExtractor.readOriginalText?.(node)||node.innerText||node.textContent)===normalized(post.quotedText));
+      })());
       const exactText=candidates.filter(item=>sameContext(post,item.text));
       // X sometimes omits the parent permalink in a quote/video reply modal,
       // while leaving a separate quoted article. A UNIQUE source-text match

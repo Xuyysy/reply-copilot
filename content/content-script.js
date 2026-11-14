@@ -670,7 +670,11 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;return;}
+    if (!post.ok) {
+      // Only on a failed verified Reply gesture; never log text or URLs.
+      traceAssociation("capture_failed",post.reason||"unknown_post");
+      pendingActivation=null;return;
+    }
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
@@ -681,10 +685,12 @@
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.blocked || performance.now()-activation.at>1500) {
+      traceAssociation("click_failed",!activation?"no_pointer_activation":activation.blocked?"blocked_activation":"activation_expired");
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId) {
+      traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
