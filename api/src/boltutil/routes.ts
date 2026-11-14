@@ -3,7 +3,7 @@ import {ApiFailure} from "../types";
 import {sessionFor,requireCsrf,takeRate} from "../auth";
 import {requireWebOrigin,jsonBody,uuid,nowMs} from "../security";
 import {response} from "../http";
-import {projectMk99Pricing} from "../pricing";
+import {projectCryptoBasePricing} from "../pricing";
 import {quoteSubscriptionUpgrade,SUBSCRIPTION_DAY_MS} from "../../../domain/subscription-policy.js";
 import {subscriptionsEnabled,subscriptionAccount} from "../subscription-account";
 import {quoteFromCnyFen,formatMicros,decimalMicros,parseBoltNetwork,validReceivingAddress,tokenRawUnits,NETWORKS,SUPPORTED_BOLT_NETWORKS,type BoltNetwork} from "./contract";
@@ -156,8 +156,7 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
         settlement_mode:string|null;exchange_rate_micros:number|null;fee_rate_bps:number|null;
       }>();
     if(!pkg)throw new ApiFailure(404,"PACKAGE_NOT_FOUND","额度包已下架。");
-    const price=projectMk99Pricing(pkg);
-    baseFen=price.totalPaymentFen;priceCents=pkg.promo_price_cents??pkg.price_cents;
+    baseFen=projectCryptoBasePricing(pkg);priceCents=pkg.promo_price_cents??pkg.price_cents;
     credits=pkg.credits;packageName=pkg.name_zh;
   }else{
     const plan=await env.DB.prepare("SELECT id,price_fen,duration_days FROM subscription_plan_versions WHERE plan_code=? AND current=1 AND active=1")

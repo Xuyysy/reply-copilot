@@ -70,6 +70,8 @@ for(const [network] of NETWORKS){
      assert.equal(initial.status,201,JSON.stringify(initial.body));
      assert.equal(initial.body.order.status,'pending');
      assert.equal(initial.body.order.network,network);
+     const expectedCny=row(f,'SELECT price_cny_fen FROM recharge_packages WHERE id=?','starter').price_cny_fen;
+     assert.equal(row(f,'SELECT base_amount_fen FROM boltutil_orders WHERE id=?',initial.body.order.id).base_amount_fen,expectedCny,'USDT must not inherit MK99 fee uplift');
      const order=initial.body.order;
      const paid=await refresh(f,order);
      assert.equal(paid.status,200,JSON.stringify(paid.body));
@@ -121,5 +123,107 @@ test('pending provider status cannot grant entitlements',async()=>{
    const pending=await refresh(f,created.body.order,{status:'PAID'});
    assert.equal(pending.status,200,JSON.stringify(pending.body));
    assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,0);
+ }finally{f.sql.close();}
+});
+
+test('TRON Basic subscription -> Polygon Pro upgrade keeps expiry and used quota',async()=>{
+ const f=setup();
+ try{
+   const purchase=await create(f,'TRC20','subscription','basic');
+   assert.equal(purchase.status,201,JSON.stringify(purchase.body));
+   assert.equal((await refresh(f,purchase.body.order)).status,200);
+   const old=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+   assert.ok(old?.id);
+   f.sql.prepare("INSERT INTO subscription_daily_usage(period_id,day_index,used,reserved,updated_at) VALUES(?,0,7,0,?)")
+     .run(old.id,Date.now());
+   const quoted=await f.call('/v1/boltutil/upgrade-quote',{body:{planCode:'pro'}});
+   assert.equal(quoted.status,200,JSON.stringify(quoted.body));
+   const upgrade=await create(f,'POLYGON','subscription','pro',{quoteId:quoted.body.quote.id});
+   assert.equal(upgrade.status,201,JSON.stringify(upgrade.body));
+   const paid=await refresh(f,upgrade.body.order);
+   assert.equal(paid.status,200,JSON.stringify(paid.body));
+   assert.equal(paid.body.order.entitlementApplied,true);
+   const changed=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+   assert.equal(changed.id,old.id);
+   assert.equal(changed.end_at,old.end_at);
+   assert.equal(changed.daily_limit,1000);
+   assert.equal(row(f,'SELECT used FROM subscription_daily_usage WHERE period_id=? AND day_index=0',old.id).used,7);
+   assert.equal(count(f,'subscription_tier_changes'),1);
+   const usage=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(usage.body.subscription.dailyLimit,1000);
+   assert.equal(usage.body.subscription.usedToday,7);
+ }finally{f.sql.close();}
+});
+test('TRON Basic -> BSC Pro next-period renewal starts only after old 30-day period expires',async()=>{
+ const f=setup();
+ try{
+   const first=await create(f,'TRC20','subscription','basic');
+   assert.equal(first.status,201,JSON.stringify(first.body));
+   assert.equal((await refresh(f,first.body.order)).status,200);
+   const second=await create(f,'BEP20','subscription','pro');
+   assert.equal(second.status,201,JSON.stringify(second.body));
+   const paid=await refresh(f,second.body.order);
+   assert.equal(paid.status,200,JSON.stringify(paid.body));
+   const queued=row(f,"SELECT id,start_at,end_at FROM subscription_periods WHERE status='queued'");
+   assert.ok(queued?.id);
+   assert.equal(queued.start_at,null);
+   assert.equal(queued.end_at,null);
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.plan,'basic');
+   const old=row(f,"SELECT id,start_at,end_at FROM subscription_periods WHERE status='active'");
+   f.sql.prepare("UPDATE subscription_periods SET start_at=?,end_at=? WHERE id=?")
+    .run(old.start_at-30*86400000-1000,old.end_at-30*86400000-1000,old.id);
+   const after=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(after.status,200,JSON.stringify(after.body));
+   assert.equal(after.body.subscription.plan,'pro');
+   assert.equal(after.body.subscription.dailyLimit,1000);
+   const active=row(f,"SELECT id,end_at-start_at AS duration FROM subscription_periods WHERE status='active'");
+   assert.equal(active.id,queued.id);
+   assert.equal(active.duration,30*86400000);
+ }finally{f.sql.close();}
+});
+test('a signed-looking but wrong-network provider confirmation triggers review without any entitlement',async()=>{
+ const f=setup();
+ try{
+   const order=await create(f,'TRC20');
+   assert.equal(order.status,201,JSON.stringify(order.body));
+   const result=await refresh(f,order.body.order,{network:'BEP20'});
+   assert.notEqual(result.status,200);
+   assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,0);
+   assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',order.body.order.id).status,'manual_review');
+ }finally{f.sql.close();}
+});
+
+test('signed BoltUtil webhook validates raw body and replay id, then credits once',async()=>{
+ const f=setup();
+ try{
+   const created=await create(f,'TRC20');
+   assert.equal(created.status,201,JSON.stringify(created.body));
+   const order=created.body.order;
+   const event={eventId:'evt_1234567890abcdef',status:'CONFIRMED',
+     amount:order.amount,paidAmount:order.amount,shortfallAmount:'0',
+     settlementType:'EXACT',manuallyAccepted:false,currency:'USDT',
+     network:'TRC20',externalOrderId:row(f,'SELECT external_order_id FROM boltutil_orders WHERE id=?',order.id).external_order_id,
+     destinationAddress:order.address,txHash:NETWORKS[0][3]};
+   async function send(payload,ts=String(Date.now()),signingPayload=payload){
+     const raw=JSON.stringify(signingPayload);
+     const sig=createHmac('sha256',secret).update(ts+'.'+raw).digest('hex');
+     return f.call('/v1/boltutil/webhook',{body:payload,headers:{
+       'X-Bolt-Webhook-Timestamp':ts,'X-Bolt-Webhook-Signature':sig
+     }});
+   }
+   const mismatch=await send({...event,amount:'999'},undefined,event);
+   assert.equal(mismatch.status,401);
+   const expired=await send(event,String(Date.now()-3600000));
+   assert.equal(expired.status,401);
+   const result=await withProvider(request=>{
+     const body=JSON.parse(request.body);
+     assert.equal(body.externalOrderId,event.externalOrderId);
+     return Response.json({code:200,data:event});
+   },()=>send(event));
+   assert.equal(result.status,200,JSON.stringify(result.body));
+   const repeated=await send(event);
+   assert.equal(repeated.status,200,JSON.stringify(repeated.body));
+   assert.equal(count(f,'boltutil_payment_events'),1);
+   assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,400);
  }finally{f.sql.close();}
 });
