@@ -13,18 +13,38 @@
   // <article>. Such links/timestamps/text are not evidence of the post being
   // replied to. These selectors follow X's public DOM testid conventions.
   const QUOTE_CONTENT = '[data-testid="quoteTweet"], [data-testid="card.wrapper"]';
+  // X sometimes uses a quoted DIV role=link card without quoteTweet.
+  // Multiple public X extensions identify it by nested author + tweetText.
+  // Requiring a separate outer tweetText was incorrect for quote-only posts.
+  function roleLinkQuoteCard(card, article) {
+    if(!card || card===article || !article?.contains?.(card) ||
+       !card.querySelector?.('[data-testid="User-Name"]') ||
+       !card.querySelector?.('[data-testid="tweetText"]')) return false;
+    // A quote card is not proof of the OUTER post identity. If no distinct
+    // parent timestamp/link exists, the postIdentity extractor still fails
+    // closed rather than reusing the quoted author's status ID.
+    return true;
+  }
+  function quoteCard(article) {
+    const marked=article?.querySelector?.('[data-testid="quoteTweet"]');
+    if(marked && marked!==article && article.contains?.(marked))return marked;
+    for(const card of article?.querySelectorAll?.('div[role="link"]')||[]) {
+      if(roleLinkQuoteCard(card,article))return card;
+    }
+    return null;
+  }
   function isQuoteContent(node, article) {
-    const quote = node?.closest?.(QUOTE_CONTENT);
-    if (quote && quote !== article && article?.contains?.(quote)) return true;
-    // Some X layouts render a quote as a role=link card without
-    // data-testid=quoteTweet. Require a distinct main text node OUTSIDE
-    // that card, so we never mistake the whole main article for a quote.
-    const card = node?.closest?.('[role="link"]');
-    if (!card || card===article || !article?.contains?.(card) ||
-        !card.querySelector?.('[data-testid="User-Name"]') ||
-        !card.querySelector?.('[data-testid="tweetText"]')) return false;
+    const quote=node?.closest?.(QUOTE_CONTENT);
+    if(quote && quote!==article && article?.contains?.(quote))return true;
+    const card=node?.closest?.('div[role="link"]');
+    if(roleLinkQuoteCard(card,article))return true;
+    // Older marked-up cards without a timestamp remain recognizable only
+    // when there is distinct outer text, never from a lone ambiguous quote.
+    if(!card || card===article || !article?.contains?.(card) ||
+       !card.querySelector?.('[data-testid="User-Name"]') ||
+       !card.querySelector?.('[data-testid="tweetText"]'))return false;
     return [...(article.querySelectorAll?.('[data-testid="tweetText"]')||[])]
-      .some(text => text.closest("article")===article && !card.contains(text));
+      .some(text=>text.closest("article")===article&&!card.contains(text));
   }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
@@ -85,8 +105,8 @@
   function quoteText(article) {
     // Fast path for normal tweets: only read nested content if a real X
     // quote card exists. No permalink lookup, network, or unrelated card.
-    const card=article?.querySelector?.('[data-testid="quoteTweet"]');
-    if (!card || card===article || !article.contains?.(card)) return "";
+    const card=quoteCard(article);
+    if (!card) return "";
     const quoted=card.querySelector?.('[data-testid="tweetText"]');
     return originalPostText(quoted);
   }
@@ -103,5 +123,5 @@
       quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent };
+  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText };
 })();
