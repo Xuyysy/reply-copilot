@@ -49,6 +49,8 @@ import Base from "../layouts/Base.astro";
     import {packageSummary} from "../lib/package-summary.mjs";
     type SubscriptionPlan={plan_code:string;price_fen:number;daily_limit:number;duration_days:number;name_zh:string;name_en:string;description_zh:string;description_en:string};
     let checkoutAvailable=false;
+    let boltutilAvailable=false;
+    let fiatCreditAvailable=false;
     let subscriptionPlans:SubscriptionPlan[]|null=null;
     const subscriptionNames=new Set(['basic','pro','max','ultra']);
     function renderSubscriptions(){
@@ -77,6 +79,20 @@ import Base from "../layouts/Base.astro";
           buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
         }
         card.append(label,heading,price,period,allowance,description,unavailable);
+        if(boltutilAvailable){
+          const usdt=document.createElement('a');
+          usdt.className='button secondary';
+          usdt.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code);
+          usdt.textContent=txt('USDT · 购买／续购','USDT · Buy / renew');
+          const upgrade=document.createElement('a');
+          upgrade.className='button secondary';
+          upgrade.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code)+'&upgrade=1';
+          upgrade.textContent=txt('USDT · 本期升档','USDT · Upgrade this period');
+          const actions=document.createElement('div');
+          actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';
+          actions.append(usdt,upgrade);
+          card.append(actions);
+        }
         box.append(card);
       }
     }
@@ -92,14 +108,28 @@ import Base from "../layouts/Base.astro";
         renderSubscriptions();
       }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
     }
+    void api<{available:boolean}>('/v1/boltutil/availability')
+      .then(data=>{
+        boltutilAvailable=data.available===true;
+        document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;
+        renderSubscriptions();render();
+      })
+      .catch(()=>{boltutilAvailable=false;renderSubscriptions();render();});
     void loadSubscriptions();
     window.addEventListener('reply-copilot-language',renderSubscriptions);
 
     type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;fee_rate_bps:number;total_payment_fen?:number|null;merchant_pricing?:{feeBearer:string;rateBps:number;status:string};description_zh?:string;description_en?:string;featured?:boolean;recommended_label_zh?:string;recommended_label_en?:string};
     let packages:Package[]|null=null;
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
-    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);box.append(card);}}
-    async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;document.getElementById("payment-status")!.hidden=data.paymentAvailable;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
+    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);
+      if(boltutilAvailable){
+        const usdt=document.createElement('a');usdt.className='button secondary';
+        usdt.href='/usdt-checkout/?productType=credits&sku='+encodeURIComponent(pkg.id);
+        usdt.textContent=label('USDT · 三链支付','USDT · Pay on 3 networks');
+        card.append(usdt);
+      }
+      box.append(card);}}
+    async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;fiatCreditAvailable=data.paymentAvailable===true;document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
     let refreshTimer:ReturnType<typeof setTimeout>|undefined;
     window.addEventListener("focus",()=>{if(refreshTimer)clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>void load(),250);});
     type Quota={quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};signupBenefit?:{status:"pending"|"granted";amount:number}|null};
