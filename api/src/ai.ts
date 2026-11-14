@@ -7,6 +7,7 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
+import { buildProductionV3Prompts } from "../../prompts/prompt-builder-v3-production.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
@@ -102,7 +103,12 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
+  // V1 clients always use the original protected builder; Production V2 uses
+  // the Staging-validated static V3 rules, with NO runtime text scanning or second model call.
+  const promptArgs = { postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any;
+  const prompts = env.ENVIRONMENT === "production" && promptArgs.outputSchemaVersion === 2
+    ? buildProductionV3Prompts(promptArgs)
+    : buildPrompts(promptArgs);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
