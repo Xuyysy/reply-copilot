@@ -37,16 +37,25 @@ function roleLinkQuoted({caption="",outerId="101",quoteId="202",roleCard=true,ha
   return {tweet,card,quoted,quoteTime,outerTime};
 }
 
-function modalOfQuoted(api,post,{parentId="101",quoteText="A useful original quoted post",includeCard=true,includeParent=true}={}) {
+function modalOfQuoted(api,post,{parentId="101",quoteText="A useful original quoted post",includeCard=true,includeParent=true,nestedArticle=false,bareQuote=false}={}) {
   const parent={isConnected:true,matches:q=>q==="article",getClientRects:()=>[{}],closest:()=>null,contains:()=>false,
     querySelectorAll:q=>q==="time"?[parentTime]:q.includes('a[href*="/status/"]')?[parentLink]:[]};
   const parentLink={href:"https://x.com/original/status/"+parentId,closest:q=>q==="article"?parent:null};
   const parentTime={closest:q=>q==="article"?parent:q.includes('a[href*="/status/"]')?parentLink:null};
   const quoted={innerText:quoteText,textContent:quoteText,querySelector:()=>null};
   const card={querySelector:q=>q==='[data-testid="User-Name"]'?{}:q==='[data-testid="tweetText"]'?quoted:null};
+  const quotedArticle={isConnected:true,getClientRects:()=>[{}],contains:()=>false,
+    closest:q=>q==='div[role="link"]'?card:null,
+    querySelectorAll:q=>q==='time'?[quotedTime]:q.includes('a[href*="/status/"]')?[quotedLink]:[]};
+  const quotedLink={href:"https://x.com/quoted/status/202",closest:q=>q==='article'?quotedArticle:q==='div[role="link"]'?card:null};
+  const quotedTime={closest:q=>q==='article'?quotedArticle:q==='div[role="link"]'?card:q.includes('a[href*="/status/"]')?quotedLink:null};
+  const bareText={isConnected:true,getClientRects:()=>[{}],innerText:quoteText,textContent:quoteText,
+    closest:q=>q==='div[role="link"]'?card:null};
   const editor={isConnected:true,getClientRects:()=>[{}],closest:q=>q==='[role="dialog"]'?dialog:null};
   const dialog={isConnected:true,getClientRects:()=>[{}],closest:()=>null,
-    querySelectorAll:q=>q==="article"?(includeParent?[parent]:[]):q==='div[role="link"]'?(includeCard?[card]:[]):
+    querySelectorAll:q=>q==="article"?[...(includeParent?[parent]:[]),...(includeCard&&nestedArticle?[quotedArticle]:[])]:
+      q==='div[role="link"]'?(includeCard?[card]:[]):
+      q==='[data-testid="tweetText"]'?(includeCard&&bareQuote?[bareText]:[]):
       q.includes('contenteditable')?[editor]:[]};
   const document={activeElement:editor,querySelectorAll:q=>q==='[role="dialog"]'?[dialog]:[]};
   const facts=api.composerAssociation.snapshot(document,post,"https://x.com/home","https://x.com/home",50);
@@ -85,9 +94,27 @@ test("role-link quote-only modal binds to verified outer ID and exact embedded q
  assert.equal(good.facts.editors[0].contextStatusId,"101");
  assert.equal(good.facts.editors[0].contextMatches,true);
  assert.equal(good.result.state,"bound");
- for(const invalid of [{parentId:"999"},{quoteText:"Wrong quoted content"},{includeCard:false},{includeParent:false}]){
+ for(const invalid of [{parentId:"999"},{quoteText:"Wrong quoted content"},{includeParent:false}]){
   assert.notEqual(modalOfQuoted(a,p,invalid).result.state,"bound",JSON.stringify(invalid));
  }
+ const missing=modalOfQuoted(a,p,{includeCard:false});
+ assert.equal(missing.facts.editors[0].contextStatusId,"101");
+ assert.equal(missing.result.state,"bound","verified parent ID survives a missing quoted preview");
+});
+test("real-X regression: nested role-link quote article never counts as outer parent",()=>{
+ const a=api(),p=a.composerAssociation.capturePost(a.postExtractor.extractPost(roleLinkQuoted().tweet));
+ const s=modalOfQuoted(a,p,{nestedArticle:true,bareQuote:true});
+ assert.equal(s.facts.editors[0].contextArticleCount,1);
+ assert.equal(s.facts.editors[0].contextStatusId,"101");
+ assert.equal(s.result.state,"bound");
+});
+test("during quote-only modal hydration only a nested quote cannot bind on text alone",()=>{
+ const a=api(),p=a.composerAssociation.capturePost(a.postExtractor.extractPost(roleLinkQuoted().tweet));
+ const s=modalOfQuoted(a,p,{includeParent:false,nestedArticle:true,bareQuote:true});
+ assert.equal(s.facts.editors[0].contextArticleCount,0);
+ assert.equal(s.facts.editors[0].contextMatches,null);
+ assert.equal(s.facts.editors[0].contextDetail,"awaiting_parent_article");
+ assert.equal(s.result.state,"waiting");
 });
 test("source only includes role-link fallback and no new request path or extra AI generation",()=>{
  const src=readFileSync(new URL("../content/post-extractor.js",import.meta.url),"utf8");
