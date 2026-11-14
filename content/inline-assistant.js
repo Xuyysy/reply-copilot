@@ -4,6 +4,9 @@
 
   function mount(anchor, onAction, { compact = false, dismissAfterMs = 0, preferences = {} } = {}) {
     const host = document.createElement("div"); host.dataset.replyCopilot = "true"; host.dataset.zaneReplyCopilot = "true";
+    // Keep our live controls untranslated in Immersive Translate only.
+    // No Google Translate compatibility path or extra runtime processing.
+    host.setAttribute("translate","no");
     const pageTheme = getComputedStyle(document.documentElement).colorScheme || getComputedStyle(document.body).colorScheme;
     if (document.documentElement.dataset.theme === "dark" || document.documentElement.dataset.colorMode === "dark" || pageTheme === "dark") host.dataset.theme = "dark";
     host.style.cssText = `position:fixed;z-index:2147483000;margin:0;font:14px/1.45 system-ui,sans-serif;max-width:min(${compact ? "480px" : "560px"},calc(100vw - 24px));max-height:calc(100vh - 24px);overflow:auto;width:min(${compact ? "480px" : "560px"},calc(100vw - 24px));right:12px;bottom:12px;`;

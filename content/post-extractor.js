@@ -47,12 +47,35 @@
     }
     return candidates.size === 1 ? candidates.values().next().value : null;
   }
+  // In bilingual mode, use the original tweet, not an appended translation.
+  // A translation-only rewrite cannot be reversed reliably; never fabricate.
+  const TRANSLATION_ADDITIONS=[
+    ".immersive-translate-translation",
+    ".immersive-translate-translation-wrapper",
+    // Current Immersive Translate page CSS uses these target wrappers.
+    ".immersive-translate-target-translation-block-wrapper",
+    ".immersive-translate-target-translation-inline-wrapper",
+    "[data-imt-translation-only='1']",
+    "[data-immersive-translate-translation]",
+    "[data-immersive-translate-translation-element]"
+  ].join(",");
+  function originalPostText(node) {
+    if(!node)return "";
+    if(node.querySelector?.(TRANSLATION_ADDITIONS)) {
+      const clone=node.cloneNode?.(true);
+      if(clone) {
+        for(const translation of clone.querySelectorAll(TRANSLATION_ADDITIONS))translation.remove();
+        const original=(clone.innerText||clone.textContent||"").trim();
+        if(original)return original;
+      }
+    }
+    return (node.innerText||node.textContent||"").trim();
+  }
   function postText(article) {
-    // Do not concatenate all tweetText nodes: the rest can belong to
-    // embedded quoted posts. Only the text of the target article is sent to AI.
-    const primary = [...article.querySelectorAll('[data-testid="tweetText"]')]
-      .find(node => node.closest("article") === article && !isQuoteContent(node, article));
-    return (primary?.innerText || primary?.textContent || "").trim();
+    // Never select a nested quoted post as the reply target.
+    const primary=[...article.querySelectorAll('[data-testid="tweetText"]')]
+      .find(node=>node.closest("article")===article&&!isQuoteContent(node,article));
+    return originalPostText(primary);
   }
   function extractPost(article) {
     if (!article?.matches?.("article")) return { ok: false, reason: "no-post" };

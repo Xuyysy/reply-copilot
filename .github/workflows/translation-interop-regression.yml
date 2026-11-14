@@ -1,0 +1,35 @@
+name: Translation interop focused regression
+
+on:
+  push:
+    branches:
+      - fix/staging-translation-interop-20261113
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: Direct DOM interaction, translation and legacy reply flow
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact experiment commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Run no-network browser-shim regressions
+        run: |
+          node --test --test-concurrency=1 \
+            tests/content-scripts.test.js \
+            tests/production-dom-flow.test.js \
+            tests/multilingual-compat.test.js \
+            tests/translator-interop.test.js
+      - name: Safety summary
+        run: |
+          echo 'No AI, no Cloudflare, no D1, no Production changes.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'These tests simulate translator DOM rewrites; manual tests with the real extensions remain necessary.' >> "$GITHUB_STEP_SUMMARY"
