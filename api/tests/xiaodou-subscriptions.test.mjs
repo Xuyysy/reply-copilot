@@ -359,9 +359,9 @@ test('signed Xiaodou CLOSED releases an unpaid subscription; historical order re
    assert.equal(closed.status,200,JSON.stringify(closed.body));
    assert.equal(closed.body.orderStatus,'closed');
    const state=f.sql.prepare('SELECT o.status order_status,t.status payment_status FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=?').get(id);
-   assert.deepEqual(state,{order_status:'closed',payment_status:'closed'});
+   assert.deepEqual({...state},{order_status:'closed',payment_status:'closed'});
    assert.equal(metrics(f).periods,0);assert.equal(metrics(f).events,0);
-   const again=await create(f,req('xd-after-closed-0002','pro'));
+   const again=await create(f,req('xd-after-closed-0002','pro'),{openOrderId:'xd-open-order-second-0002'});
    assert.equal(again.status,201,JSON.stringify(again.body));assert.notEqual(again.body.order.id,id);
    assert.equal(metrics(f).subscriptionOrders,2);
  }finally{f.sql.close();}
@@ -373,7 +373,7 @@ test('signed Xiaodou FAILED also releases, but UNKNOWN / PAYING remain blocked',
      const first=await create(f,req('xd-status-'+status+'-0001'));
      const id=first.body.order.id,checking=await query(f,id,{status,payUrl:null});
      assert.equal(checking.status,200,JSON.stringify(checking.body));
-     const attempt=await create(f,req('xd-status-'+status+'-new','pro'));
+     const attempt=await create(f,req('xd-status-'+status+'-new','pro'),{openOrderId:'xd-open-order-second-'+status});
      if(status==='FAILED'){
        assert.equal(checking.body.orderStatus,'failed');
        assert.equal(attempt.status,201,JSON.stringify(attempt.body));
@@ -397,7 +397,7 @@ test('authenticated subscription order listing auto-reconciles signed CLOSED onc
    },()=>f.call('/v1/subscriptions/orders',{method:'GET'}));
    assert.equal(list.status,200,JSON.stringify(list.body));assert.equal(calls,1);
    assert.equal(list.body.orders[0].status,'closed');
-   const after=await create(f,req('xd-autoclose-pro-0002','pro'));assert.equal(after.status,201,JSON.stringify(after.body));
+   const after=await create(f,req('xd-autoclose-pro-0002','pro'),{openOrderId:'xd-open-order-second-0002'});assert.equal(after.status,201,JSON.stringify(after.body));
    assert.equal(metrics(f).periods,0);
  }finally{f.sql.close();}
 });
@@ -412,7 +412,7 @@ test('late signed SUCCEEDED after CLOSED is audited and held for review without 
    assert.equal(late.body.orderStatus,'manual_review');assert.equal(late.body.paymentConfirmed,true);
    assert.equal(late.body.entitlementApplied,false);
    const states=f.sql.prepare('SELECT o.status order_status,t.status payment_status,t.risk_state FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=?').get(id);
-   assert.deepEqual(states,{order_status:'manual_review',payment_status:'paid',risk_state:'manual_review'});
+   assert.deepEqual({...states},{order_status:'manual_review',payment_status:'paid',risk_state:'manual_review'});
    assert.equal(metrics(f).periods,0);assert.equal(metrics(f).events,1);
    assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
    const replay=await query(f,id,{status:'SUCCEEDED',payUrl:null});
