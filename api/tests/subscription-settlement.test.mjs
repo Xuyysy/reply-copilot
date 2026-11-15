@@ -195,3 +195,71 @@ test('query replay after an expired 30-day period never reopens the same paid or
   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
  }finally{f.sql.close();}
 });
+
+test('MK99 TRADE_CLOSED is preserved on both records, without period, and releases checkout blocker',async()=>{
+ const f=ready();try{
+   seed(f);
+   const res=await query(f,'sub-order-1',{status:'TRADE_CLOSED'});
+   assert.equal(res.status,200,JSON.stringify(res.body));
+   assert.equal(res.body.orderStatus,'closed');
+   const row=f.sql.prepare("SELECT o.status order_status,t.status txn_status FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id='sub-order-1'").get();
+   assert.equal(row.order_status,'closed');assert.equal(row.txn_status,'closed');
+   const blocked=f.sql.prepare("SELECT count(*) n FROM subscription_orders WHERE user_id='test-user' AND status IN ('pending','unknown','manual_review','refund_pending')").get().n;
+   assert.equal(blocked,0);
+   assert.equal(counts(f).periods,0);assert.equal(counts(f).events,0);
+ }finally{f.sql.close();}
+});
+
+test('MK99 signed CLOSED read-repairs one old blocked subscription on authenticated order listing',async()=>{
+ const f=ready();try{
+   seed(f);
+   let requests=0;
+   const r=await withProvider(req=>{
+     requests++;assert.equal(req.method,'POST');assert.equal(new URL(req.url).pathname,'/openapi/pay/query');
+     const p=new URLSearchParams(req.body);assert.equal(p.get('out_trade_no'),'SUB_sub-order-1');
+     return Response.json({code:1,data:{out_trade_no:'SUB_sub-order-1',trade_no:'MK99_TRADE_sub-order-1',
+       trade_status:'TRADE_CLOSED',total_amount:'69.90',pid:merchant,paytype_code:'alipay',currency:'CNY'}});
+   },()=>f.call('/v1/subscriptions/orders',{method:'GET'}));
+   assert.equal(r.status,200,JSON.stringify(r.body));
+   assert.equal(requests,1);
+   assert.equal(r.body.orders[0].status,'closed');
+   assert.equal(f.sql.prepare("SELECT status FROM subscription_payment_transactions WHERE order_id='sub-order-1'").get().status,'closed');
+   assert.equal(counts(f).events,0);assert.equal(counts(f).periods,0);
+ }finally{f.sql.close();}
+});
+
+test('MK99 unconfirmed WAIT_BUYER_PAY and failed provider query never release local checkout',async()=>{
+ const f=ready();try{
+   seed(f);
+   const pending=await query(f,'sub-order-1',{status:'WAIT_BUYER_PAY'});
+   assert.equal(pending.status,200,JSON.stringify(pending.body));
+   assert.equal(pending.body.orderStatus,'pending');
+   assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id='sub-order-1'").get().status,'pending');
+   const bad=await query(f,'sub-order-1',{status:'TRADE_CLOSED',amount:'69.91'});
+   assert.equal(bad.status,409,JSON.stringify(bad.body));
+   assert.equal(f.sql.prepare("SELECT status FROM subscription_orders WHERE id='sub-order-1'").get().status,'pending');
+   assert.equal(counts(f).periods,0);
+ }finally{f.sql.close();}
+});
+
+test('MK99 trusted late TRADE_SUCCESS after terminal closure is audited and held, never granted',async()=>{
+ const f=ready();try{
+   seed(f);
+   const closed=await query(f,'sub-order-1',{status:'TRADE_CLOSED'});
+   assert.equal(closed.body.orderStatus,'closed');
+   const late=await query(f,'sub-order-1',{status:'TRADE_SUCCESS'});
+   assert.equal(late.status,200,JSON.stringify(late.body));
+   assert.equal(late.body.orderStatus,'manual_review');
+   assert.equal(late.body.paymentConfirmed,true);
+   assert.equal(late.body.entitlementApplied,false);
+   const state=f.sql.prepare("SELECT o.status order_status,t.status txn_status,t.risk_state FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id='sub-order-1'").get();
+   assert.equal(state.order_status,'manual_review');
+   assert.equal(state.txn_status,'paid');
+   assert.equal(state.risk_state,'manual_review');
+   assert.equal(counts(f).periods,0);assert.equal(counts(f).events,1);
+   const replay=await query(f,'sub-order-1',{status:'TRADE_SUCCESS'});
+   assert.equal(replay.status,200,JSON.stringify(replay.body));
+   assert.equal(replay.body.entitlementApplied,false);
+   assert.equal(counts(f).periods,0);assert.equal(counts(f).events,1);
+ }finally{f.sql.close();}
+});

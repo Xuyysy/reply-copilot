@@ -80,12 +80,13 @@ export async function subscriptionOrders(request:Request,env:Env,id?:string):Pro
    return response({order:snapshot(row,config)},200,env,request);
  }
  // On an authenticated pricing/account read, reconcile at most one original
- // Xiaodou attempt with a bounded, signed merchant query. No expiry-time guess,
+ // Xiaodou OR MK99 attempt with the appropriate authenticated merchant query.
+ // No expiry-time guess,
  // no new charge, and no automatic release on timeout or network failure.
  const unresolved=await env.DB.prepare(
    "SELECT o.id FROM subscription_orders o "+
    "JOIN subscription_payment_transactions t ON t.order_id=o.id "+
-   "WHERE o.user_id=? AND o.status IN ('pending','unknown') AND t.merchant_provider='xiaodou' "+
+   "WHERE o.user_id=? AND o.status IN ('pending','unknown') AND t.merchant_provider IN ('xiaodou','mk99') "+
    "AND t.status IN ('pending','unknown') AND t.risk_state='clear' "+
    "AND NOT ("+subscriptionRetryableSql('o')+") "+
    "ORDER BY o.created_at ASC LIMIT 1").bind(session.user_id).first<{id:string}>();
