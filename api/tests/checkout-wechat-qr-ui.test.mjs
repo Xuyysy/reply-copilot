@@ -23,13 +23,15 @@ test('RSA2 WeChat checkout renders a local QR from the unchanged payUrl and keep
  assert.ok(calls.every(path=>path.startsWith('/v1/')),'QR rendering must not send payUrl to a third-party QR service');
 });
 
-test('checkout hides payment choices and does not imply Alipay when no released method is available',async()=>{
+test('when fiat is closed, checkout shows only a disabled USDT preview and does not imply Alipay',async()=>{
  const nodes=new Map();
- class Element extends EventTarget{children=[];disabled=false;hidden=false;textContent='';replaceChildren(...children){this.children=children;}}
+ class Element extends EventTarget{children=[];disabled=false;hidden=false;textContent='';replaceChildren(...children){this.children=children;}append(...children){this.children.push(...children);}}
  const document=Object.assign(new EventTarget(),{visibilityState:'visible',documentElement:{lang:'zh'},getElementById(id){if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);},createElement(){return new Element();}});
  const fetch=async url=>{if(new URL(url).pathname==='/v1/packages')return Response.json({paymentAvailable:false,paymentProvider:null,paymentMethods:[],packages:[{id:'starter',name_zh:'400次',name_en:'400 credits',credits:400,price_cents:149,promo_price_cents:null,price_cny_fen:990,service_fee_fen:16,total_payment_fen:1006,fee_rate_bps:150}]});throw Error('Unexpected request');};
  runInNewContext(compiled,{document,window:new EventTarget(),location:{href:'https://web.example.test/checkout/?package=starter'},URL,fetch,console,setTimeout,clearTimeout,AbortController,TextEncoder});await flush();
- assert.equal(nodes.get('checkout-payment-method').hidden,true);
+ assert.equal(nodes.get('checkout-payment-method').hidden,false);
+ assert.equal(nodes.get('payment-method-options').children.length,1,'Only independent USDT is visible when fiat methods are closed');
+ assert.match(nodes.get('payment-method-options').children[0].children[1].textContent,/USDT/);
  assert.equal(nodes.get('create-order').disabled,true);
  assert.match(nodes.get('create-order-label').textContent,/暂不可付款|暂无可用支付方式/);
  assert.doesNotMatch(nodes.get('create-order-label').textContent,/支付宝|Alipay/);
