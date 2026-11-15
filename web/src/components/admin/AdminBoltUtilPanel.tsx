@@ -196,7 +196,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
           {o.providerStatus?.startsWith("CREATE_")&&<p role="status" className="rounded border px-3 py-2 text-sm">
              {t("平台创建诊断码：","Provider create diagnostic code: ")}<code>{o.providerStatus}</code>
              <span className="block text-xs text-muted-foreground">{t("只含阶段、HTTP 状态与平台业务码，不包含任何密钥或钱包信息。","Only stage, HTTP status and provider business code; no secrets or wallet details.")}</span>
-          </p>
+          </p>}
           {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
           {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}
           {o.expiresAt&&<p>{t("截止：","Expires: ")}{new Date(o.expiresAt).toLocaleString()}</p>}
