@@ -5,8 +5,9 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
 type BoltAvailability={available:boolean;networks:string[]};
+type SubscriptionUsage={subscription?:{status:string;plan:string|null;expiresAt:string|null}};
 const planOrder=['basic','pro','max','ultra'];
-const visibleFiat=(c:Catalog)=>c.checkoutAvailable?c.paymentMethods.filter(v=>v==='ALIPAY_H5'||v==='WECHAT_H5'):[];
+const visibleFiat=(c:Catalog):string[]=>c.checkoutAvailable?c.paymentMethods.filter(v=>v==='ALIPAY_H5'||v==='WECHAT_H5'):[];
 export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;retryAvailable?:boolean;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
@@ -66,7 +67,7 @@ export default function SubscriptionCheckout(){
     if(!mounted||epoch!==syncEpoch.current)return;
     setCatalog(fresh);
     setChannel(current=>visibleFiat(fresh).includes(current)?current:visibleFiat(fresh)[0]??'');
-    setBolt(availability);setCurrentSubscription(usage.subscription);
+    setBolt(availability);setCurrentSubscription(usage.subscription??null);
    }catch{
     if(mounted&&epoch===syncEpoch.current){setCatalog(current=>current?{...current,checkoutAvailable:false,paymentMethods:[]}:current);setChannel('');setBolt({available:false,networks:[]});}
    }finally{if(mounted&&epoch===syncEpoch.current)setMethodsLoading(false);}
@@ -178,12 +179,13 @@ export default function SubscriptionCheckout(){
    {upgrade?<p>{quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
     :t('先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a quote first. With less than 24 hours remaining, purchase the next period.')}</p>
     :<p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>}
+   {currentSubscription?.status==='active'&&<p role="status" className="notice">{t('按完整价格购买下一期，不会立即改变当前订阅；本期升档按剩余时间补差价。','Buying the next period at full price does not change the current term; upgrading now is prorated.')}</p>}
    {currentSubscription?.status==='active'&&planOrder.indexOf(target)>planOrder.indexOf(currentSubscription.plan??'')&&
     <fieldset className="space-y-2 rounded-xl border p-4" disabled={busy||methodsLoading}>
      <legend className="font-semibold">{t('本次购买用途','Purchase intent')}</legend>
      <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={!upgrade} onChange={()=>{setUpgrade(false);setQuote(undefined);}} />{t('购买下一期（当前到期后生效）','Buy next period (after current expiry)')}</label>
      <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={upgrade} disabled={!canUpgrade} onChange={()=>{setUpgrade(true);setQuote(undefined);}} />{t('本期升档（补差价、到期日不变）','Upgrade now (prorated, same expiry)')}</label>
-     {!canUpgrade?<p className="text-sm text-muted-foreground">{t('当前不符合本期升档条件，可购买下一期。','Current-period upgrade unavailable; you may buy the next period.')}</p>:null}
+     {!canUpgrade?<p className="text-sm text-muted-foreground">{t('本期剩余不足 24 小时或当前不可升档，可购买下一期。','Current-period upgrade unavailable; you may buy the next period.')}</p>:null}
     </fieldset>}
    <fieldset className="space-y-3" disabled={busy||methodsLoading}>
      <legend className="font-semibold">{t('选择支付方式','Select payment method')}</legend>
