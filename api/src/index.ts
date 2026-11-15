@@ -2,7 +2,7 @@ import {adminCreator} from './creator-momentum';
 import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
 import {adminBoltOrders} from './boltutil/admin';
-import {adminBoltTestCreate,adminBoltTestList,adminBoltTestRefresh,adminBoltTestWebhook} from './boltutil/admin-test';
+import {adminBoltTestCreate,adminBoltTestList,adminBoltTestRefresh,adminBoltTestWebhook} from './boltutil/admin-probes';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
