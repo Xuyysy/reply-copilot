@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true}={}){
- let next=0,commandCount=0,generationCount=0,now=0,entries=[],currentUrl='https://x.com/home';
+function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true,performanceTracing=false}={}){
+ let next=0,commandCount=0,generationCount=0,snapshotCount=0,now=0,entries=[],currentUrl='https://x.com/home';
  const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[]; let action;
  const document={body:{},visibilityState:'visible',activeElement:null,hasFocus:()=>true,addEventListener:(n,h)=>handlers[n]=h,removeEventListener(){},execCommand(_c,_u,text){commandCount++;this.activeElement.innerText=text;this.activeElement.input?.();return true;}};
  const chrome={runtime:{id:'test',onMessage:{addListener(){},removeListener(){}},sendMessage(message){
+   if(message.type==='REPLY_COPILOT_PERFORMANCE_STATE')return Promise.resolve({enabled:performanceTracing});
    if(message.type==='REPLY_COPILOT_GET_BEHAVIOR')return Promise.resolve({ok:true,preferences:{autoGenerateOnReply,showFloatingWindow:true}});
    if(message.type==='REPLY_COPILOT_ACCOUNT_STATE')return Promise.resolve({ok:true,status:'credits_available'});
    if(message.type==='REPLY_COPILOT_GENERATE'){generationCount++;return new Promise(resolve=>pending.push(resolve));}
@@ -16,17 +17,20 @@ function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true
  const assistant=()=>({showExperimentalFill:enabled=>statuses.push(enabled?"experimental_fill_available":"experimental_fill_hidden"),host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
- const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===360||ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ vm.runInNewContext(readFileSync(new URL("../utils/generation-performance.js",import.meta.url),"utf8"),ctx);
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
  // Browser boundary only: state machine and content-script actions are real.
  api.composerAssociation.baseline=()=>({baselineModalCount:entries.filter(x=>x.modal!==false).length,visibleEditorCount:entries.length+(homeComposer?1:0),visibleReplyEditorCount:entries.filter(x=>x.modal!==false).length,baselineEditors:entries.map(x=>x.node)});
  api.composerAssociation.snapshot=(_d,p,_initial,_current,_at,quarantinedPosts=[])=>({now,visibleDialogCount:entries.filter(x=>x.modal!==false).length,routeAllowed:currentUrl==='https://x.com/home'||currentUrl==='https://x.com/compose/post',sourceUnchanged:!p.article.isConnected||p.article.post.statusId===p.statusId,editors:entries.map(x=>({...x,focused:x.node===document.activeElement,empty:!x.node.innerText,quarantinedContextMatch:Boolean(x.contextStatusId!==p.statusId&&quarantinedPosts.some(q=>q.statusId!==p.statusId&&q.sourceText===p.sourceText))}))});
+ const originalSnapshot=api.composerAssociation.snapshot;
+ api.composerAssociation.snapshot=(...args)=>{snapshotCount++;return originalSnapshot(...args);};
  Object.assign(api,{experimentConfig:{associationOnly},replyDetector:{findReplyControl:target=>target.isReply?target:null},postExtractor:{extractPost:article=>article?.post||{ok:false}},inlineAssistant:{mount:(_anchor,handler)=>{action=handler;return assistant()}}});
  vm.runInNewContext(readFileSync(new URL('../content/content-script.js',import.meta.url),'utf8'),ctx);
  function post(id){const editor={dispatchEvent(event){commandCount++;event.preventDefault();this.innerText=event.clipboardData.getData('text/plain');return false;},isConnected:true,innerText:'',parentElement:{isConnected:true},contains:n=>n===editor,focus(){document.activeElement=this},addEventListener(_n,cb){this.input=cb},removeEventListener(){}};const article={isConnected:true};article.post={ok:true,article,statusId:id,sourceText:'same post text',sourceUrl:`https://x.com/test/status/${id}`};return {editor,article,control:{isReply:true,closest:s=>s==='article'?article:null}};}
  const mutate=()=>{for(const o of observers)if(o.live)o.cb()};
- return {dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
+ return {snapshotCalls:()=>snapshotCount,perfReport:()=>ctx.replyCopilotPerformanceReport?.(),dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
 }
 test('missing status link and detached original still bind from a captured activation',async()=>{const f=flow(),p=f.post('101');f.click(p);p.article.isConnected=false;f.open(p);await sleep(0);assert.equal(f.generations(),1);f.resolve(0);await sleep(110);assert.equal(f.commands(),1);assert.equal(p.editor.innerText,'中文 English 😀\nline');});
 
@@ -368,4 +372,57 @@ test("auto quote does not run for non-quote posts or when auto-generation is dis
  f.timeout(800);await sleep(0);
  assert.equal(f.generations(),0);
  assert.equal(f.commands(),0);
+});
+
+test("fast quote path starts generation after stable editor checks without waiting for legacy 800ms",async()=>{
+ const f=flow(),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
+   contextDetail:"awaiting_captioned_quote_parent"}]);
+ f.timeout(360);await sleep(145);
+ assert.equal(f.generations(),1,"AI request starts on stable 360ms+120ms path");
+ assert.equal(f.commands(),0,"cannot insert until response");
+ f.resolve(0);await sleep(112);
+ assert.equal(f.commands(),1);
+ f.timeout(800);await sleep(0);
+ assert.equal(f.generations(),1,"legacy backup never duplicates generation");
+});
+test("quote early candidate missing retains original 800ms fallback and exactly once insertion",async()=>{
+ const f=flow(),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);p.article.isConnected=false;
+ f.timeout(360);await sleep(0);
+ assert.equal(f.generations(),0);
+ f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
+ f.timeout(800);await sleep(0);
+ assert.equal(f.generations(),1);
+ f.resolve(0);await sleep(112);
+ assert.equal(f.commands(),1);
+});
+test("burst DOM mutations coalesce to a single editor-association scan without delaying focus",async()=>{
+ const f=flow(),p=f.post("101");
+ f.click(p);f.open(p);await sleep(0);
+ const before=f.snapshotCalls();
+ for(let i=0;i<12;i++)f.mutate();
+ await sleep(0);
+ assert.equal(f.snapshotCalls(),before+1,"one scan across 12 synchronous mutation batches");
+});
+test("successful auto quote produces a success timing sample rather than incomplete",async()=>{
+ const f=flow({performanceTracing:true}),p=f.post("101");
+ await sleep(0);
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.time(100);f.click(p);
+ p.article.isConnected=false;f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
+ f.time(460);f.timeout(360);await sleep(145);
+ assert.equal(f.generations(),1);
+ f.time(650);f.resolve(0);await sleep(115);
+ assert.equal(f.commands(),1);
+ const report=f.perfReport();
+ assert.equal(report.outcomes.success,1,JSON.stringify(report));
+ assert.equal(report.outcomes.incomplete||0,0);
+ assert.ok(report.metrics.reply_to_bind.p50>=360);
+ assert.ok(report.metrics.elapsedMs.p50>=550);
 });
