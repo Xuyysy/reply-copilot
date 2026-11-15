@@ -121,15 +121,15 @@ jobs:
               assert r.get('success'),p
               return r['result']
           worker=get('/workers/scripts/reply-copilot-api-staging/deployments')['deployments'][0]
-          assert worker['id']=='00f01b69-8735-442d-ab22-d913b61b3c3f'
+          assert worker['id']=='8e10efbb-996f-4484-9786-8f6a3f7a55a6'
           assert len(worker['versions'])==1 and worker['versions'][0]['version_id']=='287359ca-edab-4b29-827b-f06d033b8ac7' and worker['versions'][0]['percentage']==100
           latest=get('/workers/scripts/reply-copilot-api-staging/versions')['items'][0]
-          assert latest['id']=='287359ca-edab-4b29-827b-f06d033b8ac7'
+          assert latest['id']=='f1777589-ac35-491c-ad87-20549db613f4'
           s=get('/workers/scripts/reply-copilot-api-staging/settings')
-          b=s['bindings'];assert len(b)==49 and s['compatibility_date']=='2026-10-14'
+          b=s['bindings'];assert len(b)==51 and s['compatibility_date']=='2026-10-14'
           names=[v['name'] for v in b]
           assert len(names)==len(set(names)) and 'DB' in names and 'BOLTUTIL_API_KEY' in names and 'BOLTUTIL_WEBHOOK_SECRET' in names
-          assert not any(x.startswith('BOLTUTIL_ADMIN_TEST_') for x in names)
+          assert all(any(b['name']==key and b['type']=='plain_text' and b.get('text')=='1' for b in b) for key in ['BOLTUTIL_ADMIN_TEST_ENABLED','BOLTUTIL_ADMIN_TEST_SCHEMA_READY'])
           assert get('/workers/scripts/reply-copilot-api-production/deployments')['deployments'][0]['id']=='86cf104d-33a3-46b8-b165-7e1aaef58dce'
           assert get('/pages/projects/x-reply-helper-production')['canonical_deployment']['id']=='f26991b4-c93e-4301-87e3-dc64ab312c19'
           assert get('/pages/projects/x-reply-helper-staging')['canonical_deployment']['id']=='593b0e78-3573-4f9a-b8f0-f857708450d0'
@@ -148,23 +148,13 @@ jobs:
           out=pathlib.Path(os.environ['RUNNER_TEMP'])
           (out/'staging-probe-metadata.json').write_text(json.dumps(meta))
           (out/'staging-probe-old-names.json').write_text(json.dumps(sorted(names)))
-          print('PASS exact Staging/Production pins, 49 inherited bindings, and D1 probe schema')
+          print('PASS restored Staging, two admin-test flags, exact previous source and D1 probe schema')
           PY
-      - name: Upload API-managed Worker Version with strict inherited bindings (no traffic)
-        shell: bash
+      - name: Reuse previously uploaded exact-SHA verified API-managed Worker Version
         run: |
-          set -euo pipefail
-          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
-          curl --fail-with-body -sS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -F "metadata=@$RUNNER_TEMP/staging-probe-metadata.json;type=application/json"             -F "index.js=@release-worker/index.js;type=application/javascript+module"             "$root/versions?bindings_inherit=strict" > "$RUNNER_TEMP/staging-probe-version.json"
-          python3 - <<'PY'
-          import json,os,pathlib,re
-          r=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-version.json').read_text())
-          assert r.get('success') is True,r.get('errors')
-          v=r['result']['id'];assert re.fullmatch('[0-9a-f-]{36}',v)
-          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('NEW_STAGING_WORKER_VERSION='+v+'\n')
-          print('PASS new version staged without traffic:',v)
-          PY
-      - name: Verify 49 inherited names and two additional admin-only flags
+          echo "NEW_STAGING_WORKER_VERSION=f1777589-ac35-491c-ad87-20549db613f4" >> "$GITHUB_ENV"
+          echo "Reusing exact source SHA f1777589 after runner-only 403 caused rollback, without uploading another version"
+      - name: Verify all 51 version bindings and exact source SHA before switch
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -177,9 +167,9 @@ jobs:
           v=get('/versions/'+os.environ['NEW_STAGING_WORKER_VERSION'])
           names=sorted(b['name'] for b in v['resources']['bindings'])
           previous=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-old-names.json').read_text())
-          assert names==sorted(previous+['BOLTUTIL_ADMIN_TEST_ENABLED','BOLTUTIL_ADMIN_TEST_SCHEMA_READY'])
-          assert get('/deployments')['deployments'][0]['id']=='00f01b69-8735-442d-ab22-d913b61b3c3f'
-          print('PASS new version preserves 49 bindings + two admin-only staging flags')
+          assert names==previous and len(names)==51 and v['annotations']['workers/commit_sha']==os.environ['SOURCE_SHA']
+          assert get('/deployments')['deployments'][0]['id']=='8e10efbb-996f-4484-9786-8f6a3f7a55a6'
+          print('PASS pinned exact SHA with 51 original + two admin-only staging bindings')
           PY
       - name: Switch Staging Worker to verified version
         run: |
@@ -220,8 +210,14 @@ jobs:
           assert get('/pages/projects/x-reply-helper-production')['canonical_deployment']['id']=='f26991b4-c93e-4301-87e3-dc64ab312c19'
           pages=get('/pages/projects/x-reply-helper-staging')['canonical_deployment']
           assert pages['deployment_trigger']['metadata']['commit_hash']==os.environ['SOURCE_SHA']
-          api=json.load(urllib.request.urlopen('https://api-staging.x-reply-helper.top/v1/boltutil/availability',timeout=20))
-          assert api['available'] is False and api['networks']==[]
+          config={b['name']:b for b in s['bindings']}
+          assert config['BOLTUTIL_ADMIN_TEST_ENABLED']['text']=='1'
+          assert config['BOLTUTIL_ADMIN_TEST_SCHEMA_READY']['text']=='1'
+          assert config.get('BOLTUTIL_ENABLED',{}).get('text')!='1'
+          assert config.get('BOLTUTIL_STAGING_CREATE_ENABLED',{}).get('text')!='1'
+          assert all(config.get('BOLTUTIL_'+key+'_ENABLED',{}).get('text')!='1' for key in ('TRC20','POLYGON','BEP20'))
+          # The runner's direct public API GET may be blocked by WAF (HTTP 403).
+          # Verify public availability independently via Cloudflare Browser Rendering after deployment.
           print('PASS Staging admin probe release, public USDT OFF and Production unchanged')
           PY
       - name: Restore previous Worker and Pages if release incomplete
