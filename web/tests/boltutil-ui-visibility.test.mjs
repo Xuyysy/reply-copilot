@@ -19,7 +19,7 @@ test('pricing has one purchase action per product; payment choices live in check
 });
 test('permanent credit checkout only renders backend-authorized fiat methods plus independent USDT',()=>{
  const credit=readFileSync(new URL('../src/pages/checkout.astro',import.meta.url),'utf8');
- assert.match(credit,/uniquePaymentMethods\(paymentMethods\)/);
+ assert.match(credit,/uniquePaymentMethods\(paymentMethods\.filter\(method=>method\.provider===provider\)\)/);
  assert.match(credit,/paymentRail==='fiat'/);
  assert.match(credit,/const usdtRadio=document\.createElement/);
  assert.match(credit,/\/v1\/boltutil\/availability/);
