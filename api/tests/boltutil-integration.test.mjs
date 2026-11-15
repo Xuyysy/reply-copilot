@@ -7,7 +7,9 @@ import {fixture,withProvider} from './helpers/payment-v2.mjs';
 const NETWORKS=[
  ['TRC20',6,'T'+'1'.repeat(33),'f'.repeat(64)],
  ['POLYGON',6,'0x'+'a'.repeat(40),'0x'+'b'.repeat(64)],
- ['BEP20',18,'0x'+'a'.repeat(40),'0x'+'c'.repeat(64)]
+ ['BEP20',18,'0x'+'a'.repeat(40),'0x'+'c'.repeat(64)],
+ ['ERC20',6,'0x'+'a'.repeat(40),'0x'+'d'.repeat(64)],
+ ['SOLANA',6,'4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw','2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T']
 ];
 const secret='test-only-boltutil-secret-never-live';
 function setup(){
@@ -19,7 +21,8 @@ function setup(){
    BOLTUTIL_STAGING_CREATE_ENABLED:'1',BOLTUTIL_API_KEY:'test-bolt-key',
    BOLTUTIL_WEBHOOK_SECRET:secret,BOLTUTIL_CNY_PER_USDT_MICROS:'7000000',
    BOLTUTIL_TRC20_ENABLED:'1',BOLTUTIL_POLYGON_ENABLED:'1',
-   BOLTUTIL_BEP20_ENABLED:'1'
+   BOLTUTIL_BEP20_ENABLED:'1',BOLTUTIL_ERC20_ENABLED:'1',
+   BOLTUTIL_SOLANA_ENABLED:'1'
  });
  return f;
 }
@@ -107,9 +110,11 @@ test('USDT availability unaffected by MK99/Xiaodou merchant toggle, but independ
      f.sql.prepare("UPDATE system_settings SET value=? WHERE key='active_merchant'").run(merchant);
      const r=await f.call('/v1/boltutil/availability',{method:'GET'});
      assert.equal(r.body.available,true,JSON.stringify(r.body));
-     assert.deepEqual(r.body.networks,['TRC20','POLYGON','BEP20']);
+     assert.deepEqual(r.body.networks,['TRC20','POLYGON','BEP20','ERC20','SOLANA']);
    }
    f.env.BOLTUTIL_BEP20_ENABLED='0';
+   assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,['TRC20','POLYGON','ERC20','SOLANA']);
+   f.env.BOLTUTIL_SOLANA_ENABLED='0';f.env.BOLTUTIL_ERC20_ENABLED='0';
    assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,['TRC20','POLYGON']);
    f.env.BOLTUTIL_ENABLED='0';
    assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);

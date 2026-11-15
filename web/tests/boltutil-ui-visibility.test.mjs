@@ -45,14 +45,14 @@ test('subscription checkout revalidates paid methods and does not reveal backend
  assert.doesNotMatch(subscription,/>小豆支付</);
  assert.doesNotMatch(subscription,/>MK99 支付</);
 });
-test('three networks are visible for checkout preview, but new order buttons are gated by availability',()=>{
- for(const code of ["TRC20","POLYGON","BEP20"])assert.match(checkout,new RegExp('value="'+code+'"'));
+test('five USDT networks are previewed for in-site checkout, but new order buttons are gated by availability',()=>{
+ for(const code of ["TRC20","POLYGON","BEP20","ERC20","SOLANA"])assert.match(checkout,new RegExp('value="'+code+'"'));
  assert.match(checkout,/<div id="bolt-chain-picker"[^>]*>/);
  assert.doesNotMatch(checkout,/<div id="bolt-chain-picker"[^>]*\shidden\b/);
  assert.match(checkout,/chain\.disabled=true;/);
  assert.match(checkout,/if\(!availability\.available/);
  assert.match(checkout,/chain\.disabled=false;/);
- assert.match(checkout,/report\("支持 TRON \(TRC20\)、Polygon 和 BNB/);
+ assert.match(checkout,/支持 TRON、Polygon、BNB、Ethereum 和 Solana/);
  assert.match(checkout,/await api<\{order:Order\}>\("\/v1\/boltutil\/orders"/);
 });
 test('Admin V2 has visible independent USDT tab including mobile nav, not only a hidden backend API',()=>{
@@ -66,4 +66,16 @@ test('Admin V2 has visible independent USDT tab including mobile nav, not only a
  assert.match(panel,/Read-only:/);
  assert.doesNotMatch(panel,/<Button[^>]*onClick=\{[^}]*post/i);
  assert.match(panel,/币种单独记录/);
+});
+
+test('Staging buyer pays on-site with an exact signed provider invoice, not a BoltUtil outbound checkout',()=>{
+ assert.match(checkout,/id="bolt-qr"/);
+ assert.match(checkout,/QRCode\.toDataURL/);
+ assert.match(checkout,/order\.status==="pending"&&!!order\.address&&!!order\.amount/);
+ assert.match(checkout,/navigator\.clipboard\.writeText/);
+ assert.match(checkout,/setInterval/);
+ assert.match(checkout,/order\.entitlementApplied/);
+ assert.match(checkout,/USDT 合约\/Mint/);
+ assert.doesNotMatch(checkout,/link\.href=order\.checkoutUrl/);
+ assert.doesNotMatch(checkout,/window\.location\s*=\s*order\.checkoutUrl/);
 });

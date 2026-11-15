@@ -1,128 +1,213 @@
 ---
 import Base from "../layouts/Base.astro";
 ---
-<Base title="USDT 三链支付测试" titleEn="USDT network checkout preview">
-  <section class="container section" style="max-width:780px;margin:auto;padding:36px 16px">
-    <p class="eyebrow">BOLTUTIL · USDT · TRC20 / POLYGON / BEP20</p>
-    <h1 data-zh="USDT 支付" data-en="USDT checkout">USDT 支付</h1>
-    <p class="fineprint" data-zh="支持 TRON (TRC20)、Polygon PoS 和 BNB Smart Chain (BEP20) 的 USDT。每笔订单必须按指定网络与收款地址转账；返回页面不代表付款成功。" data-en="USDT on TRON (TRC20), Polygon PoS, and BNB Smart Chain (BEP20). Use the exact network and receiving address for each order; returning to this page does not confirm payment.">支持 TRON (TRC20)、Polygon PoS 和 BNB Smart Chain (BEP20) 的 USDT。每笔订单必须按指定网络与收款地址转账；返回页面不代表付款成功。</p>
-    <div class="notice" role="note" data-zh="Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。" data-en="Staging: if connected to a real merchant, BoltUtil creates MAINNET invoices. Do not transfer without approval.">Staging 测试版：如使用真实商户凭据，BoltUtil 创建的付款地址属于真实主网。未经管理员确认，请勿转账。</div>
-    <div id="bolt-chain-picker" class="pricing-card" style="margin-top:20px">
-      <label for="bolt-chain">USDT 收款网络 / Payment network</label>
-      <select id="bolt-chain" style="display:block;width:100%;max-width:420px;margin-top:10px;padding:10px;border:1px solid #dbe4ef;border-radius:8px">
+<Base title="USDT 五链站内支付" titleEn="USDT in-site checkout · 5 networks">
+  <section class="container section bolt-checkout" style="max-width:820px;margin:auto;padding:36px 16px">
+    <p class="eyebrow">X REPLY HELPER · USDT</p>
+    <h1 data-zh="USDT 站内付款" data-en="USDT on-site checkout">USDT 站内付款</h1>
+    <p class="fineprint">TRON (TRC20) · Polygon · BNB Smart Chain · Ethereum (ERC20) · Solana (SPL)</p>
+    <p class="fineprint" data-zh="无需跳转 BoltUtil：本站展示服务端核验的真实订单、网络、准确应付金额和收款地址。付款必须使用订单指定的 USDT 代币和网络；显示转账已提交不等于付款成功。"
+      data-en="No BoltUtil redirect: verified payment details appear here. Send the exact amount of the specified USDT token on the specified network. A submitted transaction is not confirmed payment.">
+      无需跳转 BoltUtil：本站展示服务端核验的真实订单、网络、准确应付金额和收款地址。付款必须使用订单指定的 USDT 代币和网络；显示转账已提交不等于付款成功。
+    </p>
+    <div class="notice" role="note" data-zh="Staging 测试：订单涉及真实主网资金。付款前核对网络、USDT 合约或 Mint、完整金额、收款地址和有效期。"
+      data-en="Staging test: real mainnet funds. Verify network, token contract or mint, exact amount, recipient and expiry before paying.">
+      Staging 测试：订单涉及真实主网资金。付款前核对网络、USDT 合约或 Mint、完整金额、收款地址和有效期。
+    </div>
+    <div class="pricing-card" id="bolt-chain-picker" style="margin-top:20px">
+      <label for="bolt-chain">USDT 网络 / Payment network</label>
+      <select id="bolt-chain" style="display:block;width:100%;max-width:430px;margin-top:10px;padding:12px;border:1px solid #dbe4ef;border-radius:8px">
         <option value="TRC20">TRON · TRC20</option>
         <option value="POLYGON">Polygon PoS · USDT</option>
         <option value="BEP20">BNB Smart Chain · BEP20</option>
+        <option value="ERC20">Ethereum Mainnet · ERC20</option>
+        <option value="SOLANA">Solana Mainnet · SPL USDT</option>
       </select>
-      <p class="fineprint" style="margin-top:10px">不同网络上的 USDT 不是同一代币合约。请严格按订单指定网络付款；网络确认后不可更换。</p>
+      <p class="fineprint" data-zh="不同链的 USDT 不是同一个合约或 Mint。创建订单后不可更换链；若网络没有被商户启用，将不可下单。"
+        data-en="USDT token identities differ across networks. You cannot switch networks after creating an invoice; unavailable routes cannot be ordered.">
+        不同链的 USDT 不是同一个合约或 Mint。创建订单后不可更换链；若网络没有被商户启用，将不可下单。
+      </p>
     </div>
-    <div id="bolt-status" role="status" class="notice" style="margin-top:20px">正在确认 USDT 三链收款状态。商户未开放前，请勿转账。</div>
-    <div class="pricing-card" id="bolt-panel" style="margin-top:20px" hidden>
+    <div id="bolt-status" role="status" class="notice" style="margin-top:18px" aria-live="polite">正在读取商户网络及订单状态…</div>
+    <article class="pricing-card" id="bolt-panel" style="margin-top:20px" hidden>
       <h2 id="bolt-product"></h2>
-      <p id="bolt-value" style="font-size:1.4rem;font-weight:700"></p>
+      <div id="bolt-pay-instructions" hidden>
+        <p class="fineprint" data-zh="请向以下地址转入指定网络的 USDT，金额必须完全一致（不要四舍五入）。二维码仅包含收款地址，不会自动包含 USDT 币种或金额。"
+          data-en="Send the exact USDT amount on the selected network. Do not round. The QR only contains the recipient address, not the network, asset or amount.">
+          请向以下地址转入指定网络的 USDT，金额必须完全一致（不要四舍五入）。二维码仅包含收款地址，不会自动包含 USDT 币种或金额。
+        </p>
+        <div class="bolt-amount-box">
+          <p class="fineprint">付款网络 / Network</p><strong id="bolt-network"></strong>
+          <p class="fineprint" style="margin-top:12px">准确应付 / Exact amount</p><strong id="bolt-value"></strong>
+        </div>
+        <p class="fineprint">收款地址 / Receiving address</p>
+        <p id="bolt-wallet" class="bolt-address"></p>
+        <p id="bolt-contract" class="fineprint"></p>
+        <div class="bolt-qr-wrap">
+          <img id="bolt-qr" width="220" height="220" alt="USDT 收款地址二维码（不包含币种或金额）" hidden />
+          <p id="bolt-qr-hint" class="fineprint">此二维码仅编码收款地址。请在钱包中自行选择正确的链、USDT 代币及完整付款金额；勿转账到代币合约或 Mint 地址。</p>
+        </div>
+      </div>
       <p id="bolt-expiry" class="fineprint"></p>
-      <p id="bolt-wallet" style="overflow-wrap:anywhere"></p>
-      <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:20px" id="bolt-buttons"></div>
-    </div>
+      <div class="bolt-buttons" id="bolt-buttons"></div>
+      <p class="fineprint" id="bolt-final-hint"></p>
+    </article>
     <p class="fineprint" style="margin-top:24px"><a href="/account/">查看账户权益与历史订单</a> · <a href="/pricing/">返回套餐</a></p>
   </section>
+  <style>
+    .bolt-checkout [hidden] {display:none!important}
+    .bolt-checkout .bolt-address {overflow-wrap:anywhere;font-family:monospace;font-size:14px;border:1px solid var(--border);border-radius:8px;padding:12px;user-select:all}
+    .bolt-checkout .bolt-amount-box {border:1px solid var(--border);border-radius:12px;padding:16px;margin:18px 0}
+    .bolt-checkout .bolt-amount-box strong {font-size:22px;overflow-wrap:anywhere}
+    .bolt-checkout .bolt-qr-wrap {display:flex;align-items:flex-start;flex-wrap:wrap;gap:16px;margin:18px 0}
+    .bolt-checkout .bolt-qr-wrap img {max-width:220px;border:1px solid var(--border);border-radius:9px;padding:8px;background:white}
+    .bolt-checkout .bolt-qr-hint {flex:1}
+    .bolt-checkout .bolt-buttons {display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+    .bolt-checkout .bolt-buttons .button {max-width:100%}
+    @media(max-width:520px){.bolt-checkout .bolt-buttons .button{width:100%;text-align:center}}
+  </style>
   <script>
     import {api} from "../lib/api";
-    type Network="TRC20"|"POLYGON"|"BEP20";
-    type Order={id:string;productType:string;creditOrderId:string|null;subscriptionOrderId:string|null;status:string;network:Network;tokenContract:string;tokenDecimals:number;
-      quotedAmount:string;amount:string|null;address:string|null;currency:string;
-      checkoutUrl:string|null;expiresAt:number|null;entitlementApplied:boolean};
-    const qs=new URLSearchParams(location.search),existing=qs.get("order"),productType=qs.get("productType"),
-      sku=qs.get("sku"),upgrade=qs.get("upgrade")==="1";
+    import QRCode from "qrcode";
+    type Network="TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
+    type Order={id:string;productType:string;status:string;network:Network;tokenContract:string;tokenDecimals:number;
+      quotedAmount:string;amount:string|null;address:string|null;currency:string;checkoutUrl:string|null;
+      expiresAt:number|null;entitlementApplied:boolean};
+    const qs=new URLSearchParams(location.search),existing=qs.get("order"),productType=qs.get("productType"),sku=qs.get("sku"),upgrade=qs.get("upgrade")==="1";
     const panel=document.getElementById("bolt-panel")!,message=document.getElementById("bolt-status")!,
       product=document.getElementById("bolt-product")!,value=document.getElementById("bolt-value")!,
       expiry=document.getElementById("bolt-expiry")!,wallet=document.getElementById("bolt-wallet")!,
-      buttons=document.getElementById("bolt-buttons")!;
-    const chainPicker=document.getElementById("bolt-chain-picker")!, chain=document.getElementById("bolt-chain") as HTMLSelectElement;
+      contract=document.getElementById("bolt-contract")!,networkLabel=document.getElementById("bolt-network")!,
+      payInstructions=document.getElementById("bolt-pay-instructions")!,qr=document.getElementById("bolt-qr") as HTMLImageElement,
+      buttons=document.getElementById("bolt-buttons")!,finalHint=document.getElementById("bolt-final-hint")!;
+    const chainPicker=document.getElementById("bolt-chain-picker")!,chain=document.getElementById("bolt-chain") as HTMLSelectElement;
     chain.disabled=true;
-    const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20"];
-    let order:Order|null=null,busy=false,operationKey=crypto.randomUUID();
+    const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20","ERC20","SOLANA"];
+    const labels:Record<Network,string>={TRC20:"TRON / TRC20",POLYGON:"Polygon PoS",BEP20:"BNB / BEP20",ERC20:"Ethereum / ERC20",SOLANA:"Solana / SPL USDT"};
+    let order:Order|null=null,busy=false,operationKey=crypto.randomUUID(),qrKey:string|null=null;
+    let pollTimer:number|null=null,pollCount=0;
     const en=()=>document.documentElement.lang==="en";
     const t=(zh:string,english:string)=>en()?english:zh;
     function report(zh:string,english:string){message.textContent=t(zh,english);}
     function control(label:string,handler:()=>void,secondary=false){
-      const button=document.createElement("button");button.type="button";button.className=secondary?"button secondary":"button";
-      button.textContent=label;button.disabled=busy;button.onclick=handler;buttons.append(button);
+      const button=document.createElement("button");button.type="button";
+      button.className=secondary?"button secondary":"button";button.textContent=label;button.disabled=busy;
+      button.onclick=handler;buttons.append(button);
+    }
+    function stopPolling(){if(pollTimer!==null){window.clearInterval(pollTimer);pollTimer=null;}}
+    function autoPoll(){
+      if(!order||order.status!=="pending"||order.entitlementApplied||!!(order.expiresAt&&Date.now()>=order.expiresAt)){
+        stopPolling();return;
+      }
+      if(pollTimer!==null)return;
+      pollCount=0;
+      pollTimer=window.setInterval(()=>{
+        if(pollCount>=20){stopPolling();return;}
+        if(document.hidden||busy||order?.status!=="pending")return;
+        if(order.expiresAt&&Date.now()>=order.expiresAt){stopPolling();render();return;}
+        pollCount++;void refresh(true);
+      },15000);
+    }
+    async function renderQr(visible:boolean){
+      const current=visible&&order?.address?order.id+":"+order.address:null;
+      if(!current){qr.hidden=true;qr.removeAttribute("src");qrKey=null;return;}
+      if(qrKey===current&&!qr.hidden)return;
+      qrKey=current;qr.hidden=true;
+      try{
+        const src=await QRCode.toDataURL(order!.address!,{width:220,margin:2,errorCorrectionLevel:"M"});
+        if(qrKey!==current||order?.status!=="pending")return;
+        qr.src=src;qr.hidden=false;
+      }catch{if(qrKey===current){qrKey=null;qr.hidden=true;}}
+    }
+    async function copyExact(text:string,kind:"address"|"amount"){
+      try{
+        await navigator.clipboard.writeText(text);
+        report(kind==="address"?"已复制收款地址。请核对币种、网络和完整金额。":"已复制精确应付金额。请勿取整。",
+          kind==="address"?"Address copied. Verify USDT asset, network and exact amount.":"Exact amount copied; do not round.");
+      }catch{report("复制失败，请选中文字手动复制。","Clipboard failed; select and copy the value manually.");}
     }
     function render(){
       if(!order)return;
-      panel.hidden=false;buttons.replaceChildren();
-      chainPicker.hidden=true;
-      product.textContent=order.productType==="credits"?t("永久额度包","Permanent credits"):t("30 天订阅","30-day subscription");
-      const chainLabel=order.network==="TRC20"?"TRON / TRC20":order.network==="POLYGON"?"Polygon PoS":"BNB Smart Chain / BEP20";
-      value.textContent=(order.amount??order.quotedAmount)+" USDT · "+chainLabel;
-      wallet.textContent=order.address?t("收款地址：","Receiving address: ")+order.address+" · "+t("代币合约：","Token contract: ")+order.tokenContract:"";
-      expiry.textContent=order.expiresAt?t("付款有效期：","Payment expires: ")+new Date(order.expiresAt).toLocaleString():"";
-      report(order.entitlementApplied?"付款已核实且权益已入账。":order.status==="manual_review"?"此笔需要人工核对，请勿重复转账。":
-        order.status==="paid"?"付款已核实，权益正在核对。":order.status==="pending"?"等待付款：请使用原始收银台及完整应付金额。":"付款结果尚未确认，请保留原单。",
-        order.entitlementApplied?"Confirmed and entitlement granted.":order.status==="manual_review"?"Manual review required; do not pay again.":
-        order.status==="paid"?"Confirmed; entitlement check in progress.":order.status==="pending"?"Awaiting payment; use the original checkout.":"Payment status uncertain. Keep this order.");
-      if(order.status==="pending"&&order.checkoutUrl){
-        const link=document.createElement("a");link.className="button";link.target="_blank";link.rel="noopener noreferrer";
-        link.href=order.checkoutUrl;link.textContent=t("打开 BoltUtil 收银台","Open BoltUtil checkout");
-        buttons.append(link);
-      }
-      if(!order.entitlementApplied)control(t("向平台查单并刷新","Check payment status"),()=>void refresh(),true);
+      panel.hidden=false;buttons.replaceChildren();chainPicker.hidden=true;
+      product.textContent=order.productType==="credits"?t("永久额度包付款","Permanent credits payment"):t("30 天订阅付款","30-day subscription payment");
+      const validPending=order.status==="pending"&&!!order.address&&!!order.amount&&order.currency==="USDT"&&
+        !!order.expiresAt&&Date.now()<order.expiresAt;
+      payInstructions.hidden=!validPending;
+      expiry.textContent=order.expiresAt?t("订单有效期至：","Invoice valid until: ")+new Date(order.expiresAt).toLocaleString():"";
+      finalHint.textContent=validPending?t("请从钱包转出指定链的 USDT，不要向代币合约或 Mint 付款。付款后由服务端查询 BoltUtil 的确认状态，不会凭截图发放权益。",
+        "Send only the specified USDT token on the selected network, never to the contract/mint. Entitlements require server-verified settlement."):"";
+      if(validPending){
+        networkLabel.textContent=labels[order.network];
+        value.textContent=order.amount+" USDT";
+        wallet.textContent=order.address!;
+        contract.textContent=t("USDT 合约/Mint（仅供核对，非收款地址）：","USDT contract/mint (reference only, NOT recipient): ")+order.tokenContract;
+        control(t("复制收款地址","Copy receiving address"),()=>void copyExact(order!.address!,"address"));
+        control(t("复制准确金额","Copy exact amount"),()=>void copyExact(order!.amount!,"amount"),true);
+        void renderQr(true);
+      }else{void renderQr(false);}
+      if(order.entitlementApplied)report("付款已由平台确认，权益已入账。","Provider-confirmed payment; entitlements applied.");
+      else if(order.status==="paid")report("平台已确认付款，权益仍在核对，请保留原单。","Payment verified; entitlement is being reconciled.");
+      else if(order.status==="manual_review")report("付款证据需人工核对，请勿重复付款。","Payment needs manual review. Do not pay again.");
+      else if(validPending)report("站内收银台已就绪，等待钱包转账。页面会自动刷新付款状态。","On-site cashier ready. Awaiting wallet transfer; status checks automatically.");
+      else if(order.status==="pending")report("订单已过期或缺少可靠付款信息，请勿转账，先查询原单。","Expired or incomplete invoice. Do not transfer; verify original order.");
+      else report("平台订单状态未确认。没有可信付款信息，请勿转账或重复下单。","Provider status unconfirmed. Do not send funds or create duplicates.");
+      if(!order.entitlementApplied)control(t("安全查询付款状态","Verify payment status"),()=>void refresh(),true);
       if(order.entitlementApplied){
-        const link=document.createElement("a");link.href="/account/";link.className="button";link.textContent=t("查看到账权益","View entitlements");buttons.append(link);
+        const link=document.createElement("a");link.href="/account/";link.className="button";
+        link.textContent=t("查看到账权益","View entitlements");buttons.append(link);
       }
+      autoPoll();
     }
     function setOrder(next:Order){
       order=next;history.replaceState(null,"","/usdt-checkout/?order="+encodeURIComponent(next.id));render();
     }
-    async function refresh(){
-      if(busy||!order)return;busy=true;report("正在安全查单…","Checking payment…");
+    async function refresh(silent=false){
+      if(busy||!order)return;busy=true;
+      if(!silent)report("正在向 BoltUtil 安全查单…","Checking payment securely…");
       try{
-        const result=await api<{order:Order}>("/v1/boltutil/orders/"+order.id+"/refresh",{method:"POST",body:"{}"});
-        setOrder(result.order);
-      }catch(e){report(e instanceof Error?e.message:"查单未完成，稍后再试。","Could not verify payment. Retry later.");}
-      finally{busy=false;render();}
+        const res=await api<{order:Order}>("/v1/boltutil/orders/"+order.id+"/refresh",{method:"POST",body:"{}"});
+        setOrder(res.order);
+      }catch(e){
+        if(!silent)report(e instanceof Error?e.message:"查单尚未完成，请稍后重试。","Status check failed; retry later.");
+      }finally{busy=false;}
     }
     async function create(){
-      if(busy)return;
-      if(!allowedNetworks.includes(chain.value as Network)){
-        report("请选择已开放的支付网络。","Choose an enabled payment network.");return;
-      }busy=true;buttons.replaceChildren();report("正在建立订单…","Creating order…");
+      if(busy||!allowedNetworks.includes(chain.value as Network))return;
+      busy=true;buttons.replaceChildren();report("正在创建付款订单…","Creating payment invoice…");
       try{
         let quoteId:string|undefined;
         if(upgrade){
-          const q=await api<{quote:{id:string;usdtEstimate:string}}>("/v1/boltutil/upgrade-quote",
-            {method:"POST",body:JSON.stringify({planCode:sku})});
-          quoteId=q.quote.id;
+          const quote=await api<{quote:{id:string}}>("/v1/boltutil/upgrade-quote",{method:"POST",body:JSON.stringify({planCode:sku})});
+          quoteId=quote.quote.id;
         }
-        const result=await api<{order:Order}>("/v1/boltutil/orders",
-          {method:"POST",body:JSON.stringify({productType,sku,network:chain.value,idempotencyKey:operationKey,...(quoteId?{quoteId}:{})})});
+        const result=await api<{order:Order}>("/v1/boltutil/orders",{method:"POST",
+          body:JSON.stringify({productType,sku,network:chain.value,idempotencyKey:operationKey,...(quoteId?{quoteId}:{})})});
         setOrder(result.order);
       }catch(e){
-        report(e instanceof Error?e.message:"订单未创建，请检查原订单后再试。",
-          "Could not create or confirm order. Review existing orders first.");
+        report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check the original invoice first.");
       }finally{
         busy=false;
-        if(order)render();
-        else control(t("查询原单或重新尝试建单","Check prior order / retry"),()=>void create(),true);
+        if(!order)control(t("使用相同操作 ID 重试或恢复原单","Retry/recover original operation"),()=>void create(),true);
+        else render();
       }
     }
     async function init(){
       if(existing){
-        if(!/^[0-9a-f-]{36}$/i.test(existing)){report("无效订单号。","Invalid order ID.");return;}
+        if(!/^[0-9a-f-]{36}$/i.test(existing)){report("订单编号无效。","Invalid order identifier.");return;}
         try{const result=await api<{order:Order}>("/v1/boltutil/orders/"+existing);setOrder(result.order);}
-        catch(e){report(e instanceof Error?e.message:"订单不可读取。","Order unavailable.");}
+        catch(e){report(e instanceof Error?e.message:"无法读取此订单。","Invoice unavailable.");}
         return;
       }
       if(!["credits","subscription"].includes(productType??"")||!sku||!/^[a-z0-9_-]{1,64}$/i.test(sku)){
-        report("请选择套餐后再创建订单；当前页面可预览 TRON、Polygon 和 BNB 三条网络。","Select a plan before creating an invoice. You can preview the three supported networks here.");return;
+        report("请选择套餐后创建订单；当前可预览五条 USDT 网络。","Select a product before creating an invoice. Five USDT networks can be previewed.");return;
       }
       try{
         const availability=await api<{available:boolean;networks:Network[]}>("/v1/boltutil/availability");
         if(!availability.available||!Array.isArray(availability.networks)||!availability.networks.some(n=>allowedNetworks.includes(n))){
-          chainPicker.hidden=false;
-          chain.disabled=true;
-          report("支持 TRON (TRC20)、Polygon 和 BNB (BEP20)。当前商户收款未配置，三条网络仅供预览，不能创建订单或付款。","TRON, Polygon and BNB networks are supported. Merchant payments are not configured: preview only, no invoice or transfer.");return;
+          chain.disabled=true;chainPicker.hidden=false;
+          report("支持 TRON、Polygon、BNB、Ethereum 和 Solana。当前商户通道未开放，仅供预览，不能创建订单或付款。",
+            "TRON, Polygon, BNB, Ethereum and Solana supported. Merchant routes are not enabled: preview only.");
+          return;
         }
         for(const option of Array.from(chain.options)){
           option.disabled=!availability.networks.includes(option.value as Network);
@@ -130,15 +215,14 @@ import Base from "../layouts/Base.astro";
         }
         const requested=qs.get("network");
         chain.value=requested&&availability.networks.includes(requested as Network)?requested:availability.networks[0];
-        chainPicker.hidden=false;
-        chain.disabled=false;
-        panel.hidden=false;product.textContent=t("确认 USDT 付款","Confirm USDT purchase");
-        value.textContent=t("金额以平台生成的精确 USDT 报价为准。","Exact USDT amount is provided by checkout.");
-        buttons.replaceChildren();
-        control(t("创建 USDT 订单","Create USDT invoice"),()=>void create());
-        report("请确认已了解所选 USDT 网络风险后再创建订单。","Confirm the selected USDT network before proceeding.");
-      }catch{report("无法确认 USDT 通道状态。","USDT channel unavailable.");}
+        chain.disabled=false;chainPicker.hidden=false;panel.hidden=false;
+        product.textContent=t("确认 USDT 付款","Confirm USDT checkout");buttons.replaceChildren();
+        control(t("生成本站 USDT 付款订单","Create on-site USDT invoice"),()=>void create());
+        report("请选择商户已开放的网络，创建订单后将在本站显示准确金额和收款地址。",
+          "Choose an enabled network. The exact amount and recipient will be displayed here.");
+      }catch{report("无法确认 USDT 通道状态，请勿付款。","Cannot confirm USDT availability. Do not pay.");}
     }
+    window.addEventListener("pagehide",stopPolling);
     void init();
   </script>
 </Base>

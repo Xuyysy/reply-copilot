@@ -51,7 +51,7 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
     typeof body.operationId!=="string"||!/^[0-9a-f-]{36}$/i.test(body.operationId))
    throw new ApiFailure(400,"BOLTUTIL_ADMIN_TEST_CONFIRMATION","请确认本次真实主网小额支付测试。");
  let network:BoltNetwork;
- try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","该网络不支持测试。");}
+ try{network=parseBoltNetwork(body.network);if(network==="ERC20"||network==="SOLANA")throw new Error("Admin probe network not approved");}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","该网络尚未开放管理员小额测试。");}
  const existing=await env.DB.prepare("SELECT * FROM boltutil_admin_test_orders WHERE operation_id=?")
    .bind(body.operationId).first<Probe>();
  if(existing){

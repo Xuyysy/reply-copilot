@@ -18,7 +18,9 @@ export function boltAvailable(env:Env):boolean {
 }
 function networkEnabled(env:Env,network:BoltNetwork):boolean {
   const flag=network==="TRC20"?env.BOLTUTIL_TRC20_ENABLED:
-    network==="POLYGON"?env.BOLTUTIL_POLYGON_ENABLED:env.BOLTUTIL_BEP20_ENABLED;
+    network==="POLYGON"?env.BOLTUTIL_POLYGON_ENABLED:
+    network==="BEP20"?env.BOLTUTIL_BEP20_ENABLED:
+    network==="ERC20"?env.BOLTUTIL_ERC20_ENABLED:env.BOLTUTIL_SOLANA_ENABLED;
   return boltAvailable(env)&&flag==="1";
 }
 function enabled(env:Env):void {
@@ -112,7 +114,7 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
   const user=await owner(request,env,true),body=await jsonBody(request,1024);
   const productType=body.productType,sku=body.sku,quoteId=body.quoteId,idempotencyKey=body.idempotencyKey;
   let network:BoltNetwork;
-  try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","仅支持 TRC20、Polygon、BEP20。");}
+  try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","仅支持 TRC20、Polygon、BEP20、ERC20、Solana。");}
   if(!networkEnabled(env,network))throw new ApiFailure(503,"BOLTUTIL_NETWORK_UNAVAILABLE","该 USDT 网络尚未开放。");
   if(!["credits","subscription"].includes(String(productType))||typeof sku!=="string"||
     !/^[a-z0-9_-]{1,64}$/i.test(sku)||typeof idempotencyKey!=="string"||
