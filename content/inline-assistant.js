@@ -21,7 +21,7 @@
       // Keep mount failures from surfacing as uncaught errors; refreshing the tab loads the new context.
     }
     const root = document.createElement("section"); root.className = "panel"; root.setAttribute("aria-label", "x-Reply-Helper 回复助手");
-    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs" role="group" aria-label="回复风格"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="sidepanel" class="text">打开侧边栏</button></div><div class="momentum-gate hidden" role="dialog" aria-modal="true" aria-labelledby="momentum-gate-title" tabindex="-1"></div>';
+    root.innerHTML = '<div class="top"><span class="drag-grip" title="按住拖动">⋮⋮</span><strong>x-Reply-Helper</strong><span class="disclaimer">AI 草稿</span><button data-action="settings" class="window-control" aria-label="打开设置" title="打开设置">⚙</button><button data-action="minimize" class="window-control" aria-label="收起悬浮框" title="收起悬浮框">−</button><button data-action="dismiss" class="window-control close" aria-label="关闭悬浮框" title="关闭悬浮框">×</button></div><div class="body"><div class="quick-control"><label for="auto-generate-toggle">自动生成建议</label><input id="auto-generate-toggle" type="checkbox" role="switch" aria-label="自动生成建议"></div><p class="status">正在准备…</p><div class="account-actions hidden"><button data-action="register">免费注册并连接</button><button data-action="login">已有账号？登录连接</button><button data-action="pricing" class="hidden">查看充值套餐</button><button data-action="check-account" class="hidden">查看绑定状态</button></div><button data-action="generate" class="generate hidden">手动生成建议</button><div class="reply hidden"></div><div class="actions hidden"><div class="style-tabs" role="group" aria-label="回复风格"></div><div class="action-row"><button data-action="change">换一个 ↻</button><button data-action="copy">复制</button></div></div><div class="feedback hidden"><span>这条建议有帮助吗？</span><button data-action="feedback-good">有帮助</button><button data-action="feedback-bad">不太像我</button></div><button data-action="retry" class="retry hidden">重试</button><button data-action="abandon-generation" class="retry hidden">放弃并重新生成</button><button data-action="confirm-fill" class="generate hidden">确认并填入当前回复框（实验）</button><button data-action="sidepanel" class="text">打开侧边栏</button></div><div class="momentum-gate hidden" role="dialog" aria-modal="true" aria-labelledby="momentum-gate-title" tabindex="-1"></div>';
     let momentum;
     try { momentum = globalThis.ReplyCopilotMomentumPresenter?.mount(root.querySelector(".body"), onAction); } catch {}
     shadow.append(root);
@@ -47,7 +47,10 @@
       const height = Math.min(host.getBoundingClientRect().height || 240, window.innerHeight - 16);
       host.style.left = `${Math.max(8, Math.min(left, window.innerWidth - width - 8))}px`; host.style.top = `${Math.max(8, Math.min(top, window.innerHeight - height - 8))}px`;
     }
-    function showReady(autoGenerate = true) { setStatus(autoGenerate ? "点击下方按钮生成回复建议。" : "自动生成已关闭。需要时可手动生成建议。"); root.querySelector('[data-action="generate"]').classList.remove("hidden"); }
+    function showExperimentalFill(enabled) {
+      root.querySelector('[data-action="confirm-fill"]').classList.toggle("hidden",!enabled);
+    }
+    function showReady(autoGenerate = true) { showExperimentalFill(false); setStatus(autoGenerate ? "点击下方按钮生成回复建议。" : "自动生成已关闭。需要时可手动生成建议。"); root.querySelector('[data-action="generate"]').classList.remove("hidden"); }
     function setAutoGenerate(enabled) { root.querySelector('#auto-generate-toggle').checked = Boolean(enabled); }
     function showAccount(status, quota, pending) {
       const group = root.querySelector('.account-actions'); group.classList.toggle('hidden', !['guest','auth_expired','auth_unavailable','credits_exhausted'].includes(status) && !pending);
@@ -62,9 +65,10 @@
       if (group.classList.contains('hidden')) return;
       root.querySelector('[data-action="generate"]').classList.add('hidden');
     }
-    function showLoading(message = "正在生成回复建议…") { clearRecovery(); setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
+    function showLoading(message = "正在生成回复建议…") { showExperimentalFill(false); clearRecovery(); setStatus(message); root.querySelector('[data-action="generate"]').classList.add("hidden"); root.querySelector('[data-action="retry"]').classList.add("hidden"); }
     function enterPostReplyMode() {
       postReplyMode = true;
+      showExperimentalFill(false);
       clearRecovery();
       root.querySelector('[data-action="generate"]').classList.add('hidden');
       root.querySelector('[data-action="retry"]').classList.add('hidden');
@@ -76,6 +80,7 @@
       setStatus('回复窗口已关闭。仍可切换风格、复制建议或打开设置。');
     }
     function showApplied() {
+      showExperimentalFill(false);
       appliedValue = candidates[index]?.[1] || null;
       reply.textContent = ""; reply.classList.add("hidden");
       root.querySelector('[data-action="generate"]').classList.add("hidden");
@@ -208,7 +213,13 @@
         if(!event.isTrusted||momentumGate.classList.contains('hidden'))return;
         setGateBusy(true);onAction(action==='momentum-gate-dnd'?'momentum_gate_dnd':'momentum_gate_dismiss',{id:momentumGate.dataset.id,lease:momentumGate.dataset.lease});return;
       }
-      if (action === "generate") { onAction("generate", { userGesture: true }); return; }
+      if (action === "generate") { onAction("generate", { userGesture: event.isTrusted }); return; }
+      if (action === "confirm-fill") {
+        if(!event.isTrusted || !candidates.length || postReplyMode)return;
+        const [style,replyText]=candidates[index];
+        onAction("confirm-fill",{userGesture:true,style,reply:replyText});
+        return;
+      }
       if (action === "change" && candidates.length) {
         if (cycled && !postReplyMode) { onAction("regenerate", { userGesture: true }); cycled = false; return; }
         index = nextCandidateIndex(index, candidates.length); if (index === 0) cycled = true;
@@ -234,7 +245,7 @@
       }
       notice.textContent = message;
     }
-    return { enterPostReplyMode, showPanelError, isMomentumPreview: () => gatePreview, previewMomentum: data => showMomentumGate(data, data, true), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, showMomentumGate, resolveMomentumGate(){hideMomentumGate();}, momentumGateError(message){setGateBusy(false,message||'暂时无法确认，请重试。');}, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
+    return { enterPostReplyMode, showExperimentalFill, showPanelError, isMomentumPreview: () => gatePreview, previewMomentum: data => showMomentumGate(data, data, true), setMomentum(value, request) { try { momentum?.update(value, request); } catch {} }, showMomentumGate, resolveMomentumGate(){hideMomentumGate();}, momentumGateError(message){setGateBusy(false,message||'暂时无法确认，请重试。');}, host, showResult, showApplied, showReady, showLoading, showAccount, setAutoGenerate, setAccountLabel(value) { accountBadge.textContent = value || ""; }, setStatus(message) { setStatus(message); root.querySelector('[data-action="retry"]').classList.add("hidden"); }, showRetry, showRecovery, close() { if (dismissTimer) clearTimeout(dismissTimer); host.remove(); }, setPosition, setCollapsed(value) { root.classList.toggle("collapsed", value); } };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
   globalThis.ZaneReplyCopilotContent.inlineAssistant = { mount, nextCandidateIndex };
