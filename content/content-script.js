@@ -116,7 +116,7 @@
     completeTrace(current,"cancelled");
     current.cancelled=true;
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
@@ -174,7 +174,7 @@
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     // Lifecycle codes belong in diagnostics only. Never replace a successful
@@ -213,6 +213,48 @@
     }
     return {editor:result.editor,matchedPost:result.state==='bound',reason:result.reason};
   }
+  // If the trusted Reply gesture captured a quote but X omitted the modal's
+  // parent identity, expose a MANUAL, COPY-ONLY surface. Never auto-insert
+  // without the original strict composer association.
+  async function offerQuoteCopyOnly(session) {
+    if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
+       !session.post.hasCapturedQuote||session.copyOnly)return;
+    const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
+    if(!facts.routeAllowed||!facts.sourceUnchanged||facts.editors.length!==1||
+       session.activationBaseline?.baselineModalCount!==0)return;
+    const candidate=facts.editors[0];
+    if(!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
+       session.activationBaseline?.baselineEditors?.includes(candidate.node)||
+       candidate.quarantinedContextMatch||candidate.contextStatusId||
+       candidate.contextMatches!==null)return;
+    // No generation, credit charge, or automatic typing during acquisition.
+    const response=await safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
+    if(active!==session||session.cancelled||session.editor||session.copyOnly)return;
+    if(!response?.ok||response.preferences?.showFloatingWindow!==true){
+      traceAssociation("copy_only_skipped","floating_disabled_or_settings_error");
+      return;
+    }
+    const currentFacts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
+    const still=currentFacts.editors.length===1?currentFacts.editors[0]:null;
+    if(!currentFacts.routeAllowed||!currentFacts.sourceUnchanged||
+       !still||still.node!==candidate.node||!still.node?.isConnected||
+       !still.modal||!still.focused||!still.empty||
+       still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
+    session.copyOnly=true;
+    session.copyOnlyEditor=still.node;
+    session.preferences=response.preferences;
+    session.anchor=still.node.parentElement||still.node;
+    session.initializing=false;
+    session.assistant=api.inlineAssistant.mount(session.anchor,handleAction,{preferences:response.preferences});
+    session.assistant?.setStatus("原帖已捕获，但 X 回复框身份尚未确认。可手动生成并复制；不会自动填入。");
+    traceAssociation("copy_only","new_editor_unverified_parent");
+    const account=await refreshAccount(session);
+    if(active!==session||session.cancelled||!session.copyOnly)return;
+    if(account?.status==="credits_available") {
+      session.assistant?.showReady(false);
+      session.assistant?.setStatus("身份未完全确认：可手动生成、复制并自行粘贴；本次绝不自动填入。");
+    }
+  }
   function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
     if (!hasRuntimeContext()) return;
@@ -222,9 +264,9 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     if (active?.observer) active.observer.disconnect();
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
-    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);clearTimeout(active?.copyOnlyTimer);
     const requestId = crypto.randomUUID();
-    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl, activationBaseline:activation.baseline };
     traceAssociation('activated','trusted_reply_click');
     traceAssociation('capture_kind',post.quoteOnly?'quote_only':'own_text');
     // The request ID changes on regeneration; the editor session does not.
@@ -232,10 +274,13 @@
     active.trace = activation.trace;
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
-      if (active===session && !session.editor) { rejectAssociation('association_expired'); }
+      if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
+    if(post.hasCapturedQuote)session.copyOnlyTimer=setTimeout(()=>{
+      void offerQuoteCopyOnly(session);
+    },800);
     const locate=()=>{
-      if (!hasRuntimeContext() || active!==session || session.cancelled) return;
+      if (!hasRuntimeContext() || active!==session || session.cancelled || session.copyOnly) return;
       const found=matchedComposer(post);
       if (!found.editor) return;
       if (active.editor) {
@@ -258,7 +303,7 @@
         }
         return;
       }
-      clearTimeout(active.acquireTimer);
+      clearTimeout(active.acquireTimer);clearTimeout(active.copyOnlyTimer);
       active.editor=found.editor;active.matchedPost=true;
       active.trace?.mark("editor_bound");
       const current=active;
@@ -273,6 +318,11 @@
     active.refreshAssociation=locate;
     active.observer=new MutationObserver(records=>{
       if(active!==session)return;
+      if(session.copyOnly){
+        if(!session.copyOnlyEditor?.isConnected)
+          session.assistant?.setStatus("X 回复框已变化；本次只能复制已经生成的建议。");
+        return;
+      }
       if(active.assistant?.host && !active.assistant.host.isConnected && !active.assistantDetachedReported) {
         active.assistantDetachedReported=true;
       }
@@ -441,7 +491,16 @@
     const current = active;
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated || current.momentumGate) return;
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
-    if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
+    const copyOnly=Boolean(current.copyOnly&&!current.editor&&current.post.hasCapturedQuote);
+    if(copyOnly){
+      if(!current.copyOnlyEditor?.isConnected||!current.assistant?.host?.isConnected){
+        current.assistant?.setStatus("回复框已关闭，请重新点击 Reply。");
+        return;
+      }
+    }else if(!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) {
+      current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。");
+      return;
+    }
     current.generating = true; current.assistant?.showLoading();
     try {
       current.trace?.mark("background_dispatch");
@@ -449,7 +508,9 @@
       current.trace?.mark("background_return");
       current.trace?.addDurations(response?.performance?.durations);
       if (!contextAlive) return;
-      if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
+      if (!active || active.requestId !== requestId || active.cancelled ||
+         (copyOnly ? !current.copyOnly||!current.copyOnlyEditor?.isConnected
+                    : !active.editor?.isConnected)) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
       current.generated = true; current.generating = false; current.result = response.result;
       current.retrySameRequestId = false;
@@ -459,6 +520,7 @@
       current.trace?.mark("candidates_shown");
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
       if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
+      else if(copyOnly)current.assistant?.setStatus("仅供复制：未确认 X 编辑器身份，绝不自动填入。");
       else await autoFillCurrent(current, requestId, selectedStyle);
       // A protected draft, skip recommendation or unsafe focus is not a
       // successful automatic insertion. Count it separately, without text.
@@ -654,6 +716,10 @@
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
+    if (active?.copyOnly && !active.cancelled && control) {
+      const prior=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+      if(prior.editors.length===0&&prior.visibleDialogCount===0)endSession("reply_closed");
+    }
     if (active?.editor && !active.cancelled) {
       // A new trusted Reply click is an explicit switch. If the old dialog
       // has actually disappeared, release it synchronously instead of
