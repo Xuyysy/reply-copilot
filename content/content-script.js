@@ -120,6 +120,7 @@
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
+    current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
     clearLingeringHost();
     const host = current.assistant?.host;
     if (reason === 'reply_closed' && current.appliedText && host?.isConnected) {
@@ -176,6 +177,7 @@
     current.observer?.disconnect();
     clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
+    current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     // Lifecycle codes belong in diagnostics only. Never replace a successful
     // applied state with an internal teardown message.
@@ -242,6 +244,10 @@
        still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
     session.copyOnly=true;
     session.copyOnlyEditor=still.node;
+    session.copyOnlyDialog=still.dialog||null;
+    session.copyOnlyInputTouched=false;
+    session.onCopyOnlyInput=()=>{if(!session.applyingReply)session.copyOnlyInputTouched=true;};
+    still.node.addEventListener?.("input",session.onCopyOnlyInput,true);
     session.preferences=response.preferences;
     session.anchor=still.node.parentElement||still.node;
     session.initializing=false;
@@ -459,6 +465,60 @@
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
   }
+  async function confirmQuoteCopyOnlyFill(current,data) {
+    const requestId=current?.requestId;
+    const editor=current?.copyOnlyEditor;
+    const reply=typeof data?.reply==="string"?data.reply:"";
+    const style=data?.style;
+    const expected=current?.result?.replies?.[style];
+    if(!data?.userGesture || !current || active!==current || current.cancelled ||
+       !current.copyOnly || current.editor || !editor || !current.post?.hasCapturedQuote ||
+       !current.result || current.generating || current.appliedText ||
+       typeof expected!=="string" || expected!==reply || !reply.trim() ||
+       current.result.recommendation==="skip" || current.copyOnlyInputTouched ||
+       current.attemptedInput.has(requestId))return;
+    const valid=()=>{
+      if(!contextAlive || active!==current || current.cancelled || !current.copyOnly ||
+         current.editor || current.requestId!==requestId || !editor.isConnected ||
+         current.copyOnlyInputTouched || api.composerAdapter.hasContent(editor) ||
+         !document.hasFocus() || document.visibilityState!=="visible")return false;
+      const f=api.composerAssociation.snapshot(document,current.post,current.initialUrl,location.href,performance.now(),quarantinedPosts);
+      if(!f.routeAllowed || !f.sourceUnchanged || f.editors.length!==1)return false;
+      const e=f.editors[0];
+      return e.node===editor && e.modal && e.empty &&
+        (e.dialog||null)===current.copyOnlyDialog &&
+        !e.quarantinedContextMatch && !e.contextStatusId &&
+        e.contextMatches===null;
+    };
+    if(!valid()){
+      current.assistant?.setStatus("无法确认回复框仍是刚才的空白编辑框，未填入；可复制建议。");
+      return;
+    }
+    current.attemptedInput.add(requestId);
+    if(!api.composerAdapter.focusEmpty(editor)||!valid()){
+      current.assistant?.setStatus("无法安全聚焦原回复框，未填入；可复制建议。");
+      return;
+    }
+    current.applyingReply=true;
+    const inserted=api.composerAdapter.insertOnce(editor,requestId,reply,
+      ()=>valid()&&document.activeElement===editor);
+    current.applyingReply=false;
+    if(active!==current||current.cancelled)return;
+    if(!inserted){
+      current.assistant?.setStatus("X 未接受此次单次填入，请复制建议，不要反复尝试。");
+      return;
+    }
+    await new Promise(resolve=>setTimeout(resolve,80));
+    if(active!==current||current.cancelled)return;
+    if(!editor.isConnected||api.composerAdapter.readText(editor)!==reply.trim()){
+      current.assistant?.setStatus("回复框已变化，请核对草稿，避免重复填入。");
+      return;
+    }
+    current.appliedText=reply.trim();current.appliedStyle=style;
+    current.assistant?.showApplied();
+    record("applied",{style,reply});
+    traceAssociation("confirmed_fill","explicit_user_action");
+  }
   function refreshMomentum(current, options = {}) {
     if (current.momentumRequestPending) {
       current.momentumQueued = {...current.momentumQueued, ...options};
@@ -520,7 +580,10 @@
       current.trace?.mark("candidates_shown");
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
       if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
-      else if(copyOnly)current.assistant?.setStatus("仅供复制：未确认 X 编辑器身份，绝不自动填入。");
+      else if(copyOnly) {
+        current.assistant?.showExperimentalFill?.(true);
+        current.assistant?.setStatus("可复制，或点击“确认并填入”对当前回复框执行一次实验性填入；绝不自动发送。");
+      }
       else await autoFillCurrent(current, requestId, selectedStyle);
       // A protected draft, skip recommendation or unsafe focus is not a
       // successful automatic insertion. Count it separately, without text.
@@ -586,6 +649,7 @@
       current.cancelled = true; current.dismissed = true;
       current.observer?.disconnect();
       try { current.editor?.removeEventListener("input", current.onComposerInput, true); } catch {}
+      current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
       void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: current.requestId });
       current.assistant = null;
       if (bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
@@ -643,6 +707,10 @@
     if (action === "pricing") { void safeSend({ type: "REPLY_COPILOT_OPEN_PRICING" }); return; }
     if (action === "check-account") { void refreshAccount(current); return; }
     if (action === "position_changed") { void safeSend({ type: "REPLY_COPILOT_SET_FLOATING_POSITION", left: data.left, top: data.top }); return; }
+    if (action === "confirm-fill") {
+      void confirmQuoteCopyOnlyFill(current,data);
+      return;
+    }
     if (action === "generate") { void generateActive(current.requestId); return; }
     if(action==='recover-generation'||action==='abandon-generation'){
       if(current.recovering)return;
@@ -783,6 +851,10 @@
     // nodes without .closest still use the original baseline identity fence.
     if(!event.isTrusted||!active||active.cancelled||active.editor)return;
     const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    if(active.copyOnly && editor===active.copyOnlyEditor){
+      active.copyOnlyInputTouched=true;
+      return;
+    }
     const genuine=Boolean(editor?.closest?.('[role="dialog"]')) ||
       (!event.target?.closest && api.composerAssociation.baseline(document).baselineEditors.includes(event.target));
     if(genuine)rejectAssociation('user_input_before_binding');

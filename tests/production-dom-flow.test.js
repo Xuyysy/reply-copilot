@@ -13,7 +13,7 @@ function flow({associationOnly=false,homeComposer=false}={}){
    if(message.type==='REPLY_COPILOT_GENERATE'){generationCount++;return new Promise(resolve=>pending.push(resolve));}
    return Promise.resolve({ok:true});
  }}};
- const assistant=()=>({host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
+ const assistant=()=>({showExperimentalFill:enabled=>statuses.push(enabled?"experimental_fill_available":"experimental_fill_hidden"),host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
  const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
@@ -275,4 +275,51 @@ test("unverified modal never triggers quote copy-only fallback without trusted q
    assert.equal(f.hosts.length,0,mode);
    assert.equal(f.generations(),0,mode);
  }
+});
+
+test("trusted user can explicitly fill captured quote once after manual generation",async()=>{
+ const f=flow(),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);
+ p.article.isConnected=false;
+ f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
+   contextDetail:"awaiting_captioned_quote_parent"}]);
+ f.timeout(800);await sleep(0);
+ assert.equal(f.generations(),0);
+ f.action("generate");await sleep(0);assert.equal(f.generations(),1);
+ f.resolve(0);await sleep(0);
+ assert.ok(f.statuses.includes("experimental_fill_available"));
+ f.action("confirm-fill",{userGesture:false,style:"natural",reply:"中文 English 😀\nline"});
+ assert.equal(f.commands(),0,"programmatic/inert confirmation never writes");
+ f.action("confirm-fill",{userGesture:true,style:"natural",reply:"中文 English 😀\nline"});
+ await sleep(115);
+ assert.equal(f.commands(),1,"explicit user action inserts once");
+ assert.equal(p.editor.innerText,"中文 English 😀\nline");
+ f.action("confirm-fill",{userGesture:true,style:"natural",reply:"中文 English 😀\nline"});
+ assert.equal(f.commands(),1,"cannot insert a second time");
+ assert.equal(f.generations(),1,"no new AI request");
+});
+test("manual confirmed fill rejects another editor, wrong ID, drafted content and tab focus loss",async()=>{
+ for(const mode of ["other_editor","wrong_id","draft","blur","wrong_payload"]){
+   const f=flow(),p=f.post("101");
+   p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+   f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
+   f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
+     contextDetail:"awaiting_captioned_quote_parent"}]);
+   f.timeout(800);await sleep(0);f.action("generate");await sleep(0);f.resolve(0);await sleep(0);
+   if(mode==="other_editor")f.entries([{node:{...p.editor},modal:true,contextMatches:null,contextStatusId:null}]);
+   if(mode==="wrong_id")f.entries([{node:p.editor,modal:true,contextMatches:false,contextStatusId:"999"}]);
+   if(mode==="draft")p.editor.innerText="user draft";
+   if(mode==="blur")f.document.hasFocus=()=>false;
+   f.action("confirm-fill",{userGesture:true,style:"natural",reply:mode==="wrong_payload"?"other":"中文 English 😀\nline"});
+   await sleep(0);
+   assert.equal(f.commands(),0,mode);
+ }
+});
+test("experimental insert control exists only with explicit user gesture and does not alter regular generate",()=>{
+ const ui=readFileSync(new URL("../content/inline-assistant.js",import.meta.url),"utf8");
+ assert.match(ui,/data-action="confirm-fill"/);
+ assert.match(ui,/if\(!event\.isTrusted \|\| !candidates\.length/);
+ assert.match(ui,/showExperimentalFill/);
 });
