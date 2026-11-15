@@ -257,8 +257,21 @@
     const account=await refreshAccount(session);
     if(active!==session||session.cancelled||!session.copyOnly)return;
     if(account?.status==="credits_available") {
-      session.assistant?.showReady(false);
-      session.assistant?.setStatus("身份未完全确认：可手动生成、复制并自行粘贴；本次绝不自动填入。");
+      // A real, trusted Reply click established the newly opened, unique,
+      // focused, empty editor. When the user enabled auto-generate, continue
+      // the standard full loop using that causal editor, not guessed tweet text.
+      // Preserve manual copy for disabled auto or any pending safety gate.
+      const autoEnabled=session.preferences.autoGenerateOnReply===true &&
+        !stagingGateNext && account.momentumGatePending!==true && !session.momentumGate;
+      if(autoEnabled) {
+        session.causalQuoteAuto=true;
+        traceAssociation("causal_quote_auto","trusted_new_editor");
+        session.assistant?.setStatus("已定位新打开的回复框，正在自动生成；仅在复核安全后填入，不自动发布。");
+        void generateActive(session.requestId);
+      } else {
+        session.assistant?.showReady(false);
+        session.assistant?.setStatus("未开启自动生成或有待处理权益提示：可手动生成、复制或确认填入。");
+      }
     }
   }
   function begin(control, post, activation) {
@@ -465,13 +478,14 @@
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
   }
-  async function confirmQuoteCopyOnlyFill(current,data) {
+  async function confirmQuoteCopyOnlyFill(current,data,{causalAuto=false}={}) {
     const requestId=current?.requestId;
     const editor=current?.copyOnlyEditor;
     const reply=typeof data?.reply==="string"?data.reply:"";
     const style=data?.style;
     const expected=current?.result?.replies?.[style];
-    if(!data?.userGesture || !current || active!==current || current.cancelled ||
+    if(!(data?.userGesture === true || (causalAuto && current?.causalQuoteAuto===true)) ||
+       !current || active!==current || current.cancelled ||
        !current.copyOnly || current.editor || !editor || !current.post?.hasCapturedQuote ||
        !current.result || current.generating || current.appliedText ||
        typeof expected!=="string" || expected!==reply || !reply.trim() ||
@@ -517,7 +531,9 @@
     current.appliedText=reply.trim();current.appliedStyle=style;
     current.assistant?.showApplied();
     record("applied",{style,reply});
-    traceAssociation("confirmed_fill","explicit_user_action");
+    traceAssociation(causalAuto?"auto_filled":"confirmed_fill",
+      causalAuto?"trusted_new_editor":"explicit_user_action");
+    return true;
   }
   function refreshMomentum(current, options = {}) {
     if (current.momentumRequestPending) {
@@ -581,8 +597,20 @@
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
       if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
       else if(copyOnly) {
-        current.assistant?.showExperimentalFill?.(true);
-        current.assistant?.setStatus("可复制，或点击“确认并填入”对当前回复框执行一次实验性填入；绝不自动发送。");
+        if(current.causalQuoteAuto) {
+          const applied=await confirmQuoteCopyOnlyFill(current,{
+            style:selectedStyle,
+            reply:response.result.replies?.[selectedStyle]
+          },{causalAuto:true});
+          if(active!==current||current.cancelled)return;
+          if(applied!==true) {
+            current.assistant?.showExperimentalFill?.(true);
+            current.assistant?.setStatus("自动填入未能通过安全检查，建议仍可复制；可检查回复框后手动确认填入。");
+          }
+        } else {
+          current.assistant?.showExperimentalFill?.(true);
+          current.assistant?.setStatus("可复制，或点击“确认并填入”对当前回复框执行一次实验性填入；绝不自动发送。");
+        }
       }
       else await autoFillCurrent(current, requestId, selectedStyle);
       // A protected draft, skip recommendation or unsafe focus is not a

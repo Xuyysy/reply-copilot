@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-function flow({associationOnly=false,homeComposer=false}={}){
+function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true}={}){
  let next=0,commandCount=0,generationCount=0,now=0,entries=[],currentUrl='https://x.com/home';
  const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[]; let action;
  const document={body:{},visibilityState:'visible',activeElement:null,hasFocus:()=>true,addEventListener:(n,h)=>handlers[n]=h,removeEventListener(){},execCommand(_c,_u,text){commandCount++;this.activeElement.innerText=text;this.activeElement.input?.();return true;}};
  const chrome={runtime:{id:'test',onMessage:{addListener(){},removeListener(){}},sendMessage(message){
-   if(message.type==='REPLY_COPILOT_GET_BEHAVIOR')return Promise.resolve({ok:true,preferences:{autoGenerateOnReply:true,showFloatingWindow:true}});
+   if(message.type==='REPLY_COPILOT_GET_BEHAVIOR')return Promise.resolve({ok:true,preferences:{autoGenerateOnReply,showFloatingWindow:true}});
    if(message.type==='REPLY_COPILOT_ACCOUNT_STATE')return Promise.resolve({ok:true,status:'credits_available'});
    if(message.type==='REPLY_COPILOT_GENERATE'){generationCount++;return new Promise(resolve=>pending.push(resolve));}
    return Promise.resolve({ok:true});
@@ -239,8 +239,8 @@ test('a Reply button inside an X media-viewer dialog still activates the text-on
  assert.equal(f.commands(),1);
 });
 
-test("captured quote with new unverified modal exposes manual copy-only assistant after hydration grace",async()=>{
- const f=flow(),p=f.post("101");
+test("captured quote with auto disabled exposes manual copy and never charges without user click",async()=>{
+ const f=flow({autoGenerateOnReply:false}),p=f.post("101");
  p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
  f.click(p);
  p.article.isConnected=false;
@@ -277,8 +277,8 @@ test("unverified modal never triggers quote copy-only fallback without trusted q
  }
 });
 
-test("trusted user can explicitly fill captured quote once after manual generation",async()=>{
- const f=flow(),p=f.post("101");
+test("trusted user can explicitly fill captured quote once when automatic generation is off",async()=>{
+ const f=flow({autoGenerateOnReply:false}),p=f.post("101");
  p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
  f.click(p);
  p.article.isConnected=false;
@@ -302,7 +302,7 @@ test("trusted user can explicitly fill captured quote once after manual generati
 });
 test("manual confirmed fill rejects another editor, wrong ID, drafted content and tab focus loss",async()=>{
  for(const mode of ["other_editor","wrong_id","draft","blur","wrong_payload"]){
-   const f=flow(),p=f.post("101");
+   const f=flow({autoGenerateOnReply:false}),p=f.post("101");
    p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
    f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
    f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
@@ -322,4 +322,50 @@ test("experimental insert control exists only with explicit user gesture and doe
  assert.match(ui,/data-action="confirm-fill"/);
  assert.match(ui,/if\(!event\.isTrusted \|\| !candidates\.length/);
  assert.match(ui,/showExperimentalFill/);
+});
+
+test("captured quote auto-on Reply generates and inserts exactly once into its unique new composer",async()=>{
+ const f=flow(),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
+   contextDetail:"awaiting_captioned_quote_parent"}]);
+ f.timeout(800);
+ await sleep(0);
+ assert.equal(f.hosts.length,1);
+ assert.equal(f.generations(),1,"auto-enabled quote starts exactly one AI generation");
+ assert.equal(f.commands(),0,"no native insertion before AI result");
+ f.resolve(0);
+ await sleep(115);
+ assert.equal(f.commands(),1,"AI response fills only the captured fresh composer");
+ assert.equal(p.editor.innerText,'中文 English 😀\nline');
+ assert.equal(f.generations(),1,"no repeat AI request");
+ assert.ok(f.statuses.every(s=>!s.includes("无法准确匹配原帖和回复框")));
+});
+test("auto quote never inserts after user edits, editor replacement, wrong identity, focus loss or route change",async()=>{
+ for(const mode of ["draft","replacement","wrong_id","blur","route"]){
+   const f=flow(),p=f.post("101");
+   p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+   f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
+   f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
+   f.timeout(800);await sleep(0);
+   assert.equal(f.generations(),1,"one permitted request prior to invalidation");
+   if(mode==="draft")p.editor.innerText="user draft";
+   if(mode==="replacement")f.entries([{node:{...p.editor},modal:true,contextMatches:null,contextStatusId:null}]);
+   if(mode==="wrong_id")f.entries([{node:p.editor,modal:true,contextMatches:false,contextStatusId:"999"}]);
+   if(mode==="blur")f.document.hasFocus=()=>false;
+   if(mode==="route")f.route("https://x.com/search");
+   f.resolve(0);
+   await sleep(115);
+   assert.equal(f.commands(),0,mode);
+ }
+});
+test("auto quote does not run for non-quote posts or when auto-generation is disabled",async()=>{
+ const f=flow({autoGenerateOnReply:false}),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
+ f.timeout(800);await sleep(0);
+ assert.equal(f.generations(),0);
+ assert.equal(f.commands(),0);
 });
