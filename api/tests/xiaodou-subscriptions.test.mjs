@@ -430,3 +430,47 @@ test('Xiaodou signed provider mismatch cannot release the blocked subscription',
    const other=await create(f,req('xd-mismatchclosed-0002','pro'));assert.equal(other.status,409);
  }finally{f.sql.close();}
 });
+
+test('owner-confirmed Xiaodou subscription cancellation calls merchant close, then unlocks the plan',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-sub-cancel-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+   let calls=0;
+   const closed=await withProvider(r=>{
+     calls++;assert.equal(r.method,'POST');assert.equal(new URL(r.url).pathname,'/api/open/v1/payments/'+trade+'/close');
+     return providerResponse(r,{outTradeNo:trade,amountFen:6990,currency:'CNY',channel:'ALIPAY_H5',
+       closeState:'CLOSE_REQUESTED',status:'CLOSED',payUrl:null},{status:200});
+   },()=>f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}}));
+   assert.equal(closed.status,200,JSON.stringify(closed.body));assert.equal(calls,1);
+   assert.equal(closed.body.orderStatus,'closed');assert.equal(closed.body.order.status,'closed');
+   assert.equal(metrics(f).periods,0);
+   const replaced=await create(f,req('xd-sub-cancel-new-0002','pro'),{openOrderId:'xd-after-cancel-open-0002'});
+   assert.equal(replaced.status,201,JSON.stringify(replaced.body));
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou subscription cancel refuses uncertain merchant close and leaves original blocking',async()=>{
+ for(const closeState of ['UNKNOWN_KEPT','PROVIDER_PAID_CONFLICT']){
+   const f=ready();try{
+     const first=await create(f,req('xd-sub-cancel-'+closeState));assert.equal(first.status,201);
+     const id=first.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+     const rejected=await withProvider(r=>providerResponse(r,{outTradeNo:trade,amountFen:6990,
+       currency:'CNY',channel:'ALIPAY_H5',closeState,status:'PAYING',payUrl:null},{status:200}),
+       ()=>f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}}));
+     assert.equal(rejected.status,409,JSON.stringify(rejected.body));
+     assert.equal(f.sql.prepare('SELECT status FROM subscription_orders WHERE id=?').get(id).status,'pending');
+     assert.equal(metrics(f).periods,0);
+   }finally{f.sql.close();}
+ }
+});
+
+test('Xiaodou subscription cancel must reject another user without calling merchant',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-sub-not-owner-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id;
+   f.sql.exec("INSERT INTO users(id,email,status,created_at,email_verified_at) VALUES('other','different@example.test','active',1,1)");
+   f.sql.prepare("UPDATE subscription_orders SET user_id=? WHERE id=?").run('other',id);
+   const res=await f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}});
+   assert.equal(res.status,404);
+ }finally{f.sql.close();}
+});

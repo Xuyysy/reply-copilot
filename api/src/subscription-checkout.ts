@@ -10,7 +10,7 @@ import { inspectCheckoutResponse,CheckoutValidationError } from './payment-check
 import { subscriptionRetryableSql,subscriptionBlocksNewCheckoutSql } from './subscription-retry-release.js';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
-import { orderById, querySubscriptionPayment } from './subscription-settlement';
+import { orderById, querySubscriptionPayment, reconcileUnpaidXiaodouTerminal } from './subscription-settlement';
 
 // Explicit third switch: the subscription catalog and existing-order paid
 // reconciliation can be tested WITHOUT allowing a single new real checkout.
@@ -404,3 +404,45 @@ export async function relaunchSubscriptionCheckout(request:Request,env:Env,order
  return response({ok:true,order:snapshot(updated,null)},200,env,request);
 }
 
+
+
+/**
+ * Explicit owner-confirmed cancellation of a still-unpaid Xiaodou subscription.
+ * Never infer terminal state from elapsed time or an expired cashier URL.
+ * Only the merchant-authenticated close endpoint can authorize release.
+ */
+export async function cancelUnpaidXiaodouSubscriptionCheckout(request:Request,env:Env,orderId:string):Promise<Response>{
+ if(!subscriptionsEnabled(env)||env.SUBSCRIPTION_PURCHASES_ENABLED!=='1')
+   throw new ApiFailure(404,'NOT_FOUND','接口不存在。');
+ const {session,token}=await sessionFor(request,env);
+ if(session.kind!=='web')throw new ApiFailure(403,'WEB_SESSION_REQUIRED','请在官网登录后操作。');
+ requireWebOrigin(request,env);
+ await requireCsrf(request,env,token);
+ if(!/^[a-zA-Z0-9_-]{1,80}$/.test(orderId))throw new ApiFailure(400,'INVALID_ORDER_ID','订单号无效。');
+ const input=await jsonBody(request,1024);
+ if(Object.keys(input).length)throw new ApiFailure(400,'INVALID_REQUEST','取消订单不接受付款参数。');
+ const row=await orderFor(env,orderId);
+ if(!row||row.user_id!==session.user_id)throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ if(row.merchant_provider!=='xiaodou'||row.merchant_account!==env.XIAODOU_APP_ID||
+    row.notification_sign_type!==env.XIAODOU_KEY_ID||row.payment_channel!=='ALIPAY_H5'||
+    row.status!=='pending'||row.transaction_status!=='pending'||row.risk_state!=='clear'||row.checkout_state!=='ready')
+   throw new ApiFailure(409,'SUBSCRIPTION_ORDER_NOT_CLOSABLE','原订单目前无法安全取消，请先核验付款结果。');
+ if(!await takeRate(env,'subscription-close:'+session.user_id,3,60_000,nowMs()))
+   throw new ApiFailure(429,'TOO_MANY_REQUESTS','取消订单太频繁，请稍后再试。');
+ const original=await orderById(env,orderId);
+ if(!original||original.user_id!==session.user_id)
+   throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
+ let result:Awaited<ReturnType<ReturnType<typeof configuredXiaodouMerchant>['closePayment']>>;
+ try{result=await configuredXiaodouMerchant(env).closePayment(original.provider_trade_id,{requestId:'xrh-sub-close-'+uuid()});}
+ catch{throw new ApiFailure(502,'XIAODOU_CLOSE_UNAVAILABLE','小豆平台暂无法确认关单，请保留原订单。');}
+ if(result.outTradeNo!==original.provider_trade_id||result.amountFen!==original.amount_fen||
+    result.currency!=='CNY'||result.channel!==original.payment_channel)
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆关单结果与原订单不符，请勿重复付款。');
+ if(!['CLOSE_REQUESTED','ALREADY_CLOSED'].includes(result.closeState)||result.status!=='CLOSED')
+   throw new ApiFailure(409,'SUBSCRIPTION_CLOSE_UNCONFIRMED','小豆尚未确认关闭原订单，请先查验支付状态。');
+ await reconcileUnpaidXiaodouTerminal(env,original,'CLOSED');
+ const latest=await orderFor(env,orderId);
+ if(!latest||latest.status!=='closed'||latest.transaction_status!=='closed')
+   throw new ApiFailure(409,'SUBSCRIPTION_CLOSE_UNCONFIRMED','原订单状态已变化，请先查验支付状态。');
+ return response({ok:true,orderStatus:'closed',order:snapshot(latest,null)},200,env,request);
+}

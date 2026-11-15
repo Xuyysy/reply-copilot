@@ -310,7 +310,7 @@ export async function querySubscriptionPayment(env:Env,row:Order){
 /** A signed provider CLOSED/FAILED result may unlock *unpaid* checkout.
  * Never infer closure from elapsed time, a browser return, or a webhook alone.
  * A later independently signed SUCCEEDED result is held for manual review. */
-async function reconcileUnpaidXiaodouTerminal(env:Env,row:Order,status:'CLOSED'|'FAILED'){
+export async function reconcileUnpaidXiaodouTerminal(env:Env,row:Order,status:'CLOSED'|'FAILED'){
  const terminal=status==='CLOSED'?'closed':'failed';
  const now=nowMs();
  const safe="t.order_id=? AND t.merchant_provider='xiaodou' AND t.merchant_account=? "+
