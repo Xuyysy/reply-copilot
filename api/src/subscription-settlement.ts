@@ -306,6 +306,86 @@ export async function querySubscriptionPayment(env:Env,row:Order){
 /** A signed Xiaodou GET (not a browser return or checkout creation) is the
  * financial truth for subscriptions. All original MK99 orders use their
  * unchanged authenticated MK99 query and settlement path above. */
+
+/** A signed provider CLOSED/FAILED result may unlock *unpaid* checkout.
+ * Never infer closure from elapsed time, a browser return, or a webhook alone.
+ * A later independently signed SUCCEEDED result is held for manual review. */
+async function reconcileUnpaidXiaodouTerminal(env:Env,row:Order,status:'CLOSED'|'FAILED'){
+ const terminal=status==='CLOSED'?'closed':'failed';
+ const now=nowMs();
+ const safe="t.order_id=? AND t.merchant_provider='xiaodou' AND t.merchant_account=? "+
+   "AND t.provider_trade_id=? AND t.amount_fen=? AND t.currency='CNY' "+
+   "AND t.status IN ('pending','unknown') AND t.risk_state='clear' AND t.paid_at IS NULL "+
+   "AND NOT EXISTS (SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED') "+
+   "AND NOT EXISTS (SELECT 1 FROM subscription_periods p WHERE p.source_order_id=t.order_id) "+
+   "AND NOT EXISTS (SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=t.order_id)";
+ await env.DB.batch([
+   env.DB.prepare("UPDATE subscription_payment_transactions AS t SET status=?,updated_at=? WHERE "+safe)
+     .bind(terminal,now,row.id,row.merchant_account,row.provider_trade_id,row.amount_fen),
+   env.DB.prepare("UPDATE subscription_orders SET status=?,updated_at=? "+
+     "WHERE id=? AND user_id=? AND status IN ('pending','unknown') "+
+     "AND paid_at IS NULL AND applied_at IS NULL "+
+     "AND EXISTS (SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=subscription_orders.id "+
+     "AND t.status=? AND t.risk_state='clear' AND t.paid_at IS NULL) "+
+     "AND NOT EXISTS (SELECT 1 FROM subscription_periods p WHERE p.source_order_id=subscription_orders.id) "+
+     "AND NOT EXISTS (SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=subscription_orders.id)")
+     .bind(terminal,now,row.id,row.user_id,terminal)
+ ]);
+}
+
+/** Preserve money evidence when a previously closed/failed attempt later proves
+ * paid. No entitlement or new subscription period is issued in this branch. */
+async function holdLateXiaodouPayment(env:Env,row:Order,event:VerifiedSubscriptionEvent){
+ validateOrder(env,{...row,status:'paid',payment_status:'paid',risk_state:'clear'},event);
+ if(row.merchant_provider!=='xiaodou'||row.risk_state!=='clear')
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_HELD','原订单付款状态需人工核对。');
+ const now=nowMs(),claim=uuid(),eventKey='xiaodou-sub-paid:'+event.tradeNo;
+ const evidence=await sha256('authenticated_xiaodou_query:'+row.provider_trade_id+':'+event.tradeNo+':'+event.amountFen+':TRADE_SUCCESS');
+ const proof="EXISTS (SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=? "+
+   "AND e.merchant_provider='xiaodou' AND e.provider_event_id=? AND e.event_type='PAYMENT_SUCCEEDED' "+
+   "AND e.amount_fen=? AND e.body_sha256=?)";
+ try{
+   await env.DB.batch([
+     env.DB.prepare("INSERT INTO subscription_payment_events "+
+       "(id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,body_sha256,received_at) "+
+       "SELECT ?,t.id,'xiaodou',?,'PAYMENT_SUCCEEDED',t.amount_fen,?,? "+
+       "FROM subscription_payment_transactions t JOIN subscription_orders o ON o.id=t.order_id "+
+       "WHERE t.id=? AND o.id=? AND o.user_id=? "+
+       "AND o.status IN ('closed','failed') AND o.paid_at IS NULL AND o.applied_at IS NULL "+
+       "AND t.status IN ('closed','failed') AND t.risk_state='clear' AND t.paid_at IS NULL "+
+       "AND t.merchant_provider='xiaodou' AND t.provider_trade_id=? "+
+       "AND (t.provider_payment_id IS NULL OR t.provider_payment_id=?) "+
+       "AND t.amount_fen=? AND t.amount_fen=o.amount_fen "+
+       "AND NOT EXISTS (SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id) "+
+       "AND NOT EXISTS (SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=o.id) "+
+       "ON CONFLICT(merchant_provider,provider_event_id) DO NOTHING")
+       .bind(uuid(),eventKey,evidence,now,row.transaction_id,row.id,row.user_id,row.provider_trade_id,event.tradeNo,event.amountFen),
+     env.DB.prepare("UPDATE subscription_payment_transactions SET status='paid',risk_state='manual_review',"+
+       "paid_at=COALESCE(paid_at,?),provider_payment_id=COALESCE(provider_payment_id,?),updated_at=? "+
+       "WHERE id=? AND status IN ('closed','failed') AND risk_state='clear' AND paid_at IS NULL "+
+       "AND (provider_payment_id IS NULL OR provider_payment_id=?) AND "+proof)
+       .bind(now,event.tradeNo,now,row.transaction_id,event.tradeNo,row.transaction_id,eventKey,event.amountFen,evidence),
+     env.DB.prepare("UPDATE subscription_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),updated_at=? "+
+       "WHERE id=? AND user_id=? AND status IN ('closed','failed') AND applied_at IS NULL "+
+       "AND EXISTS (SELECT 1 FROM subscription_payment_transactions t WHERE t.order_id=subscription_orders.id "+
+       "AND t.id=? AND t.status='paid' AND t.risk_state='manual_review' AND "+proof+")")
+       .bind(now,now,row.id,row.user_id,row.transaction_id,row.transaction_id,eventKey,event.amountFen,evidence),
+     env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?, CASE WHEN "+
+       "EXISTS (SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id "+
+       "WHERE o.id=? AND o.user_id=? AND o.status='manual_review' AND o.applied_at IS NULL "+
+       "AND t.id=? AND t.status='paid' AND t.risk_state='manual_review' AND "+proof+" "+
+       "AND NOT EXISTS (SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id) "+
+       "AND NOT EXISTS (SELECT 1 FROM subscription_tier_changes c WHERE c.order_id=o.id)) "+
+       "THEN 1 ELSE 0 END")
+       .bind(claim,row.id,row.user_id,row.transaction_id,row.transaction_id,eventKey,event.amountFen,evidence),
+     env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(claim)
+   ]);
+ }catch{throw new ApiFailure(409,'SUBSCRIPTION_LATE_PAYMENT_REVIEW','历史订单出现延迟付款证据，需人工核对，未自动发放权益。');}
+ const latest=await orderById(env,row.id);
+ if(latest?.status!=='manual_review'||latest.risk_state!=='manual_review'||latest.payment_status!=='paid')
+   throw new ApiFailure(503,'SUBSCRIPTION_LATE_PAYMENT_REVIEW','延迟付款状态暂无法确认，请人工核对。');
+}
+
 async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
  if(row.merchant_account!==env.XIAODOU_APP_ID||row.payment_channel!=='ALIPAY_H5'||
     !/^mkid_[0-9a-f]{16}$/.test(row.notification_sign_type??''))
@@ -321,9 +401,11 @@ async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
  if(!['CREATED','PAYING','SUCCEEDED','FAILED','CLOSED','UNKNOWN'].includes(String(status)))
    throw new ApiFailure(502,'XIAODOU_QUERY_INVALID','小豆返回了无法识别的支付状态。');
  if(status!=='SUCCEEDED'){
-   // Xiaodou may later report a trustworthy paid fact for an old CLOSED/FAILED
-   // attempt. Never irrevocably mark the subscription failed or closed here.
-   return {ok:true,orderStatus:row.status,verificationSource:'xiaodou_signed_query',
+   if((status==='CLOSED'||status==='FAILED')&&['pending','unknown'].includes(row.status)&&
+     ['pending','unknown'].includes(row.payment_status)&&row.risk_state==='clear')
+     await reconcileUnpaidXiaodouTerminal(env,row,status);
+   const latest=await orderById(env,row.id);
+   return {ok:true,orderStatus:latest?.status??row.status,verificationSource:'xiaodou_signed_query',
      paymentConfirmed:false,providerStatus:String(status)};
  }
  const tradeNo=result.openOrderId;
@@ -332,6 +414,11 @@ async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
  const verified:VerifiedSubscriptionEvent={provider:'xiaodou',verification:'authenticated_query',
    outTradeNo:row.provider_trade_id,tradeNo,amountFen:row.amount_fen,tradeStatus:'TRADE_SUCCESS',
    merchantId:env.XIAODOU_APP_ID,paytypeCode:'alipay',currency:'CNY'};
+ if(['closed','failed'].includes(row.status)||['closed','failed'].includes(row.payment_status)){
+   await holdLateXiaodouPayment(env,row,verified);
+   return {ok:true,orderStatus:'manual_review',verificationSource:'xiaodou_signed_query',
+     paymentConfirmed:true,entitlementApplied:false,providerStatus:'SUCCEEDED'};
+ }
  if(row.risk_state!=='clear'||['refund_pending','manual_review','refunded'].includes(row.status)){
    validateOrder(env,{...row,status:'paid',payment_status:'paid',risk_state:'clear'},verified);
    return {ok:true,orderStatus:row.status,verificationSource:'xiaodou_signed_query',

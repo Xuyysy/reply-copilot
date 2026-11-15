@@ -79,6 +79,24 @@ export async function subscriptionOrders(request:Request,env:Env,id?:string):Pro
    if(row.merchant_provider==='mk99')try{config=mk99Config(env);}catch{/* Preserve historical order visibility. */}
    return response({order:snapshot(row,config)},200,env,request);
  }
+ // On an authenticated pricing/account read, reconcile at most one original
+ // Xiaodou attempt with a bounded, signed merchant query. No expiry-time guess,
+ // no new charge, and no automatic release on timeout or network failure.
+ const unresolved=await env.DB.prepare(
+   "SELECT o.id FROM subscription_orders o "+
+   "JOIN subscription_payment_transactions t ON t.order_id=o.id "+
+   "WHERE o.user_id=? AND o.status IN ('pending','unknown') AND t.merchant_provider='xiaodou' "+
+   "AND t.status IN ('pending','unknown') AND t.risk_state='clear' "+
+   "AND NOT ("+subscriptionRetryableSql('o')+") "+
+   "ORDER BY o.created_at ASC LIMIT 1").bind(session.user_id).first<{id:string}>();
+ if(unresolved){
+   try{
+     if(await takeRate(env,'subscription-list-reconcile:'+session.user_id,2,60_000,nowMs())){
+       const original=await orderById(env,unresolved.id);
+       if(original?.user_id===session.user_id)await querySubscriptionPayment(env,original);
+     }
+   }catch{/* Provider failures leave the original blocking state intact. */}
+ }
  const rows=await env.DB.prepare(`SELECT ${RESULT_FIELDS} FROM subscription_orders o
    JOIN subscription_plan_versions v ON v.id=o.plan_version_id JOIN subscription_payment_transactions t ON t.order_id=o.id
    WHERE o.user_id=? ORDER BY o.created_at DESC,o.id DESC LIMIT 50`).bind(session.user_id).all<Pending>();
