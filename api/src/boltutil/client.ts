@@ -28,17 +28,26 @@ export type BoltCreateReason="WEBHOOK_CONFIG"|"WALLET_CONFIG"|"NETWORK_ASSET"|"A
 export type BoltCreateFailure={stage:"network"|"http"|"response"|"business";httpStatus:number|null;providerCode:string|null;reason?:BoltCreateReason};
 function safeBoltCreateReason(payload:Record<string,unknown>|null):BoltCreateReason|undefined{
  if(!payload)return;
- const value=[payload.message,payload.msg,payload.error].find(x=>typeof x==="string"&&x.length<=512);
- if(typeof value!=="string")return;
- const s=value.toLowerCase();
- const invalid=/(not configured|not set|missing|disabled|not enabled|unavailable|unsupported|not supported|invalid|not found|未配置|未启用|无效|不可用|缺少|不存在)/;
- if(/(webhook|callback|notify|回调)/.test(s)&&invalid.test(s))return "WEBHOOK_CONFIG";
- if(/(wallet|receiving address|deposit address|钱包|收款地址)/.test(s)&&invalid.test(s))return "WALLET_CONFIG";
- if(/(network|chain|asset|token|currency|polygon|trc20|bep20|网络|区块链|代币|币种)/.test(s)&&invalid.test(s))return "NETWORK_ASSET";
- if(/(amount|minimum|min order|金额|最低|最小)/.test(s)&&/(minimum|below|too low|at least|too small|less than|最低|最小|不足|过低|不能小于)/.test(s))return "AMOUNT_MINIMUM";
- if(/(duplicate|already exists|already used|重复|已存在)/.test(s)&&/(order|external|订单|id)/.test(s))return "DUPLICATE_ORDER";
- if(/(signature|timestamp|hmac|签名|时间戳)/.test(s))return "SIGNATURE";
- if(/(rate limit|quota|too many|frequency|配额|限额|次数超限|请求频繁)/.test(s))return "RATE_QUOTA";
+ // BoltUtil can return message/msg/error or a nested error object.
+ // Only inspect bounded strings and return a fixed enum, never provider text.
+ const err=payload.error&&typeof payload.error==="object"&&!Array.isArray(payload.error)
+   ?payload.error as Record<string,unknown>:null;
+ const detail=payload.data&&typeof payload.data==="object"&&!Array.isArray(payload.data)
+   ?payload.data as Record<string,unknown>:null;
+ const candidates=[payload.message,payload.msg,payload.error,payload.detail,
+   err?.message,err?.msg,detail?.message];
+ const missing=/(not configured|not set|missing|disabled|not enabled|unavailable|unsupported|not supported|invalid|not found|not active|inactive|no active|no enabled|not exist|is required|must configure|must be configured|未配置|未启用|无效|不可用|缺少|不存在|未设置|未激活|没有)/;
+ for(const value of candidates){
+   if(typeof value!=="string"||value.length===0||value.length>512)continue;
+   const s=value.toLowerCase();
+   if(/(webhook|callback|notify|回调)/.test(s)&&missing.test(s))return "WEBHOOK_CONFIG";
+   if(/(wallet|receiving address|deposit address|merchant address|钱包|收款地址)/.test(s)&&missing.test(s))return "WALLET_CONFIG";
+   if(/(amount|minimum|min order|金额|最低|最小)/.test(s)&&/(minimum|below|too low|at least|too small|less than|最低|最小|不足|过低|不能小于|must be greater|exceed minimum)/.test(s))return "AMOUNT_MINIMUM";
+   if(/(duplicate|already exists|already used|重复|已存在)/.test(s)&&/(order|external|订单|id)/.test(s))return "DUPLICATE_ORDER";
+   if(/(signature|timestamp|hmac|签名|时间戳)/.test(s))return "SIGNATURE";
+   if(/(rate limit|quota|too many|frequency|limit exceeded|配额|限额|次数超限|请求频繁)/.test(s))return "RATE_QUOTA";
+   if(/(network|chain|asset|token|currency|polygon|trc20|bep20|网络|区块链|代币|币种)/.test(s)&&missing.test(s))return "NETWORK_ASSET";
+ }
 }
 function safeBoltBusinessCode(value:unknown):string|null{
  if(typeof value==="number"&&Number.isSafeInteger(value))return String(value);

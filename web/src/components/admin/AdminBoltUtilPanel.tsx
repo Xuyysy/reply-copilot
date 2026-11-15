@@ -42,6 +42,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
   const [testBusy,setTestBusy]=useState(false);
   const [testError,setTestError]=useState("");
   const [testNotice,setTestNotice]=useState("");
+  const [testNoticeFailed,setTestNoticeFailed]=useState(false);
   const [testDiagnostic,setTestDiagnostic]=useState("");
   const [availability,setAvailability]=useState<PublicResponse|null>(null);
   const [loading,setLoading]=useState(false);
@@ -75,15 +76,18 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
     const message=t("这是真实主网支付：将为 "+testNetwork+" 创建一笔约 1 USDT 的收银台订单。实际金额以 BoltUtil 返回为准；不会发放用户额度。确认继续？",
       "REAL MAINNET: Create a ~1 USDT invoice on "+testNetwork+". Pay the exact returned amount. No customer entitlements will be granted. Continue?");
     if(!window.confirm(message))return;
-    setTestBusy(true);setTestError("");setTestNotice("");
+    setTestBusy(true);setTestError("");setTestNotice("");setTestNoticeFailed(false);
     try{
       const result=await write<{order:MainnetProbe}>("/v1/admin/boltutil/test-orders",{
         network:testNetwork,confirm:"I_ACCEPT_REAL_1_USDT_MAINNET",
         reason:"Staging 专用 USDT 小额实付测试 "+testNetwork
       });
-      setTestNotice(result.order.status==="pending"
-        ?t("真实测试订单已创建。请确认收款链、地址与实际金额后再转账。","Real invoice created. Verify network, address and exact amount before paying.")
-        :t("平台创建结果不明确，请先核对原订单，勿重复创建。","Creation outcome uncertain. Check the original order; do not duplicate."));
+      const ready=result.order.status==="pending"&&!!result.order.checkoutUrl&&
+        !!result.order.address&&!!result.order.amount;
+      setTestNoticeFailed(!ready);
+      setTestNotice(ready
+        ?t("BoltUtil 已创建真实收银台：下方订单卡片中有「打开 BoltUtil 付款页面」及准确金额、收款地址。","BoltUtil checkout is ready. Open the verified checkout link below and verify the amount and address.")
+        :t("仍未获得有效 BoltUtil 收银台。此条是本地测试记录，不是付款成功；请查看最新 CREATE 诊断码和商户配置清单，勿转账或盲目重试。","No verified BoltUtil checkout was returned. This local record is not a payment; inspect the latest CREATE code and merchant checklist. Do not pay or retry blindly."));
       setReload(x=>x+1);
     }catch(e){setTestError(e instanceof Error?e.message:String(e));}
     finally{setTestBusy(false);}
@@ -186,9 +190,24 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         </div>
         <p className="text-sm text-amber-800">{t("付款使用真实主网 USDT 和链上手续费。不要向代币合约地址转账，不要取整 BoltUtil 实际应付金额。公共 USDT 收款仍保持关闭。",
           "REAL MAINNET funds and network fees. Do not transfer to token contract; never round the exact payable. Public USDT checkout remains disabled.")}</p>
-        {testNotice&&<p role="status" className="text-sm text-green-700">{testNotice}</p>}
+        {testNotice&&<p role="status" className={"text-sm "+(testNoticeFailed?"text-red-700":"text-green-700")}>{testNotice}</p>}
         {testDiagnostic&&<p role="status" className="text-sm break-words rounded border p-3">{testDiagnostic}</p>}
         {testError&&<p role="alert" className="text-sm text-red-700">{testError}</p>}
+        {(probes?.orders||[]).some(o=>o.providerStatus?.startsWith("CREATE_HTTP_HTTP_400"))&&
+          <section data-testid="admin-boltutil-checkout-blocked" className="rounded-lg border border-amber-300 bg-amber-50/40 p-3 space-y-2 text-sm">
+            <strong>{t("BoltUtil 拒绝了创建订单，因此付款页面不存在","BoltUtil rejected order creation: no checkout page exists")}</strong>
+            <p>{t("API Key /ping 成功只证明密钥连通；HTTP 400 需要商户侧启用网络与钱包、Webhook，并满足最低金额。平台没有返回有效 checkoutUrl，不能自行拼接付款链接或使用代币合约地址转账。",
+              "API Key ping only checks connectivity. HTTP 400 can mean an inactive route, missing receiving wallet or Webhook, or a higher minimum. Never invent a checkout URL or pay a token contract.")}</p>
+            <ol className="list-decimal pl-5 space-y-1">
+              <li>{t("在 BoltUtil 商户后台启用本次网络的 USDT 收款通道，并配置该网络的真实收款钱包。","Enable this USDT route and a valid merchant receiving wallet in BoltUtil.")}</li>
+              <li>{t("启用 Webhook，并确认签名密钥与 Staging 服务端一致。","Enable the Webhook and confirm its secret matches Staging.")}</li>
+              <li>{t("核对本网络 USDT 的最低下单金额是否允许 1.00 USDT；不要自动提高实测金额。","Confirm the minimum for this USDT network accepts 1.00; do not automatically raise the test amount.")}</li>
+              <li>{t("配置确认后，仅由管理员主动创建一笔新单，再检查是否有真实支付链接。","After correcting settings, explicitly create one fresh admin invoice and confirm the actual checkout URL.")}</li>
+            </ol>
+            <a className="underline text-blue-700" target="_blank" rel="noopener noreferrer" href="https://boltutil.com/developer-docs?s=create">
+              {t("BoltUtil 官方创建订单及 400 错误说明","BoltUtil official order-create & HTTP 400 guide")}
+            </a>
+          </section>}
         {(probes?.orders||[]).map(o=><div key={o.id} className="rounded-lg border p-3 space-y-2 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><strong>{o.network} · {o.amount||"—"} USDT</strong><Badge variant="outline">{o.providerStatus||o.status}</Badge></div>
           <p className="break-all text-xs text-muted-foreground">{o.externalOrderId}</p>
@@ -205,11 +224,21 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
              {o.providerStatus.includes("_REASON_RATE_QUOTA")&&<p>{t("平台商户配额或限流，取消本地管理员限制无法解除。","Merchant quota or upstream rate limit; local admin limits do not override it.")}</p>}
              {o.providerStatus.startsWith("CREATE_HTTP_HTTP_400")&&!o.providerStatus.includes("_REASON_")&&<p>{t("平台返回 400，但未给出可安全分类的原因。请优先核查商户钱包、网络/资产、Webhook 与最低金额；不要继续盲目重试。","Provider returned HTTP 400 without a safely classifiable reason. Verify wallet, network, Webhook and minimum amount; avoid blind retries.")}</p>}
           </p>}
-          {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
+          {o.checkoutUrl&&o.status==="pending"&&o.address&&o.amount&&
+            <section data-testid="admin-boltutil-checkout-ready" className="rounded-lg border border-green-300 p-3 space-y-2">
+              <strong className="text-green-700">{t("真实 BoltUtil 付款页面已生成","Real BoltUtil checkout ready")}</strong>
+              <p>{t("网络：","Network: ")}{o.network} · {t("完整应付金额：","Exact payable: ")}<strong>{o.amount} USDT</strong></p>
+              <p className="break-all">{t("真实收款地址：","Verified receiving address: ")}{o.address}</p>
+              <a href={o.checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md border border-blue-700 bg-blue-700 text-white px-4 py-2 font-medium">
+                {t("打开 BoltUtil 付款页面","Open real BoltUtil checkout")}
+              </a>
+              <p className="text-amber-800">{t("这是主网真钱订单，打开链接不等于已经付款；请自行核对币种、链、地址、完整金额后手动决定是否转账。","This is a real-mainnet invoice. Opening the link does not pay. Verify currency, network, address and full amount before any manual transfer.")}</p>
+            </section>}
+          {o.address&&!(o.checkoutUrl&&o.status==="pending")&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
           {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}
           {o.expiresAt&&<p>{t("截止：","Expires: ")}{new Date(o.expiresAt).toLocaleString()}</p>}
           <div className="flex gap-2 flex-wrap">
-            {o.checkoutUrl&&<a href={o.checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md border px-3 py-2 text-blue-700">{t("打开 BoltUtil 收银台","Open BoltUtil checkout")}</a>}
+            {o.checkoutUrl&&o.status!=="pending"&&<a href={o.checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md border px-3 py-2 text-blue-700">{t("查看 BoltUtil 订单页面","View BoltUtil invoice")}</a>}
             <Button variant="outline" disabled={testBusy} onClick={()=>void refreshMainnetTest(o.id)}>{t("核验平台支付状态","Verify provider status")}</Button>
             <Button variant="outline" disabled={testBusy} onClick={()=>void diagnoseMainnetTest(o.id)}>{t("只读诊断：为何没有收银台","Diagnose missing checkout (read-only)")}</Button>
           </div>
