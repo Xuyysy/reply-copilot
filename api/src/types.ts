@@ -30,6 +30,9 @@ export interface Env {
   BOLTUTIL_SCHEMA_READY?: string;
   BOLTUTIL_STAGING_CREATE_ENABLED?: string;
   BOLTUTIL_API_KEY?: string;
+  /** Admin-only real-mainnet 1-USDT diagnostic; never enables public checkout. */
+  BOLTUTIL_ADMIN_TEST_ENABLED?: string;
+  BOLTUTIL_ADMIN_TEST_SCHEMA_READY?: string;
   BOLTUTIL_WEBHOOK_SECRET?: string;
   /** Fixed, operator-approved CNY per USDT in 1e-6 CNY, staging only. */
   BOLTUTIL_CNY_PER_USDT_MICROS?: string;

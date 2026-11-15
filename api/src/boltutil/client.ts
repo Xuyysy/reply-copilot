@@ -22,8 +22,9 @@ export async function verifyBoltWebhook(request:Request,secret:string):Promise<u
   if(mismatch!==0)throw new ApiFailure(401,"BOLTUTIL_SIGNATURE_INVALID","支付签名无效。");
   try{return JSON.parse(raw);}catch{throw new ApiFailure(400,"BOLTUTIL_BODY_INVALID","通知格式无效。");}
 }
-export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/v1/order/status",body:Record<string,unknown>):Promise<Record<string,unknown>>{
-  if(env.ENVIRONMENT!=="staging"|| (endpoint==="/api/v1/order/create"&&env.BOLTUTIL_STAGING_CREATE_ENABLED!=="1")||
+export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/v1/order/status",body:Record<string,unknown>,options:{adminProbe?:boolean}={}):Promise<Record<string,unknown>>{
+  if(env.ENVIRONMENT!=="staging"|| (endpoint==="/api/v1/order/create"&&env.BOLTUTIL_STAGING_CREATE_ENABLED!=="1"&&
+     !(options.adminProbe===true&&env.BOLTUTIL_ADMIN_TEST_ENABLED==="1"&&env.BOLTUTIL_ADMIN_TEST_SCHEMA_READY==="1"))||
      !env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
      throw new ApiFailure(503,"BOLTUTIL_NOT_CONFIGURED","USDT 收款通道尚未完成配置。");
   const raw=JSON.stringify(body),ts=String(Date.now()),sig=await hmac(env.BOLTUTIL_WEBHOOK_SECRET,ts,raw);
