@@ -4,7 +4,7 @@ import {requireAdminSession} from "../admin-auth";
 import {requireWebOrigin,jsonBody,nowMs,uuid} from "../security";
 import {takeRate} from "../auth";
 import {response} from "../http";
-import {boltRequest,verifyBoltWebhook} from "./client";
+import {boltRequest,verifyBoltWebhook,boltReadOnlyProbe} from "./client";
 import {NETWORKS,parseBoltNetwork,validReceivingAddress,verifiedPayment,decimalMicros,tokenRawUnits,equalAddress,type BoltNetwork} from "./contract";
 
 type Probe={
@@ -176,4 +176,32 @@ export async function adminBoltTestWebhook(request:Request,env:Env):Promise<Resp
    return response({ok:true,settled:false},200,env,request);
  const next=await reconcile(env,row,event.eventId);
  return response({ok:true,confirmed:next.status==="paid",entitlementApplied:false},200,env,request);
+}
+
+/** No order creation, update, or funds movement. Strongly authenticated
+ * diagnosis for one saved old test order. Safe HTTP/status summaries only. */
+export async function adminBoltTestDiagnose(request:Request,env:Env,id:string):Promise<Response>{
+ requireEnabled(env);
+ const admin=await requireAdminSession(request,env,true);
+ requireWebOrigin(request,env);
+ if(!/^[0-9a-f-]{36}$/i.test(id))throw new ApiFailure(400,"INVALID_ORDER_ID","订单号无效。");
+ const row=await get(env,id);
+ if(!row)throw new ApiFailure(404,"NOT_FOUND","测试订单不存在。");
+ if(!await takeRate(env,"bolt-admin-diagnose:"+admin.user_id,3,60000,nowMs()))
+   throw new ApiFailure(429,"BOLTUTIL_DIAG_RATE_LIMIT","诊断过于频繁，请稍后再试。");
+ const ping=await boltReadOnlyProbe(env,"ping");
+ const status=ping.kind==="ok"?
+   await boltReadOnlyProbe(env,"status",row.external_order_id):null;
+ return response({
+   ok:true,readOnly:true,externalOrderId:row.external_order_id,
+   network:row.network,localStatus:row.status,
+   hasLocalCheckout:!!row.checkout_url,
+   ping,status,
+   nextStep:ping.kind!=="ok"?"fix_api_key_or_connectivity":
+      status?.kind==="not_found"?"verify_merchant_order_not_found":
+      status?.kind==="unauthorized"?"fix_request_signature":
+      status?.kind==="bad_request"?"check_network_wallet_webhook":
+      status?.kind==="rate_limited"?"check_merchant_quota":
+      status?.kind==="ok"?"inspect_original_order":"check_provider_error"
+ },200,env,request);
 }

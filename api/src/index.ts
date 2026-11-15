@@ -2,7 +2,7 @@ import {adminCreator} from './creator-momentum';
 import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
 import {adminBoltOrders} from './boltutil/admin';
-import {adminBoltTestCreate,adminBoltTestList,adminBoltTestRefresh,adminBoltTestWebhook} from './boltutil/admin-probes';
+import {adminBoltTestCreate,adminBoltTestList,adminBoltTestRefresh,adminBoltTestWebhook,adminBoltTestDiagnose} from './boltutil/admin-probes';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
@@ -60,6 +60,8 @@ export default {
       if(request.method==="POST"&&path==="/v1/boltutil/admin-test/webhook")return await adminBoltTestWebhook(request,env);
       const adminBoltTestRoute=path.match(/^\/v1\/admin\/boltutil\/test-orders\/([0-9a-f-]{36})\/refresh$/i);
       if(request.method==="POST"&&adminBoltTestRoute)return await adminBoltTestRefresh(request,env,adminBoltTestRoute[1]);
+      const adminBoltDiagRoute=path.match(/^\/v1\/admin\/boltutil\/test-orders\/([0-9a-f-]{36})\/diagnose$/i);
+      if(request.method==="POST"&&adminBoltDiagRoute)return await adminBoltTestDiagnose(request,env,adminBoltDiagRoute[1]);
       if(request.method==="GET"&&path==="/v1/boltutil/availability")return await publicBoltAvailability(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/upgrade-quote")return await createBoltUpgradeQuote(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/orders")return await createBoltOrder(request,env);

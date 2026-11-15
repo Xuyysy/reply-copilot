@@ -42,6 +42,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
   const [testBusy,setTestBusy]=useState(false);
   const [testError,setTestError]=useState("");
   const [testNotice,setTestNotice]=useState("");
+  const [testDiagnostic,setTestDiagnostic]=useState("");
   const [availability,setAvailability]=useState<PublicResponse|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
@@ -84,6 +85,23 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         ?t("真实测试订单已创建。请确认收款链、地址与实际金额后再转账。","Real invoice created. Verify network, address and exact amount before paying.")
         :t("平台创建结果不明确，请先核对原订单，勿重复创建。","Creation outcome uncertain. Check the original order; do not duplicate."));
       setReload(x=>x+1);
+    }catch(e){setTestError(e instanceof Error?e.message:String(e));}
+    finally{setTestBusy(false);}
+  }
+  async function diagnoseMainnetTest(id:string){
+    if(testBusy)return;
+    setTestBusy(true);setTestError("");setTestDiagnostic("");
+    try{
+      const r=await write<{readOnly:true;ping:{kind:string;httpStatus:number|null;providerCode:string|null};
+        status:null|{kind:string;httpStatus:number|null;providerCode:string|null;orderStatus:string|null};
+        localStatus:string;nextStep:string}>("/v1/admin/boltutil/test-orders/"+id+"/diagnose",{
+        reason:"仅诊断原有 Staging USDT 测试订单商户连接，不创建新订单"
+      });
+      const describe=(v:{kind:string;httpStatus:number|null;providerCode:string|null})=>
+        v.kind+" (HTTP "+(v.httpStatus??"network")+" / code "+(v.providerCode??"none")+")";
+      setTestDiagnostic("BoltUtil API Key: "+describe(r.ping)+
+        "；原订单查询："+(r.status?describe(r.status)+(r.status.orderStatus?" / "+r.status.orderStatus:""):"跳过")+
+        "；建议："+r.nextStep);
     }catch(e){setTestError(e instanceof Error?e.message:String(e));}
     finally{setTestBusy(false);}
   }
@@ -169,16 +187,19 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         <p className="text-sm text-amber-800">{t("付款使用真实主网 USDT 和链上手续费。不要向代币合约地址转账，不要取整 BoltUtil 实际应付金额。公共 USDT 收款仍保持关闭。",
           "REAL MAINNET funds and network fees. Do not transfer to token contract; never round the exact payable. Public USDT checkout remains disabled.")}</p>
         {testNotice&&<p role="status" className="text-sm text-green-700">{testNotice}</p>}
+        {testDiagnostic&&<p role="status" className="text-sm break-words rounded border p-3">{testDiagnostic}</p>}
         {testError&&<p role="alert" className="text-sm text-red-700">{testError}</p>}
         {(probes?.orders||[]).map(o=><div key={o.id} className="rounded-lg border p-3 space-y-2 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><strong>{o.network} · {o.amount||"—"} USDT</strong><Badge variant="outline">{o.providerStatus||o.status}</Badge></div>
           <p className="break-all text-xs text-muted-foreground">{o.externalOrderId}</p>
+          {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("平台尚未确认创建成功，没有支付链接。请先点击只读诊断，不要再次创建或转账。","Merchant has not confirmed the invoice. Diagnose before another attempt; do not transfer funds.")}</p>}
           {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
           {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}
           {o.expiresAt&&<p>{t("截止：","Expires: ")}{new Date(o.expiresAt).toLocaleString()}</p>}
           <div className="flex gap-2 flex-wrap">
             {o.checkoutUrl&&<a href={o.checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md border px-3 py-2 text-blue-700">{t("打开 BoltUtil 收银台","Open BoltUtil checkout")}</a>}
             <Button variant="outline" disabled={testBusy} onClick={()=>void refreshMainnetTest(o.id)}>{t("核验平台支付状态","Verify provider status")}</Button>
+            <Button variant="outline" disabled={testBusy} onClick={()=>void diagnoseMainnetTest(o.id)}>{t("只读诊断：为何没有收银台","Diagnose missing checkout (read-only)")}</Button>
           </div>
           <p className="text-xs text-muted-foreground">{t("独立测试订单 · 不会触发商品权益发放。","Independent diagnostic invoice · never grants product entitlements.")}</p>
         </div>)}

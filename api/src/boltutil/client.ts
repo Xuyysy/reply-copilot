@@ -45,3 +45,60 @@ export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/
     throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","收款平台未确认此操作，请核对原单。");
   return payload.data as Record<string,unknown>;
 }
+
+// Read-only BoltUtil diagnostics for authenticated Staging administrators.
+// Never log or return API keys, secrets, raw provider bodies or payment addresses.
+// This only calls /ping and /order/status; it cannot create an invoice or transfer money.
+export type BoltReadOnlyProbe={
+ kind:"ok"|"unauthorized"|"bad_request"|"rate_limited"|"not_found"|"upstream_http"|"business_rejected"|"malformed"|"network_error";
+ httpStatus:number|null;providerCode:string|null;orderStatus:string|null;checkoutAvailable:boolean;
+};
+export async function boltReadOnlyProbe(env:Env,operation:"ping"|"status",externalOrderId?:string):Promise<BoltReadOnlyProbe>{
+ if(env.ENVIRONMENT!=="staging"||!env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
+   throw new ApiFailure(503,"BOLTUTIL_PROBE_NOT_CONFIGURED","Staging 商户密钥未配置。");
+ if(operation==="status"&&(typeof externalOrderId!=="string"||!/^[A-Za-z0-9_-]{6,64}$/.test(externalOrderId)))
+   throw new ApiFailure(400,"BOLTUTIL_INVALID_ORDER_ID","测试订单编号不合法。");
+ const isStatus=operation==="status";
+ const raw=isStatus?JSON.stringify({externalOrderId}):"";
+ const ts=String(Date.now());
+ const headers:Record<string,string>={"X-Bolt-Key":env.BOLTUTIL_API_KEY};
+ if(isStatus){
+   headers["Content-Type"]="application/json";
+   headers["X-Bolt-Timestamp"]=ts;
+   headers["X-Bolt-Signature"]=await hmac(env.BOLTUTIL_WEBHOOK_SECRET,ts,raw);
+ }
+ const blank=(kind:BoltReadOnlyProbe["kind"],httpStatus:number|null,providerCode:string|null=null):BoltReadOnlyProbe=>(
+   {kind,httpStatus,providerCode,orderStatus:null,checkoutAvailable:false}
+ );
+ let res:Response;
+ try{
+   res=await fetch(HOST+(isStatus?"/api/v1/order/status":"/api/v1/ping"),{
+     method:isStatus?"POST":"GET",headers,redirect:"manual",
+     ...(isStatus?{body:raw}:{}),signal:AbortSignal.timeout(8000)
+   });
+ }catch{return blank("network_error",null);}
+ const kind=res.status===401||res.status===403?"unauthorized":res.status===400?"bad_request":
+   res.status===429?"rate_limited":res.status===404?"not_found":"upstream_http";
+ const head=Number(res.headers.get("content-length")??0);
+ if(head>8192)return blank("malformed",res.status);
+ let payload:Record<string,unknown>|null=null;
+ try{
+   const str=await res.text();
+   if(str.length>8192)return blank("malformed",res.status);
+   const obj=JSON.parse(str);
+   if(obj&&typeof obj==="object"&&!Array.isArray(obj))payload=obj as Record<string,unknown>;
+ }catch{/* Ping may respond empty; HTTP status alone is enough. */}
+ const code=payload?.code;
+ const providerCode=(typeof code==="number"&&Number.isSafeInteger(code))?String(code):
+   (typeof code==="string"&&/^[a-zA-Z0-9_-]{1,32}$/.test(code))?code:null;
+ if(!res.ok||res.status>=300)return blank(kind,res.status,providerCode);
+ if(!isStatus)return blank("ok",res.status,providerCode);
+ if(!payload||payload.code!==200||!payload.data||typeof payload.data!=="object"||Array.isArray(payload.data))
+   return blank(payload?"business_rejected":"malformed",res.status,providerCode);
+ const p=payload.data as Record<string,unknown>;
+ if(p.externalOrderId!==externalOrderId)return blank("malformed",res.status,providerCode);
+ const providerStatus=typeof p.status==="string"&&
+   ["PENDING","PAID","CONFIRMED","COMPLETED","EXPIRED","FAILED","CANCELLED"].includes(p.status)?p.status:null;
+ return {kind:"ok",httpStatus:res.status,providerCode,orderStatus:providerStatus,
+   checkoutAvailable:typeof p.checkoutUrl==="string"&&p.checkoutUrl.startsWith("https://")};
+}
