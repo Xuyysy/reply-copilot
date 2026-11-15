@@ -102,7 +102,6 @@ export default function AccountDashboard() {
     const show=(kind:string,credits?:number)=>{if(!alive)return;const next=notices.current!.publish({orderId:pendingPaymentId,kind,credits},paymentOwner);if(next)setPaymentNotice(next);};
     show("confirming");
     const onPaidVerified=async(result:any)=>{
-        const verifiedOrder=result.order;
 
         if(!alive)return;
         const synced=await load(true,true);

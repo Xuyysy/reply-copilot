@@ -11,6 +11,12 @@ const budgetKey=(kind,id)=>'reply-copilot:auto-merchant-check:'+kind+':'+id;
 const safeRead=(store,key)=>{try{return JSON.parse(store?.getItem(key)||'null')}catch{return null}};
 const safeWrite=(store,key,value)=>{try{store?.setItem(key,JSON.stringify(value))}catch{}};
 const validKind=kind=>kind==='credit'||kind==='subscription';
+export function hasPaymentCashierOpened(kind,orderId,env=globalThis){
+ if(!validKind(kind)||!VALID_ID.test(orderId))return false;
+ const saved=safeRead(env.localStorage,markerKey(kind,orderId));
+ const age=(env.now||Date.now)()-saved?.at;
+ return Number.isFinite(saved?.at)&&age>=0&&age<MAX_MARKER_AGE_MS;
+}
 export function markPaymentCashierOpened(kind,orderId,env=globalThis){
  if(!validKind(kind)||!VALID_ID.test(orderId))return;
  safeWrite(env.localStorage,markerKey(kind,orderId),{at:Date.now()});

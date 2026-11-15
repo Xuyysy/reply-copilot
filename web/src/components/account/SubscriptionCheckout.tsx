@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {api,ApiError} from '../../lib/api';
 import {phrase,readableError,useLanguage} from '../../lib/language';
-import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened} from '../../lib/verified-payment-auto.mjs';
+import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened,hasPaymentCashierOpened} from '../../lib/verified-payment-auto.mjs';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
@@ -19,6 +19,7 @@ export default function SubscriptionCheckout(){
  const target=params.get('plan')??'';
  const upgrade=params.get('upgrade')==='1';
  const [id,setId]=useState(params.get('order')??'');
+ const [cashierOpened,setCashierOpened]=useState(()=>hasPaymentCashierOpened('subscription',params.get('order')??''));
  const [catalog,setCatalog]=useState<Catalog>();
  const [currentSubscription,setCurrentSubscription]=useState<{status:string;plan:string|null;expiresAt:string|null}|null>(null);
  const [order,setOrder]=useState<SubscriptionOrder>();
@@ -48,8 +49,9 @@ export default function SubscriptionCheckout(){
  // opened original cashier permits the existing authenticated merchant POST.
  // React cleanup stops stale-account/order notifications and all timers.
  useEffect(()=>{
-  if(!order||order.id!==id||!['pending','unknown'].includes(order.status)||order.checkout.paymentConfirmed)return;
-  let active=true,reading=false,timer:ReturnType<typeof setTimeout>|null=null;
+  if(!order||order.id!==id||!['pending','unknown'].includes(order.status)||order.checkout.paymentConfirmed||
+     (!cashierOpened&&!hasPaymentCashierOpened('subscription',id)))return;
+  let active=true,reading=false,readCount=0,timer:ReturnType<typeof setTimeout>|null=null;
   const clear=()=>{if(timer!==null){clearTimeout(timer);timer=null;}};
   const reconcile=createVerifiedPaymentAutoCheck({kind:'subscription',orderId:id,request:api,
    onVerified:(confirmed:SubscriptionOrder)=>{
@@ -61,11 +63,13 @@ export default function SubscriptionCheckout(){
    }});
   const schedule=()=>{
    clear();
-   if(active&&document.visibilityState!=='hidden')timer=setTimeout(()=>{void tick();},2500);
+   if(active&&readCount<48&&document.visibilityState!=='hidden'&&document.hasFocus?.()!==false)
+    timer=setTimeout(()=>{void tick();},2500);
   };
   async function tick(){
-   if(!active||reading||document.visibilityState==='hidden'||operation.current)return;
-   reading=true;
+   if(!active||reading||document.visibilityState==='hidden'||document.hasFocus?.()===false||readCount>=48)return;
+   if(operation.current){schedule();return;}
+   reading=true;readCount++;
    try{
     const latest=(await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+encodeURIComponent(id))).order;
     if(!active||latest.id!==id)return;
@@ -79,7 +83,7 @@ export default function SubscriptionCheckout(){
     if(active&&!([401,403,404].includes((error as ApiError)?.status)))schedule();
    }finally{reading=false;}
   }
-  const resume=()=>{if(active&&document.visibilityState!=='hidden'){clear();void tick();}};
+  const resume=()=>{if(active&&document.visibilityState!=='hidden'&&document.hasFocus?.()!==false){clear();void tick();}};
   const visible=()=>{if(document.visibilityState==='hidden')clear();else resume();};
   window.addEventListener('pageshow',resume);
   window.addEventListener('focus',resume);
@@ -90,7 +94,7 @@ export default function SubscriptionCheckout(){
    window.removeEventListener('focus',resume);
    document.removeEventListener('visibilitychange',visible);
   };
- },[id,order?.status,order?.checkout.paymentConfirmed,order?.merchantProvider]);
+ },[id,cashierOpened,order?.status,order?.checkout.paymentConfirmed,order?.merchantProvider]);
 
  async function act(action:'quote'|'create'|'refresh'|'relaunch'|'cancel'){
   if(operation.current)return;
@@ -175,7 +179,7 @@ export default function SubscriptionCheckout(){
    <p>{subscriptionStatus(order,language)}</p>
    {order.retryAvailable?<a className="button secondary" href={'/subscription-checkout/?plan='+encodeURIComponent(order.planCode)+(order.kind==='upgrade'?'&upgrade=1':'')}>{t('重新购买订阅','Purchase subscription again')}</a>:null}
    {paymentNote?<p role="status">{paymentNote}</p>:null}
-   {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer" onClick={()=>markPaymentCashierOpened('subscription',order.id)}>{t('打开原订单收银台','Open original checkout')}</a>:null}
+   {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer" onClick={()=>{markPaymentCashierOpened('subscription',order.id);setCashierOpened(true);}}>{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
    {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?

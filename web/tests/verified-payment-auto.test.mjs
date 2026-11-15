@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened} from '../src/lib/verified-payment-auto.mjs';
+import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened,hasPaymentCashierOpened} from '../src/lib/verified-payment-auto.mjs';
 const cid='11111111-1111-4111-8111-111111111111';
 function env(storage=new Map()){
  let t=Date.now();const doc={visibilityState:'visible',hasFocus:()=>true};
@@ -80,4 +80,12 @@ test('cashier marker is an eligibility flag, not a paid flag and is isolated per
  let calls=0;
  const c=createVerifiedPaymentAutoCheck({kind:'credit',orderId:cid,environment:e,request:async()=>{calls++;}});
  await c.onPending(credit);assert.equal(calls,0,'subscription marker must not arm credit queries');
+});
+
+test('foreground subscription watcher eligibility is gated on actual cashier link, not an unpaid creation',()=>{
+ const e=env();assert.equal(hasPaymentCashierOpened('subscription',cid,e),false);
+ markPaymentCashierOpened('subscription',cid,e);
+ assert.equal(hasPaymentCashierOpened('subscription',cid,e),true);
+ e.advance(16*60*1000);
+ assert.equal(hasPaymentCashierOpened('subscription',cid,e),false,'merchant query access expires');
 });
