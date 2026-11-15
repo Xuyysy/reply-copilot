@@ -195,7 +195,15 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
           {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("此笔测试单没有可靠的付款链接，请勿向此单转账。可单独创建新测试单，但必须核对新单的网络、准确金额和收款地址。","No verified checkout link exists for this attempt. Do not pay this invoice. You may create a separate test invoice; verify its network, exact amount and address before paying.")}</p>}
           {o.providerStatus?.startsWith("CREATE_")&&<p role="status" className="rounded border px-3 py-2 text-sm">
              {t("平台创建诊断码：","Provider create diagnostic code: ")}<code>{o.providerStatus}</code>
-             <span className="block text-xs text-muted-foreground">{t("只含阶段、HTTP 状态与平台业务码，不包含任何密钥或钱包信息。","Only stage, HTTP status and provider business code; no secrets or wallet details.")}</span>
+             <span className="block text-xs text-muted-foreground">{t("仅保留阶段、HTTP 状态、平台业务码及白名单原因类别，不展示商户原始响应或密钥。","Only stage, HTTP status, business code and a fixed reason category; no raw merchant response or secrets.")}</span>
+             {o.providerStatus.includes("_REASON_WEBHOOK_CONFIG")&&<p>{t("检查 BoltUtil 商户后台：Webhook URL、签名密钥及启用状态。","Check the enabled Webhook URL and signing secret in BoltUtil merchant settings.")}</p>}
+             {o.providerStatus.includes("_REASON_WALLET_CONFIG")&&<p>{t("检查该网络 USDT 收款钱包是否已配置并启用。","Check the enabled USDT receiving wallet for this network.")}</p>}
+             {o.providerStatus.includes("_REASON_NETWORK_ASSET")&&<p>{t("检查 Polygon / TRC20 / BEP20 网络与 USDT 资产是否对该商户开放。","Check network and USDT asset availability for this merchant.")}</p>}
+             {o.providerStatus.includes("_REASON_AMOUNT_MINIMUM")&&<p>{t("BoltUtil 可能设置了更高的最低收款额；不要自动提高 1 USDT 实测金额。","BoltUtil may require a higher minimum; do not automatically increase the 1 USDT test amount.")}</p>}
+             {o.providerStatus.includes("_REASON_DUPLICATE_ORDER")&&<p>{t("平台提示订单号重复，先核查对应原单，勿复用 ID。","Provider reports a duplicate order ID; reconcile the original without reusing its ID.")}</p>}
+             {o.providerStatus.includes("_REASON_SIGNATURE")&&<p>{t("核对 Staging 的 HMAC 签名密钥与 BoltUtil 商户 Webhook Secret 是否匹配。","Check whether the Staging HMAC secret matches the merchant Webhook secret.")}</p>}
+             {o.providerStatus.includes("_REASON_RATE_QUOTA")&&<p>{t("平台商户配额或限流，取消本地管理员限制无法解除。","Merchant quota or upstream rate limit; local admin limits do not override it.")}</p>}
+             {o.providerStatus.startsWith("CREATE_HTTP_HTTP_400")&&!o.providerStatus.includes("_REASON_")&&<p>{t("平台返回 400，但未给出可安全分类的原因。请优先核查商户钱包、网络/资产、Webhook 与最低金额；不要继续盲目重试。","Provider returned HTTP 400 without a safely classifiable reason. Verify wallet, network, Webhook and minimum amount; avoid blind retries.")}</p>}
           </p>}
           {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
           {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}

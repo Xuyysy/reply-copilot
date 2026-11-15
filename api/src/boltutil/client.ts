@@ -22,7 +22,24 @@ export async function verifyBoltWebhook(request:Request,secret:string):Promise<u
   if(mismatch!==0)throw new ApiFailure(401,"BOLTUTIL_SIGNATURE_INVALID","支付签名无效。");
   try{return JSON.parse(raw);}catch{throw new ApiFailure(400,"BOLTUTIL_BODY_INVALID","通知格式无效。");}
 }
-export type BoltCreateFailure={stage:"network"|"http"|"response"|"business";httpStatus:number|null;providerCode:string|null};
+// Never persist the merchant's free-form error message. Classify a bounded string
+// into a fixed vocabulary for Staging owner-only diagnostics; default to no reason.
+export type BoltCreateReason="WEBHOOK_CONFIG"|"WALLET_CONFIG"|"NETWORK_ASSET"|"AMOUNT_MINIMUM"|"DUPLICATE_ORDER"|"SIGNATURE"|"RATE_QUOTA";
+export type BoltCreateFailure={stage:"network"|"http"|"response"|"business";httpStatus:number|null;providerCode:string|null;reason?:BoltCreateReason};
+function safeBoltCreateReason(payload:Record<string,unknown>|null):BoltCreateReason|undefined{
+ if(!payload)return;
+ const value=[payload.message,payload.msg,payload.error].find(x=>typeof x==="string"&&x.length<=512);
+ if(typeof value!=="string")return;
+ const s=value.toLowerCase();
+ const invalid=/(not configured|not set|missing|disabled|not enabled|unavailable|unsupported|not supported|invalid|not found|未配置|未启用|无效|不可用|缺少|不存在)/;
+ if(/(webhook|callback|notify|回调)/.test(s)&&invalid.test(s))return "WEBHOOK_CONFIG";
+ if(/(wallet|receiving address|deposit address|钱包|收款地址)/.test(s)&&invalid.test(s))return "WALLET_CONFIG";
+ if(/(network|chain|asset|token|currency|polygon|trc20|bep20|网络|区块链|代币|币种)/.test(s)&&invalid.test(s))return "NETWORK_ASSET";
+ if(/(amount|minimum|min order|金额|最低|最小)/.test(s)&&/(minimum|below|too low|at least|too small|less than|最低|最小|不足|过低|不能小于)/.test(s))return "AMOUNT_MINIMUM";
+ if(/(duplicate|already exists|already used|重复|已存在)/.test(s)&&/(order|external|订单|id)/.test(s))return "DUPLICATE_ORDER";
+ if(/(signature|timestamp|hmac|签名|时间戳)/.test(s))return "SIGNATURE";
+ if(/(rate limit|quota|too many|frequency|配额|限额|次数超限|请求频繁)/.test(s))return "RATE_QUOTA";
+}
 function safeBoltBusinessCode(value:unknown):string|null{
  if(typeof value==="number"&&Number.isSafeInteger(value))return String(value);
  if(typeof value==="string"&&/^[A-Za-z0-9_-]{1,24}$/.test(value))return value;
@@ -55,8 +72,9 @@ export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/
   }
   const payload=data&&typeof data==="object"&&!Array.isArray(data)?data as Record<string,unknown>:null;
   const providerCode=safeBoltBusinessCode(payload?.code);
+  const reason=options.adminProbe===true?safeBoltCreateReason(payload):undefined;
   if(!upstream.ok||status>=300){
-    options.onCreateFailure?.({stage:"http",httpStatus:status,providerCode});
+    options.onCreateFailure?.({stage:"http",httpStatus:status,providerCode,reason});
     throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","USDT 平台请求未确认，请保留原单核对。");
   }
   if(!payload){
@@ -64,7 +82,7 @@ export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/
     throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应格式异常。");
   }
   if(payload.code!==200||!payload.data||typeof payload.data!=="object"||Array.isArray(payload.data)){
-    options.onCreateFailure?.({stage:"business",httpStatus:status,providerCode});
+    options.onCreateFailure?.({stage:"business",httpStatus:status,providerCode,reason});
     throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","收款平台未确认此操作，请核对原单。");
   }
   return payload.data as Record<string,unknown>;

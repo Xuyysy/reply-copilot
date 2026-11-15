@@ -199,3 +199,28 @@ test('Admin tests are explicitly unlimited but still enforce positive identity v
  assert.match(method,/micros>1100000n/);
  assert.match(method,/operation_id=\?/);
 });
+
+test('Staging 400 create reasons are mapped to fixed safe hints, never raw merchant details',async()=>{
+ for(const [message,expected] of [
+  ['Polygon receiving wallet not configured','WALLET_CONFIG'],
+  ['Webhook is not enabled','WEBHOOK_CONFIG'],
+  ['Network POLYGON is unavailable','NETWORK_ASSET'],
+  ['Minimum amount is 2 USDT','AMOUNT_MINIMUM'],
+  ['externalOrderId already exists','DUPLICATE_ORDER'],
+  ['Invalid HMAC signature','SIGNATURE'],
+  ['Daily quota reached','RATE_QUOTA'],
+  ['unexpected error with API_KEY=secret_do_not_echo',null]
+ ]){
+  const f=setup();try{
+   const r=await withProvider(()=>Response.json({code:400,message},{status:400}),
+    ()=>f.call(route,{body:req('POLYGON')}));
+   assert.equal(r.status,202);
+   const label=r.body.order.providerStatus;
+   assert.equal(label,'CREATE_HTTP_HTTP_400_CODE_400'+(expected?'_REASON_'+expected:''));
+   assert.equal(r.body.order.status,'unknown');
+   assert.equal(r.body.order.checkoutUrl,null);
+   assert.doesNotMatch(JSON.stringify(r.body),/secret_do_not_echo|Polygon receiving wallet not configured|Webhook is not enabled|Network POLYGON is unavailable/);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+  }finally{f.sql.close();}
+ }
+});
