@@ -96,11 +96,11 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
      .bind(Number(micros),pay.rawAmount,pay.address,provider.checkoutUrl,time.expireTimestamp,nowMs(),id).run();
  }catch{
    // Provider errors can be rejected or uncertain; do not assume no invoice exists.
-   // Record only the whitelisted stage, HTTP status and short provider code.
+   // Record only the whitelisted stage, HTTP status, business code and fixed reason category.
    // NEVER record the API key, secret or raw merchant response in D1 or client.
    const issue=failure as BoltCreateFailure|null;
    const safe=issue
-     ? "CREATE_"+issue.stage.toUpperCase()+"_HTTP_"+(issue.httpStatus??"NA")+"_CODE_"+(issue.providerCode??"NA")
+     ? "CREATE_"+issue.stage.toUpperCase()+"_HTTP_"+(issue.httpStatus??"NA")+"_CODE_"+(issue.providerCode??"NA")+(issue.reason?"_REASON_"+issue.reason:"")
      : "CREATE_LOCAL_RESPONSE_VALIDATION_FAILED";
    await env.DB.prepare("UPDATE boltutil_admin_test_orders SET status='unknown',provider_status=?,updated_at=? WHERE id=? AND status='creating'")
       .bind(safe,nowMs(),id).run();
