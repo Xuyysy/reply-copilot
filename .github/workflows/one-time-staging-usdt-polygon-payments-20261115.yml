@@ -1,0 +1,276 @@
+name: One-time guarded Staging Polygon-only USDT purchaser activation
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: read
+concurrency:
+  group: reply-copilot-staging-boltutil-admin-probe
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'Xuyysy' &&
+      github.event.comment.user.login == 'Xuyysy' &&
+      github.event.issue.number == 146 &&
+      github.event.issue.pull_request != null &&
+      github.event.comment.body == '/activate-staging-polygon-usdt 333a6f2f4cdd7e3d04895685b587a527ad864205'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_SHA: '333a6f2f4cdd7e3d04895685b587a527ad864205'
+      CI_RUN_ID: '43719158207'
+    steps:
+      - name: Verify exact successful full Push CI, PR and source scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh api repos/$GITHUB_REPOSITORY/pulls/146 --jq '.head.sha')" = "$SOURCE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '.head_sha==$sha and .head_repository.full_name==$repo and .event=="push" and .status=="completed" and .conclusion=="success" and .path==".github/workflows/ci.yml"' "$RUNNER_TEMP/ci.json"
+          gh api "repos/$GITHUB_REPOSITORY/compare/4c454e7f785b7746c50d0c41d80827643a6d59a4...$SOURCE_SHA" > "$RUNNER_TEMP/compare.json"
+          jq -e '.status=="ahead" and .behind_by==0 and ([.files[].filename]|sort)==["api/sql-proposals/0028_boltutil_usdt.sql","api/src/boltutil/routes.ts","api/tests/boltutil-five-network-migration.test.mjs","api/tests/boltutil-integration.test.mjs","docs/boltutil-staging-five-chain-launch-runbook.md","web/src/pages/usdt-checkout.astro","web/tests/boltutil-ui-visibility.test.mjs"]' "$RUNNER_TEMP/compare.json"
+      - name: Checkout exact Staging candidate without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: '333a6f2f4cdd7e3d04895685b587a527ad864205'
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            api/package-lock.json
+            web/package-lock.json
+      - name: Build Worker and Staging Pages, strictly no deployment
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix web ci
+          cd api
+          ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir ../release-worker
+          cd ..
+          npm --prefix web run build:staging
+      - name: Confirm private admin-only probe and staging-only Pages in compiled artifacts
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          code=Path('release-worker/index.js').read_text()
+          for marker in ['adminBoltTestCreate','adminBoltTestDiagnose','safeBoltCreateReason','WEBHOOK_CONFIG','WALLET_CONFIG','AMOUNT_MINIMUM','CREATE_LOCAL_RESPONSE_VALIDATION_FAILED','BOLTUTIL_ADMIN_TEST_ENABLED','boltutil_admin_test_orders']:
+              assert marker in code, 'Missing Worker marker '+marker
+          assert 'credit_ledger' in code and 'boltutil_admin_test_orders' in code
+          js='\n'.join(p.read_text(errors='replace') for p in Path('web/dist').rglob('*.js'))
+          assert 'admin-boltutil-checkout-ready' in js and 'admin-boltutil-checkout-blocked' in js and 'BoltUtil 拒绝了创建订单' in js and 'I_ACCEPT_REAL_1_USDT_MAINNET' in js
+          assert 'https://api-staging.x-reply-helper.top' in js
+          assert Path('web/dist/admin/index.html').is_file()
+          html=Path('web/dist/usdt-checkout/index.html').read_text()
+          assert 'value="ERC20"' in html and 'value="SOLANA"' in html and 'id="bolt-qr"' in html
+          assert 'id="bolt-recent-orders"' in html
+          assert 'xrh:bolt:pending:v1:' in js and 'sessionStorage' in js
+          assert 'USDT 站内付款' in html and 'Solana Mainnet' in html and 'Ethereum Mainnet' in html
+          assert 'Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB' in code and '0xdAC17F958D2ee523a2206206994597C13D831ec7' in code
+          print('PASS Staging-only admin test Worker + Pages build')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-polygon-usdt-333a6f2f4cdd7e3d04895685b587a527ad864205
+          path: |
+            release-worker/index.js
+            web/dist
+          retention-days: 3
+          if-no-files-found: error
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: https://staging.x-reply-helper.top/usdt-checkout/
+    env:
+      SOURCE_SHA: '333a6f2f4cdd7e3d04895685b587a527ad864205'
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-polygon-usdt-333a6f2f4cdd7e3d04895685b587a527ad864205
+          path: .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned Wrangler CLI separately from legacy main branch
+        run: npm install --prefix "$RUNNER_TEMP/staging-wrangler" --no-save --no-audit --no-fund wrangler@4.151.0
+      - name: Verify current Staging and Production pins and prepare strict inheritance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python3 - <<'PY'
+          import json,os,pathlib,urllib.request
+          a=os.environ['CLOUDFLARE_ACCOUNT_ID'];token=os.environ['CLOUDFLARE_API_TOKEN']
+          root='https://api.cloudflare.com/client/v4/accounts/'+a
+          def get(p):
+              with urllib.request.urlopen(urllib.request.Request(root+p,headers={'Authorization':'Bearer '+token}),timeout=30) as f:r=json.load(f)
+              assert r.get('success'),p
+              return r['result']
+          worker=get('/workers/scripts/reply-copilot-api-staging/deployments')['deployments'][0]
+          assert worker['id']=='6978b0ac-3adf-4816-a239-6c0304ed3a5d'
+          assert len(worker['versions'])==1 and worker['versions'][0]['version_id']=='67de5082-5e84-40b9-8615-d6bc98448224' and worker['versions'][0]['percentage']==100
+          latest=get('/workers/scripts/reply-copilot-api-staging/versions')['items'][0]
+          assert latest['id']=='67de5082-5e84-40b9-8615-d6bc98448224'
+          s=get('/workers/scripts/reply-copilot-api-staging/settings')
+          b=s['bindings'];assert len(b)==51 and s['compatibility_date']=='2026-10-14'
+          names=[v['name'] for v in b]
+          assert len(names)==len(set(names)) and 'DB' in names and 'BOLTUTIL_API_KEY' in names and 'BOLTUTIL_WEBHOOK_SECRET' in names
+          assert sorted(n for n in names if n.startswith('BOLTUTIL_ADMIN_TEST_'))==['BOLTUTIL_ADMIN_TEST_ENABLED','BOLTUTIL_ADMIN_TEST_SCHEMA_READY']
+          assert get('/workers/scripts/reply-copilot-api-production/deployments')['deployments'][0]['id']=='86cf104d-33a3-46b8-b165-7e1aaef58dce'
+          assert get('/pages/projects/x-reply-helper-production')['canonical_deployment']['id']=='20f1041e-8bb8-4aa6-ae44-ce58af2c5d24'
+          assert get('/pages/projects/x-reply-helper-staging')['canonical_deployment']['id']=='91bf32dd-26e8-4e40-9b80-939a54c6014e'
+          dbid='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert next(x for x in b if x['name']=='DB')['id']==dbid
+          plain={x['name']:x.get('text') for x in b if x.get('type')=='plain_text'}
+          assert plain.get('ENVIRONMENT')=='staging' and plain.get('WEB_ORIGIN')=='https://staging.x-reply-helper.top' and plain.get('API_ORIGIN')=='https://api-staging.x-reply-helper.top'
+          assert plain.get('BOLTUTIL_ADMIN_TEST_ENABLED')=='1' and plain.get('BOLTUTIL_ADMIN_TEST_SCHEMA_READY')=='1'
+          assert plain.get('BOLTUTIL_ENABLED')!='1' and plain.get('BOLTUTIL_STAGING_CREATE_ENABLED')!='1'
+          assert plain.get('BOLTUTIL_SOLANA_ENABLED')!='1' and plain.get('BOLTUTIL_ERC20_ENABLED')!='1'
+          # Never query remote D1: verify only the existing Staging DB binding identity.
+          meta={'main_module':'index.js','compatibility_date':'2026-10-14','compatibility_flags':[],
+                'usage_model':'standard',
+                'bindings':[{'type':'inherit','name':n} for n in names]+[
+                    {'type':'plain_text','name':'BOLTUTIL_SCHEMA_READY','text':'1'},
+                    {'type':'plain_text','name':'BOLTUTIL_ENABLED','text':'1'},
+                    {'type':'plain_text','name':'BOLTUTIL_STAGING_CREATE_ENABLED','text':'1'},
+                    {'type':'plain_text','name':'BOLTUTIL_CNY_PER_USDT_MICROS','text':'7000000'},
+                    {'type':'plain_text','name':'BOLTUTIL_POLYGON_ENABLED','text':'1'}],
+                'annotations':{'workers/commit_sha':os.environ['SOURCE_SHA'],
+                  'workers/message':'Staging Polygon-only USDT payments (7 CNY/USDT test rate), Polygon-only USDT on Staging'}}
+          out=pathlib.Path(os.environ['RUNNER_TEMP'])
+          (out/'staging-probe-metadata.json').write_text(json.dumps(meta))
+          (out/'staging-probe-old-names.json').write_text(json.dumps(sorted(names)))
+          print('PASS pinned Stage/Prod deployments, 51 inherited bindings, expected DB binding (no DB access)')
+          PY
+      - name: Upload API-managed Worker Version with strict inherited bindings (no traffic)
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
+          curl --fail-with-body -sS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -F "metadata=@$RUNNER_TEMP/staging-probe-metadata.json;type=application/json"             -F "index.js=@release-worker/index.js;type=application/javascript+module"             "$root/versions?bindings_inherit=strict" > "$RUNNER_TEMP/staging-probe-version.json"
+          python3 - <<'PY'
+          import json,os,pathlib,re
+          r=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-version.json').read_text())
+          assert r.get('success') is True,r.get('errors')
+          v=r['result']['id'];assert re.fullmatch('[0-9a-f-]{36}',v)
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('NEW_STAGING_WORKER_VERSION='+v+'\n')
+          print('PASS new version staged without traffic:',v)
+          PY
+      - name: Verify 51 inherited bindings, five Polygon Staging variables and source SHA
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib,urllib.request
+          token=os.environ['CLOUDFLARE_API_TOKEN'];base='https://api.cloudflare.com/client/v4/accounts/'+os.environ['CLOUDFLARE_ACCOUNT_ID']+'/workers/scripts/reply-copilot-api-staging'
+          def get(p):
+              with urllib.request.urlopen(urllib.request.Request(base+p,headers={'Authorization':'Bearer '+token}),timeout=30) as f:r=json.load(f)
+              assert r['success']
+              return r['result']
+          v=get('/versions/'+os.environ['NEW_STAGING_WORKER_VERSION'])
+          names=sorted(b['name'] for b in v['resources']['bindings'])
+          previous=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-old-names.json').read_text())
+          added={'BOLTUTIL_SCHEMA_READY':'1','BOLTUTIL_ENABLED':'1','BOLTUTIL_STAGING_CREATE_ENABLED':'1','BOLTUTIL_CNY_PER_USDT_MICROS':'7000000','BOLTUTIL_POLYGON_ENABLED':'1'}
+          assert names==sorted(previous+list(added)) and len(names)==56 and v['annotations']['workers/commit_sha']==os.environ['SOURCE_SHA']
+          by={b['name']:b for b in v['resources']['bindings']}
+          assert all(by[k]['type']=='plain_text' and by[k]['text']==val for k,val in added.items())
+          assert get('/deployments')['deployments'][0]['id']=='6978b0ac-3adf-4816-a239-6c0304ed3a5d'
+          print('PASS 51 original Staging bindings + five Polygon-only settings, exact source verified')
+          PY
+      - name: Switch Staging Worker to verified version
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,pathlib
+          body={'strategy':'percentage','versions':[{'version_id':os.environ['NEW_STAGING_WORKER_VERSION'],'percentage':100}],
+                'annotations':{'workers/message':'Staging Polygon-only payment enabled; four other networks OFF'}}
+          pathlib.Path(os.environ['RUNNER_TEMP'],'deploy-probe.json').write_text(json.dumps(body))
+          PY
+          curl --fail-with-body -sS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -H 'Content-Type: application/json' --data-binary "@$RUNNER_TEMP/deploy-probe.json"             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" > "$RUNNER_TEMP/staging-probe-deployed.json"
+          python3 - <<'PY'
+          import json,os,pathlib
+          r=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-deployed.json').read_text())
+          assert r.get('success') and r.get('result',{}).get('id'),r.get('errors')
+          print('PASS Staging Worker deployment accepted')
+          PY
+      - name: Publish only Staging Pages with existing protected project
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/staging-wrangler/node_modules/.bin/wrangler" pages deploy web/dist             --project-name x-reply-helper-staging             --branch codex/v0.4-credits             --commit-hash "$SOURCE_SHA"             --commit-message "Staging Polygon-only USDT payments (7 CNY/USDT test rate) $SOURCE_SHA"
+      - name: Verify Prod isolation, new Staging Worker, Pages and public payment still disabled
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json,os,urllib.request
+          token=os.environ['CLOUDFLARE_API_TOKEN'];a=os.environ['CLOUDFLARE_ACCOUNT_ID']
+          root='https://api.cloudflare.com/client/v4/accounts/'+a
+          def get(p):
+              with urllib.request.urlopen(urllib.request.Request(root+p,headers={'Authorization':'Bearer '+token}),timeout=30) as f:r=json.load(f)
+              assert r.get('success'),p
+              return r['result']
+          d=get('/workers/scripts/reply-copilot-api-staging/deployments')['deployments'][0]
+          assert d['versions'][0]['version_id']==os.environ['NEW_STAGING_WORKER_VERSION'] and d['versions'][0]['percentage']==100
+          s=get('/workers/scripts/reply-copilot-api-staging/settings')
+          assert len(s['bindings'])==56 and next(x for x in s['bindings'] if x['name']=='BOLTUTIL_ADMIN_TEST_ENABLED')['text']=='1'
+          assert get('/workers/scripts/reply-copilot-api-production/deployments')['deployments'][0]['id']=='86cf104d-33a3-46b8-b165-7e1aaef58dce'
+          assert get('/pages/projects/x-reply-helper-production')['canonical_deployment']['id']=='20f1041e-8bb8-4aa6-ae44-ce58af2c5d24'
+          pages=get('/pages/projects/x-reply-helper-staging')['canonical_deployment']
+          assert pages['deployment_trigger']['metadata']['commit_hash']==os.environ['SOURCE_SHA']
+          config={v['name']:v for v in s['bindings']}
+          assert config['BOLTUTIL_ADMIN_TEST_ENABLED']['text']=='1' and config['BOLTUTIL_ADMIN_TEST_SCHEMA_READY']['text']=='1'
+          assert config.get('BOLTUTIL_ENABLED',{}).get('text')=='1'
+          assert config.get('BOLTUTIL_STAGING_CREATE_ENABLED',{}).get('text')=='1'
+          assert config.get('BOLTUTIL_SCHEMA_READY',{}).get('text')=='1'
+          assert config.get('BOLTUTIL_CNY_PER_USDT_MICROS',{}).get('text')=='7000000'
+          assert config.get('BOLTUTIL_POLYGON_ENABLED',{}).get('text')=='1'
+          assert config.get('BOLTUTIL_TRC20_ENABLED',{}).get('text')!='1' and config.get('BOLTUTIL_BEP20_ENABLED',{}).get('text')!='1'
+          assert config.get('BOLTUTIL_ERC20_ENABLED',{}).get('text')!='1' and config.get('BOLTUTIL_SOLANA_ENABLED',{}).get('text')!='1'
+          # Public Staging API gets WAF 403 from GitHub Runner, independently verify after release via Cloudflare Browser Rendering.
+          print('PASS Staging admin probe release, Polygon-only USDT on Staging, other networks OFF; Production unchanged')
+          PY
+      - name: Restore previous Worker and Pages if release incomplete
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request
+          token=os.environ.get('CLOUDFLARE_API_TOKEN');a=os.environ.get('CLOUDFLARE_ACCOUNT_ID')
+          if not token or not a:raise SystemExit(0)
+          root='https://api.cloudflare.com/client/v4/accounts/'+a;h={'Authorization':'Bearer '+token,'Content-Type':'application/json'}
+          def call(method,path,body=None):
+              q=urllib.request.Request(root+path,method=method,headers=h,data=json.dumps(body).encode() if body else None)
+              with urllib.request.urlopen(q,timeout=30) as f:r=json.load(f)
+              assert r['success'],r.get('errors')
+              return r['result']
+          try:
+              d=call('GET','/workers/scripts/reply-copilot-api-staging/deployments')['deployments'][0]
+              if d['versions'][0]['version_id']==os.environ.get('NEW_STAGING_WORKER_VERSION','--'):
+                  call('POST','/workers/scripts/reply-copilot-api-staging/deployments',
+                    {'strategy':'percentage','versions':[{'version_id':'67de5082-5e84-40b9-8615-d6bc98448224','percentage':100}],
+                     'annotations':{'workers/message':'Rollback incomplete admin-only test release'}})
+                  print('Restored previous Staging Worker version')
+              pages=call('GET','/pages/projects/x-reply-helper-staging')['canonical_deployment']
+              if pages['id']!='91bf32dd-26e8-4e40-9b80-939a54c6014e':
+                  call('POST','/pages/projects/x-reply-helper-staging/deployments/91bf32dd-26e8-4e40-9b80-939a54c6014e/rollback')
+                  print('Restored previous Staging Pages')
+          except Exception as e:raise SystemExit('ROLLBACK REQUIRES OPERATOR ATTENTION: '+str(e))
+          PY
