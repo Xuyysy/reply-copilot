@@ -16,7 +16,7 @@ function flow({associationOnly=false,homeComposer=false}={}){
  const assistant=()=>({host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
- const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
  // Browser boundary only: state machine and content-script actions are real.
@@ -237,4 +237,40 @@ test('a Reply button inside an X media-viewer dialog still activates the text-on
  assert.equal(f.generations(),1,'a media viewer is not a reply composer submit button');
  f.resolve(0);await sleep(110);
  assert.equal(f.commands(),1);
+});
+
+test("captured quote with new unverified modal exposes manual copy-only assistant after hydration grace",async()=>{
+ const f=flow(),p=f.post("101");
+ p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+ f.click(p);
+ p.article.isConnected=false;
+ f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
+   contextDetail:"awaiting_captioned_quote_parent"}]);
+ f.timeout(800);
+ await sleep(0);
+ assert.equal(f.hosts.length,1,"visible safe fallback mounts without full parent match");
+ assert.ok(f.statuses.some(s=>s.includes("复制")));
+ assert.equal(f.generations(),0,"fallback never auto-generates or charges");
+ f.action("generate");
+ await sleep(0);
+ assert.equal(f.generations(),1,"manual generate uses the captured source");
+ f.resolve(0);
+ await sleep(115);
+ assert.equal(f.commands(),0,"copy-only must never call native editor insertion");
+});
+test("unverified modal never triggers quote copy-only fallback without trusted quote and unique focused editor",async()=>{
+ for(const mode of ["ordinary","wrong_id","unfocused","preexisting","draft"]){
+   const f=flow(),p=f.post("101");
+   if(mode!=="ordinary")p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
+   if(mode==="preexisting")f.open(p);
+   f.click(p);
+   if(mode!=="preexisting")f.entries([{node:p.editor,modal:true,contextMatches:mode==="wrong_id"?false:null,
+     contextStatusId:mode==="wrong_id"?"999":null,contextDetail:"awaiting_captioned_quote_parent"}]);
+   if(mode==="unfocused")f.document.activeElement=null;
+   if(mode==="draft")p.editor.innerText="user draft";
+   f.timeout(800);
+   await sleep(0);
+   assert.equal(f.hosts.length,0,mode);
+   assert.equal(f.generations(),0,mode);
+ }
 });
