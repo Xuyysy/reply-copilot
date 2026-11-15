@@ -4,7 +4,7 @@ import {requireAdminSession} from "../admin-auth";
 import {requireWebOrigin,jsonBody,nowMs,uuid} from "../security";
 import {takeRate} from "../auth";
 import {response} from "../http";
-import {boltRequest,verifyBoltWebhook,boltReadOnlyProbe} from "./client";
+import {boltRequest,verifyBoltWebhook,boltReadOnlyProbe,type BoltCreateFailure} from "./client";
 import {NETWORKS,parseBoltNetwork,validReceivingAddress,verifiedPayment,decimalMicros,tokenRawUnits,equalAddress,type BoltNetwork} from "./contract";
 
 type Probe={
@@ -70,12 +70,13 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
  const result=await stmt.run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"BOLTUTIL_TEST_LIMIT","已有未解决测试订单，或 24 小时内已创建 3 笔，请先核对。");
  let provider:Record<string,unknown>;
+ let failure:BoltCreateFailure|null=null;
  try{
    provider=await boltRequest(env,"/api/v1/order/create",{
      externalOrderId:external,amount:"1.00",currency:"USDT",network,
      notifyUrl:env.API_ORIGIN+"/v1/boltutil/admin-test/webhook",
      returnUrl:env.WEB_ORIGIN+"/admin/"
-   },{adminProbe:true});
+   },{adminProbe:true,onCreateFailure:result=>{failure=result;}});
    const pay=provider.payment as Record<string,unknown>|undefined;
    const time=provider.time as Record<string,unknown>|undefined;
    if(provider.merchantExternalId!==external||!pay||
@@ -95,9 +96,15 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
       "WHERE id=? AND status='creating'")
      .bind(Number(micros),pay.rawAmount,pay.address,provider.checkoutUrl,time.expireTimestamp,nowMs(),id).run();
  }catch{
-   // An upstream timeout may have CREATED the invoice; preserve externalOrderId for read reconciliation.
-   await env.DB.prepare("UPDATE boltutil_admin_test_orders SET status='unknown',updated_at=? WHERE id=? AND status='creating'")
-      .bind(nowMs(),id).run();
+   // Provider errors can be rejected or uncertain; do not assume no invoice exists.
+   // Record only the whitelisted stage, HTTP status and short provider code.
+   // NEVER record the API key, secret or raw merchant response in D1 or client.
+   const issue=failure as BoltCreateFailure|null;
+   const safe=issue
+     ? "CREATE_"+issue.stage.toUpperCase()+"_HTTP_"+(issue.httpStatus??"NA")+"_CODE_"+(issue.providerCode??"NA")
+     : "CREATE_LOCAL_RESPONSE_VALIDATION_FAILED";
+   await env.DB.prepare("UPDATE boltutil_admin_test_orders SET status='unknown',provider_status=?,updated_at=? WHERE id=? AND status='creating'")
+      .bind(safe,nowMs(),id).run();
  }
  const row=await get(env,id);
  return response({order:present(row!),resumed:false},row?.status==="pending"?201:202,env,request);

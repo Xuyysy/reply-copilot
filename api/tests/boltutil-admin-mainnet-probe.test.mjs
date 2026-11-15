@@ -114,3 +114,41 @@ test('probe SQL is isolated and bounded with no business-table writes',()=>{
  assert.match(sql,/requested_usdt_micros=1000000/);
  assert.doesNotMatch(sql,/ALTER TABLE|DROP TABLE|credit_ledger|subscription_periods/);
 });
+
+test('BoltUtil create 400 and business-code rejection are stored as sanitized diagnostic without leaking merchant body',async()=>{
+ for(const [status,body,expected] of [
+  [400,{code:40102,message:'SECRET_UNTRUSTED_DO_NOT_ECHO'},'CREATE_HTTP_HTTP_400_CODE_40102'],
+  [200,{code:40909,message:'SECRET_UNTRUSTED_DO_NOT_ECHO'},'CREATE_BUSINESS_HTTP_200_CODE_40909']
+ ]){
+   const f=setup();try{
+     const r=await withProvider(req=>{
+       assert.equal(new URL(req.url).pathname,'/api/v1/order/create');
+       return Response.json(body,{status});
+     },()=>f.call(route,{body:req('TRC20')}));
+     assert.equal(r.status,202,JSON.stringify(r.body));
+     assert.equal(r.body.order.status,'unknown');
+     assert.equal(r.body.order.providerStatus,expected);
+     assert.doesNotMatch(JSON.stringify(r.body),/SECRET_UNTRUSTED_DO_NOT_ECHO/);
+     assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders").get().n,1);
+   }finally{f.sql.close();}
+ }
+});
+test('BoltUtil create connection timeout retains unknown with sanitized failure type',async()=>{
+ const f=setup();try{
+   const r=await withProvider(()=>{throw Error('secret internal transport details');},
+     ()=>f.call(route,{body:req('BEP20')}));
+   assert.equal(r.status,202);
+   assert.equal(r.body.order.providerStatus,'CREATE_NETWORK_HTTP_NA_CODE_NA');
+   assert.doesNotMatch(JSON.stringify(r.body),/secret internal/);
+ }finally{f.sql.close();}
+});
+test('BoltUtil malformed create invoice payload is not exposed and never grants benefits',async()=>{
+ const f=setup();try{
+   const r=await withProvider(()=>Response.json({code:200,data:{merchantExternalId:'wrong-id',checkoutUrl:'http://malicious.test'}}),
+     ()=>f.call(route,{body:req('POLYGON')}));
+   assert.equal(r.status,202);
+   assert.equal(r.body.order.providerStatus,'CREATE_LOCAL_RESPONSE_VALIDATION_FAILED');
+   assert.equal(r.body.order.checkoutUrl,null);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+ }finally{f.sql.close();}
+});

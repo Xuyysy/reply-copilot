@@ -193,6 +193,10 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
           <div className="flex flex-wrap justify-between gap-2"><strong>{o.network} · {o.amount||"—"} USDT</strong><Badge variant="outline">{o.providerStatus||o.status}</Badge></div>
           <p className="break-all text-xs text-muted-foreground">{o.externalOrderId}</p>
           {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("平台尚未确认创建成功，没有支付链接。请先点击只读诊断，不要再次创建或转账。","Merchant has not confirmed the invoice. Diagnose before another attempt; do not transfer funds.")}</p>}
+          {o.providerStatus?.startsWith("CREATE_")&&<p role="status" className="rounded border px-3 py-2 text-sm">
+             {t("平台创建诊断码：","Provider create diagnostic code: ")}<code>{o.providerStatus}</code>
+             <span className="block text-xs text-muted-foreground">{t("只含阶段、HTTP 状态与平台业务码，不包含任何密钥或钱包信息。","Only stage, HTTP status and provider business code; no secrets or wallet details.")}</span>
+          </p>
           {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
           {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}
           {o.expiresAt&&<p>{t("截止：","Expires: ")}{new Date(o.expiresAt).toLocaleString()}</p>}

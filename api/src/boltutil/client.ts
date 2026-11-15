@@ -22,7 +22,13 @@ export async function verifyBoltWebhook(request:Request,secret:string):Promise<u
   if(mismatch!==0)throw new ApiFailure(401,"BOLTUTIL_SIGNATURE_INVALID","支付签名无效。");
   try{return JSON.parse(raw);}catch{throw new ApiFailure(400,"BOLTUTIL_BODY_INVALID","通知格式无效。");}
 }
-export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/v1/order/status",body:Record<string,unknown>,options:{adminProbe?:boolean}={}):Promise<Record<string,unknown>>{
+export type BoltCreateFailure={stage:"network"|"http"|"response"|"business";httpStatus:number|null;providerCode:string|null};
+function safeBoltBusinessCode(value:unknown):string|null{
+ if(typeof value==="number"&&Number.isSafeInteger(value))return String(value);
+ if(typeof value==="string"&&/^[A-Za-z0-9_-]{1,24}$/.test(value))return value;
+ return null;
+}
+export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/v1/order/status",body:Record<string,unknown>,options:{adminProbe?:boolean;onCreateFailure?:(value:BoltCreateFailure)=>void}={}):Promise<Record<string,unknown>>{
   if(env.ENVIRONMENT!=="staging"|| (endpoint==="/api/v1/order/create"&&env.BOLTUTIL_STAGING_CREATE_ENABLED!=="1"&&
      !(options.adminProbe===true&&env.BOLTUTIL_ADMIN_TEST_ENABLED==="1"&&env.BOLTUTIL_ADMIN_TEST_SCHEMA_READY==="1"))||
      !env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
@@ -33,16 +39,34 @@ export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/
     upstream=await fetch(HOST+endpoint,{method:"POST",redirect:"manual",
       headers:{"Content-Type":"application/json","X-Bolt-Key":env.BOLTUTIL_API_KEY,
         "X-Bolt-Timestamp":ts,"X-Bolt-Signature":sig},body:raw,signal:AbortSignal.timeout(8000)});
-  }catch{throw new ApiFailure(503,"BOLTUTIL_NETWORK_UNCERTAIN","USDT 平台请求状态不明，请查询原订单。");}
-  if(!upstream.ok||upstream.status>=300)
-    throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","USDT 平台请求未确认，请保留原单核对。");
-  if(Number(upstream.headers.get("content-length")??0)>16384)throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应异常。");
+  }catch{
+    options.onCreateFailure?.({stage:"network",httpStatus:null,providerCode:null});
+    throw new ApiFailure(503,"BOLTUTIL_NETWORK_UNCERTAIN","USDT 平台请求状态不明，请查询原订单。");
+  }
+  const status=upstream.status;
+  if(Number(upstream.headers.get("content-length")??0)>16384){
+    options.onCreateFailure?.({stage:"response",httpStatus:status,providerCode:null});
+    throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应异常。");
+  }
   let data:unknown;
-  try{data=await upstream.json();}catch{throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应格式异常。");}
-  if(!data||typeof data!=="object"||Array.isArray(data))throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应格式异常。");
-  const payload=data as Record<string,unknown>;
-  if(payload.code!==200||!payload.data||typeof payload.data!=="object"||Array.isArray(payload.data))
+  try{data=await upstream.json();}catch{
+    options.onCreateFailure?.({stage:upstream.ok?"response":"http",httpStatus:status,providerCode:null});
+    throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应格式异常。");
+  }
+  const payload=data&&typeof data==="object"&&!Array.isArray(data)?data as Record<string,unknown>:null;
+  const providerCode=safeBoltBusinessCode(payload?.code);
+  if(!upstream.ok||status>=300){
+    options.onCreateFailure?.({stage:"http",httpStatus:status,providerCode});
+    throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","USDT 平台请求未确认，请保留原单核对。");
+  }
+  if(!payload){
+    options.onCreateFailure?.({stage:"response",httpStatus:status,providerCode:null});
+    throw new ApiFailure(502,"BOLTUTIL_BAD_RESPONSE","收款平台响应格式异常。");
+  }
+  if(payload.code!==200||!payload.data||typeof payload.data!=="object"||Array.isArray(payload.data)){
+    options.onCreateFailure?.({stage:"business",httpStatus:status,providerCode});
     throw new ApiFailure(502,"BOLTUTIL_UPSTREAM_UNCONFIRMED","收款平台未确认此操作，请核对原单。");
+  }
   return payload.data as Record<string,unknown>;
 }
 
