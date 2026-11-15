@@ -124,7 +124,8 @@ jobs:
           assert worker['id']=='7c561b1d-7baa-46d9-8aac-e1d42fce4acf'
           assert len(worker['versions'])==1 and worker['versions'][0]['version_id']=='0fdc0e97-192b-425a-a0b1-6b26f66a41bd' and worker['versions'][0]['percentage']==100
           latest=get('/workers/scripts/reply-copilot-api-staging/versions')['items'][0]
-          assert latest['id']=='0fdc0e97-192b-425a-a0b1-6b26f66a41bd'
+          assert latest['id']=='1fccb56c-8513-4f6c-a66b-06d9e26f6a22'
+          assert latest['annotations']['workers/commit_sha']==os.environ['SOURCE_SHA']
           s=get('/workers/scripts/reply-copilot-api-staging/settings')
           b=s['bindings'];assert len(b)==51 and s['compatibility_date']=='2026-10-14'
           names=[v['name'] for v in b]
@@ -148,20 +149,10 @@ jobs:
           (out/'staging-probe-old-names.json').write_text(json.dumps(sorted(names)))
           print('PASS all Staging and Production pins, 51 inherited bindings and D1 schema')
           PY
-      - name: Upload API-managed Worker Version with strict inherited bindings (no traffic)
-        shell: bash
+      - name: Reuse already uploaded exact-SHA Worker version with strict inherited bindings (no new upload)
         run: |
-          set -euo pipefail
-          root="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
-          curl --fail-with-body -sS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN"             -F "metadata=@$RUNNER_TEMP/staging-probe-metadata.json;type=application/json"             -F "index.js=@release-worker/index.js;type=application/javascript+module"             "$root/versions?bindings_inherit=strict" > "$RUNNER_TEMP/staging-probe-version.json"
-          python3 - <<'PY'
-          import json,os,pathlib,re
-          r=json.loads(pathlib.Path(os.environ['RUNNER_TEMP'],'staging-probe-version.json').read_text())
-          assert r.get('success') is True,r.get('errors')
-          v=r['result']['id'];assert re.fullmatch('[0-9a-f-]{36}',v)
-          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('NEW_STAGING_WORKER_VERSION='+v+'\n')
-          print('PASS new version staged without traffic:',v)
-          PY
+          echo "NEW_STAGING_WORKER_VERSION=1fccb56c-8513-4f6c-a66b-06d9e26f6a22" >> "$GITHUB_ENV"
+          echo "Reusing immutable API-managed version; no new upload and no traffic switch until verified"
       - name: Verify 51 inherited bindings and source SHA
         run: |
           set -euo pipefail
