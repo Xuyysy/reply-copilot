@@ -1,4 +1,7 @@
 import {adminCreator} from './creator-momentum';
+import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder} from './boltutil/routes';
+import {boltWebhook} from './boltutil/settle';
+import {adminBoltOrders} from './boltutil/admin';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
@@ -56,6 +59,15 @@ export default {
       if(env.ENVIRONMENT==="development" && host!=="127.0.0.1" && host!=="localhost") throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","开发环境只能在本机运行。");
       if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
       if (request.method === "OPTIONS") return options(request, env);
+      if(request.method==="GET"&&path==="/v1/admin/boltutil/orders")return await adminBoltOrders(request,env);
+      if(request.method==="GET"&&path==="/v1/boltutil/availability")return await publicBoltAvailability(request,env);
+      if(request.method==="POST"&&path==="/v1/boltutil/upgrade-quote")return await createBoltUpgradeQuote(request,env);
+      if(request.method==="POST"&&path==="/v1/boltutil/orders")return await createBoltOrder(request,env);
+      if(request.method==="GET"&&path==="/v1/boltutil/orders")return await listBoltOrders(request,env);
+      if(request.method==="POST"&&path==="/v1/boltutil/webhook")return await boltWebhook(request,env);
+      const boltRoute=path.match(/^\/v1\/boltutil\/orders\/([0-9a-f-]{36})(?:\/(refresh))?$/i);
+      if(request.method==="GET"&&boltRoute&&!boltRoute[2])return await getBoltOrder(request,env,boltRoute[1]);
+      if(request.method==="POST"&&boltRoute?.[2]==="refresh")return await refreshBoltOrder(request,env,boltRoute[1]);
       if(request.method==="GET"&&path==="/v1/site")return await siteContent(request,env);
       if(request.method==="GET"&&path==="/v1/subscriptions/plans")return await publicSubscriptionPlans(request,env);
       if(request.method==="POST"&&path==="/v1/subscriptions/upgrade-quote")return await createSubscriptionUpgradeQuote(request,env);

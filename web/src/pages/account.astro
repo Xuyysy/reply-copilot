@@ -1,7 +1,9 @@
 ---
 import Base from "../layouts/Base.astro";
 import AccountDashboard from "../components/account/AccountDashboard";
+import BoltOrdersList from "../components/account/BoltOrdersList";
 ---
 <Base title="我的账户" titleEn="My account">
   <section class="container public-account-panel app-shell" aria-label="Account dashboard"><AccountDashboard client:load /></section>
+  <BoltOrdersList client:only="react" />
 </Base>
