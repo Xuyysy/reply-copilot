@@ -105,10 +105,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: api/package-lock.json
-      - name: Install trusted Wrangler CLI
-        run: npm --prefix api ci
+      - name: Install pinned Wrangler CLI separately from legacy main branch
+        run: npm install --prefix "$RUNNER_TEMP/staging-wrangler" --no-save --no-audit --no-fund wrangler@4.151.0
       - name: Verify current Staging and Production pins and prepare strict inheritance
         shell: bash
         run: |
@@ -202,7 +200,7 @@ jobs:
       - name: Publish only Staging Pages with existing protected project
         run: |
           set -euo pipefail
-          ./api/node_modules/.bin/wrangler pages deploy web/dist             --project-name x-reply-helper-staging             --branch codex/v0.4-credits             --commit-hash "$SOURCE_SHA"             --commit-message "Staging admin-only BoltUtil mainnet probe $SOURCE_SHA"
+          "$RUNNER_TEMP/staging-wrangler/node_modules/.bin/wrangler" pages deploy web/dist             --project-name x-reply-helper-staging             --branch codex/v0.4-credits             --commit-hash "$SOURCE_SHA"             --commit-message "Staging admin-only BoltUtil mainnet probe $SOURCE_SHA"
       - name: Verify Prod isolation, new Staging Worker, Pages and public payment still disabled
         run: |
           set -euo pipefail
