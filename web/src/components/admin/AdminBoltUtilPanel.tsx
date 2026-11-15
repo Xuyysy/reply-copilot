@@ -16,6 +16,11 @@ type BoltOrder={
 };
 type AdminResponse={orders:BoltOrder[];available:boolean;networks:Network[];currency:"USDT";note:string};
 type PublicResponse={available:boolean;networks:Network[];currency:"USDT";independentMerchant:boolean};
+type MainnetProbe={id:string;externalOrderId:string;network:Network;requestedAmount:string;amount:string|null;
+ address:string|null;checkoutUrl:string|null;expiresAt:number|null;status:string;providerStatus:string|null;
+ txHash:string|null;paidAt:number|null;createdAt:number;noEntitlement:true;mainnet:true};
+type MainnetProbes={enabled:boolean;orders:MainnetProbe[];amount:string;mainnet:true};
+type AdminWrite=<T,>(path:string,body:object)=>Promise<T>;
 const NETWORKS:Array<{code:Network;label:string;chain:string}>=[
   {code:"TRC20",label:"TRON · TRC20",chain:"TRON"},
   {code:"POLYGON",label:"Polygon PoS",chain:"Polygon"},
@@ -29,9 +34,15 @@ function usdt(value:number|null):string{
 function when(value:number|null):string{
   return typeof value==="number"&&Number.isFinite(value)?new Date(value).toLocaleString():"—";
 }
-export default function AdminBoltUtilPanel({active,language}:{active:boolean;language:Language}){
+export default function AdminBoltUtilPanel({active,language,write}:{active:boolean;language:Language;write:AdminWrite}){
   const t=(zh:string,en:string)=>phrase(language,zh,en);
   const [data,setData]=useState<AdminResponse|null>(null);
+  const [probes,setProbes]=useState<MainnetProbes|null>(null);
+  const [testNetwork,setTestNetwork]=useState<Network>("TRC20");
+  const [testBusy,setTestBusy]=useState(false);
+  const [testError,setTestError]=useState("");
+  const [testNotice,setTestNotice]=useState("");
+  const [testDiagnostic,setTestDiagnostic]=useState("");
   const [availability,setAvailability]=useState<PublicResponse|null>(null);
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
@@ -44,10 +55,11 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
     setLoading(true);setError("");
     void Promise.all([
       api<AdminResponse>("/v1/admin/boltutil/orders"),
-      api<PublicResponse>("/v1/boltutil/availability")
-    ]).then(([orders,status])=>{
+      api<PublicResponse>("/v1/boltutil/availability"),
+      api<MainnetProbes>("/v1/admin/boltutil/test-orders")
+    ]).then(([orders,status,tests])=>{
       if(!live)return;
-      setData(orders);setAvailability(status);
+      setData(orders);setAvailability(status);setProbes(tests);
     }).catch((cause:unknown)=>{
       if(live)setError(cause instanceof Error?cause.message:t("读取 USDT 收款状态失败。","Unable to load USDT payment status."));
     }).finally(()=>{if(live)setLoading(false);});
@@ -58,6 +70,51 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
     return (data?.orders||[]).filter(o=>(network==="all"||o.network===network)&&
       (!word||[o.external_order_id,o.id,o.email,o.user_id,o.tx_hash||"",o.status].some(v=>v.toLowerCase().includes(word))));
   },[data,query,network]);
+  async function createMainnetTest(){
+    if(testBusy||!probes?.enabled)return;
+    const message=t("这是真实主网支付：将为 "+testNetwork+" 创建一笔约 1 USDT 的收银台订单。实际金额以 BoltUtil 返回为准；不会发放用户额度。确认继续？",
+      "REAL MAINNET: Create a ~1 USDT invoice on "+testNetwork+". Pay the exact returned amount. No customer entitlements will be granted. Continue?");
+    if(!window.confirm(message))return;
+    setTestBusy(true);setTestError("");setTestNotice("");
+    try{
+      const result=await write<{order:MainnetProbe}>("/v1/admin/boltutil/test-orders",{
+        network:testNetwork,confirm:"I_ACCEPT_REAL_1_USDT_MAINNET",
+        reason:"Staging 专用 USDT 小额实付测试 "+testNetwork
+      });
+      setTestNotice(result.order.status==="pending"
+        ?t("真实测试订单已创建。请确认收款链、地址与实际金额后再转账。","Real invoice created. Verify network, address and exact amount before paying.")
+        :t("平台创建结果不明确，请先核对原订单，勿重复创建。","Creation outcome uncertain. Check the original order; do not duplicate."));
+      setReload(x=>x+1);
+    }catch(e){setTestError(e instanceof Error?e.message:String(e));}
+    finally{setTestBusy(false);}
+  }
+  async function diagnoseMainnetTest(id:string){
+    if(testBusy)return;
+    setTestBusy(true);setTestError("");setTestDiagnostic("");
+    try{
+      const r=await write<{readOnly:true;ping:{kind:string;httpStatus:number|null;providerCode:string|null};
+        status:null|{kind:string;httpStatus:number|null;providerCode:string|null;orderStatus:string|null};
+        localStatus:string;nextStep:string}>("/v1/admin/boltutil/test-orders/"+id+"/diagnose",{
+        reason:"仅诊断原有 Staging USDT 测试订单商户连接，不创建新订单"
+      });
+      const describe=(v:{kind:string;httpStatus:number|null;providerCode:string|null})=>
+        v.kind+" (HTTP "+(v.httpStatus??"network")+" / code "+(v.providerCode??"none")+")";
+      setTestDiagnostic("BoltUtil API Key: "+describe(r.ping)+
+        "；原订单查询："+(r.status?describe(r.status)+(r.status.orderStatus?" / "+r.status.orderStatus:""):"跳过")+
+        "；建议："+r.nextStep);
+    }catch(e){setTestError(e instanceof Error?e.message:String(e));}
+    finally{setTestBusy(false);}
+  }
+  async function refreshMainnetTest(id:string){
+    if(testBusy)return;setTestBusy(true);setTestError("");setTestNotice("");
+    try{
+      const result=await write<{order:MainnetProbe}>("/v1/admin/boltutil/test-orders/"+id+"/refresh",{
+        reason:"Staging USDT 实付订单可信平台状态查询"
+      });
+      setTestNotice(t("平台已返回：","Provider status: ")+(result.order.providerStatus||result.order.status));
+      setReload(x=>x+1);
+    }catch(e){setTestError(e instanceof Error?e.message:String(e));}finally{setTestBusy(false);}
+  }
   const enabledNetworks=availability?.networks||[];
   const settled=(data?.orders||[]).filter(o=>o.status==="paid"&&o.applied_at!==null).length;
   const review=(data?.orders||[]).filter(o=>o.status==="manual_review"||
@@ -108,6 +165,48 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
           </a>
         </div>
         {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
+      </CardContent>
+    </Card>
+    <Card data-testid="admin-boltutil-mainnet-test">
+      <CardHeader>
+        <CardTitle>{t("管理员专用 · 三链 1 USDT 实付测试","Admin only · 1 USDT mainnet payment tests")}</CardTitle>
+        <p className="text-sm text-muted-foreground">{t("只有 Staging 管理员可创建，要求重新验证管理员密码。测试次数不限；每笔均需单独确认真实主网付款。不会给任何用户发放额度或订阅。",
+        "Staging admin and fresh password verification only. No test-order count limit; each real-mainnet invoice needs explicit confirmation. No credits or subscriptions are granted.")}</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <Badge variant={probes?.enabled?"secondary":"outline"}>{probes?.enabled?t("专用测试已启用","Test enabled"):t("专用测试未启用","Test disabled")}</Badge>
+        <div className="flex flex-wrap gap-3 items-center">
+          <select className="h-10 rounded-md border px-3" aria-label={t("选择小额测试网络","Small-payment test network")}
+            value={testNetwork} onChange={e=>setTestNetwork(e.target.value as Network)}>
+            {NETWORKS.map(n=><option key={n.code} value={n.code}>{n.label}</option>)}
+          </select>
+          <Button disabled={!probes?.enabled||testBusy} onClick={()=>void createMainnetTest()}>
+            {testBusy?t("正在处理…","Working…"):t("确认创建约 1 USDT 主网测试单","Create ~1 USDT MAINNET invoice")}
+          </Button>
+        </div>
+        <p className="text-sm text-amber-800">{t("付款使用真实主网 USDT 和链上手续费。不要向代币合约地址转账，不要取整 BoltUtil 实际应付金额。公共 USDT 收款仍保持关闭。",
+          "REAL MAINNET funds and network fees. Do not transfer to token contract; never round the exact payable. Public USDT checkout remains disabled.")}</p>
+        {testNotice&&<p role="status" className="text-sm text-green-700">{testNotice}</p>}
+        {testDiagnostic&&<p role="status" className="text-sm break-words rounded border p-3">{testDiagnostic}</p>}
+        {testError&&<p role="alert" className="text-sm text-red-700">{testError}</p>}
+        {(probes?.orders||[]).map(o=><div key={o.id} className="rounded-lg border p-3 space-y-2 text-sm">
+          <div className="flex flex-wrap justify-between gap-2"><strong>{o.network} · {o.amount||"—"} USDT</strong><Badge variant="outline">{o.providerStatus||o.status}</Badge></div>
+          <p className="break-all text-xs text-muted-foreground">{o.externalOrderId}</p>
+          {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("此笔测试单没有可靠的付款链接，请勿向此单转账。可单独创建新测试单，但必须核对新单的网络、准确金额和收款地址。","No verified checkout link exists for this attempt. Do not pay this invoice. You may create a separate test invoice; verify its network, exact amount and address before paying.")}</p>}
+          {o.providerStatus?.startsWith("CREATE_")&&<p role="status" className="rounded border px-3 py-2 text-sm">
+             {t("平台创建诊断码：","Provider create diagnostic code: ")}<code>{o.providerStatus}</code>
+             <span className="block text-xs text-muted-foreground">{t("只含阶段、HTTP 状态与平台业务码，不包含任何密钥或钱包信息。","Only stage, HTTP status and provider business code; no secrets or wallet details.")}</span>
+          </p>}
+          {o.address&&<p className="break-all">{t("收款地址：","Receiving address: ")}{o.address}</p>}
+          {o.txHash&&<p className="break-all">{t("交易哈希：","Transaction hash: ")}{o.txHash}</p>}
+          {o.expiresAt&&<p>{t("截止：","Expires: ")}{new Date(o.expiresAt).toLocaleString()}</p>}
+          <div className="flex gap-2 flex-wrap">
+            {o.checkoutUrl&&<a href={o.checkoutUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center rounded-md border px-3 py-2 text-blue-700">{t("打开 BoltUtil 收银台","Open BoltUtil checkout")}</a>}
+            <Button variant="outline" disabled={testBusy} onClick={()=>void refreshMainnetTest(o.id)}>{t("核验平台支付状态","Verify provider status")}</Button>
+            <Button variant="outline" disabled={testBusy} onClick={()=>void diagnoseMainnetTest(o.id)}>{t("只读诊断：为何没有收银台","Diagnose missing checkout (read-only)")}</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">{t("独立测试订单 · 不会触发商品权益发放。","Independent diagnostic invoice · never grants product entitlements.")}</p>
+        </div>)}
       </CardContent>
     </Card>
     <Card>

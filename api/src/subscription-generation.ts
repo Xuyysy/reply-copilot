@@ -7,6 +7,7 @@ import { subscriptionDayWindow } from '../../domain/subscription-policy.js';
 type Allocation = { id: string; period_id: string; day_index: number };
 type RequestCost = { model: string; inputTokens: number; outputTokens: number; costMicroUsd: number; usageQuality?: 'verified' | 'estimated' };
 const MAX_CLEANUP_PER_CALL=20;
+const BOLTUTIL_PROOF_SQL = "EXISTS (SELECT 1 FROM subscription_orders o JOIN boltutil_orders b ON b.subscription_order_id=o.id AND b.user_id=o.user_id JOIN boltutil_payment_events e ON e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash WHERE o.id=p.source_order_id AND o.user_id=p.user_id AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL AND b.status='paid' AND b.applied_at IS NOT NULL AND b.paid_at IS NOT NULL AND b.product_type='subscription' AND b.payable_usdt_micros>=1000000 AND b.paid_usdt_micros>=b.payable_usdt_micros AND b.receiving_address IS NOT NULL AND e.body_sha256 IS NOT NULL)";
 const PROOF_SQL = "EXISTS (SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=p.source_order_id AND o.user_id=p.user_id AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear' AND t.amount_fen=o.amount_fen AND t.currency='CNY' AND (?<>'production' OR t.merchant_provider IN ('mk99','xiaodou')) AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)))";
 
 async function pendingSubscriptionAllocation(env:Env,userId:string,requestId:string):Promise<Allocation|null> {
@@ -46,9 +47,10 @@ export async function reserveSubscribedGeneration(
   const budgetLimit=Number(setting?.value);
   if(!Number.isSafeInteger(budgetLimit)||budgetLimit<1)throw new ApiFailure(503,'BUDGET_NOT_CONFIGURED','AI 成本预算尚未配置。');
   const nonce=uuid(),allocationId=uuid(),eventId=uuid();
+  const proof=env.ENVIRONMENT==="staging"&&env.BOLTUTIL_SCHEMA_READY==="1" ? "("+PROOF_SQL+" OR "+BOLTUTIL_PROOF_SQL+")":PROOF_SQL;
   const requestInsert="INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase,provider_config_id,provider_config_version) "+
     "SELECT ?,?,?,?,'reserved',0,?,?,NULL,?,?,'generating',?,? FROM subscription_periods p WHERE p.id=? AND p.user_id=? AND p.status='active' AND p.start_at<=? AND p.end_at>? "+
-    "AND "+PROOF_SQL+" AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.user_id AND u.status='active' AND u.archived_at IS NULL) "+
+    "AND "+proof+" AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.user_id AND u.status='active' AND u.archived_at IS NULL) "+
     "AND EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=? AND d.reserved_micro_usd+d.settled_micro_usd+?<=?) "+
     "AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?)) "+
     "AND NOT EXISTS(SELECT 1 FROM ai_requests r WHERE r.user_id=? AND r.status='reserved' AND (COALESCE(r.generation_phase,'unknown')<>'awaiting_delivery' OR r.raw_response IS NULL OR r.response_expires_at IS NULL)) "+

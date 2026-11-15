@@ -22,6 +22,20 @@ export interface Env {
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
+  /** BoltUtil is staged independently of MK99/Xiaodou payment controls. */
+  BOLTUTIL_ENABLED?: string;
+  BOLTUTIL_TRC20_ENABLED?: string;
+  BOLTUTIL_POLYGON_ENABLED?: string;
+  BOLTUTIL_BEP20_ENABLED?: string;
+  BOLTUTIL_SCHEMA_READY?: string;
+  BOLTUTIL_STAGING_CREATE_ENABLED?: string;
+  BOLTUTIL_API_KEY?: string;
+  /** Admin-only real-mainnet 1-USDT diagnostic; never enables public checkout. */
+  BOLTUTIL_ADMIN_TEST_ENABLED?: string;
+  BOLTUTIL_ADMIN_TEST_SCHEMA_READY?: string;
+  BOLTUTIL_WEBHOOK_SECRET?: string;
+  /** Fixed, operator-approved CNY per USDT in 1e-6 CNY, staging only. */
+  BOLTUTIL_CNY_PER_USDT_MICROS?: string;
   SUBSCRIPTIONS_ENABLED?: string;
   SUBSCRIPTION_PURCHASES_ENABLED?: string;
   SUBSCRIPTION_CHECKOUT_ENABLED?: string;
