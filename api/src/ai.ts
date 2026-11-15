@@ -12,7 +12,7 @@ import { executeAiGeneration } from "./ai-generation-flow.js";
 
 import { normalizeAiInput } from "./ai-input.js";
 import { decryptProviderApiKey } from "./ai-model-crypto";
-import { requestConfiguredModel, serializeModelOutput } from "./ai-model-provider.js";
+import { requestConfiguredModel, serializeOutputForClientVersion } from "./ai-model-provider.js";
 
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
@@ -113,7 +113,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     return {quota};
   };
   const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
-  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(prior.quota)}),200,env,request);
+  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeOutputForClientVersion(prior.raw,input.outputSchemaVersion||1),...await wireQuota(prior.quota)}),200,env,request);
   const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
@@ -128,11 +128,11 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     }
     // Validate the full shared contract for legacy and managed providers and
     // persist a wire representation accepted by both released client parsers.
-    result.raw = serializeModelOutput(result.raw);
+    result.raw = serializeOutputForClientVersion(result.raw,input.outputSchemaVersion||1);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
-  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(execution.quota) }), 200, env, request);
+  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeOutputForClientVersion(execution.raw,input.outputSchemaVersion||1), ...await wireQuota(execution.quota) }), 200, env, request);
   if (execution.kind === "abandoned") throw new ApiFailure(409,"GENERATION_ABANDONED","这次生成已结束，请使用新的回复请求。");
   if (execution.kind === "failed") {
     const error = execution.error;

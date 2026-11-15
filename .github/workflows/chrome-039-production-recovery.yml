@@ -1,0 +1,77 @@
+name: Chrome 0.3.9 Production Recovery candidate (build only)
+on:
+  push:
+    branches:
+      - chatgpt/legacy-036-unreadable-pending-hotfix-20261112
+permissions:
+  contents: read
+jobs:
+  package:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Build Production CWS official-ID zip
+        env:
+          REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
+          REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
+        run: |
+          set -euo pipefail
+          npm run build:production
+          python3 scripts/package-production-ci.py
+      - name: Verify immutable source/version/identity and client recovery fix
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os,hashlib,json,pathlib,zipfile
+          root=pathlib.Path('dist/production-ci/extension')
+          p=json.loads((root/'provenance.json').read_text())
+          assert p['sourceSha']==os.environ['SOURCE_SHA']
+          assert p['version']=='0.3.9'
+          assert p['extensionId']=='fgfjajofkapebgphfidblngcjomkbdaj'
+          file=root/p['archive']
+          assert file.name=='reply-copilot-production-0.3.9.zip'
+          assert file.is_file() and hashlib.sha256(file.read_bytes()).hexdigest()==p['sha256']
+          with zipfile.ZipFile(file) as z:
+              assert z.testzip() is None
+              names=z.namelist()
+              assert 'manifest.json' in names
+              assert not any(n.startswith('staging/') for n in names)
+              m=json.loads(z.read('manifest.json'))
+              origin=z.read('config/runtime.js').decode()
+              recovery=z.read('services/delivery-coordinator.js').decode()
+              assert m['version']=='0.3.9'
+              assert m['key']==json.loads(pathlib.Path('config/extension-store-identity.json').read_text())['publicKey']
+              assert m['host_permissions']==['https://api.x-reply-helper.top/*']
+              assert m['externally_connectable']=={'matches':['https://app.x-reply-helper.top/*']}
+              assert m['permissions']==['contextMenus','storage','sidePanel','clipboardWrite']
+              assert 'channel: "production"' in origin
+              assert 'CLIENT_RESPONSE_INCOMPATIBLE' in recovery
+              assert "name==='InvalidAIResponseError'" in recovery
+              assert 'fastPostSwitch: true' in z.read('background/service-worker.js').decode()
+          print('PASS: Chrome 0.3.9 Production client-unblock package')
+          PY
+      - name: Dry-run Production Worker, no API deployment
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run typecheck
+          (cd api && ./node_modules/.bin/wrangler deploy --config deploy/production.wrangler.json --dry-run)
+      - name: Upload immutable Chrome candidate only
+        uses: actions/upload-artifact@v4
+        with:
+          name: chrome-039-production-recovery-${{ github.sha }}
+          path: dist/production-ci/extension/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Explicit no-release guard
+        run: |
+          echo 'No Production Worker/Pages deploy and no Chrome Web Store upload/review/publication.' >> "$GITHUB_STEP_SUMMARY"
