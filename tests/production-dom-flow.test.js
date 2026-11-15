@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true,performanceTracing=false}={}){
  let next=0,commandCount=0,generationCount=0,snapshotCount=0,now=0,entries=[],currentUrl='https://x.com/home';
- const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[],sentMessages=[]; let action;
+ const handlers={},windowHandlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[],sentMessages=[]; let action;
  const document={body:{},visibilityState:'visible',activeElement:null,hasFocus:()=>true,addEventListener:(n,h)=>handlers[n]=h,removeEventListener(){},execCommand(_c,_u,text){commandCount++;this.activeElement.innerText=text;this.activeElement.input?.();return true;}};
  const chrome={runtime:{id:'test',onMessage:{addListener(){},removeListener(){}},sendMessage(message){
    sentMessages.push(message.type);
@@ -18,7 +18,7 @@ function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true
  const assistant=()=>({showExperimentalFill:enabled=>statuses.push(enabled?"experimental_fill_available":"experimental_fill_hidden"),host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
- const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===360||ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener:(n,h)=>windowHandlers[n]=h,removeEventListener:n=>delete windowHandlers[n]},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===20000||ms===360||ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
  vm.runInNewContext(readFileSync(new URL("../utils/generation-performance.js",import.meta.url),"utf8"),ctx);
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
@@ -31,7 +31,7 @@ function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true
  vm.runInNewContext(readFileSync(new URL('../content/content-script.js',import.meta.url),'utf8'),ctx);
  function post(id){const editor={dispatchEvent(event){commandCount++;event.preventDefault();this.innerText=event.clipboardData.getData('text/plain');return false;},isConnected:true,innerText:'',parentElement:{isConnected:true},contains:n=>n===editor,focus(){document.activeElement=this},addEventListener(_n,cb){this.input=cb},removeEventListener(){}};const article={isConnected:true};article.post={ok:true,article,statusId:id,sourceText:'same post text',sourceUrl:`https://x.com/test/status/${id}`};return {editor,article,control:{isReply:true,closest:s=>s==='article'?article:null}};}
  const mutate=records=>{for(const o of observers)if(o.live)o.cb(records)};
- return {snapshotCalls:()=>snapshotCount,sentTypes:()=>sentMessages.slice(),perfReport:()=>ctx.replyCopilotPerformanceReport?.(),dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
+ return {wakeReport:()=>ctx.replyCopilotWakeReport?.(),visibility:state=>{document.visibilityState=state;handlers.visibilitychange?.()},blur:()=>{document.hasFocus=()=>false;windowHandlers.blur?.()},refocus:()=>{document.hasFocus=()=>true;windowHandlers.focus?.()},snapshotCalls:()=>snapshotCount,sentTypes:()=>sentMessages.slice(),perfReport:()=>ctx.replyCopilotPerformanceReport?.(),dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
 }
 test('missing status link and detached original still bind from a captured activation',async()=>{const f=flow(),p=f.post('101');f.click(p);p.article.isConnected=false;f.open(p);await sleep(0);assert.equal(f.generations(),1);f.resolve(0);await sleep(110);assert.equal(f.commands(),1);assert.equal(p.editor.innerText,'中文 English 😀\nline');});
 
@@ -475,4 +475,34 @@ test("bound ordinary reply ignores unrelated X feed mutations but scans relevant
  assert.equal(f.snapshotCalls(),original+2,"editor changes still force revalidation");
  f.resolve(0);await sleep(110);
  assert.equal(f.commands(),1);
+});
+
+test("foreground X page keeps MV3 worker warm locally without generating or reading accounts",async()=>{
+ const f=flow();await sleep(0);
+ assert.equal(f.wakeReport().scheduled,true);
+ assert.equal(f.sentTypes().includes("REPLY_COPILOT_WARM_LOCAL"),false,
+   "initial PERFORMANCE_STATE already wakes the worker, avoid duplicate boot ping");
+ f.timeout(20000);await sleep(0);
+ assert.equal(f.sentTypes().filter(x=>x==="REPLY_COPILOT_WARM_LOCAL").length,1);
+ assert.equal(f.sentTypes().includes("REPLY_COPILOT_GENERATE"),false);
+ assert.equal(f.sentTypes().includes("REPLY_COPILOT_ACCOUNT_STATE"),false);
+ assert.equal(f.wakeReport().successes,1);
+ f.timeout(20000);await sleep(0);
+ assert.equal(f.sentTypes().filter(x=>x==="REPLY_COPILOT_WARM_LOCAL").length,2,
+   "at most one local wake per bounded interval");
+});
+test("hidden or unfocused X page stops local MV3 warmup; resuming wakes once",async()=>{
+ const f=flow();await sleep(0);
+ f.visibility("hidden");f.timeout(20000);await sleep(0);
+ assert.equal(f.sentTypes().includes("REPLY_COPILOT_WARM_LOCAL"),false);
+ assert.equal(f.wakeReport().scheduled,false);
+ f.visibility("visible");await sleep(0);
+ assert.equal(f.sentTypes().filter(x=>x==="REPLY_COPILOT_WARM_LOCAL").length,1,
+   "returning to X wakes without waiting for next Reply click");
+ f.blur();f.timeout(20000);await sleep(0);
+ assert.equal(f.wakeReport().scheduled,false);
+ assert.equal(f.sentTypes().filter(x=>x==="REPLY_COPILOT_WARM_LOCAL").length,1);
+ f.refocus();await sleep(0);
+ assert.equal(f.sentTypes().filter(x=>x==="REPLY_COPILOT_WARM_LOCAL").length,2);
+ assert.equal(f.generations(),0);
 });
