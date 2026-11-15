@@ -27,3 +27,23 @@ test("background returns AI draft even when saving local history fails", async (
   assert.equal(response.result.replies.natural, "A casual thought.");
   assert.match(response.accountLabel, /剩余 199 次/);
 });
+
+test("foreground top-frame local warm heartbeat cannot spend credits or call hosted endpoints",async()=>{
+ const beforeFetch=globalThis.fetch;
+ let networkCalls=0;
+ globalThis.fetch=()=>{networkCalls++;throw new Error("no remote requests allowed")};
+ const send=(url,frameId)=>new Promise(resolve=>{
+   chrome.runtime.onMessage.listener(
+     {type:"REPLY_COPILOT_WARM_LOCAL"},
+     {id:"test-extension",url,frameId},resolve
+   );
+ });
+ try{
+   const valid=await send("https://x.com/home",0);
+   assert.equal(valid.ok,true);
+   assert.ok(Number.isFinite(valid.workerUptimeMs));
+   assert.equal((await send("https://x.com/home",1)).ok,false);
+   assert.equal((await send("https://example.com/home",0)).ok,false);
+   assert.equal(networkCalls,0,"no account or model network requests");
+ }finally{globalThis.fetch=beforeFetch}
+});

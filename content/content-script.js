@@ -15,6 +15,14 @@
     void safeSend({type:"REPLY_COPILOT_PERFORMANCE_SAMPLE",sample});
   }
   let contextAlive = true;
+  // Active-X-tab MV3 warmup. A heartbeat is an extension-local message only,
+  // never a Cloudflare/AI/account API request. Chrome can still suspend the
+  // worker under memory pressure, so correctness never depends on this timer.
+  const LOCAL_WARM_INTERVAL_MS = 20_000;
+  let localWarmTimer = null;
+  let localWarmPending = false;
+  const localWarmStats={attempts:0,successes:0,failures:0,lastLatencyMs:null,lastWorkerUptimeMs:null};
+  globalThis.replyCopilotWakeReport=()=>({...localWarmStats,foreground:Boolean(contextAlive&&document.visibilityState==='visible'&&document.hasFocus?.()),scheduled:localWarmTimer!==null});
   let bindingTimer = null;
   let settingsRevision = 0;
   let replyPreferenceRevision = 0;
@@ -66,6 +74,10 @@
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    if(localWarmTimer!==null){clearTimeout(localWarmTimer);localWarmTimer=null;}
+    try {document.removeEventListener('visibilitychange',reconcileLocalWarm);} catch {}
+    try {window.removeEventListener('focus',reconcileLocalWarm);} catch {}
+    try {window.removeEventListener('blur',reconcileLocalWarm);} catch {}
     clearLingeringHost();
     momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
@@ -104,6 +116,43 @@
       if (/extension context invalidated/i.test(error?.message || "")) stopInvalidContext();
       return Promise.resolve({ ok: false, error: "插件后台连接已中断，请重新加载扩展并刷新 X 页面。" });
     }
+  }
+  function localWarmEligible(){
+    return contextAlive && document.visibilityState==='visible' &&
+      document.hasFocus?.()!==false && hasRuntimeContext();
+  }
+  async function localWarmPing(){
+    if(localWarmPending||!localWarmEligible())return;
+    localWarmPending=true;
+    localWarmStats.attempts++;
+    const started=performance.now();
+    try{
+      const res=await safeSend({type:'REPLY_COPILOT_WARM_LOCAL'});
+      if(res?.ok===true){
+        localWarmStats.successes++;
+        localWarmStats.lastLatencyMs=Math.round(Math.max(0,performance.now()-started));
+        if(Number.isFinite(res.workerUptimeMs))
+          localWarmStats.lastWorkerUptimeMs=res.workerUptimeMs;
+      }else localWarmStats.failures++;
+    }catch{localWarmStats.failures++;}
+    finally{localWarmPending=false;}
+  }
+  function scheduleLocalWarm(){
+    if(localWarmTimer!==null){clearTimeout(localWarmTimer);localWarmTimer=null;}
+    if(!localWarmEligible())return;
+    localWarmTimer=setTimeout(()=>{
+      localWarmTimer=null;
+      if(!localWarmEligible())return;
+      void localWarmPing();
+      scheduleLocalWarm();
+    },LOCAL_WARM_INTERVAL_MS);
+  }
+  function reconcileLocalWarm(){
+    const wasScheduled=localWarmTimer!==null;
+    scheduleLocalWarm();
+    // Returning from a hidden/unfocused tab should wake immediately. At
+    // initial page load, the existing PERFORMANCE_STATE message already wakes.
+    if(!wasScheduled&&localWarmEligible())void localWarmPing();
   }
   function record(eventName, data = {}) {
     if (!active) return;
@@ -1013,6 +1062,12 @@
       if (initialRevision === momentumPreferenceRevision) setMomentumEntry(behaviorPreferences?.showMomentumEntry !== false);
     }).catch(() => {});
   } catch {}
+  // Run only while the foreground X tab is in use. No alarms, offscreen
+  // documents, extra manifest permissions, remote keepalive or paid request.
+  document.addEventListener('visibilitychange',reconcileLocalWarm);
+  window.addEventListener('focus',reconcileLocalWarm);
+  window.addEventListener('blur',reconcileLocalWarm);
+  scheduleLocalWarm();
   void safeSend({type:"REPLY_COPILOT_PERFORMANCE_STATE"}).then(response=>{performanceEnabled=response?.enabled===true;});
   document.addEventListener('pointerdown',captureActivation,true);
   document.addEventListener('keydown',captureActivation,true);
