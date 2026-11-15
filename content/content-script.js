@@ -17,7 +17,13 @@
   let contextAlive = true;
   let bindingTimer = null;
   let settingsRevision = 0;
+  let quotePreferenceRevision = 0;
   let pendingActivation = null;
+  // Staging quote fast path requires an unchanged editor across two reads.
+  // The proven 800ms path remains as a conservative fallback.
+  const QUOTE_EARLY_CHECK_MS = 350;
+  const QUOTE_STABILITY_MS = 120;
+  const QUOTE_LEGACY_FALLBACK_MS = 800;
   // After a completed draft's native editor closes, keep only the floating UI
   // available for review. The old editor, request and association are retired
   // immediately; this copy-only surface cannot generate or insert again.
@@ -67,6 +73,8 @@
     try { active?.assistant?.host?.remove(); } catch {}
     if (bindingTimer) clearInterval(bindingTimer);
     clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
+    clearTimeout(active?.copyOnlyTimer);clearTimeout(active?.copyOnlyFastTimer);
+    active?.copyOnlyEditor?.removeEventListener?.("input",active.onCopyOnlyInput,true);
     active = null;
     try {
       document.removeEventListener("click",onDocumentClick,true);
@@ -116,7 +124,7 @@
     completeTrace(current,"cancelled");
     current.cancelled=true;
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);clearTimeout(current.copyOnlyFastTimer);
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
@@ -175,7 +183,7 @@
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);clearTimeout(current.copyOnlyFastTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
     current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
@@ -218,9 +226,17 @@
   // If the trusted Reply gesture captured a quote but X omitted the modal's
   // parent identity, expose a MANUAL, COPY-ONLY surface. Never auto-insert
   // without the original strict composer association.
-  async function offerQuoteCopyOnly(session) {
+  async function offerQuoteCopyOnly(session,stabilityMs=0) {
+    if(session.offeringQuoteCopyOnly){
+      // The legacy 800ms timer must get one final attempt if a fast,
+      // in-flight check lost a React remount race.
+      session.retryQuoteAfterInFlight=true;
+      return;
+    }
     if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
        !session.post.hasCapturedQuote||session.copyOnly)return;
+    session.offeringQuoteCopyOnly=true;
+    try {
     const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
     if(!facts.routeAllowed||!facts.sourceUnchanged||facts.editors.length!==1||
        session.activationBaseline?.baselineModalCount!==0)return;
@@ -230,7 +246,15 @@
        candidate.quarantinedContextMatch||candidate.contextStatusId||
        candidate.contextMatches!==null)return;
     // No generation, credit charge, or automatic typing during acquisition.
-    const response=await safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
+    const shared=session.quotePreflight;
+    const prefetched=shared?.revision===quotePreferenceRevision;
+    const behaviorPending=prefetched?shared.behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
+    // The early path requires a stable editor after the UI has had time
+    // to hydrate, without delaying the original fallback at 800ms.
+    let [response]=await Promise.all([behaviorPending,
+      stabilityMs>0?new Promise(resolve=>setTimeout(resolve,stabilityMs)):Promise.resolve()]);
+    if(prefetched&&shared.revision!==quotePreferenceRevision)
+      response=await safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
     if(active!==session||session.cancelled||session.editor||session.copyOnly)return;
     if(!response?.ok||response.preferences?.showFloatingWindow!==true){
       traceAssociation("copy_only_skipped","floating_disabled_or_settings_error");
@@ -243,6 +267,7 @@
        !still.modal||!still.focused||!still.empty||
        still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
     session.copyOnly=true;
+    session.trace?.mark("editor_bound");
     session.copyOnlyEditor=still.node;
     session.copyOnlyDialog=still.dialog||null;
     session.copyOnlyInputTouched=false;
@@ -254,8 +279,11 @@
     session.assistant=api.inlineAssistant.mount(session.anchor,handleAction,{preferences:response.preferences});
     session.assistant?.setStatus("原帖已捕获，但 X 回复框身份尚未确认。可手动生成并复制；不会自动填入。");
     traceAssociation("copy_only","new_editor_unverified_parent");
-    const account=await refreshAccount(session);
+    const precheckStart=performance.now();
+    const account=await refreshAccount(session,session.quotePreflight?.account);
     if(active!==session||session.cancelled||!session.copyOnly)return;
+    session.trace?.addDurations({precheck:performance.now()-precheckStart});
+    session.trace?.mark("precheck_complete");
     if(account?.status==="credits_available") {
       // A real, trusted Reply click established the newly opened, unique,
       // focused, empty editor. When the user enabled auto-generate, continue
@@ -273,6 +301,14 @@
         session.assistant?.setStatus("未开启自动生成或有待处理权益提示：可手动生成、复制或确认填入。");
       }
     }
+    } finally {
+      session.offeringQuoteCopyOnly=false;
+      if(session.retryQuoteAfterInFlight){
+        session.retryQuoteAfterInFlight=false;
+        if(active===session&&!session.cancelled&&!session.editor&&!session.copyOnly)
+          void offerQuoteCopyOnly(session);
+      }
+    }
   }
   function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
@@ -283,7 +319,7 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     if (active?.observer) active.observer.disconnect();
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
-    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);clearTimeout(active?.copyOnlyTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);clearTimeout(active?.copyOnlyTimer);clearTimeout(active?.copyOnlyFastTimer);
     const requestId = crypto.randomUUID();
     active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl, activationBaseline:activation.baseline };
     traceAssociation('activated','trusted_reply_click');
@@ -291,13 +327,27 @@
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.trace = activation.trace;
+    // Only successful human Reply clicks on captured quotes pre-read these
+    // independent, read-only values; normal posts add no extra messages.
+    if(post.hasCapturedQuote){
+      session.quotePreflight={
+        revision:quotePreferenceRevision,
+        behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"}),
+        account:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"})
+      };
+    }
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
-    if(post.hasCapturedQuote)session.copyOnlyTimer=setTimeout(()=>{
-      void offerQuoteCopyOnly(session);
-    },800);
+    if(post.hasCapturedQuote){
+      session.copyOnlyFastTimer=setTimeout(()=>{
+        void offerQuoteCopyOnly(session,QUOTE_STABILITY_MS);
+      },QUOTE_EARLY_CHECK_MS);
+      session.copyOnlyTimer=setTimeout(()=>{
+        void offerQuoteCopyOnly(session);
+      },QUOTE_LEGACY_FALLBACK_MS);
+    }
     const locate=()=>{
       if (!hasRuntimeContext() || active!==session || session.cancelled || session.copyOnly) return;
       const found=matchedComposer(post);
@@ -322,7 +372,7 @@
         }
         return;
       }
-      clearTimeout(active.acquireTimer);clearTimeout(active.copyOnlyTimer);
+      clearTimeout(active.acquireTimer);clearTimeout(active.copyOnlyTimer);clearTimeout(active.copyOnlyFastTimer);
       active.editor=found.editor;active.matchedPost=true;
       active.trace?.mark("editor_bound");
       const current=active;
@@ -335,6 +385,16 @@
       void prepareCurrent(requestId);
     };
     active.refreshAssociation=locate;
+    // Coalesce DOM mutation bursts into one microtask scan. Focus and click
+    // listeners remain immediate; no 200ms DOM debounce on reply activation.
+    const scheduleLocate=()=>{
+      if(session.locateScheduled)return;
+      session.locateScheduled=true;
+      Promise.resolve().then(()=>{
+        session.locateScheduled=false;
+        if(active===session&&!session.cancelled&&!session.copyOnly)locate();
+      });
+    };
     active.observer=new MutationObserver(records=>{
       if(active!==session)return;
       if(session.copyOnly){
@@ -358,7 +418,7 @@
           else locate();
         },350);
       }
-      locate();
+      scheduleLocate();
     });
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
     locate();
@@ -368,8 +428,11 @@
     try {
       // Independent reads start together; both remain mandatory before AI.
       const precheckStart = performance.now();
-      const accountPending = safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
-      const response = await safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" });
+      const accountPending = current.quotePreflight?.account ||
+        safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
+      const response = await (current.quotePreflight?.revision===quotePreferenceRevision
+        ? current.quotePreflight.behavior
+        : safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }));
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
@@ -514,6 +577,7 @@
       return;
     }
     current.applyingReply=true;
+    current.trace?.mark("insert_started");
     const inserted=api.composerAdapter.insertOnce(editor,requestId,reply,
       ()=>valid()&&document.activeElement===editor);
     current.applyingReply=false;
@@ -528,6 +592,8 @@
       current.assistant?.setStatus("回复框已变化，请核对草稿，避免重复填入。");
       return;
     }
+    current.trace?.mark("editor_verified");
+    if(causalAuto)completeTrace(current,"success");
     current.appliedText=reply.trim();current.appliedStyle=style;
     current.assistant?.showApplied();
     record("applied",{style,reply});
@@ -899,6 +965,7 @@
   let momentumPreferenceRevision = 0;
   function onMomentumPreference(changes, area) {
     if (area !== 'local' || !changes.behaviorPreferences) return;
+    quotePreferenceRevision++;
     const {oldValue, newValue} = changes.behaviorPreferences;
     if ((oldValue?.showMomentumEntry !== false) === (newValue?.showMomentumEntry !== false)) return;
     momentumPreferenceRevision++;
