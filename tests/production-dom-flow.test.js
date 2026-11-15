@@ -244,6 +244,7 @@ test("captured quote with new unverified modal exposes manual copy-only assistan
  p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
  f.click(p);
  p.article.isConnected=false;
+ f.document.activeElement=p.editor;
  f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
    contextDetail:"awaiting_captioned_quote_parent"}]);
  f.timeout(800);
@@ -264,6 +265,7 @@ test("unverified modal never triggers quote copy-only fallback without trusted q
    if(mode!=="ordinary")p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
    if(mode==="preexisting")f.open(p);
    f.click(p);
+   if(mode!=="preexisting")f.document.activeElement=p.editor;
    if(mode!=="preexisting")f.entries([{node:p.editor,modal:true,contextMatches:mode==="wrong_id"?false:null,
      contextStatusId:mode==="wrong_id"?"999":null,contextDetail:"awaiting_captioned_quote_parent"}]);
    if(mode==="unfocused")f.document.activeElement=null;
