@@ -7,8 +7,8 @@ const read = (name) => readFileSync(new URL("../" + name, import.meta.url), "utf
 
 test("unavailable payments keep checkout disabled and the API rejects order creation", () => {
   const checkout = read("web/src/pages/checkout.astro");
-  assert.match(checkout, /byId\("create-order"\)\.disabled=busy\|\|!paymentAvailable/);
-  assert.match(checkout, /if\(!selected\|\|busy\|\|\(!restart&&order\)\|\|!paymentAvailable\)return/);
+  assert.match(checkout, /byId\("create-order"\)\.disabled=busy\|\|paymentRail!=='fiat'\|\|!paymentAvailable/);
+  assert.match(checkout, /if\(!selected\|\|busy\|\|\(!restart&&order\)\|\|!paymentAvailable\|\|paymentRail!=='fiat'\)return/);
   assert.match(read("api/src/payments.ts"), /PAYMENT_UNAVAILABLE/);
 });
 
