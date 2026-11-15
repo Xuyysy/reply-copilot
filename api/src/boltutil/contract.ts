@@ -51,8 +51,10 @@ export function validReceivingAddress(value:unknown,network:BoltNetwork):value i
   if(typeof value!=="string")return false;
   if(network==="SOLANA")return base58DecodedLength(value)===32 &&
     value!=="11111111111111111111111111111111"&&value!==NETWORKS.SOLANA.contract;
-  if(network==="TRC20")return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value);
-  return /^0x[a-fA-F0-9]{40}$/.test(value);
+  if(network==="TRC20")return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(value)&&
+    value!==NETWORKS.TRC20.contract;
+  return /^0x[a-fA-F0-9]{40}$/.test(value)&&
+    !/^0x0{40}$/i.test(value)&&value.toLowerCase()!==NETWORKS[network].contract.toLowerCase();
 }
 export function validTransactionHash(value:unknown,network:BoltNetwork):value is string{
   if(typeof value!=="string")return false;

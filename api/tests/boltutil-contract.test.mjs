@@ -62,6 +62,10 @@ test('network-specific transfer address and transaction formats',()=>{
   assert.equal(validReceivingAddress(evmAddress,'SOLANA'),false);
   assert.equal(validTransactionHash(evmHash,'SOLANA'),false);
   assert.equal(validTransactionHash(solSignature,'ERC20'),false);
+  for(const network of SUPPORTED_BOLT_NETWORKS)
+    assert.equal(validReceivingAddress(NETWORKS[network].contract,network),false,'never pay token contract or Solana mint');
+  for(const network of ['POLYGON','BEP20','ERC20'])
+    assert.equal(validReceivingAddress('0x'+'0'.repeat(40),network),false,'zero EVM destination rejected');
   assert.ok(validReceivingAddress(evmAddress,'ERC20'));
   assert.ok(validTransactionHash(evmHash,'ERC20'));
 });
