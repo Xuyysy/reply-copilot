@@ -350,3 +350,127 @@ test('a paid Xiaodou subscription exposes a verified period and never restores i
   assert.equal(detail.body.order.checkout.paymentUrl,null);
  }finally{f.sql.close();}
 });
+
+test('signed Xiaodou CLOSED releases an unpaid subscription; historical order remains archived',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-close-expired-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id;
+   const closed=await query(f,id,{status:'CLOSED',payUrl:null});
+   assert.equal(closed.status,200,JSON.stringify(closed.body));
+   assert.equal(closed.body.orderStatus,'closed');
+   const state=f.sql.prepare('SELECT o.status order_status,t.status payment_status FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=?').get(id);
+   assert.deepEqual({...state},{order_status:'closed',payment_status:'closed'});
+   assert.equal(metrics(f).periods,0);assert.equal(metrics(f).events,0);
+   const again=await create(f,req('xd-after-closed-0002','pro'),{openOrderId:'xd-open-order-second-0002'});
+   assert.equal(again.status,201,JSON.stringify(again.body));assert.notEqual(again.body.order.id,id);
+   assert.equal(metrics(f).subscriptionOrders,2);
+ }finally{f.sql.close();}
+});
+
+test('signed Xiaodou FAILED also releases, but UNKNOWN / PAYING remain blocked',async()=>{
+ for(const status of ['UNKNOWN','PAYING','FAILED']){
+   const f=ready();try{
+     const first=await create(f,req('xd-status-'+status+'-0001'));
+     const id=first.body.order.id,checking=await query(f,id,{status,payUrl:null});
+     assert.equal(checking.status,200,JSON.stringify(checking.body));
+     const attempt=await create(f,req('xd-status-'+status+'-new','pro'),{openOrderId:'xd-open-order-second-'+status});
+     if(status==='FAILED'){
+       assert.equal(checking.body.orderStatus,'failed');
+       assert.equal(attempt.status,201,JSON.stringify(attempt.body));
+     }else{
+       assert.equal(checking.body.orderStatus,'pending');
+       assert.equal(attempt.status,409,JSON.stringify(attempt.body));
+     }
+     assert.equal(metrics(f).periods,0);
+   }finally{f.sql.close();}
+ }
+});
+
+test('authenticated subscription order listing auto-reconciles signed CLOSED once, then unlocks pricing',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-autoclose-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+   let calls=0;
+   const list=await withProvider(r=>{
+     calls++;assert.equal(r.method,'GET');assert.equal(new URL(r.url).pathname,'/api/open/v1/payments/'+trade);
+     return providerResponse(r,{outTradeNo:trade,status:'CLOSED',amountFen:6990,currency:'CNY',channel:'ALIPAY_H5',payUrl:null},{status:200});
+   },()=>f.call('/v1/subscriptions/orders',{method:'GET'}));
+   assert.equal(list.status,200,JSON.stringify(list.body));assert.equal(calls,1);
+   assert.equal(list.body.orders[0].status,'closed');
+   const after=await create(f,req('xd-autoclose-pro-0002','pro'),{openOrderId:'xd-open-order-second-0002'});assert.equal(after.status,201,JSON.stringify(after.body));
+   assert.equal(metrics(f).periods,0);
+ }finally{f.sql.close();}
+});
+
+test('late signed SUCCEEDED after CLOSED is audited and held for review without granting entitlement',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-latepaid-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id;
+   const closed=await query(f,id,{status:'CLOSED',payUrl:null});assert.equal(closed.body.orderStatus,'closed');
+   const late=await query(f,id,{status:'SUCCEEDED',payUrl:null});
+   assert.equal(late.status,200,JSON.stringify(late.body));
+   assert.equal(late.body.orderStatus,'manual_review');assert.equal(late.body.paymentConfirmed,true);
+   assert.equal(late.body.entitlementApplied,false);
+   const states=f.sql.prepare('SELECT o.status order_status,t.status payment_status,t.risk_state FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=?').get(id);
+   assert.deepEqual({...states},{order_status:'manual_review',payment_status:'paid',risk_state:'manual_review'});
+   assert.equal(metrics(f).periods,0);assert.equal(metrics(f).events,1);
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
+   const replay=await query(f,id,{status:'SUCCEEDED',payUrl:null});
+   assert.equal(replay.status,200,JSON.stringify(replay.body));assert.equal(replay.body.entitlementApplied,false);
+   assert.equal(metrics(f).periods,0);assert.equal(metrics(f).events,1);
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou signed provider mismatch cannot release the blocked subscription',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-mismatchclosed-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id,invalid=await query(f,id,{status:'CLOSED',amountFen:6991,payUrl:null});
+   assert.equal(invalid.status,409);
+   assert.equal(f.sql.prepare('SELECT status FROM subscription_orders WHERE id=?').get(id).status,'pending');
+   const other=await create(f,req('xd-mismatchclosed-0002','pro'));assert.equal(other.status,409);
+ }finally{f.sql.close();}
+});
+
+test('owner-confirmed Xiaodou subscription cancellation calls merchant close, then unlocks the plan',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-sub-cancel-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+   let calls=0;
+   const closed=await withProvider(r=>{
+     calls++;assert.equal(r.method,'POST');assert.equal(new URL(r.url).pathname,'/api/open/v1/payments/'+trade+'/close');
+     return providerResponse(r,{outTradeNo:trade,amountFen:6990,currency:'CNY',channel:'ALIPAY_H5',
+       closeState:'CLOSE_REQUESTED',status:'CLOSED',payUrl:null},{status:200});
+   },()=>f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}}));
+   assert.equal(closed.status,200,JSON.stringify(closed.body));assert.equal(calls,1);
+   assert.equal(closed.body.orderStatus,'closed');assert.equal(closed.body.order.status,'closed');
+   assert.equal(metrics(f).periods,0);
+   const replaced=await create(f,req('xd-sub-cancel-new-0002','pro'),{openOrderId:'xd-after-cancel-open-0002'});
+   assert.equal(replaced.status,201,JSON.stringify(replaced.body));
+ }finally{f.sql.close();}
+});
+
+test('Xiaodou subscription cancel refuses uncertain merchant close and leaves original blocking',async()=>{
+ for(const closeState of ['UNKNOWN_KEPT','PROVIDER_PAID_CONFLICT']){
+   const f=ready();try{
+     const first=await create(f,req('xd-sub-cancel-'+closeState));assert.equal(first.status,201);
+     const id=first.body.order.id,trade=f.sql.prepare('SELECT provider_trade_id FROM subscription_payment_transactions WHERE order_id=?').get(id).provider_trade_id;
+     const rejected=await withProvider(r=>providerResponse(r,{outTradeNo:trade,amountFen:6990,
+       currency:'CNY',channel:'ALIPAY_H5',closeState,status:'PAYING',payUrl:null},{status:200}),
+       ()=>f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}}));
+     assert.equal(rejected.status,409,JSON.stringify(rejected.body));
+     assert.equal(f.sql.prepare('SELECT status FROM subscription_orders WHERE id=?').get(id).status,'pending');
+     assert.equal(metrics(f).periods,0);
+   }finally{f.sql.close();}
+ }
+});
+
+test('Xiaodou subscription cancel must reject another user without calling merchant',async()=>{
+ const f=ready();try{
+   const first=await create(f,req('xd-sub-not-owner-0001'));assert.equal(first.status,201);
+   const id=first.body.order.id;
+   f.sql.exec("INSERT INTO users(id,email,status,created_at,email_verified_at) VALUES('other','different@example.test','active',1,1)");
+   f.sql.prepare("UPDATE subscription_orders SET user_id=? WHERE id=?").run('other',id);
+   const res=await f.call('/v1/subscriptions/orders/'+id+'/cancel',{body:{}});
+   assert.equal(res.status,404);
+ }finally{f.sql.close();}
+});
