@@ -152,3 +152,50 @@ test('BoltUtil malformed create invoice payload is not exposed and never grants 
    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
  }finally{f.sql.close();}
 });
+
+test('Staging admin can create more than three real-mainnet diagnostics in a day with no count or frequency restriction',async()=>{
+ const f=setup();try{
+  const ids=new Set();
+  await withProvider(mockCreate,async()=>{
+    for(let i=0;i<7;i++){
+      const r=await f.call(route,{body:req('POLYGON',crypto.randomUUID())});
+      assert.equal(r.status,201,JSON.stringify(r.body));
+      assert.equal(r.body.order.network,'POLYGON');
+      ids.add(r.body.order.id);
+    }
+  });
+  assert.equal(ids.size,7);
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders").get().n,7);
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders WHERE network='POLYGON' AND status='pending'").get().n,7);
+  assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_events").get().n,0);
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+ }finally{f.sql.close();}
+});
+test('Prior unknown Polygon test does not block another Polygon or TRC20 test; operationId remains idempotent',async()=>{
+ const f=setup();try{
+   const oldOp=crypto.randomUUID(),newOp=crypto.randomUUID();
+   const old=await withProvider(()=>{throw Error('simulated timeout');},()=>f.call(route,{body:req('POLYGON',oldOp)}));
+   assert.equal(old.status,202);assert.equal(old.body.order.status,'unknown');
+   const next=await withProvider(mockCreate,()=>f.call(route,{body:req('POLYGON',newOp)}));
+   assert.equal(next.status,201,JSON.stringify(next.body));
+   assert.notEqual(next.body.order.id,old.body.order.id);
+   const duplicate=await f.call(route,{body:req('POLYGON',newOp)});
+   assert.equal(duplicate.status,200);
+   assert.equal(duplicate.body.resumed,true);
+   assert.equal(duplicate.body.order.id,next.body.order.id);
+   const third=await withProvider(mockCreate,()=>f.call(route,{body:req('TRC20',crypto.randomUUID())}));
+   assert.equal(third.status,201,JSON.stringify(third.body));
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders").get().n,3);
+   assert.equal(f.sql.prepare("SELECT status FROM boltutil_admin_test_orders WHERE id=?").get(old.body.order.id).status,'unknown');
+ }finally{f.sql.close();}
+});
+test('Admin tests are explicitly unlimited but still enforce positive identity verification and 1-USDT amount safeguards',()=>{
+ const code=readFileSync(new URL('../src/boltutil/admin-probes.ts',import.meta.url),'utf8');
+ const method=code.slice(code.indexOf('export async function adminBoltTestCreate'),code.indexOf('async function reconcile'));
+ assert.doesNotMatch(method,/created_at\s*>\s*\?|COUNT\(\*\).*<3|status IN \('creating','pending','unknown','manual_review'\)|bolt-admin-test-create:/);
+ assert.match(method,/requireAdminSession\(request,env,true\)/);
+ assert.match(method,/I_ACCEPT_REAL_1_USDT_MAINNET/);
+ assert.match(method,/micros>1100000n/);
+ assert.match(method,/operation_id=\?/);
+});

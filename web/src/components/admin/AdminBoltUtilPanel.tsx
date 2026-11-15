@@ -170,8 +170,8 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
     <Card data-testid="admin-boltutil-mainnet-test">
       <CardHeader>
         <CardTitle>{t("管理员专用 · 三链 1 USDT 实付测试","Admin only · 1 USDT mainnet payment tests")}</CardTitle>
-        <p className="text-sm text-muted-foreground">{t("只有 Staging 管理员可创建，要求重新验证管理员密码。每条链单独验收；最多 24 小时 3 笔。不会给任何用户发放额度或订阅。",
-        "Staging admin and fresh password verification only. Test each chain separately, at most 3 invoices per 24 hours. No credits or subscriptions are granted.")}</p>
+        <p className="text-sm text-muted-foreground">{t("只有 Staging 管理员可创建，要求重新验证管理员密码。测试次数不限；每笔均需单独确认真实主网付款。不会给任何用户发放额度或订阅。",
+        "Staging admin and fresh password verification only. No test-order count limit; each real-mainnet invoice needs explicit confirmation. No credits or subscriptions are granted.")}</p>
       </CardHeader>
       <CardContent className="space-y-3">
         <Badge variant={probes?.enabled?"secondary":"outline"}>{probes?.enabled?t("专用测试已启用","Test enabled"):t("专用测试未启用","Test disabled")}</Badge>
@@ -192,7 +192,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         {(probes?.orders||[]).map(o=><div key={o.id} className="rounded-lg border p-3 space-y-2 text-sm">
           <div className="flex flex-wrap justify-between gap-2"><strong>{o.network} · {o.amount||"—"} USDT</strong><Badge variant="outline">{o.providerStatus||o.status}</Badge></div>
           <p className="break-all text-xs text-muted-foreground">{o.externalOrderId}</p>
-          {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("平台尚未确认创建成功，没有支付链接。请先点击只读诊断，不要再次创建或转账。","Merchant has not confirmed the invoice. Diagnose before another attempt; do not transfer funds.")}</p>}
+          {!o.checkoutUrl&&o.status==="unknown"&&<p className="text-sm text-red-700">{t("此笔测试单没有可靠的付款链接，请勿向此单转账。可单独创建新测试单，但必须核对新单的网络、准确金额和收款地址。","No verified checkout link exists for this attempt. Do not pay this invoice. You may create a separate test invoice; verify its network, exact amount and address before paying.")}</p>}
           {o.providerStatus?.startsWith("CREATE_")&&<p role="status" className="rounded border px-3 py-2 text-sm">
              {t("平台创建诊断码：","Provider create diagnostic code: ")}<code>{o.providerStatus}</code>
              <span className="block text-xs text-muted-foreground">{t("只含阶段、HTTP 状态与平台业务码，不包含任何密钥或钱包信息。","Only stage, HTTP status and provider business code; no secrets or wallet details.")}</span>

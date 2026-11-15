@@ -52,8 +52,6 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
    throw new ApiFailure(400,"BOLTUTIL_ADMIN_TEST_CONFIRMATION","请确认本次真实主网小额支付测试。");
  let network:BoltNetwork;
  try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","该网络不支持测试。");}
- if(!await takeRate(env,"bolt-admin-test-create:"+admin.user_id,2,60000,nowMs()))
-   throw new ApiFailure(429,"BOLTUTIL_TEST_RATE_LIMIT","小额测试创建过于频繁。");
  const existing=await env.DB.prepare("SELECT * FROM boltutil_admin_test_orders WHERE operation_id=?")
    .bind(body.operationId).first<Probe>();
  if(existing){
@@ -61,14 +59,15 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
    return response({order:present(existing),resumed:true},200,env,request);
  }
  const now=nowMs(),id=uuid(),external="BOLTTEST_"+id.replaceAll("-","").slice(0,24);
+ // Staging owner-only diagnostic invoices have no per-day or per-network attempt cap.
+ // Preserve unique operationId and externalOrderId constraints for request idempotency.
+ // Old unknown attempts are retained for audit but do not block new independent attempts.
  const stmt=env.DB.prepare("INSERT INTO boltutil_admin_test_orders "+
  "(id,external_order_id,operation_id,admin_user_id,network,requested_usdt_micros,token_contract,status,created_at,updated_at) "+
- "SELECT ?,?,?,?,?,1000000,?,'creating',?,? WHERE "+
- "(SELECT COUNT(*) FROM boltutil_admin_test_orders WHERE created_at>=?)<3 AND "+
- "NOT EXISTS (SELECT 1 FROM boltutil_admin_test_orders WHERE network=? AND status IN ('creating','pending','unknown','manual_review'))")
- .bind(id,external,body.operationId,admin.user_id,network,NETWORKS[network].contract,now,now,now-86400000,network);
+ "VALUES(?,?,?,?,?,1000000,?,'creating',?,?)")
+ .bind(id,external,body.operationId,admin.user_id,network,NETWORKS[network].contract,now,now);
  const result=await stmt.run();
- if(result.meta.changes!==1)throw new ApiFailure(409,"BOLTUTIL_TEST_LIMIT","已有未解决测试订单，或 24 小时内已创建 3 笔，请先核对。");
+ if(result.meta.changes!==1)throw new ApiFailure(409,"BOLTUTIL_TEST_CREATE_CONFLICT","创建测试单时发生冲突，请核对订单记录。");
  let provider:Record<string,unknown>;
  let failure:BoltCreateFailure|null=null;
  try{
