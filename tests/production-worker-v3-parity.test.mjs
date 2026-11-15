@@ -10,10 +10,10 @@ test('Production live V3 parity changes only V2 system style rules, preserves sc
  const base=buildPrompts(args),actual=buildLiveProductionV3Prompts(args);
  assert.notEqual(actual.system,base.system);
  assert.equal(actual.user,base.user);
- assert.match(actual.system,/OFFHAND HUMAN REPLY RULES\\n- Write an X comment, not a response essay/);
+ assert.match(actual.system,/OFFHAND HUMAN REPLY RULES\n- Write an X comment, not a response essay/);
  assert.match(actual.system,/Required JSON shape/);
- assert.equal(actual.system.slice(0,actual.system.indexOf('\\nOFFHAND HUMAN REPLY RULES')),base.system.slice(0,base.system.indexOf('\\nOFFHAND HUMAN REPLY RULES')));
- assert.equal(actual.system.slice(actual.system.indexOf('\\nRequired JSON shape')),base.system.slice(base.system.indexOf('\\nRequired JSON shape')));
+ assert.equal(actual.system.slice(0,actual.system.indexOf('\nOFFHAND HUMAN REPLY RULES')),base.system.slice(0,base.system.indexOf('\nOFFHAND HUMAN REPLY RULES')));
+ assert.equal(actual.system.slice(actual.system.indexOf('\nRequired JSON shape')),base.system.slice(base.system.indexOf('\nRequired JSON shape')));
 });
 
 test('Production parity helper cannot change V1 prompt hash or behavior',()=>{
@@ -23,5 +23,5 @@ test('Production parity helper cannot change V1 prompt hash or behavior',()=>{
 
 test('Live V3 only activates for Production outputSchemaVersion V2 in API source',()=>{
  const ai=readFileSync(new URL('../api/src/ai.ts',import.meta.url),'utf8');
- assert.match(ai,/env\\.ENVIRONMENT===\"production\"&&input\\.outputSchemaVersion===2\\?buildLiveProductionV3Prompts:buildPrompts/);
+ assert.match(ai,/env\.ENVIRONMENT===\"production\"&&input\.outputSchemaVersion===2\?buildLiveProductionV3Prompts:buildPrompts/);
 });
