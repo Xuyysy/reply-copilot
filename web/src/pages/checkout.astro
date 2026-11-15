@@ -21,6 +21,10 @@ import Base from "../layouts/Base.astro";
         <div id="payment-method-options" role="radiogroup" aria-labelledby="payment-method-title"></div>
         <p id="payment-method-note" data-site-text="checkoutPaymentNote" data-zh="前往支付收银台完成付款。实际支付币种为人民币 CNY。">Continue to the payment cashier. The actual charge is in CNY.</p>
       </section>
+      <div id="checkout-usdt-choice" class="checkout-usdt-choice" hidden>
+        <p id="checkout-usdt-note" class="fineprint">USDT 支付将在下一步选择 TRON、Polygon 或 BNB 网络。</p>
+        <a id="checkout-usdt-link" class="button checkout-pay-button" href="#" hidden>继续选择 USDT 网络</a>
+      </div>
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
 
@@ -30,7 +34,7 @@ import Base from "../layouts/Base.astro";
         <section id="wechat-qr-panel" class="checkout-wechat-qr" hidden aria-labelledby="wechat-qr-title">
           <h3 id="wechat-qr-title" data-zh="用微信扫码完成支付">Scan with WeChat to continue</h3>
           <img id="wechat-qr-image" width="240" height="240" alt="微信支付收银台二维码" />
-          <p data-zh="请使用手机微信扫描。扫码后将在手机微信中打开小豆收银台。">Scan with your phone. The Xiaodou cashier will open in WeChat.</p>
+          <p data-zh="请使用手机微信扫描。扫码后将在手机微信中打开支付收银台。">Scan with your phone. The payment cashier will open in WeChat.</p>
         </section>
         <p id="wechat-mobile-note" class="checkout-wechat-mobile-note" hidden data-zh="手机端请在微信内打开收银台；其他浏览器请复制支付链接并在微信中打开。">On mobile, open the cashier in WeChat. In other browsers, copy the payment link and open it in WeChat.</p>
         <button id="epay-submit" class="button checkout-pay-button" type="button" hidden><span id="epay-pay-label"><span id="epay-pay-text" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></span><span id="epay-restore-label" hidden data-zh="恢复付款表单">Restore payment form</span></button>
@@ -92,6 +96,8 @@ import Base from "../layouts/Base.astro";
     let paymentAvailable = false;
     let provider:"local_mock"|"xiaodou"|"xiaodou_epay"|"mk99"|null = null;
     let paymentMethods:PaymentMethod[]=[];
+    let paymentRail:'fiat'|'usdt'='fiat';
+    let boltAvailable=false;
     let selectedChannel:Channel|null=null;
     let selectedProvider:PaymentMethod["provider"]|null=null;
     let order:Order|null = null;
@@ -139,20 +145,38 @@ import Base from "../layouts/Base.astro";
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
       const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
-      const choicesVisible=unique.length>0&&!order;
+      const choicesVisible=Boolean(selected)&&!order;
       show("checkout-payment-method",choicesVisible);
       if(!selectedChannel||!unique.some(method=>method.channel===selectedChannel&&method.provider===selectedProvider)){selectedChannel=unique[0]?.channel??null;selectedProvider=unique[0]?.provider??null;}
       for(const method of unique){
         const item=document.createElement("label");item.className="checkout-payment-option";
-        const input=document.createElement("input");input.type="radio";input.name="payment-channel";input.value=paymentMethodKey(method);input.checked=method.channel===selectedChannel&&method.provider===selectedProvider;input.disabled=!paymentAvailable;
-        input.addEventListener("change",()=>{selectedChannel=method.channel;selectedProvider=method.provider;renderPaymentMethods();});
+        const input=document.createElement("input");input.type="radio";input.name="payment-channel";input.value=paymentMethodKey(method);input.checked=paymentRail==='fiat'&&method.channel===selectedChannel&&method.provider===selectedProvider;input.disabled=!paymentAvailable;
+        input.addEventListener("change",()=>{paymentRail='fiat';selectedChannel=method.channel;selectedProvider=method.provider;render();});
         const text=document.createElement("strong");text.textContent=method.channel==="ALIPAY_H5"?"支付宝 Alipay":"微信支付 WeChat Pay";
         item.append(input,text);root.append(item);
       }
+
+      const usdtItem=document.createElement('label');usdtItem.className='checkout-payment-option';
+      const usdtRadio=document.createElement('input');usdtRadio.type='radio';usdtRadio.name='payment-channel';
+      usdtRadio.value='USDT';usdtRadio.checked=paymentRail==='usdt';
+      usdtRadio.addEventListener('change',()=>{paymentRail='usdt';render();});
+      const usdtText=document.createElement('strong');usdtText.textContent=boltAvailable?'USDT · TRON / Polygon / BNB':'USDT · '+label('暂未开放','Not available');
+      usdtItem.append(usdtRadio,usdtText);root.append(usdtItem);
+      const selectedUsdt=paymentRail==='usdt'&&!order;
+      show('checkout-usdt-choice',selectedUsdt);
+      const link=byId<HTMLAnchorElement>('checkout-usdt-link');
+      link.href=selected?'/usdt-checkout/?productType=credits&sku='+encodeURIComponent(selected.id):'#';
+      show('checkout-usdt-link',selectedUsdt&&boltAvailable);
+      byId('checkout-usdt-note').textContent=boltAvailable?
+        label('下一步选择 USDT 网络，最终应付金额以收银台报价为准。','Select the USDT network next; final amount is quoted in checkout.'):
+        label('USDT 尚未配置，只能预览，无法创建付款订单。','USDT is not configured. Preview only; no payment orders.');
+      show('create-order',!selectedUsdt&&Boolean(selected)&&!order);
       byId("create-order-label").textContent=selectedChannel?paymentActionLabel(selectedChannel,"pay",document.documentElement.lang==="en"?"en":"zh"):label("暂不可付款","Payment unavailable");
       byId("epay-pay-text").textContent=paymentActionLabel("ALIPAY_H5","pay",document.documentElement.lang==="en"?"en":"zh");
       byId("cashier-link").textContent=paymentActionLabel(selectedChannel,"cashier",document.documentElement.lang==="en"?"en":"zh");
-      byId("payment-method-note").textContent=selectedProvider==="mk99"?label("前往收银台按渠道引导完成付款。实际支付币种为人民币 CNY。","Follow the cashier instructions for your payment method. Your payment is charged in CNY."):selectedChannel==="WECHAT_H5"?label("微信支付需要在微信内打开收银台完成支付；其他浏览器请按收银台引导操作。","WeChat Pay works in the WeChat browser. In other browsers, follow the cashier's instructions."):selectedChannel==="ALIPAY_H5"?label("前往收银台，使用支付宝完成付款。实际支付币种为人民币 CNY。","Continue to the cashier and pay with Alipay. Your payment is charged in CNY."):label("当前没有已放行的支付方式，暂时无法创建新订单。","No currently released payment methods; new orders are unavailable.");
+      byId("payment-method-note").textContent=selectedUsdt?
+        label('USDT 与人民币商户切换无关。','USDT does not depend on fiat merchant selection.'):
+        selectedProvider==="mk99"?label("前往收银台按渠道引导完成付款。实际支付币种为人民币 CNY。","Follow the cashier instructions for your payment method. Your payment is charged in CNY."):selectedChannel==="WECHAT_H5"?label("微信支付需要在微信内打开收银台完成支付；其他浏览器请按收银台引导操作。","WeChat Pay works in the WeChat browser. In other browsers, follow the cashier's instructions."):selectedChannel==="ALIPAY_H5"?label("前往收银台，使用支付宝完成付款。实际支付币种为人民币 CNY。","Continue to the cashier and pay with Alipay. Your payment is charged in CNY."):label("当前没有已放行的支付方式，暂时无法创建新订单。","No currently released payment methods; new orders are unavailable.");
     }
     function render(){
       const restartableOrder=order?.paymentProtocol==="epay"&&["pending","unknown","failed","closed","expired"].includes(order.status);
@@ -174,7 +198,7 @@ import Base from "../layouts/Base.astro";
       byId("package-fee").textContent=pricingSummary.fee;
       byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
-          byId("create-order").disabled=busy||!paymentAvailable||!selected.total_payment_fen||Boolean(order);
+          byId("create-order").disabled=busy||paymentRail!=='fiat'||!paymentAvailable||!selected.total_payment_fen||!paymentMethods.some(m=>m.channel===selectedChannel&&m.provider===selectedProvider)||Boolean(order);
     }
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
@@ -227,7 +251,10 @@ import Base from "../layouts/Base.astro";
       try{
         if(invalidOrderLocator){setStatus("订单编号无效，请从账户页面重新打开原订单。","Invalid order ID. Open the original order from your account.");return;}
         const data=await api<{packages:Package[];paymentAvailable:boolean;paymentProvider:"local_mock"|"xiaodou"|"xiaodou_epay"|"mk99"|null;paymentMethods?:PaymentMethod[]}>("/v1/packages");
-        selected=data.packages.find(item=>item.id===pkgId)||null;paymentAvailable=data.paymentAvailable;provider=data.paymentProvider;paymentMethods=data.paymentMethods??[];selectedChannel=paymentMethods[0]?.channel??null;
+        selected=data.packages.find(item=>item.id===pkgId)||null;paymentAvailable=data.paymentAvailable;provider=data.paymentProvider;paymentMethods=data.paymentMethods??[];
+        selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
+        try{const config=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');boltAvailable=config.available===true&&config.networks?.length>0;}
+        catch{boltAvailable=false;}
         if(resumeOrderId){
           const saved=await loadOrderCheckout(resumeOrderId,api);
           confirmedMk99OrderId=saved.verified?resumeOrderId:null;
@@ -255,6 +282,11 @@ import Base from "../layouts/Base.astro";
         const changed=paymentAvailable!==data.paymentAvailable;
         paymentAvailable=data.paymentAvailable;
         paymentMethods=data.paymentMethods??[];
+        if(!paymentMethods.some(m=>m.channel===selectedChannel&&m.provider===selectedProvider)){
+          selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
+        }
+        try{const config=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');boltAvailable=config.available===true&&config.networks?.length>0;}
+        catch{boltAvailable=false;}
         // A closed switch must not erase the provider needed by an existing order's manual refresh.
         if(data.paymentProvider)provider=data.paymentProvider;
         else if(!order)provider=null;
@@ -281,11 +313,20 @@ import Base from "../layouts/Base.astro";
     window.addEventListener("focus",scheduleAvailabilityRefresh);
     document.addEventListener("visibilitychange",scheduleAvailabilityRefresh);
     async function startOrder(restart=false){
-      if(!selected||busy||(!restart&&order)||!paymentAvailable)return;
+      if(!selected||busy||(!restart&&order)||!paymentAvailable||paymentRail!=='fiat')return;
       if(restart&&(order?order.paymentProtocol!=="epay":selectedProvider!=="xiaodou_epay"))return;
       busy=true;render();setStatus("正在创建订单…","Creating order…");let failureMessage:string|null=null;
       try{
-        if(!restart){try{if(await resumeExistingCreditOrder())return;}catch{/* Fall through to server atomic duplicate guard. */}}
+        if(!restart){
+          const latest=await api<{packages:Package[];paymentAvailable:boolean;paymentMethods?:PaymentMethod[]}>('/v1/packages');
+          paymentAvailable=latest.paymentAvailable===true;paymentMethods=latest.paymentMethods??[];
+          if(!paymentAvailable||!paymentMethods.some(m=>m.provider===selectedProvider&&m.channel===selectedChannel)){
+            selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
+            setStatus('后台支付渠道已切换，请重新选择。','Payment channel changed; choose another option.');
+            return;
+          }
+          try{if(await resumeExistingCreditOrder())return;}catch{/* Server rechecks atomically. */}
+        }
         const result=await api<{order:Order}>("/v1/orders",{method:"POST",body:JSON.stringify({packageId:selected.id,...(!restart&&selectedChannel?{provider:selectedProvider,channel:selectedChannel}:{}),...(restart?{restartPayment:true}:{})})});restartAvailable=false;showOrder(result.order);
         if(result.order.paymentProtocol==="mk99"&&result.order.status==="pending"){
           const saved=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(result.order.id));
