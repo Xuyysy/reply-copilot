@@ -37,6 +37,10 @@ test('subscription checkout revalidates paid methods and does not reveal backend
  assert.match(subscription,/if\(rail!=='fiat'\|\|!methods\.includes\(channel\)\)/);
  assert.match(subscription,/fiatMethods\.map\(value=>/);
  assert.match(subscription,/usdtHref/);
+ assert.match(subscription,/name="subscription-intent"/);
+ assert.match(subscription,/setUpgrade\(true\)/);
+ assert.match(subscription,/setUpgrade\(false\)/);
+ assert.match(subscription,/!canUpgrade/);
  assert.match(subscription,/\/v1\/boltutil\/availability/);
  assert.doesNotMatch(subscription,/>小豆支付</);
  assert.doesNotMatch(subscription,/>MK99 支付</);

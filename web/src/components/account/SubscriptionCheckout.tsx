@@ -5,6 +5,8 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
 type BoltAvailability={available:boolean;networks:string[]};
+type SubscriptionUsage={subscription?:{status:string;plan:string|null;expiresAt:string|null}};
+const planOrder=['basic','pro','max','ultra'];
 const visibleFiat=(c:Catalog)=>c.checkoutAvailable?c.paymentMethods.filter(v=>v==='ALIPAY_H5'||v==='WECHAT_H5'):[];
 
 export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
@@ -19,7 +21,7 @@ export default function SubscriptionCheckout(){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [params]=useState(()=>new URLSearchParams(location.search));
  const target=params.get('plan')??'';
- const upgrade=params.get('upgrade')==='1';
+ const [upgrade,setUpgrade]=useState(params.get('upgrade')==='1');
  const [id,setId]=useState(params.get('order')??'');
  const [catalog,setCatalog]=useState<Catalog>();
  const [order,setOrder]=useState<SubscriptionOrder>();
@@ -29,6 +31,7 @@ export default function SubscriptionCheckout(){
  const [channel,setChannel]=useState('');
  const [rail,setRail]=useState<'fiat'|'usdt'>('fiat');
  const [bolt,setBolt]=useState<BoltAvailability>({available:false,networks:[]});
+ const [currentSub,setCurrentSub]=useState<SubscriptionUsage['subscription']>();
  const [methodsLoading,setMethodsLoading]=useState(false);
  const [quote,setQuote]=useState<Quote>();
  const [error,setError]=useState<unknown>();
@@ -41,8 +44,8 @@ export default function SubscriptionCheckout(){
   let active=true;
   const read=id
    ? (orderPattern.test(id)?api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id).then(result=>{if(active){setOrder(result.order);setPayUrl(result.order.status==='pending'&&!result.order.checkout.paymentConfirmed?result.order.checkout.paymentUrl:null);}}):Promise.reject(new ApiError('订单编号无效。','INVALID_ORDER_ID',400)))
-   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api('/v1/usage')]).then(([result])=>{
-     if(active){setCatalog(result);setChannel(old=>visibleFiat(result).includes(old)?old:visibleFiat(result)[0]??'');}
+   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api<SubscriptionUsage>('/v1/usage')]).then(([result,usage])=>{
+     if(active){setCatalog(result);setChannel(old=>visibleFiat(result).includes(old)?old:visibleFiat(result)[0]??'');setCurrentSub(usage.subscription);}
    });
   void read.catch(cause=>{if(active)setError(cause);}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
@@ -54,14 +57,15 @@ export default function SubscriptionCheckout(){
    if(document.visibilityState==='hidden')return;
    setMethodsLoading(true);
    try{
-    const [fresh,availability]=await Promise.all([
+    const [fresh,availability,usage]=await Promise.all([
       api<Catalog>('/v1/subscriptions/plans'),
-      api<BoltAvailability>('/v1/boltutil/availability').catch(()=>({available:false,networks:[]}))
+      api<BoltAvailability>('/v1/boltutil/availability').catch(()=>({available:false,networks:[]})),
+      api<SubscriptionUsage>('/v1/usage')
     ]);
     if(!mounted)return;
     setCatalog(fresh);
     setChannel(current=>visibleFiat(fresh).includes(current)?current:visibleFiat(fresh)[0]??'');
-    setBolt(availability);
+    setBolt(availability);setCurrentSub(usage.subscription);
    }catch{
     if(mounted){setCatalog(current=>current?{...current,checkoutAvailable:false,paymentMethods:[]}:current);setChannel('');setBolt({available:false,networks:[]});}
    }finally{if(mounted)setMethodsLoading(false);}
@@ -133,6 +137,10 @@ export default function SubscriptionCheckout(){
  }
  const signedOut=error instanceof ApiError&&error.status===401;
  const fiatMethods=catalog?visibleFiat(catalog):[];
+ const canUpgrade=currentSub?.status==='active'&&currentSub.plan!==null&&
+   planOrder.indexOf(target)>planOrder.indexOf(currentSub.plan??'')&&
+   planOrder.indexOf(currentSub.plan??'')>=0&&
+   Boolean(currentSub.expiresAt)&&new Date(currentSub.expiresAt!).getTime()>Date.now()+86400000;
  const usdtAvailable=bolt.available===true&&bolt.networks.length>0;
  const usdtHref='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'');
  return <div className="space-y-5">
@@ -161,6 +169,13 @@ export default function SubscriptionCheckout(){
    {upgrade?<p>{quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
     :t('先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a quote first. With less than 24 hours remaining, purchase the next period.')}</p>
     :<p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>}
+   {currentSub?.status==='active'&&planOrder.indexOf(target)>planOrder.indexOf(currentSub.plan??'')&&
+    <fieldset className="space-y-2 rounded-xl border p-4" disabled={busy||methodsLoading}>
+     <legend className="font-semibold">{t('本次购买用途','Purchase intent')}</legend>
+     <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={!upgrade} onChange={()=>{setUpgrade(false);setQuote(undefined);}} />{t('购买下一期（当前到期后生效）','Buy next period (after current expiry)')}</label>
+     <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={upgrade} disabled={!canUpgrade} onChange={()=>{setUpgrade(true);setQuote(undefined);}} />{t('本期升档（补差价、到期日不变）','Upgrade now (prorated, same expiry)')}</label>
+     {!canUpgrade?<p className="text-sm text-muted-foreground">{t('当前不符合本期升档条件，可购买下一期。','Current-period upgrade unavailable; you may buy the next period.')}</p>:null}
+    </fieldset>}
    <fieldset className="space-y-3" disabled={busy||methodsLoading}>
      <legend className="font-semibold">{t('选择支付方式','Select payment method')}</legend>
      <div className="grid gap-3 sm:grid-cols-2">
@@ -177,10 +192,10 @@ export default function SubscriptionCheckout(){
     {methodsLoading?<p role="status">{t('正在同步可用支付方式…','Refreshing payment methods…')}</p>:null}
     {rail==='usdt'?<div className="space-y-3 rounded-xl border bg-slate-50 p-4">
       <p>{t('下一步选择 TRON、Polygon 或 BNB 网络。','Next choose TRON, Polygon or BNB network.')}</p>
-      {usdtAvailable?<a className="button" href={usdtHref}>{t('继续选择 USDT 网络','Continue to USDT networks')}</a>:
-       <p role="status" className="notice">{t('USDT 收款尚未配置，无法创建真实订单。','USDT not configured; real payment orders are disabled.')}</p>}
+      {usdtAvailable&&(!upgrade||canUpgrade)?<a className="button" href={usdtHref}>{t('继续选择 USDT 网络','Continue to USDT networks')}</a>:
+       <p role="status" className="notice">{upgrade&&!canUpgrade?t('当前订阅不满足本期升档条件，可改为购买下一期。','This upgrade is not eligible. You may buy the next period.'):t('USDT 收款尚未配置，无法创建真实订单。','USDT not configured; real payment orders are disabled.')}</p>}
      </div>:<>
-     {upgrade&&!quote?<button className="button" disabled={busy||methodsLoading||!fiatMethods.includes(channel)} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
+     {upgrade&&!quote?<button className="button" disabled={busy||methodsLoading||!fiatMethods.includes(channel)||!canUpgrade} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
       {quote?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
       <button className="button" disabled={busy||methodsLoading||!fiatMethods.includes(channel)||Boolean(quote&&quote.expiresAt<=Date.now())} onClick={()=>void act('create')}>{t('确认金额并创建订单','Confirm amount and create order')}</button>
       {quote?<button className="button secondary" disabled={busy} onClick={()=>void act('quote')}>{t('重新报价','Refresh quote')}</button>:null}
