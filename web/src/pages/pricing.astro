@@ -22,14 +22,6 @@ import Base from "../layouts/Base.astro";
     <p id="subscription-disclosure" class="fineprint" style="margin-top:20px"></p>
   </section>
   <div id="legacy-pricing-hero" class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
-  <section class="container section" aria-labelledby="usdt-network-title" style="padding-top:16px;padding-bottom:6px">
-    <div class="pricing-card" id="usdt-payment-method" aria-label="USDT independent checkout">
-      <p class="eyebrow" data-zh="独立支付通道 · 不受人民币商户切换影响" data-en="Independent payment rail · Not affected by fiat merchant selection">独立支付通道 · 不受人民币商户切换影响</p>
-      <h2 id="usdt-network-title" data-zh="USDT · TRON / Polygon / BNB Smart Chain" data-en="USDT · TRON / Polygon / BNB Smart Chain">USDT · TRON / Polygon / BNB Smart Chain</h2>
-      <p id="usdt-rail-status" role="status" class="fineprint" data-zh="三链收款测试版已部署，商户配置未完成，暂不可创建真实付款订单。" data-en="Three-network staging UI is deployed. Merchant setup is incomplete; real payment invoices are disabled.">三链收款测试版已部署，商户配置未完成，暂不可创建真实付款订单。</p>
-      <a class="button secondary" href="/usdt-checkout/" data-zh="查看 USDT 三链测试版" data-en="Preview USDT networks">查看 USDT 三链测试版</a>
-    </div>
-  </section>
   <section class="container section" aria-labelledby="credit-packs-title" style="padding-top:20px">
     <div class="section-heading">
       <p class="eyebrow" data-zh="独立购买 · 超量补充">Buy separately · Extra generations</p>
@@ -82,29 +74,11 @@ import Base from "../layouts/Base.astro";
         const allowance=document.createElement('p');allowance.className='subscription-limit';allowance.textContent=p.daily_limit.toLocaleString()+' '+txt('次/天','generations/day');
         const description=document.createElement('p');description.textContent=(en?p.description_en:p.description_zh)||txt('每次生成三个候选回复','Three reply suggestions per generation');
         const unavailable=document.createElement('p');unavailable.className='notice';unavailable.textContent=txt('订阅结账尚未开放，请勿付款。','Subscription checkout is not yet available. No payment can be made.');
-        if(checkoutAvailable){
-          const buy=document.createElement('a');buy.className='button';buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
-          buy.textContent=txt('购买或续购','Purchase or renew');unavailable.replaceChildren(buy);
-        }
+        const buy=document.createElement('a');buy.className='button';
+        buy.href='/subscription-checkout/?plan='+encodeURIComponent(p.plan_code);
+        buy.textContent=txt('购买或续购','Purchase or renew');
+        unavailable.replaceChildren(buy);
         card.append(label,heading,price,period,allowance,description,unavailable);
-        {
-          const usdt=document.createElement('a');
-          usdt.className='button secondary';
-          usdt.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code);
-          usdt.textContent=boltutilAvailable
-            ?txt('USDT · 购买／续购','USDT · Buy / renew')
-            :txt('USDT · 购买／续购（未开放）','USDT · Buy / renew (not open)');
-          const upgrade=document.createElement('a');
-          upgrade.className='button secondary';
-          upgrade.href='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(p.plan_code)+'&upgrade=1';
-          upgrade.textContent=boltutilAvailable
-            ?txt('USDT · 本期升档','USDT · Upgrade this period')
-            :txt('USDT · 升档（未开放）','USDT · Upgrade (not open)');
-          const actions=document.createElement('div');
-          actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';
-          actions.append(usdt,upgrade);
-          card.append(actions);
-        }
         box.append(card);
       }
     }
@@ -120,32 +94,18 @@ import Base from "../layouts/Base.astro";
         renderSubscriptions();
       }catch{/* Prior to full subscription rollout, keep existing credit pricing unchanged. */}
     }
+    // The pricing page lists products only; payment options are selected in checkout.
+    // USDT availability is independent of the current fiat merchant.
     void api<{available:boolean}>('/v1/boltutil/availability')
-      .then(data=>{
-        boltutilAvailable=data.available===true;
-        const status=document.getElementById('usdt-rail-status');
-        if(status)status.textContent=boltutilAvailable
-          ?(document.documentElement.lang==='en'?'USDT payment enabled on configured networks. Choose a plan below.':'USDT 已按已配置的网络开放，可在下方选择套餐。')
-          :(document.documentElement.lang==='en'?'USDT networks are visible for preview; merchant setup is incomplete and real payments are disabled.':'USDT 三链入口可预览；商户配置未完成，目前不能真实付款。');
-        document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;
-        renderSubscriptions();render();
-      })
-      .catch(()=>{boltutilAvailable=false;renderSubscriptions();render();});
+      .then(v=>{boltutilAvailable=v.available===true;})
+      .catch(()=>{boltutilAvailable=false;});
     void loadSubscriptions();
     window.addEventListener('reply-copilot-language',renderSubscriptions);
 
     type Package={id:string;name_zh:string;name_en:string;credits:number;price_cents:number;promo_price_cents:number|null;currency:string;fee_rate_bps:number;total_payment_fen?:number|null;merchant_pricing?:{feeBearer:string;rateBps:number;status:string};description_zh?:string;description_en?:string;featured?:boolean;recommended_label_zh?:string;recommended_label_en?:string};
     let packages:Package[]|null=null;
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
-    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);
-      {
-        const usdt=document.createElement('a');usdt.className='button secondary';
-        usdt.href='/usdt-checkout/?productType=credits&sku='+encodeURIComponent(pkg.id);
-        usdt.textContent=boltutilAvailable
-          ?label('USDT · 三链支付','USDT · Pay on 3 networks')
-          :label('USDT · 三链支付（未开放）','USDT · 3 networks (not open)');
-        card.append(usdt);
-      }
+    function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("购买额度包","Purchase credits");card.append(kind,heading,price,detail,description,cny,fee,link);
       box.append(card);}}
     async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;fiatCreditAvailable=data.paymentAvailable===true;document.getElementById("payment-status")!.hidden=fiatCreditAvailable||boltutilAvailable;render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
     let refreshTimer:ReturnType<typeof setTimeout>|undefined;

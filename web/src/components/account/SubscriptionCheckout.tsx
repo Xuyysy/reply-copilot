@@ -4,6 +4,11 @@ import {phrase,readableError,useLanguage} from '../../lib/language';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
+type BoltAvailability={available:boolean;networks:string[]};
+type SubscriptionUsage={subscription?:{status:string;plan:string|null;expiresAt:string|null}};
+const planOrder=['basic','pro','max','ultra'];
+const visibleFiat=(c:Catalog)=>c.checkoutAvailable?c.paymentMethods.filter(v=>v==='ALIPAY_H5'||v==='WECHAT_H5'):[];
+
 export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
@@ -16,7 +21,7 @@ export default function SubscriptionCheckout(){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [params]=useState(()=>new URLSearchParams(location.search));
  const target=params.get('plan')??'';
- const upgrade=params.get('upgrade')==='1';
+ const [upgrade,setUpgrade]=useState(params.get('upgrade')==='1');
  const [id,setId]=useState(params.get('order')??'');
  const [catalog,setCatalog]=useState<Catalog>();
  const [order,setOrder]=useState<SubscriptionOrder>();
@@ -24,10 +29,15 @@ export default function SubscriptionCheckout(){
  const [paymentNote,setPaymentNote]=useState('');
  const [blockingOrder,setBlockingOrder]=useState<SubscriptionOrder|null>(null);
  const [channel,setChannel]=useState('');
+ const [rail,setRail]=useState<'fiat'|'usdt'>('fiat');
+ const [bolt,setBolt]=useState<BoltAvailability>({available:false,networks:[]});
+ const [currentSub,setCurrentSub]=useState<SubscriptionUsage['subscription']>();
+ const [methodsLoading,setMethodsLoading]=useState(false);
  const [quote,setQuote]=useState<Quote>();
  const [error,setError]=useState<unknown>();
  const [busy,setBusy]=useState(false);
  const [loading,setLoading]=useState(true);
+ const syncEpoch=useRef(0);
  const operation=useRef(false);
  const key=useRef<string|null>(null);
  const plan=catalog?.plans.find(item=>item.plan_code===target);
@@ -35,11 +45,38 @@ export default function SubscriptionCheckout(){
   let active=true;
   const read=id
    ? (orderPattern.test(id)?api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id).then(result=>{if(active){setOrder(result.order);setPayUrl(result.order.status==='pending'&&!result.order.checkout.paymentConfirmed?result.order.checkout.paymentUrl:null);}}):Promise.reject(new ApiError('订单编号无效。','INVALID_ORDER_ID',400)))
-   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api('/v1/usage')]).then(([result])=>{
-     if(active){setCatalog(result);setChannel(result.paymentMethods[0]??'');}
+   : Promise.all([api<Catalog>('/v1/subscriptions/plans'),api<SubscriptionUsage>('/v1/usage')]).then(([result,usage])=>{
+     if(active){setCatalog(result);setChannel(old=>visibleFiat(result).includes(old)?old:visibleFiat(result)[0]??'');setCurrentSub(usage.subscription);}
    });
   void read.catch(cause=>{if(active)setError(cause);}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
+ },[id]);
+ useEffect(()=>{
+  if(id)return;
+  let mounted=true;
+  async function sync(){
+   if(document.visibilityState==='hidden')return;
+   const epoch=++syncEpoch.current;
+   setMethodsLoading(true);
+   try{
+    const [fresh,availability,usage]=await Promise.all([
+      api<Catalog>('/v1/subscriptions/plans'),
+      api<BoltAvailability>('/v1/boltutil/availability').catch(()=>({available:false,networks:[]})),
+      api<SubscriptionUsage>('/v1/usage')
+    ]);
+    if(!mounted||epoch!==syncEpoch.current)return;
+    setCatalog(fresh);
+    setChannel(current=>visibleFiat(fresh).includes(current)?current:visibleFiat(fresh)[0]??'');
+    setBolt(availability);setCurrentSub(usage.subscription);
+   }catch{
+    if(mounted&&epoch===syncEpoch.current){setCatalog(current=>current?{...current,checkoutAvailable:false,paymentMethods:[]}:current);setChannel('');setBolt({available:false,networks:[]});}
+   }finally{if(mounted&&epoch===syncEpoch.current)setMethodsLoading(false);}
+  }
+  const onFocus=()=>void sync();
+  const onVisible=()=>{if(document.visibilityState==='visible')void sync();};
+  void sync();window.addEventListener('focus',onFocus);
+  document.addEventListener('visibilitychange',onVisible);
+  return()=>{mounted=false;syncEpoch.current++;window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);};
  },[id]);
 
  async function act(action:'quote'|'create'|'refresh'|'relaunch'){
@@ -49,6 +86,13 @@ export default function SubscriptionCheckout(){
    if(action==='quote'){
     setQuote((await api<{quote:Quote}>('/v1/subscriptions/upgrade-quote',{method:'POST',body:JSON.stringify({planCode:target})})).quote);
    }else if(action==='create'){
+    // Re-check the backend-owned merchant/channel policy immediately before a new payment.
+    const fresh=await api<Catalog>('/v1/subscriptions/plans');
+    const methods=visibleFiat(fresh);
+    setCatalog(fresh);
+    setChannel(current=>methods.includes(current)?current:methods[0]??'');
+    if(rail!=='fiat'||!methods.includes(channel))throw new ApiError(
+      t('支付渠道已变更，请重新选择。','Payment channel changed; choose an available method.'),'PAYMENT_METHOD_CHANGED',409);
     key.current??=crypto.randomUUID();
     const result=await api<{order:SubscriptionOrder;resumed:boolean}>('/v1/subscriptions/orders',{method:'POST',
       body:JSON.stringify({planCode:target,channel,idempotencyKey:key.current,...(upgrade?{quoteId:quote?.id}:{})})});
@@ -94,6 +138,13 @@ export default function SubscriptionCheckout(){
   history.replaceState(null,'','/subscription-checkout/?order='+encodeURIComponent(value.id));
  }
  const signedOut=error instanceof ApiError&&error.status===401;
+ const fiatMethods=catalog?visibleFiat(catalog):[];
+ const canUpgrade=currentSub?.status==='active'&&currentSub.plan!==null&&
+   planOrder.indexOf(target)>planOrder.indexOf(currentSub.plan??'')&&
+   planOrder.indexOf(currentSub.plan??'')>=0&&
+   Boolean(currentSub.expiresAt)&&new Date(currentSub.expiresAt!).getTime()>Date.now()+86400000;
+ const usdtAvailable=bolt.available===true&&bolt.networks.length>0;
+ const usdtHref='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'');
  return <div className="space-y-5">
   {loading?<p role="status">{t('正在读取订阅…','Loading subscription…')}</p>:null}
   {error?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
@@ -115,22 +166,46 @@ export default function SubscriptionCheckout(){
     <button className="button secondary" disabled={busy} onClick={()=>void act('relaunch')}>{t('重新生成原订单二维码','Generate new QR code for this order')}</button>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>
   </section>:null}
-  {!id&&!loading&&plan&&catalog?.checkoutAvailable?<section className="pricing-card space-y-3">
+  {!id&&!loading&&plan&&catalog?<section className="pricing-card space-y-4">
    <h2>{language==='en'?plan.name_en:plan.name_zh}</h2>
    {upgrade?<p>{quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
     :t('先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a quote first. With less than 24 hours remaining, purchase the next period.')}</p>
     :<p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>}
-   {upgrade&&!quote?<button className="button" disabled={busy} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
-    {quote?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
-    <fieldset disabled={busy}><legend>{t('支付方式','Payment method')}</legend>
-     {catalog.paymentMethods.map(value=><label key={value} className="block"><input type="radio" name="payment-method" checked={channel===value} onChange={()=>setChannel(value)} /> {value==='WECHAT_H5'?t('微信支付','WeChat Pay'):t('支付宝','Alipay')}</label>)}
+   {currentSub?.status==='active'&&planOrder.indexOf(target)>planOrder.indexOf(currentSub.plan??'')&&
+    <fieldset className="space-y-2 rounded-xl border p-4" disabled={busy||methodsLoading}>
+     <legend className="font-semibold">{t('本次购买用途','Purchase intent')}</legend>
+     <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={!upgrade} onChange={()=>{setUpgrade(false);setQuote(undefined);}} />{t('购买下一期（当前到期后生效）','Buy next period (after current expiry)')}</label>
+     <label className="flex items-center gap-2"><input type="radio" name="subscription-intent" checked={upgrade} disabled={!canUpgrade} onChange={()=>{setUpgrade(true);setQuote(undefined);}} />{t('本期升档（补差价、到期日不变）','Upgrade now (prorated, same expiry)')}</label>
+     {!canUpgrade?<p className="text-sm text-muted-foreground">{t('当前不符合本期升档条件，可购买下一期。','Current-period upgrade unavailable; you may buy the next period.')}</p>:null}
+    </fieldset>}
+   <fieldset className="space-y-3" disabled={busy||methodsLoading}>
+     <legend className="font-semibold">{t('选择支付方式','Select payment method')}</legend>
+     <div className="grid gap-3 sm:grid-cols-2">
+      {fiatMethods.map(value=><label key={value} className={'flex cursor-pointer items-center gap-3 rounded-xl border p-4 '+(rail==='fiat'&&channel===value?'border-blue-500 bg-blue-50':'bg-white')}>
+       <input type="radio" name="payment-method" checked={rail==='fiat'&&channel===value} onChange={()=>{setRail('fiat');setChannel(value);setQuote(undefined);}}/>
+       <strong>{value==='WECHAT_H5'?t('微信支付','WeChat Pay'):t('支付宝','Alipay')}</strong>
+      </label>)}
+      <label className={'flex cursor-pointer items-center gap-3 rounded-xl border p-4 '+(rail==='usdt'?'border-blue-500 bg-blue-50':'bg-white')}>
+       <input type="radio" name="payment-method" checked={rail==='usdt'} onChange={()=>{setRail('usdt');setQuote(undefined);}}/>
+       <span><strong>USDT</strong><small className="block text-muted-foreground">{usdtAvailable?t('TRON / Polygon / BNB','TRON / Polygon / BNB'):t('暂未开放','Not available')}</small></span>
+      </label>
+     </div>
     </fieldset>
+    {methodsLoading?<p role="status">{t('正在同步可用支付方式…','Refreshing payment methods…')}</p>:null}
+    {rail==='usdt'?<div className="space-y-3 rounded-xl border bg-slate-50 p-4">
+      <p>{t('下一步选择 TRON、Polygon 或 BNB 网络。','Next choose TRON, Polygon or BNB network.')}</p>
+      {usdtAvailable&&(!upgrade||canUpgrade)?<a className="button" href={usdtHref}>{t('继续选择 USDT 网络','Continue to USDT networks')}</a>:
+       <p role="status" className="notice">{upgrade&&!canUpgrade?t('当前订阅不满足本期升档条件，可改为购买下一期。','This upgrade is not eligible. You may buy the next period.'):t('USDT 收款尚未配置，无法创建真实订单。','USDT not configured; real payment orders are disabled.')}</p>}
+     </div>:<>
+     {upgrade&&!quote?<button className="button" disabled={busy||methodsLoading||!fiatMethods.includes(channel)||!canUpgrade} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
+      {quote?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
+      <button className="button" disabled={busy||methodsLoading||!fiatMethods.includes(channel)||Boolean(quote&&quote.expiresAt<=Date.now())} onClick={()=>void act('create')}>{t('确认金额并创建订单','Confirm amount and create order')}</button>
+      {quote?<button className="button secondary" disabled={busy} onClick={()=>void act('quote')}>{t('重新报价','Refresh quote')}</button>:null}
+     </>}
+    </>}
     <p><a href="/terms/">{t('服务条款','Terms')}</a> · <a href="/refunds/">{t('退款说明','Refunds')}</a></p>
-    <button className="button" disabled={busy||!channel||Boolean(quote&&quote.expiresAt<=Date.now())} onClick={()=>void act('create')}>{t('确认金额并创建订单','Confirm amount and create order')}</button>
-    {quote?<button className="button secondary" disabled={busy} onClick={()=>void act('quote')}>{t('重新报价','Refresh quote')}</button>:null}
-   </>}
   </section>:null}
-  {!id&&!loading&&catalog&&(!plan||!catalog.checkoutAvailable)?<p role="status">{t('所选订阅暂不可购买。永久额度购买不受影响。','This subscription is unavailable. Permanent credits are still available.')}</p>:null}
+  {!id&&!loading&&catalog&&!plan?<p role="status">{t('所选订阅暂不可购买。','This subscription is unavailable.')}</p>:null}
   <a href="/pricing/">{t('查看套餐','View plans')}</a>
  </div>;
 }

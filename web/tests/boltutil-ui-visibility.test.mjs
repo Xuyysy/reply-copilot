@@ -7,17 +7,43 @@ const checkout=readFileSync(new URL('../src/pages/usdt-checkout.astro',import.me
 const admin=readFileSync(new URL('../src/components/admin/AdminDashboard.tsx',import.meta.url),'utf8');
 const panel=readFileSync(new URL('../src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
 
-test('Staging pricing advertises USDT independent of unavailable merchant configuration',()=>{
- assert.match(pricing,/id="usdt-payment-method"/);
- assert.match(pricing,/TRON \/ Polygon \/ BNB Smart Chain/);
- assert.match(pricing,/href="\/usdt-checkout\/"/);
- const subs=pricing.slice(pricing.indexOf("const unavailable=document.createElement"),pricing.indexOf("box.append(card);",pricing.indexOf("const unavailable=document.createElement")));
- assert.match(subs,/const usdt=document.createElement/);
- assert.match(subs,/const upgrade=document.createElement/);
- assert.doesNotMatch(subs,/if\(boltutilAvailable\)\s*\{/);
+test('pricing has one purchase action per product; payment choices live in checkout',()=>{
+ assert.doesNotMatch(pricing,/id="usdt-payment-method"/);
+ assert.doesNotMatch(pricing,/const upgrade=document.createElement/);
+ const subs=pricing.slice(pricing.indexOf("function renderSubscriptions()"),pricing.indexOf("async function loadSubscriptions()"));
+ assert.match(subs,/buy\.href='\/subscription-checkout\/\?plan='/);
+ assert.doesNotMatch(subs,/usdt-checkout/);
  const packs=pricing.slice(pricing.indexOf("function render(){const box"),pricing.indexOf("async function load(){"));
- assert.match(packs,/const usdt=document.createElement/);
- assert.doesNotMatch(packs,/if\(boltutilAvailable\)\s*\{/);
+ assert.match(packs,/link\.href=\`\/checkout\?package=/);
+ assert.doesNotMatch(packs,/const usdt=document.createElement/);
+});
+test('permanent credit checkout only renders backend-authorized fiat methods plus independent USDT',()=>{
+ const credit=readFileSync(new URL('../src/pages/checkout.astro',import.meta.url),'utf8');
+ assert.match(credit,/uniquePaymentMethods\(paymentMethods\.filter\(method=>method\.provider===provider\)\)/);
+ assert.match(credit,/paymentRail==='fiat'/);
+ assert.match(credit,/const usdtRadio=document\.createElement/);
+ assert.match(credit,/\/v1\/boltutil\/availability/);
+ assert.match(credit,/\/v1\/packages/);
+ assert.match(credit,/paymentMethods\.some\(m=>m\.provider===selectedProvider&&m\.channel===selectedChannel\)/);
+ assert.match(credit,/selectedChannel=paymentMethods\[0\]\?\.channel/);
+ assert.doesNotMatch(credit,/扫码后将在手机微信中打开小豆收银台/);
+});
+test('subscription checkout revalidates paid methods and does not reveal backend merchant names',()=>{
+ const subscription=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
+ assert.match(subscription,/visibleFiat\(fresh\)/);
+ assert.match(subscription,/window\.addEventListener\('focus',onFocus\)/);
+ assert.match(subscription,/document\.addEventListener\('visibilitychange',onVisible\)/);
+ assert.match(subscription,/const fresh=await api<Catalog>\('\/v1\/subscriptions\/plans'\)/);
+ assert.match(subscription,/if\(rail!=='fiat'\|\|!methods\.includes\(channel\)\)/);
+ assert.match(subscription,/fiatMethods\.map\(value=>/);
+ assert.match(subscription,/usdtHref/);
+ assert.match(subscription,/name="subscription-intent"/);
+ assert.match(subscription,/setUpgrade\(true\)/);
+ assert.match(subscription,/setUpgrade\(false\)/);
+ assert.match(subscription,/!canUpgrade/);
+ assert.match(subscription,/\/v1\/boltutil\/availability/);
+ assert.doesNotMatch(subscription,/>小豆支付</);
+ assert.doesNotMatch(subscription,/>MK99 支付</);
 });
 test('three networks are visible for checkout preview, but new order buttons are gated by availability',()=>{
  for(const code of ["TRC20","POLYGON","BEP20"])assert.match(checkout,new RegExp('value="'+code+'"'));
