@@ -64,10 +64,33 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
           AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)
       )
     LIMIT 1`).bind(userId,now,now,env.ENVIRONMENT).first<ActivePeriod>();
+
+  // The BoltUtil proof is a separate money domain. Never query its tables
+  // before an independently approved Staging migration has been applied.
+  const cryptoReady=env.ENVIRONMENT==='staging'&&env.BOLTUTIL_SCHEMA_READY==='1';
+  const cryptoQuery=()=>env.DB.prepare(
+    "SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code FROM subscription_periods p "+
+    "JOIN subscription_plan_versions v ON v.id=p.plan_version_id "+
+    "JOIN subscription_orders o ON o.id=p.source_order_id AND o.user_id=p.user_id "+
+    "JOIN boltutil_orders b ON b.subscription_order_id=o.id AND b.user_id=p.user_id "+
+    "JOIN users u ON u.id=p.user_id "+
+    "WHERE p.user_id=? AND p.status='active' AND p.start_at<=? AND p.end_at>? "+
+    "AND u.status='active' AND u.archived_at IS NULL "+
+    "AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL "+
+    "AND b.status='paid' AND b.paid_at IS NOT NULL AND b.applied_at IS NOT NULL "+
+    "AND b.product_type='subscription' AND b.tx_hash IS NOT NULL AND b.receiving_address IS NOT NULL "+
+    "AND b.payable_usdt_micros>=1000000 AND b.paid_usdt_micros>=b.payable_usdt_micros "+
+    "AND EXISTS(SELECT 1 FROM boltutil_payment_events e WHERE e.external_order_id=b.external_order_id "+
+    "AND e.network=b.network AND e.tx_hash=b.tx_hash AND e.body_sha256 IS NOT NULL) LIMIT 1")
+      .bind(userId,now,now).first<ActivePeriod>();
   let row = await activeQuery();
+  if(!row&&cryptoReady)row=await cryptoQuery();
   if (!row) {
     // A verified queued renewal becomes usable on the first request after expiry.
-    if (await activateQueuedSubscriptionForUser(env,userId,now)) row=await activeQuery();
+    if (await activateQueuedSubscriptionForUser(env,userId,now)){
+      row=await activeQuery();
+      if(!row&&cryptoReady)row=await cryptoQuery();
+    }
   }
   if (!row) return { ...NONE };
 
