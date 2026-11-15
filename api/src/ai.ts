@@ -7,6 +7,7 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
+import { buildLiveProductionV3Prompts } from "../../prompts/prompt-v3-live-parity.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
@@ -102,7 +103,8 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  const prompts = buildPrompts({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
+  const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildLiveProductionV3Prompts:buildPrompts;
+  const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
