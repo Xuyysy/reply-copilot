@@ -37,6 +37,7 @@ export default function SubscriptionCheckout(){
  const [error,setError]=useState<unknown>();
  const [busy,setBusy]=useState(false);
  const [loading,setLoading]=useState(true);
+ const syncEpoch=useRef(0);
  const operation=useRef(false);
  const key=useRef<string|null>(null);
  const plan=catalog?.plans.find(item=>item.plan_code===target);
@@ -55,6 +56,7 @@ export default function SubscriptionCheckout(){
   let mounted=true;
   async function sync(){
    if(document.visibilityState==='hidden')return;
+   const epoch=++syncEpoch.current;
    setMethodsLoading(true);
    try{
     const [fresh,availability,usage]=await Promise.all([
@@ -62,19 +64,19 @@ export default function SubscriptionCheckout(){
       api<BoltAvailability>('/v1/boltutil/availability').catch(()=>({available:false,networks:[]})),
       api<SubscriptionUsage>('/v1/usage')
     ]);
-    if(!mounted)return;
+    if(!mounted||epoch!==syncEpoch.current)return;
     setCatalog(fresh);
     setChannel(current=>visibleFiat(fresh).includes(current)?current:visibleFiat(fresh)[0]??'');
     setBolt(availability);setCurrentSub(usage.subscription);
    }catch{
-    if(mounted){setCatalog(current=>current?{...current,checkoutAvailable:false,paymentMethods:[]}:current);setChannel('');setBolt({available:false,networks:[]});}
-   }finally{if(mounted)setMethodsLoading(false);}
+    if(mounted&&epoch===syncEpoch.current){setCatalog(current=>current?{...current,checkoutAvailable:false,paymentMethods:[]}:current);setChannel('');setBolt({available:false,networks:[]});}
+   }finally{if(mounted&&epoch===syncEpoch.current)setMethodsLoading(false);}
   }
   const onFocus=()=>void sync();
   const onVisible=()=>{if(document.visibilityState==='visible')void sync();};
   void sync();window.addEventListener('focus',onFocus);
   document.addEventListener('visibilitychange',onVisible);
-  return()=>{mounted=false;window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);};
+  return()=>{mounted=false;syncEpoch.current++;window.removeEventListener('focus',onFocus);document.removeEventListener('visibilitychange',onVisible);};
  },[id]);
 
  async function act(action:'quote'|'create'|'refresh'|'relaunch'){
