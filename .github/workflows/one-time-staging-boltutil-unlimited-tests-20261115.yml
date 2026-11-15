@@ -20,13 +20,13 @@ jobs:
       github.event.comment.user.login == 'Xuyysy' &&
       github.event.issue.number == 143 &&
       github.event.issue.pull_request != null &&
-      github.event.comment.body == '/deploy-staging-unlimited-boltutil-tests 321aac77c25633716620d9b19904033068191d99'
+      github.event.comment.body == '/deploy-staging-unlimited-boltutil-tests 73d72fab2aecccc57d498858780fc3b1cb487c93'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       GH_TOKEN: ${{ github.token }}
-      SOURCE_SHA: '321aac77c25633716620d9b19904033068191d99'
-      CI_RUN_ID: '43708439580'
+      SOURCE_SHA: '73d72fab2aecccc57d498858780fc3b1cb487c93'
+      CI_RUN_ID: '43708778245'
     steps:
       - name: Verify exact successful full Push CI, PR and source scope
         shell: bash
@@ -36,11 +36,11 @@ jobs:
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci.json"
           jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '.head_sha==$sha and .head_repository.full_name==$repo and .event=="push" and .status=="completed" and .conclusion=="success" and .path==".github/workflows/ci.yml"' "$RUNNER_TEMP/ci.json"
           gh api "repos/$GITHUB_REPOSITORY/compare/35c161eeca4b79815e0a304faef1fd59d72e4a91...$SOURCE_SHA" > "$RUNNER_TEMP/compare.json"
-          jq -e '.status=="ahead" and .behind_by==0 and ([.files[].filename]|sort)==["api/src/boltutil/admin-probes.ts","api/tests/boltutil-admin-mainnet-probe.test.mjs","web/src/components/admin/AdminBoltUtilPanel.tsx"]' "$RUNNER_TEMP/compare.json"
+          jq -e '.status=="ahead" and .behind_by==0 and ([.files[].filename]|sort)==["api/src/boltutil/admin-probes.ts","api/tests/boltutil-admin-diagnostics.test.mjs","api/tests/boltutil-admin-mainnet-probe.test.mjs","web/src/components/admin/AdminBoltUtilPanel.tsx"]' "$RUNNER_TEMP/compare.json"
       - name: Checkout exact Staging candidate without credentials
         uses: actions/checkout@v4
         with:
-          ref: '321aac77c25633716620d9b19904033068191d99'
+          ref: '73d72fab2aecccc57d498858780fc3b1cb487c93'
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -75,7 +75,7 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: staging-boltutil-unlimited-tests-321aac77c25633716620d9b19904033068191d99
+          name: staging-boltutil-unlimited-tests-73d72fab2aecccc57d498858780fc3b1cb487c93
           path: |
             release-worker/index.js
             web/dist
@@ -90,7 +90,7 @@ jobs:
       name: staging
       url: https://staging.x-reply-helper.top/admin/
     env:
-      SOURCE_SHA: '321aac77c25633716620d9b19904033068191d99'
+      SOURCE_SHA: '73d72fab2aecccc57d498858780fc3b1cb487c93'
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
@@ -100,7 +100,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: staging-boltutil-unlimited-tests-321aac77c25633716620d9b19904033068191d99
+          name: staging-boltutil-unlimited-tests-73d72fab2aecccc57d498858780fc3b1cb487c93
           path: .
       - uses: actions/setup-node@v4
         with:
