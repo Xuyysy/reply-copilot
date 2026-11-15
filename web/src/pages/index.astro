@@ -22,6 +22,14 @@ import Base from "../layouts/Base.astro";
             <p data-zh="我认为，原创帖的传播机会，并不只取决于发布的那一刻。">I believe an original post's reach is shaped by more than the moment it's published.</p>
           </div>
           <p class="momentum-v2-lead" data-zh="X Reply Helper 帮你更自然地参与高质量讨论；互动势能临界值引擎，则探索互动积累与原创传播窗口之间的关系。一套工具，从回复开始，为原创蓄势。">X Reply Helper helps you join meaningful conversations in your own voice. Creator Momentum explores how accumulated engagement may relate to promising moments for original posts. Two capabilities, one creator workflow.</p>
+          <!-- Welcome offer: existing eligibility and device-bind requirements remain server controlled. -->
+          <div class="momentum-v2-trial-callout">
+            <span class="momentum-v2-trial-icon" aria-hidden="true">✦</span>
+            <div class="momentum-v2-trial-copy">
+              <strong><span data-zh="新用户免费体验">New users get</span> <span class="momentum-v2-trial-count">200</span> <span data-zh="次 AI 回复">free AI replies</span></strong>
+              <small data-zh="验证邮箱并绑定浏览器插件后领取 · 无需信用卡">Verify your email and link the browser extension to claim · No credit card required</small>
+            </div>
+          </div>
           <div class="momentum-v2-actions">
             <a href="/account/" data-reply-assistant-cta class="button momentum-v2-primary">
               <span data-zh="免费体验 AI 回复助手">Start with AI replies</span>
@@ -245,5 +253,20 @@ import Base from "../layouts/Base.astro";
     void api<{packages:unknown[]}>("/v1/packages").then(data=>{featuredSource=data.packages;renderFeatured();}).catch(()=>{featuredSource=[];renderFeatured();});
     window.addEventListener("reply-copilot-language",renderFeatured);
   </script>
+  <style>
+    .momentum-v2-trial-callout {display:flex;align-items:center;gap:12px;max-width:560px;margin-top:19px;padding:13px 16px;border:1px solid #c9dafa;border-radius:13px;background:linear-gradient(110deg,#eaf2ff 0%,#f8fbff 75%,#fff 100%);box-shadow:0 7px 19px rgba(48,84,187,.06);}
+    .momentum-v2-trial-icon {display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:10px;background:#315be8;color:#fff;font-size:18px;box-shadow:0 5px 13px rgba(49,91,232,.18);}
+    .momentum-v2-trial-copy {display:flex;flex-direction:column;gap:4px;min-width:0;}
+    .momentum-v2-trial-copy strong {font-size:15px;font-weight:800;line-height:1.4;letter-spacing:-.02em;color:#1a315a;}
+    .momentum-v2-trial-count {font-size:22px;line-height:1;font-weight:900;letter-spacing:-.035em;color:#315be8;}
+    .momentum-v2-trial-copy small {font-size:11px;line-height:1.55;color:#667996;}
+    @media(max-width:520px) {
+      .momentum-v2-trial-callout {gap:10px;margin-top:17px;padding:11px 12px;}
+      .momentum-v2-trial-icon {width:30px;height:30px;font-size:16px;}
+      .momentum-v2-trial-copy strong {font-size:13px;}
+      .momentum-v2-trial-count {font-size:20px;}
+      .momentum-v2-trial-copy small {font-size:10px;}
+    }
+  </style>
   <style>:global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}:global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}.home-subscription-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}.home-subscription-featured{border:2px solid #2663ac}</style>
 </Base>
