@@ -144,7 +144,9 @@ import Base from "../layouts/Base.astro";
     }
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
-      const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
+      // Never render two fiat providers in one checkout: the active merchant is backend-owned.
+      // A stale or malformed mixed-merchant catalog must not leak extra payment buttons.
+      const unique=uniquePaymentMethods(paymentMethods.filter(method=>method.provider===provider)) as PaymentMethod[];
       const choicesVisible=Boolean(selected)&&!order;
       show("checkout-payment-method",choicesVisible);
       if(!selectedChannel||!unique.some(method=>method.channel===selectedChannel&&method.provider===selectedProvider)){selectedChannel=unique[0]?.channel??null;selectedProvider=unique[0]?.provider??null;}
@@ -198,7 +200,7 @@ import Base from "../layouts/Base.astro";
       byId("package-fee").textContent=pricingSummary.fee;
       byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
-          byId("create-order").disabled=busy||paymentRail!=='fiat'||!paymentAvailable||!selected.total_payment_fen||!paymentMethods.some(m=>m.channel===selectedChannel&&m.provider===selectedProvider)||Boolean(order);
+          byId("create-order").disabled=busy||paymentRail!=='fiat'||!paymentAvailable||!selected.total_payment_fen||selectedProvider!==provider||!paymentMethods.some(m=>m.channel===selectedChannel&&m.provider===selectedProvider)||Boolean(order);
     }
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
@@ -251,7 +253,8 @@ import Base from "../layouts/Base.astro";
       try{
         if(invalidOrderLocator){setStatus("订单编号无效，请从账户页面重新打开原订单。","Invalid order ID. Open the original order from your account.");return;}
         const data=await api<{packages:Package[];paymentAvailable:boolean;paymentProvider:"local_mock"|"xiaodou"|"xiaodou_epay"|"mk99"|null;paymentMethods?:PaymentMethod[]}>("/v1/packages");
-        selected=data.packages.find(item=>item.id===pkgId)||null;paymentAvailable=data.paymentAvailable;provider=data.paymentProvider;paymentMethods=data.paymentMethods??[];
+        selected=data.packages.find(item=>item.id===pkgId)||null;paymentAvailable=data.paymentAvailable;provider=data.paymentProvider;
+        paymentMethods=(data.paymentMethods??[]).filter(m=>m.provider===data.paymentProvider);
         selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
         try{const config=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');boltAvailable=config.available===true&&config.networks?.length>0;}
         catch{boltAvailable=false;}
@@ -281,7 +284,7 @@ import Base from "../layouts/Base.astro";
         const data=await api<{packages:Package[];paymentAvailable:boolean;paymentProvider:typeof provider;paymentMethods?:PaymentMethod[]}>("/v1/packages");
         const changed=paymentAvailable!==data.paymentAvailable;
         paymentAvailable=data.paymentAvailable;
-        paymentMethods=data.paymentMethods??[];
+        paymentMethods=(data.paymentMethods??[]).filter(m=>m.provider===data.paymentProvider);
         if(!paymentMethods.some(m=>m.channel===selectedChannel&&m.provider===selectedProvider)){
           selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
         }
@@ -300,6 +303,9 @@ import Base from "../layouts/Base.astro";
         if(!order&&changed)setStatus(paymentAvailable?"支付已开放，可以创建订单。":"支付暂未开放，目前不能创建订单。",paymentAvailable?"Checkout is available. You can create an order.":"Checkout is not open yet; an order cannot be created.");
       }catch{
         paymentAvailable=false;
+        // A failed refresh must not leave stale WeChat/Alipay buttons from
+        // the previous merchant visible in the checkout.
+        if(!order){paymentMethods=[];selectedChannel=null;selectedProvider=null;boltAvailable=false;}
         if(!order)render();
         show("restart-payment",false);show("restart-notice",false);show("epay-submit",false);
         if(!order)show("checkout-extra-actions",false);
@@ -318,9 +324,9 @@ import Base from "../layouts/Base.astro";
       busy=true;render();setStatus("正在创建订单…","Creating order…");let failureMessage:string|null=null;
       try{
         if(!restart){
-          const latest=await api<{packages:Package[];paymentAvailable:boolean;paymentMethods?:PaymentMethod[]}>('/v1/packages');
-          paymentAvailable=latest.paymentAvailable===true;paymentMethods=latest.paymentMethods??[];
-          if(!paymentAvailable||!paymentMethods.some(m=>m.provider===selectedProvider&&m.channel===selectedChannel)){
+          const latest=await api<{packages:Package[];paymentAvailable:boolean;paymentProvider:typeof provider;paymentMethods?:PaymentMethod[]}>('/v1/packages',{cache:'no-store'});
+          paymentAvailable=latest.paymentAvailable===true;paymentMethods=(latest.paymentMethods??[]).filter(m=>m.provider===latest.paymentProvider);
+          if(!paymentAvailable||latest.paymentProvider!==selectedProvider||!paymentMethods.some(m=>m.provider===selectedProvider&&m.channel===selectedChannel)){
             selectedChannel=paymentMethods[0]?.channel??null;selectedProvider=paymentMethods[0]?.provider??null;
             setStatus('后台支付渠道已切换，请重新选择。','Payment channel changed; choose another option.');
             return;
