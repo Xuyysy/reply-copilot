@@ -10,7 +10,7 @@ CREATE TABLE boltutil_orders (
   product_type TEXT NOT NULL CHECK(product_type IN ('credits','subscription')),
   credit_order_id TEXT UNIQUE REFERENCES recharge_orders(id) ON DELETE RESTRICT,
   subscription_order_id TEXT UNIQUE REFERENCES subscription_orders(id) ON DELETE RESTRICT,
-  network TEXT NOT NULL CHECK(network IN ('TRC20','POLYGON','BEP20','ERC20','SOLANA')),
+  network TEXT NOT NULL CHECK(network IN ('TRC20','POLYGON','BEP20')),
   token_contract TEXT NOT NULL,
   token_decimals INTEGER NOT NULL CHECK(token_decimals IN (6,18)),
   base_amount_fen INTEGER NOT NULL CHECK(base_amount_fen>0),
@@ -38,7 +38,7 @@ CREATE TABLE boltutil_payment_events (
   event_id TEXT PRIMARY KEY,
   external_order_id TEXT NOT NULL REFERENCES boltutil_orders(external_order_id) ON DELETE RESTRICT,
   status TEXT NOT NULL,
-  network TEXT NOT NULL CHECK(network IN ('TRC20','POLYGON','BEP20','ERC20','SOLANA')),
+  network TEXT NOT NULL CHECK(network IN ('TRC20','POLYGON','BEP20')),
   tx_hash TEXT NOT NULL,
   body_sha256 TEXT NOT NULL,
   received_at INTEGER NOT NULL

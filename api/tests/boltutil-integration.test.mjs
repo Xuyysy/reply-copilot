@@ -15,6 +15,7 @@ const secret='test-only-boltutil-secret-never-live';
 function setup(){
  const f=fixture();
  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
+ f.sql.exec(readFileSync(new URL('../sql-proposals/0030_boltutil_five_networks_staging.sql',import.meta.url),'utf8'));
  Object.assign(f.env,{
    SUBSCRIPTIONS_ENABLED:'1',SUBSCRIPTION_PURCHASES_ENABLED:'1',
    BOLTUTIL_ENABLED:'1',BOLTUTIL_SCHEMA_READY:'1',
@@ -314,3 +315,55 @@ for(const [network] of NETWORKS){
     });
   }
 }
+
+test('Native on-site checkout needs only verified provider payment details, not a hosted checkout URL',async()=>{
+ for(const network of ['TRC20','POLYGON','BEP20','ERC20','SOLANA']){
+  const f=setup();
+  try{
+   const created=await withProvider(async request=>{
+    const result=await mockCreate(request).json();
+    delete result.data.checkoutUrl;
+    return Response.json(result);
+   },()=>f.call('/v1/boltutil/orders',{body:{
+    productType:'credits',sku:'starter',network,idempotencyKey:crypto.randomUUID()
+   }}));
+   assert.equal(created.status,201,JSON.stringify(created.body));
+   const o=created.body.order;
+   assert.equal(o.status,'pending');
+   assert.equal(o.checkoutUrl,null);
+   assert.equal(o.network,network);
+   assert.equal(typeof o.address,'string');
+   assert.ok(o.amount&&o.expiresAt>Date.now());
+   const grant=await refresh(f,o);
+   assert.equal(grant.status,200,JSON.stringify(grant.body));
+   assert.equal(grant.body.order.entitlementApplied,true);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+   assert.equal((await refresh(f,o)).body.order.entitlementApplied,true);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+  }finally{f.sql.close();}
+ }
+});
+test('Untrusted hosted URLs and non-PENDING provider creation never enable native payment or grant credits',async()=>{
+ for(const modification of [
+  data=>{data.checkoutUrl='https://evil.example/steal';},
+  data=>{data.checkoutUrl='javascript:alert(1)';},
+  data=>{data.checkoutUrl='';},
+  data=>{data.status='EXPIRED';},
+  data=>{data.payment.address=data.payment.address.replace('a','b');data.payment.address='0x'+'0'.repeat(40);}
+ ]){
+  const f=setup();try{
+   const result=await withProvider(async request=>{
+    const created=await mockCreate(request).json();
+    modification(created.data);
+    return Response.json(created);
+   },()=>f.call('/v1/boltutil/orders',{body:{
+    productType:'credits',sku:'starter',network:'POLYGON',idempotencyKey:crypto.randomUUID()
+   }}));
+   assert.equal(result.status,202,JSON.stringify(result.body));
+   assert.equal(result.body.order.status,'unknown');
+   assert.equal(result.body.order.checkoutUrl,null);
+   assert.equal(result.body.order.address,null);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,0);
+  }finally{f.sql.close();}
+ }
+});

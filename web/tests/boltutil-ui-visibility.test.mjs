@@ -79,3 +79,16 @@ test('Staging buyer pays on-site with an exact signed provider invoice, not a Bo
  assert.doesNotMatch(checkout,/link\.href=order\.checkoutUrl/);
  assert.doesNotMatch(checkout,/window\.location\s*=\s*order\.checkoutUrl/);
 });
+
+test('Native checkout can recover uncertain orders across reloads without opening BoltUtil and without storing wallet secrets',()=>{
+ assert.match(checkout,/sessionStorage\.setItem\(storageKey,JSON\.stringify\(fresh\)\)/);
+ assert.match(checkout,/saveAttempt\(network,attempt\)/);
+ assert.match(checkout,/idempotencyKey:attempt\.key/);
+ assert.match(checkout,/attempt\.quoteId=quote\.quote\.id/);
+ assert.match(checkout,/clearAttempt\(next\.network\)/);
+ assert.match(checkout,/\/v1\/boltutil\/orders"\)/);
+ assert.match(checkout,/id="bolt-recent-orders"/);
+ assert.match(checkout,/recentList\.replaceChildren\(\)/);
+ assert.match(checkout,/rows\.length===0/);
+ assert.doesNotMatch(checkout,/sessionStorage\.setItem\([^\n]*(?:address|amount|API_KEY|WEBHOOK)/);
+});

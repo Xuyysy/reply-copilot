@@ -52,6 +52,11 @@ import Base from "../layouts/Base.astro";
       <div class="bolt-buttons" id="bolt-buttons"></div>
       <p class="fineprint" id="bolt-final-hint"></p>
     </article>
+    <div class="pricing-card" id="bolt-recent-orders" data-testid="bolt-recent-orders" style="margin-top:20px" hidden>
+      <h3>最近的 USDT 订单 / Recent USDT invoices</h3>
+      <p class="fineprint">创建结果不明确时，请先恢复原单，勿直接重开另一笔。所有订单仅从你的登录账户读取。</p>
+      <div id="bolt-recent-list"></div>
+    </div>
     <p class="fineprint" style="margin-top:24px"><a href="/account/">查看账户权益与历史订单</a> · <a href="/pricing/">返回套餐</a></p>
   </section>
   <style>
@@ -79,12 +84,44 @@ import Base from "../layouts/Base.astro";
       expiry=document.getElementById("bolt-expiry")!,wallet=document.getElementById("bolt-wallet")!,
       contract=document.getElementById("bolt-contract")!,networkLabel=document.getElementById("bolt-network")!,
       payInstructions=document.getElementById("bolt-pay-instructions")!,qr=document.getElementById("bolt-qr") as HTMLImageElement,
-      buttons=document.getElementById("bolt-buttons")!,finalHint=document.getElementById("bolt-final-hint")!;
+      buttons=document.getElementById("bolt-buttons")!,finalHint=document.getElementById("bolt-final-hint")!,
+      recentContainer=document.getElementById("bolt-recent-orders")!,recentList=document.getElementById("bolt-recent-list")!;
     const chainPicker=document.getElementById("bolt-chain-picker")!,chain=document.getElementById("bolt-chain") as HTMLSelectElement;
     chain.disabled=true;
     const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20","ERC20","SOLANA"];
     const labels:Record<Network,string>={TRC20:"TRON / TRC20",POLYGON:"Polygon PoS",BEP20:"BNB / BEP20",ERC20:"Ethereum / ERC20",SOLANA:"Solana / SPL USDT"};
-    let order:Order|null=null,busy=false,operationKey=crypto.randomUUID(),qrKey:string|null=null;
+    let order:Order|null=null,busy=false,qrKey:string|null=null;
+    type Attempt={key:string;createdAt:number;quoteId?:string};
+    const operationCache=new Map<Network,Attempt>();
+    function attemptStorageKey(network:Network){
+      return "xrh:bolt:pending:v1:"+String(productType)+":"+String(sku)+":"+(upgrade?"upgrade":"new")+":"+network;
+    }
+    function loadAttempt(network:Network):Attempt{
+      const cached=operationCache.get(network);
+      if(cached)return cached;
+      const storageKey=attemptStorageKey(network);
+      try{
+        const stored=JSON.parse(sessionStorage.getItem(storageKey)||"null") as Attempt|null;
+        if(stored&&typeof stored.key==="string"&&/^[0-9a-f-]{36}$/i.test(stored.key)&&
+           typeof stored.createdAt==="number"&&stored.createdAt<=Date.now()&&
+           Date.now()-stored.createdAt<12*60*60*1000&&
+           (stored.quoteId===undefined||(typeof stored.quoteId==="string"&&/^[0-9a-f-]{36}$/i.test(stored.quoteId)))){
+          operationCache.set(network,stored);return stored;
+        }
+      }catch{/* Storage unavailable: idempotency remains in-memory for this page. */}
+      const fresh={key:crypto.randomUUID(),createdAt:Date.now()};
+      operationCache.set(network,fresh);
+      try{sessionStorage.setItem(storageKey,JSON.stringify(fresh));}catch{/* No storage grant. */}
+      return fresh;
+    }
+    function saveAttempt(network:Network,attempt:Attempt){
+      operationCache.set(network,attempt);
+      try{sessionStorage.setItem(attemptStorageKey(network),JSON.stringify(attempt));}catch{/* Optional storage. */}
+    }
+    function clearAttempt(network:Network){
+      operationCache.delete(network);
+      try{sessionStorage.removeItem(attemptStorageKey(network));}catch{/* Optional storage. */}
+    }
     let pollTimer:number|null=null,pollCount=0;
     const en=()=>document.documentElement.lang==="en";
     const t=(zh:string,english:string)=>en()?english:zh;
@@ -102,7 +139,7 @@ import Base from "../layouts/Base.astro";
       if(pollTimer!==null)return;
       pollCount=0;
       pollTimer=window.setInterval(()=>{
-        if(pollCount>=20){stopPolling();return;}
+        if(pollCount>=20){stopPolling();report("自动查询已暂停，可手动点击「安全查询付款状态」，请勿重复支付。","Automatic checks paused. Use Verify payment status; do not pay again.");return;}
         if(document.hidden||busy||order?.status!=="pending")return;
         if(order.expiresAt&&Date.now()>=order.expiresAt){stopPolling();render();return;}
         pollCount++;void refresh(true);
@@ -159,7 +196,9 @@ import Base from "../layouts/Base.astro";
       autoPoll();
     }
     function setOrder(next:Order){
+      if(productType&&sku)clearAttempt(next.network);
       order=next;history.replaceState(null,"","/usdt-checkout/?order="+encodeURIComponent(next.id));render();
+      recentContainer.hidden=true;
     }
     async function refresh(silent=false){
       if(busy||!order)return;busy=true;
@@ -175,21 +214,43 @@ import Base from "../layouts/Base.astro";
       if(busy||!allowedNetworks.includes(chain.value as Network))return;
       busy=true;buttons.replaceChildren();report("正在创建付款订单…","Creating payment invoice…");
       try{
-        let quoteId:string|undefined;
-        if(upgrade){
+        const network=chain.value as Network,attempt=loadAttempt(network);
+        if(upgrade&&!attempt.quoteId){
           const quote=await api<{quote:{id:string}}>("/v1/boltutil/upgrade-quote",{method:"POST",body:JSON.stringify({planCode:sku})});
-          quoteId=quote.quote.id;
+          attempt.quoteId=quote.quote.id;
+          saveAttempt(network,attempt);
         }
         const result=await api<{order:Order}>("/v1/boltutil/orders",{method:"POST",
-          body:JSON.stringify({productType,sku,network:chain.value,idempotencyKey:operationKey,...(quoteId?{quoteId}:{})})});
+          body:JSON.stringify({productType,sku,network,idempotencyKey:attempt.key,...(attempt.quoteId?{quoteId:attempt.quoteId}:{})})});
         setOrder(result.order);
       }catch(e){
-        report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check the original invoice first.");
+        report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check existing invoice first.");
+        void showRecent();
       }finally{
         busy=false;
-        if(!order)control(t("使用相同操作 ID 重试或恢复原单","Retry/recover original operation"),()=>void create(),true);
-        else render();
+        if(!order){
+          control(t("使用原操作 ID 恢复订单","Resume with same operation ID"),()=>void create(),true);
+          control(t("查看最近订单","Review recent orders"),()=>void showRecent(),true);
+        }else render();
       }
+    }
+    async function showRecent(){
+      try{
+        const result=await api<{orders:Order[]}>("/v1/boltutil/orders");
+        const rows=Array.isArray(result.orders)?result.orders.filter(item=>
+          item&&/^[0-9a-f-]{36}$/i.test(item.id)&&allowedNetworks.includes(item.network)
+        ).slice(0,10):[];
+        recentList.replaceChildren();
+        for(const item of rows){
+          const a=document.createElement("a");
+          a.href="/usdt-checkout/?order="+encodeURIComponent(item.id);
+          a.className="block border rounded p-3 mb-2";
+          a.textContent=labels[item.network]+" · "+(item.productType==="credits"?t("永久额度包","Credits"):t("30 天订阅","Subscription"))+
+            " · "+item.status+" · "+(item.amount??item.quotedAmount)+" USDT";
+          recentList.append(a);
+        }
+        recentContainer.hidden=rows.length===0;
+      }catch{recentContainer.hidden=true;/* Never expose another user's orders or guest data. */}
     }
     async function init(){
       if(existing){
@@ -207,6 +268,7 @@ import Base from "../layouts/Base.astro";
           chain.disabled=true;chainPicker.hidden=false;
           report("支持 TRON、Polygon、BNB、Ethereum 和 Solana。当前商户通道未开放，仅供预览，不能创建订单或付款。",
             "TRON, Polygon, BNB, Ethereum and Solana supported. Merchant routes are not enabled: preview only.");
+          void showRecent();
           return;
         }
         for(const option of Array.from(chain.options)){
@@ -218,6 +280,7 @@ import Base from "../layouts/Base.astro";
         chain.disabled=false;chainPicker.hidden=false;panel.hidden=false;
         product.textContent=t("确认 USDT 付款","Confirm USDT checkout");buttons.replaceChildren();
         control(t("生成本站 USDT 付款订单","Create on-site USDT invoice"),()=>void create());
+        control(t("找回最近 USDT 订单","Recover recent USDT invoices"),()=>void showRecent(),true);
         report("请选择商户已开放的网络，创建订单后将在本站显示准确金额和收款地址。",
           "Choose an enabled network. The exact amount and recipient will be displayed here.");
       }catch{report("无法确认 USDT 通道状态，请勿付款。","Cannot confirm USDT availability. Do not pay.");}

@@ -236,15 +236,16 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
        typeof pay.amount!=="string"||!validReceivingAddress(pay.address,network)||
        pay.decimal!==NETWORKS[network].decimals ||
        typeof pay.rawAmount!=="string"||!/^(0|[1-9][0-9]*)$/.test(pay.rawAmount)||
-       typeof provider.checkoutUrl!=="string"||
-       !/^https:\/\/([a-z0-9-]+\.)*boltutil\.com\//i.test(provider.checkoutUrl)||
+       provider.status!=="PENDING"||
+       (provider.checkoutUrl!=null&&(typeof provider.checkoutUrl!=="string"||
+         !/^https:\/\/([a-z0-9-]+\.)*boltutil\.com\//i.test(provider.checkoutUrl)))||
        !time||typeof time.expireTimestamp!=="number"||!Number.isSafeInteger(time.expireTimestamp)||time.expireTimestamp<=now)
       throw new Error("untrusted create reply");
     const payable=decimalMicros(pay.amount);
     if(payable<quoted||pay.rawAmount!==tokenRawUnits(payable,network).toString())
       throw new Error("payment lower than quote or raw units mismatch");
     await env.DB.prepare("UPDATE boltutil_orders SET payable_usdt_micros=?,payable_token_raw=?,receiving_address=?,checkout_url=?,expires_at=?,status='pending',updated_at=? WHERE id=? AND status='creating' AND network=?")
-      .bind(Number(payable),pay.rawAmount,pay.address,provider.checkoutUrl,time.expireTimestamp,nowMs(),id,network).run();
+      .bind(Number(payable),pay.rawAmount,pay.address,provider.checkoutUrl??null,time.expireTimestamp,nowMs(),id,network).run();
   }catch{
     await env.DB.prepare("UPDATE boltutil_orders SET status='unknown',updated_at=? WHERE id=? AND status='creating'")
       .bind(nowMs(),id).run();

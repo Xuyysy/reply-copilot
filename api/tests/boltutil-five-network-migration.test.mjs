@@ -16,7 +16,9 @@ db.execute("INSERT INTO users VALUES('u1')")
 for code in ['c1','c2','c3']:
  db.execute('INSERT INTO recharge_orders VALUES(?)',(code,))
 with open(sys.argv[1],encoding='utf8') as f:
- old=f.read().replace("('TRC20','POLYGON','BEP20','ERC20','SOLANA')","('TRC20','POLYGON','BEP20')")
+ old=f.read()
+assert "('TRC20','POLYGON','BEP20','ERC20','SOLANA')" not in old
+assert "('TRC20','POLYGON','BEP20')" in old
 db.executescript(old)
 def order(id,net,credit):
  db.execute("INSERT INTO boltutil_orders(id,external_order_id,user_id,operation_id,product_type,credit_order_id,network,token_contract,token_decimals,base_amount_fen,cny_per_usdt_micros,quoted_usdt_micros,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(id,'ex'+id,'u1','op'+id,'credits',credit,net,'contract',6,6990,7000000,1000000,'pending',1,1))
