@@ -5,9 +5,10 @@ import vm from 'node:vm';
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true,performanceTracing=false}={}){
  let next=0,commandCount=0,generationCount=0,snapshotCount=0,now=0,entries=[],currentUrl='https://x.com/home';
- const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[]; let action;
+ const handlers={},pending=[],logs=[],observers=[],timers=new Map(),statuses=[],hosts=[],sentMessages=[]; let action;
  const document={body:{},visibilityState:'visible',activeElement:null,hasFocus:()=>true,addEventListener:(n,h)=>handlers[n]=h,removeEventListener(){},execCommand(_c,_u,text){commandCount++;this.activeElement.innerText=text;this.activeElement.input?.();return true;}};
  const chrome={runtime:{id:'test',onMessage:{addListener(){},removeListener(){}},sendMessage(message){
+   sentMessages.push(message.type);
    if(message.type==='REPLY_COPILOT_PERFORMANCE_STATE')return Promise.resolve({enabled:performanceTracing});
    if(message.type==='REPLY_COPILOT_GET_BEHAVIOR')return Promise.resolve({ok:true,preferences:{autoGenerateOnReply,showFloatingWindow:true}});
    if(message.type==='REPLY_COPILOT_ACCOUNT_STATE')return Promise.resolve({ok:true,status:'credits_available'});
@@ -29,8 +30,8 @@ function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true
  Object.assign(api,{experimentConfig:{associationOnly},replyDetector:{findReplyControl:target=>target.isReply?target:null},postExtractor:{extractPost:article=>article?.post||{ok:false}},inlineAssistant:{mount:(_anchor,handler)=>{action=handler;return assistant()}}});
  vm.runInNewContext(readFileSync(new URL('../content/content-script.js',import.meta.url),'utf8'),ctx);
  function post(id){const editor={dispatchEvent(event){commandCount++;event.preventDefault();this.innerText=event.clipboardData.getData('text/plain');return false;},isConnected:true,innerText:'',parentElement:{isConnected:true},contains:n=>n===editor,focus(){document.activeElement=this},addEventListener(_n,cb){this.input=cb},removeEventListener(){}};const article={isConnected:true};article.post={ok:true,article,statusId:id,sourceText:'same post text',sourceUrl:`https://x.com/test/status/${id}`};return {editor,article,control:{isReply:true,closest:s=>s==='article'?article:null}};}
- const mutate=()=>{for(const o of observers)if(o.live)o.cb()};
- return {snapshotCalls:()=>snapshotCount,perfReport:()=>ctx.replyCopilotPerformanceReport?.(),dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
+ const mutate=records=>{for(const o of observers)if(o.live)o.cb(records)};
+ return {snapshotCalls:()=>snapshotCount,sentTypes:()=>sentMessages.slice(),perfReport:()=>ctx.replyCopilotPerformanceReport?.(),dialogReply:()=>{const target={isReply:true,closest:s=>s==='[role="dialog"]'?{}:null};handlers.pointerdown({type:'pointerdown',isTrusted:true,target});handlers.click({isTrusted:true,target})}, action:(name,data={})=>action(name,data),hosts,outside:()=>handlers.pointerdown({type:'pointerdown',isTrusted:true,target:{}}),post,click:(p,trusted=true)=>{handlers.pointerdown({type:'pointerdown',isTrusted:trusted,target:p.control});handlers.click({isTrusted:trusted,target:p.control})},open:p=>{entries=[{node:p.editor,modal:true,contextMatches:true,contextStatusId:null}];document.activeElement=p.editor;mutate()},close:(p,{notify=true,detach=true}={})=>{entries=[];if(detach)p.editor.isConnected=false;document.activeElement=null;if(notify)mutate()},entries:x=>{entries=x;mutate()},mutate,resolve:i=>pending[i]({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:'中文 English 😀\nline'}}}),generations:()=>generationCount,commands:()=>commandCount,logs,statuses,document,timeout:ms=>timers.get(ms)?.(),route:url=>{currentUrl=url;mutate()},time:n=>{now=n},report:()=>ctx.__xrhStagingDiagnosticReport?.(),escape:()=>handlers.keydown({type:'keydown',key:'Escape',isTrusted:true,target:document.activeElement}),focus:node=>{document.activeElement=node;handlers.focusin()},beforeTyping:node=>handlers.beforeinput?.({isTrusted:true,target:node}),typing:p=>{p.editor.innerText='user draft';p.editor.input?.()}};
 }
 test('missing status link and detached original still bind from a captured activation',async()=>{const f=flow(),p=f.post('101');f.click(p);p.article.isConnected=false;f.open(p);await sleep(0);assert.equal(f.generations(),1);f.resolve(0);await sleep(110);assert.equal(f.commands(),1);assert.equal(p.editor.innerText,'中文 English 😀\nline');});
 
@@ -425,4 +426,53 @@ test("successful auto quote produces a success timing sample rather than incompl
  assert.equal(report.outcomes.incomplete||0,0);
  assert.ok(report.metrics.reply_to_bind.p50>=360);
  assert.ok(report.metrics.elapsedMs.p50>=550);
+});
+
+test("ordinary Reply prefetches exactly one settings and account read while editor hydrates",async()=>{
+ const f=flow(),p=f.post("1201");
+ f.click(p);
+ assert.equal(f.generations(),0,"no paid request before editor is verified");
+ assert.equal(f.sentTypes().filter(t=>t==="REPLY_COPILOT_GET_BEHAVIOR").length,1);
+ assert.equal(f.sentTypes().filter(t=>t==="REPLY_COPILOT_ACCOUNT_STATE").length,1);
+ f.open(p);await sleep(0);
+ assert.equal(f.generations(),1);
+ assert.equal(f.sentTypes().filter(t=>t==="REPLY_COPILOT_GET_BEHAVIOR").length,1,
+   "reuse prefetched preferences instead of asking twice");
+ assert.equal(f.sentTypes().filter(t=>t==="REPLY_COPILOT_ACCOUNT_STATE").length,1,
+   "reuse prefetched account instead of asking twice");
+ f.resolve(0);await sleep(110);
+ assert.equal(f.commands(),1);
+});
+test("ordinary prefetch never triggers paid generation after an unverified Reply",async()=>{
+ for(const scenario of ["no_editor","wrong_parent","preexisting"]){
+   const f=flow(),p=f.post("1202"),other=f.post("1203");
+   if(scenario==="preexisting")f.open(other);
+   f.click(p);
+   if(scenario==="wrong_parent"){
+     f.document.activeElement=p.editor;
+     f.entries([{node:p.editor,modal:true,contextStatusId:"999",contextMatches:false}]);
+   }
+   await sleep(0);
+   assert.equal(f.generations(),0,scenario);
+   assert.equal(f.commands(),0,scenario);
+ }
+});
+test("bound ordinary reply ignores unrelated X feed mutations but scans relevant changes",async()=>{
+ const f=flow(),p=f.post("1204");
+ f.click(p);f.open(p);await sleep(0);
+ const original=f.snapshotCalls();
+ const unrelated={nodeType:1,contains:()=>false,matches:()=>false,querySelector:()=>null};
+ f.mutate([{type:"characterData",target:{nodeType:3,parentElement:unrelated}}]);
+ f.mutate([{type:"attributes",target:unrelated,attributeName:"data-testid"}]);
+ f.mutate([{type:"childList",target:f.document.body,addedNodes:[unrelated],removedNodes:[]}]);
+ await sleep(0);
+ assert.equal(f.snapshotCalls(),original,"cosmetic off-target DOM changes cannot cause modal scans");
+ f.mutate([{type:"attributes",target:p.article,attributeName:"data-testid"}]);
+ await sleep(0);
+ assert.equal(f.snapshotCalls(),original+1,"source updates still force revalidation");
+ f.mutate([{type:"characterData",target:p.editor}]);
+ await sleep(0);
+ assert.equal(f.snapshotCalls(),original+2,"editor changes still force revalidation");
+ f.resolve(0);await sleep(110);
+ assert.equal(f.commands(),1);
 });

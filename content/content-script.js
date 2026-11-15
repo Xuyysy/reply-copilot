@@ -17,7 +17,7 @@
   let contextAlive = true;
   let bindingTimer = null;
   let settingsRevision = 0;
-  let quotePreferenceRevision = 0;
+  let replyPreferenceRevision = 0;
   let pendingActivation = null;
   // Staging quote fast path requires an unchanged editor across two reads.
   // The proven 800ms path remains as a conservative fallback.
@@ -246,14 +246,14 @@
        candidate.quarantinedContextMatch||candidate.contextStatusId||
        candidate.contextMatches!==null)return;
     // No generation, credit charge, or automatic typing during acquisition.
-    const shared=session.quotePreflight;
-    const prefetched=shared?.revision===quotePreferenceRevision;
+    const shared=session.replyPreflight;
+    const prefetched=shared?.revision===replyPreferenceRevision;
     const behaviorPending=prefetched?shared.behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
     // The early path requires a stable editor after the UI has had time
     // to hydrate, without delaying the original fallback at 800ms.
     let [response]=await Promise.all([behaviorPending,
       stabilityMs>0?new Promise(resolve=>setTimeout(resolve,stabilityMs)):Promise.resolve()]);
-    if(prefetched&&shared.revision!==quotePreferenceRevision)
+    if(prefetched&&shared.revision!==replyPreferenceRevision)
       response=await safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
     if(active!==session||session.cancelled||session.editor||session.copyOnly)return;
     if(!response?.ok||response.preferences?.showFloatingWindow!==true){
@@ -280,7 +280,7 @@
     session.assistant?.setStatus("原帖已捕获，但 X 回复框身份尚未确认。可手动生成并复制；不会自动填入。");
     traceAssociation("copy_only","new_editor_unverified_parent");
     const precheckStart=performance.now();
-    const account=await refreshAccount(session,session.quotePreflight?.account);
+    const account=await refreshAccount(session,session.replyPreflight?.account);
     if(active!==session||session.cancelled||!session.copyOnly)return;
     session.trace?.addDurations({precheck:performance.now()-precheckStart});
     session.trace?.mark("precheck_complete");
@@ -327,19 +327,17 @@
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.trace = activation.trace;
-    // Only successful human Reply clicks on captured quotes pre-read these
-    // independent, read-only values; normal posts add no extra messages.
-    if(post.hasCapturedQuote){
-      session.quotePreflight={
-        revision:quotePreferenceRevision,
-        // A failed prefetched read must not poison the later 800ms path.
-        // Retry transient transport failures once; all requests are read-only.
-        behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})
-          .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})),
-        account:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"})
-          .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"}))
-      };
-    }
+    // Start only read-only checks on the verified Reply click, before X
+    // hydrates the new editor. Both results are still required before the
+    // first AI request; every click keeps its own revision-fenced promises.
+    // This now helps ordinary replies too, without adding any extra reads.
+    session.replyPreflight={
+      revision:replyPreferenceRevision,
+      behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})
+        .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})),
+      account:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"})
+        .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"}))
+    };
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
@@ -399,6 +397,35 @@
         if(active===session&&!session.cancelled&&!session.copyOnly)locate();
       });
     };
+    // Once associated, ignore ordinary feed mutations that cannot affect
+    // this source article, its dialog, the bound editor, or a newly created
+    // competing dialog. Never filter unbound sessions: they must reject a
+    // wrong target immediately, before a second human Reply gesture.
+    const mutationTouchesReply=records=>{
+      if(!records?.length)return true; // conservative on unknown records
+      const editor=session.editor,article=session.post?.article;
+      const dialog=editor?.closest?.('[role="dialog"]');
+      const inside=(node,root)=>Boolean(root&&(node===root||root.contains?.(node)));
+      return records.some(record=>{
+        const raw=record?.target;
+        if(!raw||!record?.type)return true;
+        const node=raw.nodeType===3?raw.parentElement:raw;
+        if(!node)return true;
+        if(inside(node,article)||inside(node,dialog)||node===editor)return true;
+        if(record.type==='attributes')
+          return Boolean(node.contains?.(article)||node.contains?.(dialog)||
+            node.contains?.(editor));
+        if(record.type==='characterData')return false;
+        if(record.type!=='childList')return true;
+        const changed=[...(record.addedNodes||[]),...(record.removedNodes||[])];
+        if(!changed.length)return true;
+        return changed.some(n=>
+          n===editor||n===dialog||n===article||
+          n?.contains?.(editor)||n?.contains?.(dialog)||n?.contains?.(article)||
+          n?.matches?.('[role="dialog"]')||n?.querySelector?.('[role="dialog"]')
+        );
+      });
+    };
     active.observer=new MutationObserver(records=>{
       if(active!==session)return;
       if(session.copyOnly){
@@ -422,11 +449,11 @@
           else locate();
         },350);
       }
-      // Unbound sessions must reject a wrong or changed reply target *now*;
-      // otherwise a rapid second click may race ahead of its rejection.
-      // Bound sessions can safely batch repeated cosmetic DOM mutations.
-      if(session.editor) scheduleLocate();
-      else locate();
+      // Never debounce unbound identity checks. For a bound editor, ignore
+      // clearly unrelated changes and batch relevant mutation bursts.
+      if(session.editor){
+        if(mutationTouchesReply(records))scheduleLocate();
+      }else locate();
     });
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
     locate();
@@ -436,10 +463,10 @@
     try {
       // Independent reads start together; both remain mandatory before AI.
       const precheckStart = performance.now();
-      const accountPending = current.quotePreflight?.account ||
+      const accountPending = current.replyPreflight?.account ||
         safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
-      const response = await (current.quotePreflight?.revision===quotePreferenceRevision
-        ? current.quotePreflight.behavior
+      const response = await (current.replyPreflight?.revision===replyPreferenceRevision
+        ? current.replyPreflight.behavior
         : safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }));
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
@@ -973,7 +1000,7 @@
   let momentumPreferenceRevision = 0;
   function onMomentumPreference(changes, area) {
     if (area !== 'local' || !changes.behaviorPreferences) return;
-    quotePreferenceRevision++;
+    replyPreferenceRevision++;
     const {oldValue, newValue} = changes.behaviorPreferences;
     if ((oldValue?.showMomentumEntry !== false) === (newValue?.showMomentumEntry !== false)) return;
     momentumPreferenceRevision++;
