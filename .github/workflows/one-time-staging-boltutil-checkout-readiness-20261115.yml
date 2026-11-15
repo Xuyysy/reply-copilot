@@ -35,7 +35,7 @@ jobs:
           test "$(gh api repos/$GITHUB_REPOSITORY/pulls/144 --jq '.head.sha')" = "$SOURCE_SHA"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/ci.json"
           jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '.head_sha==$sha and .head_repository.full_name==$repo and .event=="push" and .status=="completed" and .conclusion=="success" and .path==".github/workflows/ci.yml"' "$RUNNER_TEMP/ci.json"
-          gh api "repos/$GITHUB_REPOSITORY/compare/02fbf3969a4f25c511ea20afd765d1177cd1bcc6...$SOURCE_SHA" > "$RUNNER_TEMP/compare.json"
+          gh api "repos/$GITHUB_REPOSITORY/compare/f5f9867d1946478d0b5e3a3e265bc939cf00f210...$SOURCE_SHA" > "$RUNNER_TEMP/compare.json"
           jq -e '.status=="ahead" and .behind_by==0 and ([.files[].filename]|sort)==["api/src/boltutil/client.ts","api/tests/boltutil-admin-mainnet-probe.test.mjs","web/src/components/admin/AdminBoltUtilPanel.tsx"]' "$RUNNER_TEMP/compare.json"
       - name: Checkout exact Staging candidate without credentials
         uses: actions/checkout@v4
