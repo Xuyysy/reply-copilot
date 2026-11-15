@@ -17,7 +17,7 @@ function flow({associationOnly=false,homeComposer=false,autoGenerateOnReply=true
  const assistant=()=>({showExperimentalFill:enabled=>statuses.push(enabled?"experimental_fill_available":"experimental_fill_hidden"),host:(()=>{const h={isConnected:true,style:{},contains:()=>false,remove(){this.isConnected=false}};hosts.push(h);return h})(),showLoading(){},showResult(){},setAccountLabel(){},showApplied(){},showAccount(){},enterPostReplyMode(){statuses.push('post_reply_interactive')},setStatus:s=>statuses.push(s),showReady(){},close(){}});
  class DataTransfer {setData(type,text){this[type]=text;}getData(type){return this[type]||'';}}
  class ClipboardEvent extends Event {constructor(type,options){super(type,options);this.clipboardData=options.clipboardData;}}
- const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===350||ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
+ const ctx={DataTransfer,ClipboardEvent,document,window:{getSelection:()=>({isCollapsed:true,anchorNode:document.activeElement,focusNode:document.activeElement}),addEventListener(){}},location:{get href(){return currentUrl}},performance:{now:()=>now},URL,chrome,console:{info:(...a)=>logs.push(a)},crypto:{randomUUID:()=>`r${++next}`},setTimeout:(fn,ms)=>ms===360||ms===800||ms===9000||ms===60000||ms===30000?(timers.set(ms,fn),ms):setTimeout(fn,ms),clearTimeout:id=>{timers.delete(id);clearTimeout(id)},setInterval,clearInterval,Symbol,MutationObserver:class{constructor(cb){this.cb=cb;observers.push(this)}observe(){this.live=true}disconnect(){this.live=false}},globalThis:null};ctx.globalThis=ctx;
  vm.runInNewContext(readFileSync(new URL("../utils/generation-performance.js",import.meta.url),"utf8"),ctx);
  for(const name of ['composer-adapter','composer-association'])vm.runInNewContext(readFileSync(new URL(`../content/${name}.js`,import.meta.url),'utf8'),ctx);
  const api=ctx.ZaneReplyCopilotContent;
@@ -380,8 +380,8 @@ test("fast quote path starts generation after stable editor checks without waiti
  f.click(p);p.article.isConnected=false;f.document.activeElement=p.editor;
  f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null,
    contextDetail:"awaiting_captioned_quote_parent"}]);
- f.timeout(350);await sleep(145);
- assert.equal(f.generations(),1,"AI request starts on stable 350ms+120ms path");
+ f.timeout(360);await sleep(145);
+ assert.equal(f.generations(),1,"AI request starts on stable 360ms+120ms path");
  assert.equal(f.commands(),0,"cannot insert until response");
  f.resolve(0);await sleep(112);
  assert.equal(f.commands(),1);
@@ -392,7 +392,7 @@ test("quote early candidate missing retains original 800ms fallback and exactly 
  const f=flow(),p=f.post("101");
  p.article.querySelector=s=>s==='[data-testid="quoteTweet"]'?{}:null;
  f.click(p);p.article.isConnected=false;
- f.timeout(350);await sleep(0);
+ f.timeout(360);await sleep(0);
  assert.equal(f.generations(),0);
  f.document.activeElement=p.editor;
  f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
@@ -416,13 +416,13 @@ test("successful auto quote produces a success timing sample rather than incompl
  f.time(100);f.click(p);
  p.article.isConnected=false;f.document.activeElement=p.editor;
  f.entries([{node:p.editor,modal:true,contextMatches:null,contextStatusId:null}]);
- f.time(450);f.timeout(350);await sleep(145);
+ f.time(460);f.timeout(360);await sleep(145);
  assert.equal(f.generations(),1);
  f.time(650);f.resolve(0);await sleep(115);
  assert.equal(f.commands(),1);
  const report=f.perfReport();
  assert.equal(report.outcomes.success,1,JSON.stringify(report));
  assert.equal(report.outcomes.incomplete||0,0);
- assert.ok(report.metrics.reply_to_bind.p50>=350);
+ assert.ok(report.metrics.reply_to_bind.p50>=360);
  assert.ok(report.metrics.elapsedMs.p50>=550);
 });

@@ -21,7 +21,7 @@
   let pendingActivation = null;
   // Staging quote fast path requires an unchanged editor across two reads.
   // The proven 800ms path remains as a conservative fallback.
-  const QUOTE_EARLY_CHECK_MS = 350;
+  const QUOTE_EARLY_CHECK_MS = 360;
   const QUOTE_STABILITY_MS = 120;
   const QUOTE_LEGACY_FALLBACK_MS = 800;
   // After a completed draft's native editor closes, keep only the floating UI
@@ -332,8 +332,12 @@
     if(post.hasCapturedQuote){
       session.quotePreflight={
         revision:quotePreferenceRevision,
-        behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"}),
+        // A failed prefetched read must not poison the later 800ms path.
+        // Retry transient transport failures once; all requests are read-only.
+        behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})
+          .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})),
         account:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"})
+          .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"}))
       };
     }
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
@@ -418,7 +422,11 @@
           else locate();
         },350);
       }
-      scheduleLocate();
+      // Unbound sessions must reject a wrong or changed reply target *now*;
+      // otherwise a rapid second click may race ahead of its rejection.
+      // Bound sessions can safely batch repeated cosmetic DOM mutations.
+      if(session.editor) scheduleLocate();
+      else locate();
     });
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
     locate();
