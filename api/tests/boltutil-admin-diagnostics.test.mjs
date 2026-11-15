@@ -96,5 +96,5 @@ test('diagnostics do not change the public USDT checkout flag, URLs or create en
 test('Staging admin UI offers diagnostics without asking to create more invoices',()=>{
  const src=readFileSync(new URL('../../web/src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
  assert.match(src,/只读诊断：为何没有收银台/);
- assert.match(src,/尚未确认创建成功，没有支付链接/);
+ assert.match(src,/此笔测试单没有可靠的付款链接/);
 });
