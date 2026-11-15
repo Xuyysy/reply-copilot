@@ -154,7 +154,7 @@ jobs:
           (cd api && npx --no-install wrangler deploy --config deploy/production.wrangler.json --dry-run)
 
       - name: Build and fingerprint Production Chrome candidate
-        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109')
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109' || github.ref == 'refs/heads/release/chrome-0311-reply-perf-candidate-20261115')
         env:
           REPLY_COPILOT_WEBSITE_URL: https://app.x-reply-helper.top
           REPLY_COPILOT_API_URL: https://api.x-reply-helper.top
@@ -162,8 +162,39 @@ jobs:
           npm run build:production
           python3 scripts/package-production-rc.py
 
+      - name: Validate Chrome 0.3.11 Web Store candidate before artifact upload
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release/chrome-0311-reply-perf-candidate-20261115'
+        run: |
+          python3 - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          from zipfile import ZipFile
+          root=Path('dist/production')
+          m=json.loads((root/'manifest.json').read_text())
+          key=json.loads(Path('config/extension-store-identity.json').read_text())
+          assert m['version']=='0.3.11' and m.get('version_name')=='0.3.11'
+          assert m['key']==key['publicKey'] and key['id']=='fgfjajofkapebgphfidblngcjomkbdaj'
+          assert m['host_permissions']==['https://api.x-reply-helper.top/*']
+          assert m.get('externally_connectable')=={'matches':['https://app.x-reply-helper.top/*']}
+          assert not (root/'staging').exists()
+          assert 'channel: "production"' in (root/'config/runtime.js').read_text()
+          assert (root/'content/content-script.js').exists()
+          assert 'mutationTouchesReply' in (root/'content/content-script.js').read_text()
+          assert 'causalQuoteAuto' in (root/'content/content-script.js').read_text()
+          archive=Path('dist/production-rc/reply-copilot-production-0.3.11.zip')
+          provenance=json.loads(Path('dist/production-rc/provenance.json').read_text())
+          assert archive.is_file() and provenance['sourceSha']==__import__('os').environ['SOURCE_SHA']
+          assert provenance['version']=='0.3.11' and provenance['extensionId']==key['id']
+          assert hashlib.sha256(archive.read_bytes()).hexdigest()==provenance['sha256']
+          with ZipFile(archive) as z:
+            assert z.testzip() is None
+            assert json.loads(z.read('manifest.json'))==m
+            assert all(not n.startswith(('staging/','dev/')) for n in z.namelist())
+          print('PASS: Web Store identity, 0.3.11, Production-only ZIP and pinned SHA')
+          PY
+
       - name: Upload Production Chrome candidate
-        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109')
+        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true' && (github.ref == 'refs/heads/codex/chrome-034-release-candidate-v2' || github.ref == 'refs/heads/codex/subscriptions-v1-issue21' || github.ref == 'refs/heads/chatgpt/subscription-release-integration-20261109' || github.ref == 'refs/heads/release/chrome-0311-reply-perf-candidate-20261115')
         uses: actions/upload-artifact@v4
         with:
           name: production-extension-${{ env.SOURCE_SHA }}
