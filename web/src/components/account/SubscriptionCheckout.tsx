@@ -1,6 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {api,ApiError} from '../../lib/api';
 import {phrase,readableError,useLanguage} from '../../lib/language';
+import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened} from '../../lib/verified-payment-auto.mjs';
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
@@ -42,6 +43,54 @@ export default function SubscriptionCheckout(){
   void read.catch(cause=>{if(active)setError(cause);}).finally(()=>{if(active)setLoading(false);});
   return()=>{active=false;};
  },[id]);
+
+ // Payment-return UX: bounded local GET monitoring, and only a previously
+ // opened original cashier permits the existing authenticated merchant POST.
+ // React cleanup stops stale-account/order notifications and all timers.
+ useEffect(()=>{
+  if(!order||order.id!==id||!['pending','unknown'].includes(order.status)||order.checkout.paymentConfirmed)return;
+  let active=true,reading=false,timer:ReturnType<typeof setTimeout>|null=null;
+  const clear=()=>{if(timer!==null){clearTimeout(timer);timer=null;}};
+  const reconcile=createVerifiedPaymentAutoCheck({kind:'subscription',orderId:id,request:api,
+   onVerified:(confirmed:SubscriptionOrder)=>{
+    if(!active||confirmed.id!==id)return;
+    setOrder(confirmed);setPayUrl(null);
+    setPaymentNote(confirmed.periodStatus==='queued'
+     ?t('付款已核验，下一期已排队，将在当前订阅结束后生效。','Payment verified. Your next period is queued.')
+     :t('付款已核验，订阅权益已处理。','Payment verified. Subscription entitlement applied.'));
+   }});
+  const schedule=()=>{
+   clear();
+   if(active&&document.visibilityState!=='hidden')timer=setTimeout(()=>{void tick();},2500);
+  };
+  async function tick(){
+   if(!active||reading||document.visibilityState==='hidden'||operation.current)return;
+   reading=true;
+   try{
+    const latest=(await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+encodeURIComponent(id))).order;
+    if(!active||latest.id!==id)return;
+    setOrder(latest);
+    if(['pending','unknown'].includes(latest.status)&&!latest.checkout.paymentConfirmed)
+      await reconcile.onPending(latest);
+    if(!active)return;
+    if(['pending','unknown'].includes(latest.status)&&!latest.checkout.paymentConfirmed)schedule();
+    else{clear();setPayUrl(null);}
+   }catch(error){
+    if(active&&!([401,403,404].includes((error as ApiError)?.status)))schedule();
+   }finally{reading=false;}
+  }
+  const resume=()=>{if(active&&document.visibilityState!=='hidden'){clear();void tick();}};
+  const visible=()=>{if(document.visibilityState==='hidden')clear();else resume();};
+  window.addEventListener('pageshow',resume);
+  window.addEventListener('focus',resume);
+  document.addEventListener('visibilitychange',visible);
+  schedule();
+  return()=>{active=false;clear();reconcile.stop();
+   window.removeEventListener('pageshow',resume);
+   window.removeEventListener('focus',resume);
+   document.removeEventListener('visibilitychange',visible);
+  };
+ },[id,order?.status,order?.checkout.paymentConfirmed,order?.merchantProvider]);
 
  async function act(action:'quote'|'create'|'refresh'|'relaunch'|'cancel'){
   if(operation.current)return;
@@ -126,7 +175,7 @@ export default function SubscriptionCheckout(){
    <p>{subscriptionStatus(order,language)}</p>
    {order.retryAvailable?<a className="button secondary" href={'/subscription-checkout/?plan='+encodeURIComponent(order.planCode)+(order.kind==='upgrade'?'&upgrade=1':'')}>{t('重新购买订阅','Purchase subscription again')}</a>:null}
    {paymentNote?<p role="status">{paymentNote}</p>:null}
-   {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer">{t('打开原订单收银台','Open original checkout')}</a>:null}
+   {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer" onClick={()=>markPaymentCashierOpened('subscription',order.id)}>{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
    {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?

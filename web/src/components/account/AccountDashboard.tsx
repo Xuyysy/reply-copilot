@@ -9,6 +9,7 @@ import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
 import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder, rememberPayment, createPaymentNotices } from "../../lib/payment-sync.mjs";
 import { canRefreshPaymentOrder, refreshPaymentOrder } from "../../lib/payment-refresh.mjs";
+import { createVerifiedPaymentAutoCheck } from "../../lib/verified-payment-auto.mjs";
 import { navigateVerifiedCashier } from "../../lib/cashier-navigation.mjs";
 import { canResumeMk99Order, resumeMk99Payment, paymentResumeMessage } from "../../lib/payment-resume.mjs";
 import { orderPriceSummary } from "../../lib/order-price-summary.mjs";
@@ -100,8 +101,9 @@ export default function AccountDashboard() {
     let alive=true;
     const show=(kind:string,credits?:number)=>{if(!alive)return;const next=notices.current!.publish({orderId:pendingPaymentId,kind,credits},paymentOwner);if(next)setPaymentNotice(next);};
     show("confirming");
-    const stop=watchPayment({orderId:pendingPaymentId,request:api,
-      onPaid:async(result:any)=>{
+    const onPaidVerified=async(result:any)=>{
+        const verifiedOrder=result.order;
+
         if(!alive)return;
         const synced=await load(true,true);
         // A successful refresh can end this watcher by removing the pending order.
@@ -111,12 +113,17 @@ export default function AccountDashboard() {
         const next=notices.current!.publish({orderId:pendingPaymentId,kind:synced?"paid":"paid_refresh_failed",credits:result.order.credits},paymentOwner);if(next)setPaymentNotice(next);
         setPaymentHint(previous=>previous===pendingPaymentId?null:previous);
         const u=new URL(location.href);if(u.searchParams.get("payment_order")===pendingPaymentId){u.searchParams.delete("payment_order");history.replaceState(history.state,"",u);}
-      },
+    };
+    const autoCheck=createVerifiedPaymentAutoCheck({kind:"credit",orderId:pendingPaymentId,request:api,
+      onVerified:async(o:any)=>{if(alive&&notices.current!.isOwner(paymentOwner))await onPaidVerified({order:o});}});
+    const stop=watchPayment({orderId:pendingPaymentId,request:api,
+      onPending:(r:any)=>{if(alive&&notices.current!.isOwner(paymentOwner))void autoCheck.onPending(r.order);},
+      onPaid:onPaidVerified,
       onTimeout:()=>show("timeout"),
       onTerminal:(result:any)=>{if(!alive||!notices.current!.isOwner(paymentOwner))return;setPaymentHint(null);show(result.order.status);void load(true);},
       onError:(error:any)=>{if([401,403,404].includes(error?.status)&&alive&&notices.current!.isOwner(paymentOwner)){setPaymentHint(null);show("unavailable");}}
     });
-    return()=>{alive=false;stop();};
+    return()=>{alive=false;autoCheck.stop();stop();};
   },[pendingPaymentId,state,load,language,paymentOwner]);
   function dismissPaymentNotice(){notices.current!.dismiss(paymentNotice);setPaymentNotice(null);}
   function paymentNoticeText(notice:PaymentNotice){

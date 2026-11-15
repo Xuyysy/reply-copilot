@@ -67,6 +67,7 @@ import Base from "../layouts/Base.astro";
   </style>
   <script>
     import { watchPayment, rememberPayment, rememberedPayment, clearRememberedPayment, paymentReturnOrder, shouldMonitorPayment } from "../lib/payment-sync.mjs";
+    import { createVerifiedPaymentAutoCheck, markPaymentCashierOpened } from "../lib/verified-payment-auto.mjs";
     import { submitEpayForm } from "../lib/epay-form.mjs";
     import QRCode from "qrcode";
     import {uniquePaymentMethods,paymentMethodKey} from "../lib/payment-methods.mjs";
@@ -109,10 +110,18 @@ import Base from "../layouts/Base.astro";
     function monitorPayment(next:Order){
       if(!shouldMonitorPayment(next)){stopMonitoring();monitoredId=null;return;}
       if(monitoredId===next.id)return;stopMonitoring();monitoredId=next.id;
-      stopMonitoring=watchPayment({orderId:next.id,request:api,onPaid:async(result:any)=>{
+      const autoCheck=createVerifiedPaymentAutoCheck({kind:"credit",orderId:next.id,request:api,onVerified:async(confirmed:Order)=>{
+        if(!order||order.id!==confirmed.id)return;
+        showOrder(mergeCheckoutRead(order,confirmed) as Order);
+        await syncConfirmedPayment(confirmed);
+      }});
+      const stopLocal=watchPayment({orderId:next.id,request:api,onPending:(result:any)=>{
+        void autoCheck.onPending(result.order);
+      },onPaid:async(result:any)=>{
         if(!order||order.id!==result.order.id)return;showOrder(mergeCheckoutRead(order,result.order));
         await syncConfirmedPayment(result.order);
       },onTimeout:()=>{monitoredId=null;setStatus("支付结果仍在确认，请稍后查看或手动刷新；不要重复付款。","Payment is still unconfirmed. Check later or refresh manually; do not pay again.");},onTerminal:(result:any)=>{if(order)showOrder(mergeCheckoutRead(order,result.order));},onError:(error:any)=>{if([401,403,404].includes(error?.status))setStatus("暂时无法读取订单，请登录对应账户后重试。","Cannot read this order. Sign in to the matching account.");}});
+      stopMonitoring=()=>{autoCheck.stop();stopLocal();};
     }
     const setStatus = (zh:string,en:string) => { byId("checkout-status").textContent = label(zh,en); };
     function show(id:string,visible:boolean){byId(id).hidden=!visible;}
@@ -132,6 +141,9 @@ import Base from "../layouts/Base.astro";
         if(renderedQrKey!==key||!order||order.id!==next.id||order.paymentUrl!==next.paymentUrl||order.status!=="pending")return;
         image.src=`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
         image.alt=label("微信支付收银台二维码，请使用手机微信扫描","WeChat cashier QR code. Scan with your phone using WeChat.");
+        // A QR can be scanned from another device without clicking the link.
+        // Arm the bounded merchant checker only after a real QR is rendered.
+        rememberPayment(next.id);markPaymentCashierOpened("credit",next.id);
       }catch{
         renderedQrKey=null;show("wechat-qr-panel",false);show("wechat-mobile-note",false);
       }
@@ -325,7 +337,9 @@ import Base from "../layouts/Base.astro";
         try{rememberPayment(latest.id);}catch{event.preventDefault();setStatus("无法保存付款跟踪状态，请稍后重试。","Unable to save payment tracking. Please retry.");}
         return;
       }
-      if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending")rememberPayment(order.id);
+      if(order&&order.paymentProtocol==="rsa2"&&order.status==="pending"){
+        rememberPayment(order.id);markPaymentCashierOpened("credit",order.id);
+      }
     });
     byId("epay-submit").addEventListener("click",async()=>{
       if(busy||!order||order.paymentProtocol!=="epay"||order.status!=="pending"||!paymentAvailable)return;
