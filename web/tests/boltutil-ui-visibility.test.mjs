@@ -47,8 +47,8 @@ test('subscription checkout revalidates paid methods and does not reveal backend
 });
 test('five USDT networks are previewed for in-site checkout, but new order buttons are gated by availability',()=>{
  for(const code of ["TRC20","POLYGON","BEP20","ERC20","SOLANA"])assert.match(checkout,new RegExp('value="'+code+'"'));
- assert.match(checkout,/<div id="bolt-chain-picker"[^>]*>/);
- assert.doesNotMatch(checkout,/<div id="bolt-chain-picker"[^>]*\shidden\b/);
+ assert.match(checkout,/<div[^>]*id="bolt-chain-picker"[^>]*>/);
+ assert.doesNotMatch(checkout,/<div[^>]*id="bolt-chain-picker"[^>]*\shidden\b/);
  assert.match(checkout,/chain\.disabled=true;/);
  assert.match(checkout,/if\(!availability\.available/);
  assert.match(checkout,/chain\.disabled=false;/);

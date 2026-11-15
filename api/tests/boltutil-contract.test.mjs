@@ -19,7 +19,7 @@ const base={eventId:'evt_123456',externalOrderId:'XRH_123456',status:'CONFIRMED'
 test('only five explicitly approved USDT networks are accepted',()=>{
   assert.deepEqual(SUPPORTED_BOLT_NETWORKS,['TRC20','POLYGON','BEP20','ERC20','SOLANA']);
   for(const chain of SUPPORTED_BOLT_NETWORKS) assert.equal(parseBoltNetwork(chain),chain);
-  for(const unsupported of ['BSC','BNB','ERC20','POLYGON_USDT','BASE',null,''])
+  for(const unsupported of ['BSC','BNB','POLYGON_USDT','BASE',null,''])
     assert.throws(()=>parseBoltNetwork(unsupported));
 });
 test('USDT contracts and on-chain decimals never alias networks',()=>{
