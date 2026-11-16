@@ -6,6 +6,7 @@ import {Button} from "../ui/button";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 import {Table,TableBody,TableCell,TableHead,TableHeader,TableRow} from "../ui/table";
 import AdminBoltReconciliationPanel from "./AdminBoltReconciliationPanel";
+import AdminBoltMerchantAcceptancePanel from "./AdminBoltMerchantAcceptancePanel";
 
 type Network="TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
 type BoltOrder={
@@ -170,6 +171,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
             {loading?t("正在读取上线准入状态…","Loading release readiness…"):t("上线准入尚无数据。","Readiness data unavailable.")}
           </p>}
         </section>
+        <AdminBoltMerchantAcceptancePanel active={active} language={language} control={control}/>
         <section className="space-y-4 rounded-xl border p-4" aria-label={t("USDT 收款开关","USDT payment switches")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
