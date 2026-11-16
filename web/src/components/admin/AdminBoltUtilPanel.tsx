@@ -30,18 +30,6 @@ type AdminControl={
   environmentNetworks:Switches;effectiveNetworks:Network[];available:boolean;
   environment:string;
 };
-const CHECK_LABELS:Record<string,[string,string]>={
-  schemaDeclared:["D1 结构就绪开关","D1 schema-ready runtime flag"],
-  schemaVerified:["Production D1 结构专项核验确认","Production D1 schema verification acknowledgment"],
-  globalEnabled:["Worker USDT 总门禁","Worker USDT global gate"],
-  productionCreateApproved:["Worker 环境建单授权","Worker environment create permission"],
-  apiKeyPresent:["BoltUtil 商户 API Secret 已绑定","BoltUtil API Secret present"],
-  webhookSecretPresent:["BoltUtil Webhook Secret 已绑定","BoltUtil webhook Secret present"],
-  providerVerificationAcknowledged:["商户验签联调确认标记","Provider signature handshake acknowledgment"],
-  quoteConfigured:["CNY/USDT 报价数值已配置","CNY/USDT quote configured"],
-  approvedQuoteMatches:["正式汇率审批值与当前报价完全一致","Approved FX exactly matches configured quote"],
-  operatorMasterEnabled:["后台 USDT 总开关","Admin USDT master switch"]
-};
 const NETWORKS:Array<{code:Network;label:string;chain:string}>=[
   {code:"TRC20",label:"TRON · TRC20",chain:"TRON"},
   {code:"POLYGON",label:"Polygon PoS",chain:"Polygon"},
@@ -122,57 +110,21 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
     <Card>
       <CardHeader className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <CardTitle>{t("USDT 收款 · 独立通道","USDT payments · Independent rail")}</CardTitle>
+          <CardTitle>{t("USDT 真实付款验证","USDT real-payment verification")}</CardTitle>
           <Badge variant={availability?.available?"secondary":"outline"}>
             {availability?.available?t("已开放收款","Accepting payments"):t("收款尚未开放","Payments disabled")}
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground">
-          {t("BoltUtil 五条 USDT 网络（TRON、Polygon、BNB Smart Chain、Ethereum、Solana）独立于 MK99／小豆人民币收款。",
-             "BoltUtil supports five independent USDT networks: TRON, Polygon, BNB Smart Chain, Ethereum and Solana; separate from MK99/Xiaodou fiat payments.")}
+          {t("先验证单链 Production 真实付款；其余网络保持关闭。人民币支付独立不受影响。",
+             "Validate one Production chain before opening the others. Fiat payments stay independent.")}
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
-        <section className="space-y-3 rounded-xl border p-4" data-testid="boltutil-production-readiness"
-          aria-label={t("USDT 上线准入检查","USDT release-readiness checks")}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="font-semibold">{t("五链收款 · 上线准入清单","Five-network payment release readiness")}</h4>
-            <Badge variant={control?.readiness.acceptingNewOrders?"secondary":"outline"}>
-              {control?.readiness.acceptingNewOrders?t("已有网络接受新订单","Accepting new invoices"):t("未开放新订单","New orders blocked")}
-            </Badge>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {t("此处读取 Worker 当前运行配置和后台开关，不执行生产 D1 结构查询或 BoltUtil 联调。标记为已确认不能代替真实数据库迁移、商户验签或链上付款验收。",
-               "These are Worker and operator declarations only, not a live D1 query, merchant handshake, or real on-chain acceptance test.")}
-          </p>
-          <div className="grid gap-2 md:grid-cols-2">
-            {(control?.readiness.checks||[]).map(check=><div key={check.id}
-              className="flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
-              <span>{t(CHECK_LABELS[check.id]?.[0]||check.id,CHECK_LABELS[check.id]?.[1]||check.id)}</span>
-              <Badge variant={check.satisfied?"secondary":"outline"}>
-                {check.satisfied?t("已配置","Configured"):t("未完成","Blocked")}
-              </Badge>
-            </div>)}
-          </div>
-          <div className="space-y-2">
-            <p className="text-sm font-medium">{t("逐链实际准入","Per-network effective readiness")}</p>
-            {(control?.readiness.networks||[]).map(chain=><div key={chain.network}
-              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
-              <span>{chain.network}</span>
-              <span className="text-xs text-muted-foreground">
-                {t("云端","Cloud")}: {chain.environmentEnabled?"ON":"OFF"} ·
-                {t("后台","Admin")}: {chain.operatorEnabled?"ON":"OFF"} ·
-                {chain.acceptingNewOrders?t("可新建订单","Invoice creation allowed"):
-                  t("新订单阻断","Blocked")}
-              </span>
-            </div>)}
-          </div>
-          {!control?.readiness&&<p role="status" className="text-sm text-muted-foreground">
-            {loading?t("正在读取上线准入状态…","Loading release readiness…"):t("上线准入尚无数据。","Readiness data unavailable.")}
-          </p>}
-        </section>
         <AdminBoltMerchantAcceptancePanel active={active} language={language} control={control}/>
-        <section className="space-y-4 rounded-xl border p-4" aria-label={t("USDT 收款开关","USDT payment switches")}>
+        <details className="rounded-xl border p-4" data-testid="boltutil-advanced-controls">
+          <summary className="cursor-pointer text-sm font-semibold">{t("高级支付设置（仅管理员）","Advanced payment controls (admin only)")}</summary>
+          <section className="space-y-4 rounded-xl border p-4" aria-label={t("USDT 收款开关","USDT payment switches")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="font-semibold">{t("USDT 收款总开关","USDT new-order master switch")}</h4>
@@ -228,28 +180,11 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
             </div>
           </div>}
           {notice&&<p role="status" className="text-sm text-emerald-700">{notice}</p>}
-        </section>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-          {NETWORKS.map(n=><div className="rounded-lg border p-3" key={n.code}>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <strong className="text-sm">{n.label}</strong>
-              <Badge variant={enabledNetworks.includes(n.code)?"secondary":"outline"}>
-                {enabledNetworks.includes(n.code)?t("已启用","Enabled"):t("未开放","Disabled")}
-              </Badge>
-            </div>
-            <p className="mt-2 text-xs text-muted-foreground">USDT · {n.code}</p>
-          </div>)}
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
-          {availability?.available
-            ?t("已启用网络以独立开关为准。请确认 BoltUtil 钱包和定价配置，才能进行真实付款验收。",
-               "Networks use independent switches. Verify merchant wallet and quote configuration before live payment acceptance.")
-            :t("USDT 新订单当前不可用。请检查后台运营开关和 Worker 安全门禁；无需切换 MK99 或小豆。",
-               "New USDT checkout is unavailable. Check operator switches and Cloudflare ceilings; no fiat merchant switch is needed.")}
-        </div>
+          </section>
+        </details>
         <p className="text-xs text-muted-foreground">
-          {t("下方订单列表只读；上方开关操作需管理员验证并记录审计。密钥仅存 Cloudflare Worker Secrets，不在网页展示或输入。",
-             "Orders below are read-only; switch changes require admin verification and audit. Secrets stay in Cloudflare Worker bindings and are never displayed or entered here.")}
+          {t("Orders below are read-only. 高级设置保留密码二次验证和审计，USDT 新订单仍由云端安全门禁控制。",
+             "Orders below are read-only. Advanced settings retain password reauthentication, audit and cloud safety ceilings.")}
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" disabled={loading} onClick={()=>setReload(x=>x+1)}>
@@ -262,6 +197,8 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
       </CardContent>
     </Card>
+    <details className="rounded-xl border p-3" data-testid="boltutil-history-details">
+      <summary className="cursor-pointer text-sm font-semibold">{t("历史订单与异常对账","Historical orders & reconciliation")}</summary>
     <Card>
       <CardHeader>
         <CardTitle>{t("USDT 独立订单与异常记录","USDT orders and review queue")}</CardTitle>
@@ -315,6 +252,8 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         </div>
       </CardContent>
     </Card>
-    <AdminBoltReconciliationPanel active={active} language={language}/>
+      <AdminBoltReconciliationPanel active={active} language={language}/>
+    </details>
+
   </div>;
 }
