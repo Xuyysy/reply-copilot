@@ -65,3 +65,22 @@ Code-review and CI evidence belong to the exact PR head, not historical
 Staging PR #149. Full Push CI, separate Production build, artifacts and
 manual deployment approval are distinct. Passing tests does not prove
 Production migration, wallet correctness, or real-money acceptance.
+
+## PR-scoped offline Production candidate build (2026-11-16)
+
+Production Build now accepts same-repository PRs targeting release/production
+when BoltUtil files or build-guard files change. It checks out the exact PR
+head SHA, builds immutable Worker/Pages/Chrome packages, verifies all digests,
+and uploads the candidate. The job has read-only GitHub permission and never
+uses Cloudflare credentials, executes D1, deploys or performs real payment.
+
+The source preflight and artifact verifier reject a committed source config
+that enables any BoltUtil global/schema/production-create/network flag, or
+contains merchant API/webhook credentials or a quoted FX rate. Existing
+MK99/Xiaodou payments and Production D1 binding are preserved.
+
+**A PR candidate build is not a releasable Production artifact.** Existing
+manual release verification still requires a separate successful full CI
+and Production Build triggered by push to release/production, pinned to the
+identical source SHA. D1 schema verification/migration, FX, wallet, callback
+and per-chain activation need separate human approvals.

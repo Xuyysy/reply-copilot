@@ -67,6 +67,22 @@ def verify(folder: pathlib.Path, source_sha: str):
     }.items():
         if vars_.get(name) != expected:
             raise ValueError(f"Unsafe Production variable {name}")
+    # The source bundle must not contain an enabled crypto sale flag,
+    # merchant secret or provisional currency quote. Runtime Cloudflare
+    # configuration requires separate approvals and is not inspected here.
+    for name in (
+        "BOLTUTIL_ENABLED", "BOLTUTIL_SCHEMA_READY",
+        "BOLTUTIL_STAGING_CREATE_ENABLED", "BOLTUTIL_PRODUCTION_CREATE_ENABLED",
+        "BOLTUTIL_TRC20_ENABLED", "BOLTUTIL_POLYGON_ENABLED",
+        "BOLTUTIL_BEP20_ENABLED", "BOLTUTIL_ERC20_ENABLED",
+        "BOLTUTIL_SOLANA_ENABLED",
+    ):
+        if vars_.get(name) == "1":
+            raise ValueError("USDT source gate unexpectedly enabled: " + name)
+    for name in ("BOLTUTIL_API_KEY", "BOLTUTIL_WEBHOOK_SECRET",
+                 "BOLTUTIL_CNY_PER_USDT_MICROS"):
+        if name in vars_:
+            raise ValueError("Merchant credentials/FX embedded in artifact: " + name)
     dbs = config.get("d1_databases", [])
     if len(dbs) != 1 or dbs[0].get("binding") != "DB" or dbs[0].get("database_id") != DB_ID:
         raise ValueError("Unexpected Production D1 binding")

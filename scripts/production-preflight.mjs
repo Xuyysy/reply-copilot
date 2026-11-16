@@ -3,6 +3,14 @@ import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+// Source-level safe-off: runtime Cloudflare authorization and D1 migrations
+// require their own owner approvals and are never performed by this script.
+export const BOLTUTIL_PRODUCTION_SOURCE_OFF_KEYS=Object.freeze([
+ 'BOLTUTIL_ENABLED','BOLTUTIL_SCHEMA_READY','BOLTUTIL_STAGING_CREATE_ENABLED',
+ 'BOLTUTIL_PRODUCTION_CREATE_ENABLED','BOLTUTIL_TRC20_ENABLED',
+ 'BOLTUTIL_POLYGON_ENABLED','BOLTUTIL_BEP20_ENABLED',
+ 'BOLTUTIL_ERC20_ENABLED','BOLTUTIL_SOLANA_ENABLED'
+]);
 export function productionBlockers(config,staging){
  const errors=[],v=config.vars||{},db=config.d1_databases?.[0];
  const store=JSON.parse(readFileSync(path.join(root,'config/extension-store-identity.json')));
@@ -11,6 +19,10 @@ export function productionBlockers(config,staging){
  if(v.EXTENSION_ORIGIN!=='chrome-extension://'+store.id)errors.push('Chrome Web Store Extension ID is missing');
  if(v.PAYMENTS_ENABLED!=='1'||v.ADMIN_PORTAL_ENABLED!=='1')errors.push('Production must preserve enabled payments and administrator access');
  if(v.XIAODOU_WEBHOOKS_ENABLED!=='1')errors.push('Production payment notifications must remain available for verified existing orders');
+ for(const key of BOLTUTIL_PRODUCTION_SOURCE_OFF_KEYS)
+  if(v[key]==='1')errors.push('Production source cannot activate USDT without separate approval: '+key);
+ for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS'])
+  if(Object.hasOwn(v,key))errors.push('Version-controlled Production vars cannot include merchant secrets or FX: '+key);
  if(v.AI_MODE!=='production'||!(Number(v.DEEPSEEK_INPUT_USD_PER_MILLION)>0)||!(Number(v.DEEPSEEK_OUTPUT_USD_PER_MILLION)>0))errors.push('Real AI mode and conservative pricing required');
  for(const k of ['WEB_ORIGIN','API_ORIGIN']){try{const u=new URL(v[k]);if(u.protocol!=='https:'||u.origin!==v[k]||v[k]===staging.vars[k]||/staging|\.invalid/.test(u.hostname))throw new Error();}catch{errors.push('Invalid Production '+k);}}
  if(config.observability?.logs?.invocation_logs!==false||config.observability?.redact_query_string!==true)errors.push('Payment callback query logging must be redacted and invocation logs disabled');
