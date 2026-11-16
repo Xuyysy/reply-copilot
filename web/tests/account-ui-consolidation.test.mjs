@@ -58,3 +58,18 @@ test("verification codes warn about spam without changing verification APIs", ()
   assert.match(auth, /\/v1\/auth\/verify-registration/);
   assert.match(auth, /\/v1\/auth\/reset-password/);
 });
+
+test("USDT is grouped inside the existing account order center rather than a bottom-of-page island",()=>{
+ const astro=read("web/src/pages/account.astro");
+ const bolt=read("web/src/components/account/BoltOrdersList.tsx");
+ assert.doesNotMatch(astro,/<BoltOrdersList/);
+ assert.match(account,/import BoltOrdersList from/);
+ assert.match(account,/<BoltOrdersList productType="subscription"\/>/);
+ assert.match(account,/<BoltOrdersList productType="credits"\/>/);
+ assert.ok(account.indexOf('data-subscription-orders')<account.indexOf('<BoltOrdersList productType="subscription"/>'));
+ assert.ok(account.indexOf('data-credit-orders')<account.indexOf('<BoltOrdersList productType="credits"/>'));
+ assert.match(bolt,/orders\.filter\(o=>o\.productType===productType\)/);
+ assert.match(bolt,/data-testid=\{"account-usdt-"/);
+ for(const code of ["TRC20","POLYGON","BEP20","ERC20","SOLANA"])assert.ok(bolt.includes(code));
+ assert.doesNotMatch(bolt,/className="container section"/);
+});

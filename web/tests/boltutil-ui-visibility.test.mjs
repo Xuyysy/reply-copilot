@@ -62,7 +62,7 @@ test('Admin V2 has visible independent USDT tab including mobile nav, not only a
  assert.match(panel,/data-testid="admin-boltutil-usdt"/);
  assert.match(panel,/\/v1\/admin\/boltutil\/orders/);
  assert.match(panel,/\/v1\/boltutil\/availability/);
- for(const code of ["TRC20","POLYGON","BEP20"])assert.match(panel,new RegExp('code:"'+code+'"'));
+ for(const code of ["TRC20","POLYGON","BEP20","ERC20","SOLANA"])assert.match(panel,new RegExp('code:"'+code+'"'));
  assert.match(panel,/Read-only:/);
  assert.doesNotMatch(panel,/<Button[^>]*onClick=\{[^}]*post/i);
  assert.match(panel,/币种单独记录/);
@@ -134,4 +134,17 @@ test('Production-aligned USDT subscriber blocker lookup includes fiat and paid q
  assert.match(checkout,/item\.rail==="fiat"\?"\/subscription-checkout\/\?order="/);
  assert.match(checkout,/Older API or temporary network error/);
  assert.doesNotMatch(checkout,/cancelBoltOrder|confirmBoltPaymentWithoutProvider/);
+});
+
+test("Staging admin only shows five-chain payment operations, not retired mainnet probe",()=>{
+ const sub=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
+ assert.match(sub,/TRON \/ Polygon \/ BNB \/ Ethereum \/ Solana/);
+ assert.match(sub,/下一步选择 TRON、Polygon、BNB、Ethereum 或 Solana 网络/);
+ assert.doesNotMatch(sub,/下一步选择 TRON、Polygon 或 BNB/);
+ assert.match(panel,/lg:grid-cols-5/);
+ assert.doesNotMatch(panel,/admin-boltutil-mainnet-test/);
+ assert.doesNotMatch(panel,/\/v1\/admin\/boltutil\/test-orders/);
+ assert.doesNotMatch(panel,/createMainnetTest|setProbes/);
+ assert.match(panel,/USDT 独立订单与异常记录/);
+ assert.match(panel,/查看用户端五链收银台/);
 });

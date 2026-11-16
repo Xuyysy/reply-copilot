@@ -187,13 +187,13 @@ export default function SubscriptionCheckout(){
       </label>)}
       <label className={'flex cursor-pointer items-center gap-3 rounded-xl border p-4 '+(rail==='usdt'?'border-blue-500 bg-blue-50':'bg-white')}>
        <input type="radio" name="payment-method" checked={rail==='usdt'} onChange={()=>{setRail('usdt');setQuote(undefined);}}/>
-       <span><strong>USDT</strong><small className="block text-muted-foreground">{usdtAvailable?t('TRON / Polygon / BNB','TRON / Polygon / BNB'):t('暂未开放','Not available')}</small></span>
+       <span><strong>USDT</strong><small className="block text-muted-foreground">{usdtAvailable?t('TRON / Polygon / BNB / Ethereum / Solana','TRON / Polygon / BNB / Ethereum / Solana'):t('暂未开放','Not available')}</small></span>
       </label>
      </div>
     </fieldset>
     {methodsLoading?<p role="status">{t('正在同步可用支付方式…','Refreshing payment methods…')}</p>:null}
     {rail==='usdt'?<div className="space-y-3 rounded-xl border bg-slate-50 p-4">
-      <p>{t('下一步选择 TRON、Polygon 或 BNB 网络。','Next choose TRON, Polygon or BNB network.')}</p>
+      <p>{t('下一步选择 TRON、Polygon、BNB、Ethereum 或 Solana 网络。','Next choose TRON, Polygon, BNB, Ethereum or Solana network.')}</p>
       {usdtAvailable&&(!upgrade||canUpgrade)?<a className="button" href={usdtHref}>{t('继续选择 USDT 网络','Continue to USDT networks')}</a>:
        <p role="status" className="notice">{upgrade&&!canUpgrade?t('当前订阅不满足本期升档条件，可改为购买下一期。','This upgrade is not eligible. You may buy the next period.'):t('USDT 收款尚未配置，无法创建真实订单。','USDT not configured; real payment orders are disabled.')}</p>}
      </div>:<>

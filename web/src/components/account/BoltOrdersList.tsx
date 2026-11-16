@@ -2,9 +2,9 @@ import {useEffect,useState} from "react";
 import {api} from "../../lib/api";
 import {phrase,useLanguage} from "../../lib/language";
 
-type BoltOrder={id:string;productType:string;network:"TRC20"|"POLYGON"|"BEP20";
+type BoltOrder={id:string;productType:"credits"|"subscription";network:"TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
   amount:string|null;quotedAmount:string;status:string;entitlementApplied:boolean;paidAt:number|null};
-export default function BoltOrdersList(){
+export default function BoltOrdersList({productType}:{productType:"credits"|"subscription"}){
   const language=useLanguage();
   const t=(zh:string,en:string)=>phrase(language,zh,en);
   const [orders,setOrders]=useState<BoltOrder[]>([]);
@@ -16,13 +16,13 @@ export default function BoltOrdersList(){
       .catch(()=>{if(live)setError(true);});
     return ()=>{live=false;};
   },[]);
-  if(!orders.length||error)return null;
-  return <section className="container section" aria-labelledby="bolt-orders-heading" style={{maxWidth:1080}}>
-    <div className="pricing-card space-y-3">
-      <h2 id="bolt-orders-heading">{t("USDT 付款记录","USDT payment history")}</h2>
-      <p className="fineprint">{t("TRON、Polygon、BNB Smart Chain 订单分链记录。回调不等于权益到账；可打开原订单主动查单。","Separate records for TRON, Polygon and BNB Smart Chain. Open an existing order to check payment and entitlements.")}</p>
+  const matching=orders.filter(o=>o.productType===productType);
+  if(!matching.length||error)return null;
+  return <section data-testid={"account-usdt-"+productType+"-orders"} className="mt-4 min-w-0 border-t border-border pt-4" aria-label={t("USDT 付款记录","USDT payment history")}>
+      <h4 className="mb-2 text-sm font-semibold">{productType==="credits"?t("USDT 充值订单","USDT top-up orders"):t("USDT 订阅订单","USDT subscription orders")}</h4>
+      <p className="mb-3 text-xs text-muted-foreground">{t("TRON、Polygon、BNB、Ethereum、Solana 五链订单独立记录；权益到账以服务端核验为准。","TRON, Polygon, BNB, Ethereum and Solana orders are tracked separately; entitlements require server verification.")}</p>
       <div className="space-y-2">
-        {orders.slice(0,20).map(o=><div key={o.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-2">
+        {matching.slice(0,20).map(o=><div key={o.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 py-2">
           <div><p><strong>{o.productType==="credits"?t("永久额度包","Permanent credits"):t("订阅","Subscription")}</strong>
             {" · "}{o.network}{" · "}{o.amount??o.quotedAmount} USDT</p>
             <p className="fineprint">{o.entitlementApplied?t("权益已到账","Entitlement applied"):
@@ -34,6 +34,5 @@ export default function BoltOrdersList(){
           </a>
         </div>)}
       </div>
-    </div>
   </section>;
 }
