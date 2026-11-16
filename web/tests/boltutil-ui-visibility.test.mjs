@@ -92,3 +92,17 @@ test('Native checkout can recover uncertain orders across reloads without openin
  assert.match(checkout,/rows\.length===0/);
  assert.doesNotMatch(checkout,/sessionStorage\.setItem\([^\n]*(?:address|amount|API_KEY|WEBHOOK)/);
 });
+
+test('Five-chain payment page distinguishes recipient amount from network fee, with no invented fixed gas estimate',()=>{
+ assert.match(checkout,/id="bolt-fee-guidance"/);
+ assert.match(checkout,/id="bolt-gas-info"/);
+ for(const [network,token] of [['TRC20','TRX'],['POLYGON','POL'],['BEP20','BNB'],['ERC20','ETH'],['SOLANA','SOL']]){
+  assert.match(checkout,new RegExp(network+':"'+token+'"'));
+ }
+ assert.match(checkout,/gasInfo\.textContent=t\(/);
+ assert.match(checkout,/order\.amount\+" USDT"/);
+ assert.match(checkout,/实际到账数量/);
+ assert.match(checkout,/手续费可能从账户余额或提币金额中扣除/);
+ assert.match(checkout,/never subtract it from the invoice amount/);
+ assert.doesNotMatch(checkout,/gasFeeEstimate\s*=\s*[0-9]/);
+});

@@ -40,6 +40,14 @@ import Base from "../layouts/Base.astro";
           <p class="fineprint">付款网络 / Network</p><strong id="bolt-network"></strong>
           <p class="fineprint" style="margin-top:12px">准确应付 / Exact amount</p><strong id="bolt-value"></strong>
         </div>
+        <aside id="bolt-fee-guidance" class="notice" role="note" aria-live="polite">
+          <strong data-zh="订单金额必须足额到账 · 网络手续费另付" data-en="The exact invoice amount must arrive · network fees are extra">订单金额必须足额到账 · 网络手续费另付</strong>
+          <p id="bolt-gas-info"></p>
+          <p data-zh="从 OKX 等交易所提币，请以提交前显示的「实际到账数量」为准；手续费可能从账户余额或提币金额中扣除。不要因为手续费减少本订单的实际到账金额。"
+             data-en="For OKX/exchange withdrawals, check the final amount received before confirming. Fees can be taken from your balance or withdrawal amount. Never reduce the invoice's net received amount.">
+             从 OKX 等交易所提币，请以提交前显示的「实际到账数量」为准；手续费可能从账户余额或提币金额中扣除。不要因为手续费减少本订单的实际到账金额。
+          </p>
+        </aside>
         <p class="fineprint">收款地址 / Receiving address</p>
         <p id="bolt-wallet" class="bolt-address"></p>
         <p id="bolt-contract" class="fineprint"></p>
@@ -82,7 +90,7 @@ import Base from "../layouts/Base.astro";
     const panel=document.getElementById("bolt-panel")!,message=document.getElementById("bolt-status")!,
       product=document.getElementById("bolt-product")!,value=document.getElementById("bolt-value")!,
       expiry=document.getElementById("bolt-expiry")!,wallet=document.getElementById("bolt-wallet")!,
-      contract=document.getElementById("bolt-contract")!,networkLabel=document.getElementById("bolt-network")!,
+      contract=document.getElementById("bolt-contract")!,networkLabel=document.getElementById("bolt-network")!,gasInfo=document.getElementById("bolt-gas-info")!,
       payInstructions=document.getElementById("bolt-pay-instructions")!,qr=document.getElementById("bolt-qr") as HTMLImageElement,
       buttons=document.getElementById("bolt-buttons")!,finalHint=document.getElementById("bolt-final-hint")!,
       recentContainer=document.getElementById("bolt-recent-orders")!,recentList=document.getElementById("bolt-recent-list")!;
@@ -90,6 +98,7 @@ import Base from "../layouts/Base.astro";
     chain.disabled=true;
     const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20","ERC20","SOLANA"];
     const labels:Record<Network,string>={TRC20:"TRON / TRC20",POLYGON:"Polygon PoS",BEP20:"BNB / BEP20",ERC20:"Ethereum / ERC20",SOLANA:"Solana / SPL USDT"};
+    const gasTokens:Record<Network,string>={TRC20:"TRX",POLYGON:"POL",BEP20:"BNB",ERC20:"ETH",SOLANA:"SOL"};
     let order:Order|null=null,busy=false,qrKey:string|null=null;
     type Attempt={key:string;createdAt:number;quoteId?:string};
     const operationCache=new Map<Network,Attempt>();
@@ -176,6 +185,9 @@ import Base from "../layouts/Base.astro";
       if(validPending){
         networkLabel.textContent=labels[order.network];
         value.textContent=order.amount+" USDT";
+        gasInfo.textContent=t(
+          "收款方必须实际收到 "+order.amount+" USDT；Web3 钱包一般另用 "+gasTokens[order.network]+" 支付链上 Gas。具体网络费以钱包确认页为准，不要从应付 USDT 中扣除。",
+          "The recipient must receive exactly "+order.amount+" USDT. Web3 wallets normally pay gas separately in "+gasTokens[order.network]+". Review the wallet's actual gas estimate; never subtract it from the invoice amount.");
         wallet.textContent=order.address!;
         contract.textContent=t("USDT 合约/Mint（仅供核对，非收款地址）：","USDT contract/mint (reference only, NOT recipient): ")+order.tokenContract;
         control(t("复制收款地址","Copy receiving address"),()=>void copyExact(order!.address!,"address"));
