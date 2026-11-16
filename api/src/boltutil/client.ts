@@ -156,3 +156,30 @@ export async function boltReadOnlyProbe(env:Env,operation:"ping"|"status",extern
  return {kind:"ok",httpStatus:res.status,providerCode,orderStatus:providerStatus,
    checkoutAvailable:typeof p.checkoutUrl==="string"&&p.checkoutUrl.startsWith("https://")};
 }
+
+/**
+ * Production merchant API-key connectivity check only. GET /ping cannot
+ * create invoices, update payment state, inspect orders or move money.
+ * Never return response bodies, merchant identity, wallet or credentials.
+ * This is intentionally separate from Staging's order-status diagnostics.
+ */
+export type BoltProductionKeyProbe={
+  kind:"ok"|"unauthorized"|"rate_limited"|"upstream_http"|"network_error";
+  httpStatus:number|null;
+};
+export async function boltProductionKeyProbe(env:Env):Promise<BoltProductionKeyProbe>{
+  if(env.ENVIRONMENT!=="production"||!env.BOLTUTIL_API_KEY)
+    throw new ApiFailure(503,"BOLTUTIL_PRODUCTION_KEY_PROBE_UNAVAILABLE","正式商户 API Key 尚未配置。");
+  let upstream:Response;
+  try{
+    upstream=await fetch(HOST+"/api/v1/ping",{
+      method:"GET",headers:{"X-Bolt-Key":env.BOLTUTIL_API_KEY},
+      redirect:"manual",signal:AbortSignal.timeout(8000)
+    });
+  }catch{return {kind:"network_error",httpStatus:null};}
+  const httpStatus=upstream.status;
+  const kind:BoltProductionKeyProbe["kind"]=
+    httpStatus===200?"ok":httpStatus===401||httpStatus===403?"unauthorized":
+    httpStatus===429?"rate_limited":"upstream_http";
+  return {kind,httpStatus};
+}

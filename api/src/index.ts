@@ -1,7 +1,7 @@
 import {adminCreator} from './creator-momentum';
 import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
-import {adminBoltOrders,adminBoltControl,updateAdminBoltControl} from './boltutil/admin';
+import {adminBoltOrders,adminBoltControl,updateAdminBoltControl,adminBoltProviderPing} from './boltutil/admin';
 import {adminBoltReconciliation,adminBoltOrderEvidence} from './boltutil/reconciliation';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
@@ -64,6 +64,7 @@ export default {
       if(request.method==="GET"&&path==="/v1/admin/boltutil/reconciliation")return await adminBoltReconciliation(request,env);
       const boltEvidenceMatch=path.match(/^\/v1\/admin\/boltutil\/orders\/([0-9a-f-]{36})\/evidence$/i);
       if(request.method==="GET"&&boltEvidenceMatch)return await adminBoltOrderEvidence(request,env,boltEvidenceMatch[1]);
+      if(request.method==="GET"&&path==="/v1/admin/boltutil/provider-ping")return await adminBoltProviderPing(request,env);
       if(request.method==="GET"&&path==="/v1/admin/boltutil/control")return await adminBoltControl(request,env);
       if(request.method==="POST"&&path==="/v1/admin/boltutil/control")return await updateAdminBoltControl(request,env);
       if(request.method==="GET"&&path==="/v1/boltutil/availability")return await publicBoltAvailability(request,env);

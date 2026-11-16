@@ -1,5 +1,6 @@
 import type {Env} from "../types";
 import {ApiFailure} from "../types";
+import {boltProductionKeyProbe} from "./client";
 import {requireAdminSession} from "../admin-auth";
 import {operation,commitOperation} from "../admin-operations";
 import {jsonBody,nowMs,requireWebOrigin} from "../security";
@@ -11,6 +12,14 @@ import {
   boltEnvironmentReady,boltEnvironmentNetworkEnabled,effectiveBoltNetworks,boltReadiness,
   type BoltOperatorControl
 } from "./control";
+
+/** Admin-only, read-only production merchant key verification. No orders or D1 mutations. */
+export async function adminBoltProviderPing(request:Request,env:Env):Promise<Response>{
+  await requireAdminSession(request,env);
+  if(env.ENVIRONMENT!=="production")throw new ApiFailure(404,"NOT_FOUND","接口不存在。");
+  const result=await boltProductionKeyProbe(env);
+  return response(result,200,env,request);
+}
 
 export async function adminBoltControl(request:Request,env:Env):Promise<Response>{
   await requireAdminSession(request,env);
