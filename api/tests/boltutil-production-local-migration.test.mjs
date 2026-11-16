@@ -62,7 +62,13 @@ test('0031 locally adds exactly the proposed tables/indexes to full Production s
   assert.deepEqual(fks(sql),[]);
   const before=snapshot(sql);
   const stripped=proposal.split('\n').filter(line=>!line.trimStart().startsWith('--')).join('\n');
-  assert.doesNotMatch(stripped,/\b(?:DROP|ALTER|DELETE|UPDATE|REPLACE|ATTACH|DETACH|VACUUM)\b/i);
+  // ON DELETE RESTRICT is an FK protection clause, NOT a DELETE statement.
+  // Allow only additive CREATE TABLE / CREATE INDEX statements.
+  const statements=stripped.split(';').map(statement=>statement.trim()).filter(Boolean);
+  assert.equal(statements.length,6,'unexpected number of Production schema statements');
+  for(const statement of statements)
+   assert.match(statement,/^CREATE\s+(?:TABLE|(?:UNIQUE\s+)?INDEX)\b/i,
+    'only additive schema statements are authorized in proposal 0031');
   assert.equal(before.schema.some(item=>item.name.startsWith('boltutil_')),false);
   applyTransaction(sql);
   const after=snapshot(sql);
