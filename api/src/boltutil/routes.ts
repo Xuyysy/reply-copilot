@@ -8,11 +8,12 @@ import {quoteSubscriptionUpgrade,SUBSCRIPTION_DAY_MS} from "../../../domain/subs
 import {subscriptionsEnabled,subscriptionAccount} from "../subscription-account";
 import {quoteFromCnyFen,formatMicros,decimalMicros,parseBoltNetwork,validReceivingAddress,tokenRawUnits,NETWORKS,SUPPORTED_BOLT_NETWORKS,type BoltNetwork} from "./contract";
 import {boltRequest} from "./client";
+import {boltCreateAuthorized,boltReadSchemaReady} from "./environment";
 import {settleBoltPayment} from "./settle";
 
 export function boltAvailable(env:Env):boolean {
-  return env.ENVIRONMENT==="staging" && env.BOLTUTIL_SCHEMA_READY==="1" && env.BOLTUTIL_ENABLED==="1" &&
-    env.BOLTUTIL_STAGING_CREATE_ENABLED==="1" && !!env.BOLTUTIL_API_KEY &&
+  return boltReadSchemaReady(env) && env.BOLTUTIL_ENABLED==="1" &&
+    boltCreateAuthorized(env) && !!env.BOLTUTIL_API_KEY &&
     !!env.BOLTUTIL_WEBHOOK_SECRET && !!env.BOLTUTIL_CNY_PER_USDT_MICROS &&
     /^[1-9][0-9]{5,8}$/.test(env.BOLTUTIL_CNY_PER_USDT_MICROS);
 }
@@ -24,7 +25,7 @@ function networkEnabled(env:Env,network:BoltNetwork):boolean {
   return boltAvailable(env)&&flag==="1";
 }
 function enabled(env:Env):void {
-  if(!boltAvailable(env)) throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 测试通道暂未开放。");
+  if(!boltAvailable(env)) throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 收款通道暂未开放。");
 }
 async function owner(request:Request,env:Env,write:boolean){
   const {session,token}=await sessionFor(request,env);
@@ -97,7 +98,7 @@ export async function createBoltUpgradeQuote(request:Request,env:Env):Promise<Re
     periodEndsAt:row.end_at}},200,env,request);
 }
 export async function listBoltOrders(request:Request,env:Env):Promise<Response>{
-  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1")return response({orders:[]},200,env,request);
+  if(!boltReadSchemaReady(env))return response({orders:[]},200,env,request);
   const user=await owner(request,env,false);
   const rows=await env.DB.prepare("SELECT * FROM boltutil_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 30")
     .bind(user.user_id).all<Order>();
@@ -105,13 +106,13 @@ export async function listBoltOrders(request:Request,env:Env):Promise<Response>{
 }
 
 /**
- * Production-aligned read-only original-order recovery for staging USDT.
+ * Owner-scoped read-only original-order recovery for staged/production USDT.
  * Unlike the fiat subscription list, this includes BoltUtil-backed orders
  * and paid queued periods without needing a fiat payment transaction join.
  * It never calls any payment provider or updates financial status.
  */
 export async function listBoltSubscriptionBlockers(request:Request,env:Env):Promise<Response>{
-  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1"||!subscriptionsEnabled(env))
+  if(!boltReadSchemaReady(env)||!subscriptionsEnabled(env))
     throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
   const user=await owner(request,env,false);
   const rows=await env.DB.prepare(`SELECT o.id,o.status,o.kind,v.plan_code,
@@ -140,7 +141,7 @@ export async function listBoltSubscriptionBlockers(request:Request,env:Env):Prom
 }
 
 export async function getBoltOrder(request:Request,env:Env,id:string):Promise<Response>{
-  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1")throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
+  if(!boltReadSchemaReady(env))throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
   const user=await owner(request,env,false),row=await orderById(env,onlyId(id));
   if(!row||row.user_id!==user.user_id)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
   return response({order:snapshot(row)},200,env,request);
@@ -290,7 +291,7 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
   return response({order:snapshot(order!),resumed:false},order?.status==="pending"?201:202,env,request);
 }
 export async function refreshBoltOrder(request:Request,env:Env,id:string):Promise<Response>{
-  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1")throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
+  if(!boltReadSchemaReady(env))throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
   const user=await owner(request,env,true),row=await orderById(env,onlyId(id));
   if(!row||row.user_id!==user.user_id)throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");
   if(!await takeRate(env,"bolt-refresh:"+user.user_id,6,60000,nowMs()))

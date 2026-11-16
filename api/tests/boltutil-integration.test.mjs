@@ -425,6 +425,85 @@ test('Staging cross-rail blocker endpoint includes old fiat, USDT and paid queue
   const attempts=f.sql.prepare("SELECT count(*) n FROM boltutil_orders").get().n;
   assert.equal(attempts,2,'read-only blocker lookup must not create another invoice');
   f.env.ENVIRONMENT='production';
+  // Read-only cross-rail recovery is allowed for a schema-ready Production
+  // deployment even when new invoice creation is switched off.
+  assert.equal((await f.call('/v1/boltutil/subscription-blockers',{method:'GET'})).status,200);
+  f.env.BOLTUTIL_SCHEMA_READY='0';
   assert.equal((await f.call('/v1/boltutil/subscription-blockers',{method:'GET'})).status,404);
+ }finally{f.sql.close();}
+});
+
+test('Production five-network checkout stays fail-closed until a separate explicit Production create bit is granted',async()=>{
+ const f=setup();
+ try{
+  f.env.ENVIRONMENT='production';
+  delete f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED;
+  let contacts=0;
+  const gone=await withProvider(()=>{contacts++;throw Error('must never create a merchant invoice');},()=>create(f,'POLYGON'));
+  assert.equal(gone.status,503,JSON.stringify(gone.body));
+  assert.equal(contacts,0);
+  assert.equal(count(f,'boltutil_orders'),0);
+  assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);
+
+  f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  // Even after operator approval, all other live readiness controls are mandatory.
+  for(const [name,value] of [['BOLTUTIL_SCHEMA_READY','0'],['BOLTUTIL_API_KEY',''],['BOLTUTIL_WEBHOOK_SECRET',''],['BOLTUTIL_CNY_PER_USDT_MICROS','']]){
+   const prior=f.env[name];f.env[name]=value;
+   assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false,'required '+name);
+   f.env[name]=prior;
+  }
+  // Staging flag is irrelevant in Production.
+  f.env.BOLTUTIL_STAGING_CREATE_ENABLED='0';
+  assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,
+   ['TRC20','POLYGON','BEP20','ERC20','SOLANA']);
+  const created=await create(f,'ERC20');
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const original=created.body.order;
+  // Owner must be able to reconcile already created orders even during a sales freeze.
+  f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='0';
+  f.env.BOLTUTIL_ENABLED='0';
+  assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);
+  assert.equal((await f.call('/v1/boltutil/orders/'+original.id,{method:'GET'})).status,200);
+  const verified=await refresh(f,original);
+  assert.equal(verified.status,200,JSON.stringify(verified.body));
+  assert.equal(verified.body.order.entitlementApplied,true);
+  const replay=await refresh(f,original);
+  assert.equal(replay.status,200,JSON.stringify(replay.body));
+  assert.equal(count(f,'boltutil_payment_events'),1);
+  assert.equal(row(f,"SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+  assert.equal((await create(f,'SOLANA')).status,503,'creation must stay off after settlement');
+ }finally{f.sql.close();}
+});
+
+test('Production webhook rejects uninitialized D1 and keeps signed original-order settlement after sales pause',async()=>{
+ const f=setup();
+ try{
+  f.env.ENVIRONMENT='production';
+  f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  const created=await create(f,'SOLANA');
+  assert.equal(created.status,201,JSON.stringify(created.body));
+  const order=created.body.order;
+  const event={eventId:'production_evt_20261116',status:'CONFIRMED',
+   amount:order.amount,paidAmount:order.amount,shortfallAmount:'0',
+   settlementType:'EXACT',manuallyAccepted:false,currency:'USDT',
+   network:'SOLANA',externalOrderId:row(f,'SELECT external_order_id FROM boltutil_orders WHERE id=?',order.id).external_order_id,
+   destinationAddress:order.address,txHash:NETWORKS.find(n=>n[0]==='SOLANA')[3]};
+  const signed=async()=>{const ts=String(Date.now()),sig=createHmac('sha256',secret)
+   .update(ts+'.'+JSON.stringify(event)).digest('hex');
+   return f.call('/v1/boltutil/webhook',{body:event,headers:{
+    'X-Bolt-Webhook-Timestamp':ts,'X-Bolt-Webhook-Signature':sig
+   }});
+  };
+  f.env.BOLTUTIL_SCHEMA_READY='0';
+  assert.equal((await signed()).status,404,'never acknowledge a production webhook without schema');
+  f.env.BOLTUTIL_SCHEMA_READY='1';
+  f.env.BOLTUTIL_ENABLED='0';f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='0';
+  const confirmed=await withProvider(request=>{
+   assert.equal(new URL(request.url).pathname,'/api/v1/order/status');
+   return Response.json({code:200,data:event});
+  },signed);
+  assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+  assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,400);
+  assert.equal(count(f,'boltutil_payment_events'),1);
  }finally{f.sql.close();}
 });

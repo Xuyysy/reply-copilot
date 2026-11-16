@@ -3,6 +3,7 @@ import {ApiFailure} from "../types";
 import {sha256,nowMs,uuid} from "../security";
 import {response} from "../http";
 import {verifyBoltWebhook,boltRequest} from "./client";
+import {boltReadSchemaReady} from "./environment";
 import {VerifiedPayment,verifiedPayment,distinctSettlement,tokenRawUnits,equalAddress,normalizedBoltTransactionHash,NETWORKS,type BoltNetwork} from "./contract";
 import {SUBSCRIPTION_PERIOD_MS,SUBSCRIPTION_DAY_MS} from "../../../domain/subscription-policy.js";
 
@@ -33,7 +34,7 @@ function failReview(env:Env,order:Local,now:number):Promise<unknown>{
 
 /** Provider status query is mandatory: a signed callback is a trigger, not permission to grant. */
 export async function settleBoltPayment(env:Env,externalId:string,callback:Record<string,unknown>|null):Promise<void>{
-  if(env.ENVIRONMENT!=="staging"||!env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
+  if(!boltReadSchemaReady(env)||!env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
     throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 查单暂不可用。");
   const order=await localOrder(env,externalId);
   if(!order)throw new ApiFailure(404,"BOLTUTIL_ORDER_NOT_FOUND","订单不存在。");
@@ -147,7 +148,7 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
   catch{throw new ApiFailure(503,"BOLTUTIL_SETTLEMENT_UNCONFIRMED","付款已核验，但权益结算尚未完成，请保留原单。");}
 }
 export async function boltWebhook(request:Request,env:Env):Promise<Response>{
-  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1"||!env.BOLTUTIL_WEBHOOK_SECRET)
+  if(!boltReadSchemaReady(env)||!env.BOLTUTIL_WEBHOOK_SECRET)
     throw new ApiFailure(404,"NOT_FOUND","支付通知接口不可用。");
   const payload=await verifyBoltWebhook(request,env.BOLTUTIL_WEBHOOK_SECRET);
   if(!payload||typeof payload!=="object"||Array.isArray(payload))throw new ApiFailure(400,"INVALID_WEBHOOK","通知无效。");

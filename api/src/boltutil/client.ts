@@ -1,4 +1,5 @@
 import type {Env} from "../types";
+import {boltCreateAuthorized,boltEnvironmentSupported} from "./environment";
 import {ApiFailure} from "../types";
 
 const HOST="https://api.boltutil.com";
@@ -55,8 +56,10 @@ function safeBoltBusinessCode(value:unknown):string|null{
  return null;
 }
 export async function boltRequest(env:Env,endpoint:"/api/v1/order/create"|"/api/v1/order/status",body:Record<string,unknown>,options:{adminProbe?:boolean;onCreateFailure?:(value:BoltCreateFailure)=>void}={}):Promise<Record<string,unknown>>{
-  if(env.ENVIRONMENT!=="staging"|| (endpoint==="/api/v1/order/create"&&env.BOLTUTIL_STAGING_CREATE_ENABLED!=="1"&&
-     !(options.adminProbe===true&&env.BOLTUTIL_ADMIN_TEST_ENABLED==="1"&&env.BOLTUTIL_ADMIN_TEST_SCHEMA_READY==="1"))||
+  if(!boltEnvironmentSupported(env)|| (endpoint==="/api/v1/order/create"&&
+     !(options.adminProbe===true&&env.ENVIRONMENT==="staging"&&
+       env.BOLTUTIL_ADMIN_TEST_ENABLED==="1"&&env.BOLTUTIL_ADMIN_TEST_SCHEMA_READY==="1")&&
+     !(options.adminProbe!==true&&boltCreateAuthorized(env)))||
      !env.BOLTUTIL_API_KEY||!env.BOLTUTIL_WEBHOOK_SECRET)
      throw new ApiFailure(503,"BOLTUTIL_NOT_CONFIGURED","USDT 收款通道尚未完成配置。");
   const raw=JSON.stringify(body),ts=String(Date.now()),sig=await hmac(env.BOLTUTIL_WEBHOOK_SECRET,ts,raw);

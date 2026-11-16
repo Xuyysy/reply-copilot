@@ -31,6 +31,8 @@ export interface Env {
   BOLTUTIL_SOLANA_ENABLED?: string;
   BOLTUTIL_SCHEMA_READY?: string;
   BOLTUTIL_STAGING_CREATE_ENABLED?: string;
+  /** Explicit Production-only checkout authorization, absent/OFF until approved. */
+  BOLTUTIL_PRODUCTION_CREATE_ENABLED?: string;
   BOLTUTIL_API_KEY?: string;
   /** Admin-only real-mainnet 1-USDT diagnostic; never enables public checkout. */
   BOLTUTIL_ADMIN_TEST_ENABLED?: string;

@@ -21,3 +21,10 @@
 10. **Production 验证**：记录发布前后 Production Worker 与 Pages 版本、绑定数、CNY 通道状态；验证官方生产域名与所有结账流程无回归。上线前后禁止从网页或日志明文输出任何支付密钥。
 
 当前范围：以上为预发布准备，未在 Production 新建订单、转账、修改 D1、切换开关或部署。
+
+## 2026-11-16 Production support code (draft, NOT deployed)
+- BoltUtil endpoints now support `ENVIRONMENT=production` in addition to Staging, but **only with `BOLTUTIL_PRODUCTION_CREATE_ENABLED=1`**, existing `BOLTUTIL_ENABLED=1`, verified `BOLTUTIL_SCHEMA_READY=1`, valid separate Production `BOLTUTIL_API_KEY` and `BOLTUTIL_WEBHOOK_SECRET`, an explicitly approved `BOLTUTIL_CNY_PER_USDT_MICROS` and per-network flags. Absent Production create flag blocks all new real invoices, even if Staging is enabled.
+- Read-only owner history, per-order provider status verification and signed payment webhook remain independently available *after* the sale switches are turned OFF, once Prod D1 schema and Prod merchant keys are valid. This is essential for late payments and refunds/reconciliation. Admin-only Staging mainnet test code remains Staging-only and default create-OFF.
+- Candidate initial Prod five-chain SQL is `api/sql-proposals/0031_boltutil_five_networks_production_initial.sql`. It is additive, initial-only, not auto-migrated, and intentionally fails if preexisting BoltUtil tables exist. Do NOT run `0030` against Production: it contains a Staging-only table rebuild. Required preflight: schema-only D1 verification and Time Travel bookmark, no user financial data read; separate approval for SQL mutation. Production runtime flag stays OFF until completed and independently verified.
+- Production Worker currently has **no BoltUtil merchant secrets**, so code readiness alone cannot activate payments. Secrets are Worker-specific, write-only and cannot be copied from Staging through this connection. The owner must provision exact **Production** merchant API Key, Webhook Secret, Webhook `https://api.x-reply-helper.top/v1/boltutil/webhook`, official five USDT receiving wallets, and an approved live FX quote **outside source control** before any activation.
+- This PR does not operate the Production Worker, D1 or wallets. Do not inherit Staging's 7 CNY/USDT test rate.
