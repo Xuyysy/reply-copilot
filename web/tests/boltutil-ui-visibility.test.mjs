@@ -55,7 +55,7 @@ test('five USDT networks are previewed for in-site checkout, but new order butto
  assert.match(checkout,/支持 TRON、Polygon、BNB、Ethereum 和 Solana/);
  assert.match(checkout,/await api<\{order:Order\}>\("\/v1\/boltutil\/orders"/);
 });
-test('Admin V2 has visible independent USDT tab including mobile nav, not only a hidden backend API',()=>{
+test('Admin V2 has independent audited USDT operator controls and read-only payment evidence',()=>{
  assert.match(admin,/import AdminBoltUtilPanel from/);
  assert.match(admin,/\["boltutil",t\("USDT 收款","USDT payments"\)\]/);
  assert.match(admin,/<TabsContent value="boltutil"><AdminBoltUtilPanel active=\{tab==="boltutil"\}/);
@@ -63,8 +63,10 @@ test('Admin V2 has visible independent USDT tab including mobile nav, not only a
  assert.match(panel,/\/v1\/admin\/boltutil\/orders/);
  assert.match(panel,/\/v1\/boltutil\/availability/);
  for(const code of ["TRC20","POLYGON","BEP20","ERC20","SOLANA"])assert.match(panel,new RegExp('code:"'+code+'"'));
- assert.match(panel,/Read-only:/);
- assert.doesNotMatch(panel,/<Button[^>]*onClick=\{[^}]*post/i);
+ assert.match(panel,/\/v1\/admin\/boltutil\/control/);
+ assert.match(panel,/confirm:true,reason:reason\.trim\(\)/);
+ assert.match(panel,/Orders below are read-only/);
+ assert.doesNotMatch(panel,/write\("\/v1\/boltutil\/orders"/);
  assert.match(panel,/币种单独记录/);
 });
 
