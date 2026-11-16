@@ -93,8 +93,12 @@ test('diagnostics do not change the public USDT checkout flag, URLs or create en
   assert.doesNotMatch(diag,/order\/create|UPDATE boltutil_admin_test_orders|INSERT INTO boltutil_admin_test_orders/);
  }finally{f.sql.close();}
 });
-test('Staging admin UI offers diagnostics without asking to create more invoices',()=>{
+test('Retired Staging mainnet admin probe UI is removed; real five-chain finance and audit remain',()=>{
  const src=readFileSync(new URL('../../web/src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
- assert.match(src,/只读诊断：为何没有收银台/);
- assert.match(src,/此笔测试单没有可靠的付款链接/);
+ assert.doesNotMatch(src,/只读诊断：为何没有收银台|此笔测试单没有可靠的付款链接/);
+ assert.doesNotMatch(src,/admin-boltutil-mainnet-test|createMainnetTest|admin\/boltutil\/test-orders/);
+ assert.match(src,/\/v1\/admin\/boltutil\/orders/);
+ assert.match(src,/USDT 独立订单与异常记录/);
+ for(const network of ['TRC20','POLYGON','BEP20','ERC20','SOLANA'])
+  assert.match(src,new RegExp('code:"'+network+'"'));
 });

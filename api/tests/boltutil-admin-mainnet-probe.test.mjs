@@ -249,15 +249,16 @@ test('Expanded BoltUtil error classification understands inactive merchant setup
   }finally{f.sql.close();}
  }
 });
-test('Staging admin checkout UX shows a real provider link only after validated invoice, and a merchant configuration checklist on HTTP 400',()=>{
- const source=readFileSync(new URL('../../web/src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
- assert.match(source,/admin-boltutil-checkout-blocked/);
- assert.match(source,/admin-boltutil-checkout-ready/);
- assert.match(source,/BoltUtil 拒绝了创建订单/);
- assert.match(source,/真实 BoltUtil 付款页面已生成/);
- assert.match(source,/result.order.status==="pending"&&!!result.order.checkoutUrl/);
- assert.match(source,/o.checkoutUrl&&o.status==="pending"&&o.address&&o.amount/);
- assert.match(source,/https:\/\/boltutil\.com\/developer-docs\?s=create/);
+test('Retired Staging mainnet test checkout is absent, while server creation remains default-off and historical signed callbacks remain',()=>{
+ const ui=readFileSync(new URL('../../web/src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
+ const server=readFileSync(new URL('../src/boltutil/admin-probes.ts',import.meta.url),'utf8');
+ assert.doesNotMatch(ui,/admin-boltutil-checkout-blocked|admin-boltutil-checkout-ready|管理员专用 · 三链|I_ACCEPT_REAL_1_USDT_MAINNET/);
+ assert.doesNotMatch(ui,/admin\/boltutil\/test-orders/);
+ assert.match(server,/BOLTUTIL_ADMIN_TEST_CREATE_ENABLED!=="1"/);
+ assert.match(server,/BOLTUTIL_ADMIN_TEST_CREATE_RETIRED/);
+ assert.match(server,/export async function adminBoltTestWebhook/);
+ assert.match(server,/export async function adminBoltTestRefresh/);
+ assert.match(server,/export async function adminBoltTestDiagnose/);
 });
 
 test('Retired admin mainnet test creation fails closed without separate explicit create authorization',async()=>{
