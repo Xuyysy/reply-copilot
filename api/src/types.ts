@@ -22,6 +22,27 @@ export interface Env {
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
   ADMIN_PORTAL_ENABLED?: string;
   PAYMENTS_ENABLED?: string;
+  /** BoltUtil USDT is independent of the MK99/Xiaodou fiat rail. */
+  BOLTUTIL_ENABLED?: string;
+  BOLTUTIL_TRC20_ENABLED?: string;
+  BOLTUTIL_POLYGON_ENABLED?: string;
+  BOLTUTIL_BEP20_ENABLED?: string;
+  BOLTUTIL_ERC20_ENABLED?: string;
+  BOLTUTIL_SOLANA_ENABLED?: string;
+  BOLTUTIL_SCHEMA_READY?: string;
+  BOLTUTIL_STAGING_CREATE_ENABLED?: string;
+  BOLTUTIL_PRODUCTION_CREATE_ENABLED?: string;
+  BOLTUTIL_API_KEY?: string;
+  BOLTUTIL_WEBHOOK_SECRET?: string;
+  BOLTUTIL_CNY_PER_USDT_MICROS?: string;
+  /** Explicit release acknowledgements. These are not evidence of a live payment. */
+  BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED?: string;
+  BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED?: string;
+  /** Must exactly match the configured CNY/USDT micros quote; rate changes revoke approval. */
+  BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS?: string;
+  BOLTUTIL_ADMIN_TEST_ENABLED?: string;
+  BOLTUTIL_ADMIN_TEST_CREATE_ENABLED?: string;
+  BOLTUTIL_ADMIN_TEST_SCHEMA_READY?: string;
   SUBSCRIPTIONS_ENABLED?: string;
   SUBSCRIPTION_PURCHASES_ENABLED?: string;
   SUBSCRIPTION_CHECKOUT_ENABLED?: string;

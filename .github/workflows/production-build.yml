@@ -4,24 +4,40 @@ on:
   push:
     branches:
       - release/production
+  # Read-only Production candidate from same-repository source PR.
+  # This does not satisfy the protected release/production push requirement.
+  pull_request:
+    branches:
+      - release/production
+    paths:
+      - 'api/src/boltutil/**'
+      - 'api/tests/boltutil-*.test.mjs'
+      - 'web/src/pages/usdt-checkout.astro'
+      - '.github/workflows/production-build.yml'
+      - 'scripts/production-preflight.mjs'
+      - 'scripts/verify-production-artifact.py'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: production-build-${{ github.ref }}
+  group: production-build-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   package:
     name: Build immutable Worker / Pages / Chrome packages
-    if: github.repository == 'Xuyysy/reply-copilot'
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -64,7 +80,7 @@ jobs:
           cp api/deploy/production.wrangler.json dist/production-ci/worker-config.json
       - name: Fingerprint every output with exact Git source
         env:
-          SOURCE_SHA: ${{ github.sha }}
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           python3 - <<'PY'
           import hashlib,json,os,pathlib
@@ -98,15 +114,21 @@ jobs:
           (base/'release-manifest.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n')
           print(f'PASS: {len(files)} files; source {os.environ["SOURCE_SHA"]}')
           PY
+      - name: Verify exact-sha Production artifact offline before upload
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: python3 scripts/verify-production-artifact.py dist/production-ci "$SOURCE_SHA"
       - uses: actions/upload-artifact@v4
         with:
-          name: production-build-${{ github.sha }}
+          name: production-build-${{ github.event.pull_request.head.sha || github.sha }}
           path: dist/production-ci/
           if-no-files-found: error
           retention-days: 30
       - name: Explain trust boundary
         run: |
           echo '### Production bundle prepared; nothing deployed' >> "$GITHUB_STEP_SUMMARY"
-          echo "- Source SHA: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Immutable artifact: \`production-build-${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
-          echo '- Release requires a separate guarded Production deploy workflow.' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source SHA: ${{ github.event.pull_request.head.sha || github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Immutable artifact: \`production-build-${{ github.event.pull_request.head.sha || github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Nothing deployed, no Cloudflare secrets or remote D1 touched.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- PR candidate builds CANNOT authorize Production deploy; that requires full CI and build on release/production push.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Release requires separate owner approval and guarded Production deploy workflow.' >> "$GITHUB_STEP_SUMMARY"

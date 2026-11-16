@@ -21,6 +21,15 @@ export default function SubscriptionCheckout(){
  const [id,setId]=useState(params.get('order')??'');
  const [cashierOpened,setCashierOpened]=useState(()=>hasPaymentCashierOpened('subscription',params.get('order')??''));
  const [catalog,setCatalog]=useState<Catalog>();
+ const [boltAvailable,setBoltAvailable]=useState(false);
+ useEffect(()=>{
+   let alive=true;
+   const check=()=>{void api<{available:boolean;networks:string[]}>('/v1/boltutil/availability')
+    .then(result=>{if(alive)setBoltAvailable(result.available===true&&result.networks.length>0);})
+    .catch(()=>{if(alive)setBoltAvailable(false);});};
+   check();window.addEventListener('focus',check);
+   return()=>{alive=false;window.removeEventListener('focus',check);};
+ },[]);
  const [currentSubscription,setCurrentSubscription]=useState<{status:string;plan:string|null;expiresAt:string|null}|null>(null);
  const [order,setOrder]=useState<SubscriptionOrder>();
  const [payUrl,setPayUrl]=useState<string|null>(null);
@@ -212,6 +221,11 @@ export default function SubscriptionCheckout(){
    </>}
   </section>:null}
   {!id&&!loading&&catalog&&(!plan||!catalog.checkoutAvailable)?<p role="status">{t('所选订阅暂不可购买。永久额度购买不受影响。','This subscription is unavailable. Permanent credits are still available.')}</p>:null}
+  {!id&&!loading&&plan&&boltAvailable?<section className="pricing-card space-y-3">
+    <h3 className="font-semibold">USDT · {t('五链独立收款','Five-network payment')}</h3>
+    <p className="text-sm text-muted-foreground">{t('可选择 TRON、Polygon、BNB、Ethereum 或 Solana。真实应付数量以服务端订单报价为准。','Choose TRON, Polygon, BNB, Ethereum or Solana. The amount is determined by a verified server quote.')}</p>
+    <a className="button secondary" href={'/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'')}>{t('使用 USDT 付款','Pay with USDT')}</a>
+  </section>:null}
   <a href="/pricing/">{t('查看套餐','View plans')}</a>
  </div>;
 }

@@ -1,4 +1,5 @@
 import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
+import BoltOrdersList from './BoltOrdersList';
 import ReferralInviteCard from "./ReferralInviteCard";
 import {loadAccountSnapshot} from "../../lib/account-load.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -447,6 +448,7 @@ export default function AccountDashboard() {
               {order.status==='paid'&&order.periodStatus==='queued'&&<span className="text-sm text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</span>}
               <a className="button secondary" data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{order.status==="pending"&&order.riskState==="clear"?t("继续支付","Continue payment"):['pending','unknown'].includes(order.status)?t("查验原订单","Verify original order"):t("查看原订单","View original order")}</a>
             </div>) : <p className="text-sm text-muted-foreground">{t("暂无订阅订单。", "No subscription orders yet.")}</p>}
+            <BoltOrdersList productType="subscription"/>
           </div>
         </details>
         <details data-credit-orders className="group min-w-0 rounded-xl border border-border bg-card">
@@ -458,6 +460,7 @@ export default function AccountDashboard() {
               {order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&["pending","unknown"].includes(order.payment_status||"")&&!(order.payment_status==="pending"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.risk_state==="clear")&&<Button size="sm" variant="outline" asChild><a data-credit-review href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("查验／处理旧订单","Verify / resolve old order")}</a></Button>}
               {order.payment_protocol==="epay"&&order.payment_status==="pending"&&<Button size="sm" variant="outline" asChild><a href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue original payment")}</a></Button>}
               {canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</div>
+          <BoltOrdersList productType="credits"/>
         </details>
       </CardContent>
     </Card>

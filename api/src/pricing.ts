@@ -25,6 +25,10 @@ function packageBasePricing(pkg:PackagePricing){
   if(!Number.isSafeInteger(baseAmountFen)||baseAmountFen<1)invalid();
   return {baseAmountFen,settlementMode:settlementMode as SettlementMode,exchangeRateMicros};
 }
+/** Underlying product price only: crypto excludes fiat seller and service fees. */
+export function projectCryptoBasePricing(pkg:PackagePricing){
+  return packageBasePricing(pkg).baseAmountFen;
+}
 export function projectPackagePricing(pkg:PackagePricing){
   const feeRateBps=pkg.fee_rate_bps??CUSTOMER_FEE_RATE_BPS;
   if(!Number.isInteger(feeRateBps)||feeRateBps<0||feeRateBps>3000)invalid();

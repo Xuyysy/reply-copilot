@@ -19,7 +19,7 @@ export function hasPaymentCashierOpened(kind,orderId,env=globalThis){
 }
 export function markPaymentCashierOpened(kind,orderId,env=globalThis){
  if(!validKind(kind)||!VALID_ID.test(orderId))return;
- safeWrite(env.localStorage,markerKey(kind,orderId),{at:Date.now()});
+ safeWrite(env.localStorage,markerKey(kind,orderId),{at:(env.now||Date.now)()});
 }
 export function createVerifiedPaymentAutoCheck({kind,orderId,request,onVerified,environment:env=globalThis}){
  if(!validKind(kind)||!VALID_ID.test(orderId))return {onPending:async()=>{},stop:()=>{}};

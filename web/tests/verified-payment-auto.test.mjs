@@ -82,6 +82,18 @@ test('cashier marker is an eligibility flag, not a paid flag and is isolated per
  await c.onPending(credit);assert.equal(calls,0,'subscription marker must not arm credit queries');
 });
 
+test('cashier marker uses the same monotonic test clock for writes and reads',()=>{
+ const e=env();
+ const origin=e.now();
+ markPaymentCashierOpened('subscription',cid,e);
+ assert.equal(JSON.parse(e.store.get('reply-copilot:cashier-seen:subscription:'+cid)).at,origin);
+ assert.equal(hasPaymentCashierOpened('subscription',cid,e),true);
+ e.advance(14*60*1000);
+ assert.equal(hasPaymentCashierOpened('subscription',cid,e),true);
+ e.advance(60*1000);
+ assert.equal(hasPaymentCashierOpened('subscription',cid,e),false);
+});
+
 test('foreground subscription watcher eligibility is gated on actual cashier link, not an unpaid creation',()=>{
  const e=env();assert.equal(hasPaymentCashierOpened('subscription',cid,e),false);
  markPaymentCashierOpened('subscription',cid,e);
