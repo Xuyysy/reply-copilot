@@ -34,6 +34,8 @@ export interface Env {
   BOLTUTIL_API_KEY?: string;
   /** Admin-only real-mainnet 1-USDT diagnostic; never enables public checkout. */
   BOLTUTIL_ADMIN_TEST_ENABLED?: string;
+  /** Archived probe read/refresh stays available; retired creation is OFF unless explicitly reauthorized. */
+  BOLTUTIL_ADMIN_TEST_CREATE_ENABLED?: string;
   BOLTUTIL_ADMIN_TEST_SCHEMA_READY?: string;
   BOLTUTIL_WEBHOOK_SECRET?: string;
   /** Fixed, operator-approved CNY per USDT in 1e-6 CNY, staging only. */

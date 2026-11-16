@@ -16,7 +16,7 @@ function setup({admin=true,enabled=true}={}){
   f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('test-session',?)").run(Date.now()+60000);
  }
  Object.assign(f.env,{ADMIN_PORTAL_ENABLED:'1',BOLTUTIL_ADMIN_TEST_SCHEMA_READY:'1',
-  BOLTUTIL_ADMIN_TEST_ENABLED:enabled?'1':'0',BOLTUTIL_API_KEY:'local-test-only',
+  BOLTUTIL_ADMIN_TEST_ENABLED:enabled?'1':'0',BOLTUTIL_ADMIN_TEST_CREATE_ENABLED:'1',BOLTUTIL_API_KEY:'local-test-only',
   BOLTUTIL_WEBHOOK_SECRET:'local-test-only-secret',BOLTUTIL_ENABLED:'0',BOLTUTIL_STAGING_CREATE_ENABLED:'0'});
  return f;
 }
@@ -258,4 +258,19 @@ test('Staging admin checkout UX shows a real provider link only after validated 
  assert.match(source,/result.order.status==="pending"&&!!result.order.checkoutUrl/);
  assert.match(source,/o.checkoutUrl&&o.status==="pending"&&o.address&&o.amount/);
  assert.match(source,/https:\/\/boltutil\.com\/developer-docs\?s=create/);
+});
+
+test('Retired admin mainnet test creation fails closed without separate explicit create authorization',async()=>{
+ const f=setup();try{
+  delete f.env.BOLTUTIL_ADMIN_TEST_CREATE_ENABLED;
+  let called=false;
+  const blocked=await withProvider(()=>{called=true;throw Error('should never create a real merchant invoice');},
+    ()=>f.call(route,{body:req('TRC20')}));
+  assert.equal(blocked.status,503,JSON.stringify(blocked.body));
+  assert.equal(blocked.body.code,'BOLTUTIL_ADMIN_TEST_CREATE_RETIRED');
+  assert.equal(called,false,'retired test must never contact merchant create API');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders").get().n,0);
+  const history=await f.call(route,{method:'GET'});
+  assert.equal(history.status,200,'authenticated historic test listing stays available');
+ }finally{f.sql.close();}
 });

@@ -42,6 +42,11 @@ export async function adminBoltTestList(request:Request,env:Env):Promise<Respons
 /** Admin explicitly confirms a fixed 1-USDT mainnet order; no product/entitlement is associated. */
 export async function adminBoltTestCreate(request:Request,env:Env):Promise<Response>{
  requireEnabled(env);
+ // Retired staging admin mainnet test UI: fail closed for new creation.
+ // Historical signed callbacks, read-only diagnostics and existing-order
+ // reconciliation must remain available independently of this creation flag.
+ if(env.BOLTUTIL_ADMIN_TEST_CREATE_ENABLED!=="1")
+   throw new ApiFailure(503,"BOLTUTIL_ADMIN_TEST_CREATE_RETIRED","管理员历史实付测试已停止新建订单。");
  const admin=await requireAdminSession(request,env,true);
  requireWebOrigin(request,env);
  const body=await jsonBody(request,2048);
