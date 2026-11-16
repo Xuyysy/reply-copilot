@@ -60,6 +60,13 @@ import Base from "../layouts/Base.astro";
       <div class="bolt-buttons" id="bolt-buttons"></div>
       <p class="fineprint" id="bolt-final-hint"></p>
     </article>
+    <section class="pricing-card" id="bolt-subscription-blocker" role="region" aria-labelledby="bolt-blocker-title" style="margin-top:20px" hidden>
+      <h3 id="bolt-blocker-title">已有订阅订单需要先核验 / Existing subscription order needs review</h3>
+      <p id="bolt-blocker-explanation" role="status" class="fineprint">系统检测到旧订阅订单或待生效的续费，暂不能重复创建付款订单。</p>
+      <div id="bolt-blocker-list"></div>
+      <p class="fineprint">如果原单已经付款或状态不明，请在原单页面核验平台状态。不要重新支付或通过更换区块链绕过限制。</p>
+      <a class="button secondary" href="/account/">查看账户订单与订阅权益 / Account orders</a>
+    </section>
     <div class="pricing-card" id="bolt-recent-orders" data-testid="bolt-recent-orders" style="margin-top:20px" hidden>
       <h3>最近的 USDT 订单 / Recent USDT invoices</h3>
       <p class="fineprint">创建结果不明确时，请先恢复原单，勿直接重开另一笔。所有订单仅从你的登录账户读取。</p>
@@ -80,9 +87,10 @@ import Base from "../layouts/Base.astro";
     @media(max-width:520px){.bolt-checkout .bolt-buttons .button{width:100%;text-align:center}}
   </style>
   <script>
-    import {api} from "../lib/api";
+    import {api,ApiError} from "../lib/api";
     import QRCode from "qrcode";
     type Network="TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
+    type FiatSubscription={id:string;planCode:string;status:string;kind:string;periodStatus?:string|null;checkout?:{paymentConfirmed:boolean}};
     type Order={id:string;productType:string;status:string;network:Network;tokenContract:string;tokenDecimals:number;
       quotedAmount:string;amount:string|null;address:string|null;currency:string;checkoutUrl:string|null;
       expiresAt:number|null;entitlementApplied:boolean};
@@ -93,7 +101,9 @@ import Base from "../layouts/Base.astro";
       contract=document.getElementById("bolt-contract")!,networkLabel=document.getElementById("bolt-network")!,gasInfo=document.getElementById("bolt-gas-info")!,
       payInstructions=document.getElementById("bolt-pay-instructions")!,qr=document.getElementById("bolt-qr") as HTMLImageElement,
       buttons=document.getElementById("bolt-buttons")!,finalHint=document.getElementById("bolt-final-hint")!,
-      recentContainer=document.getElementById("bolt-recent-orders")!,recentList=document.getElementById("bolt-recent-list")!;
+      recentContainer=document.getElementById("bolt-recent-orders")!,recentList=document.getElementById("bolt-recent-list")!,
+      blockerPanel=document.getElementById("bolt-subscription-blocker")!,blockerExplanation=document.getElementById("bolt-blocker-explanation")!,
+      blockerList=document.getElementById("bolt-blocker-list")!;
     const chainPicker=document.getElementById("bolt-chain-picker")!,chain=document.getElementById("bolt-chain") as HTMLSelectElement;
     chain.disabled=true;
     const allowedNetworks:Network[]=["TRC20","POLYGON","BEP20","ERC20","SOLANA"];
@@ -224,7 +234,8 @@ import Base from "../layouts/Base.astro";
     }
     async function create(){
       if(busy||!allowedNetworks.includes(chain.value as Network))return;
-      busy=true;buttons.replaceChildren();report("正在创建付款订单…","Creating payment invoice…");
+      busy=true;blockerPanel.hidden=true;buttons.replaceChildren();report("正在创建付款订单…","Creating payment invoice…");
+      let subscriptionConflict=false;
       try{
         const network=chain.value as Network,attempt=loadAttempt(network);
         if(upgrade&&!attempt.quoteId){
@@ -236,15 +247,75 @@ import Base from "../layouts/Base.astro";
           body:JSON.stringify({productType,sku,network,idempotencyKey:attempt.key,...(attempt.quoteId?{quoteId:attempt.quoteId}:{})})});
         setOrder(result.order);
       }catch(e){
-        report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check existing invoice first.");
-        void showRecent();
+        subscriptionConflict=e instanceof ApiError&&
+          ["SUBSCRIPTION_PENDING_ORDER","SUBSCRIPTION_RENEWAL_QUEUED"].includes(e.code);
+        if(subscriptionConflict){
+          report("已有订阅原单挡住了新的付款。请先核验下方原单，不要反复下单。",
+            "An earlier subscription blocks a new invoice. Review the original order below. Do not create another payment.");
+          await showSubscriptionBlockers();
+        }else{
+          report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check existing invoice first.");
+          void showRecent();
+        }
       }finally{
         busy=false;
         if(!order){
-          control(t("使用原操作 ID 恢复订单","Resume with same operation ID"),()=>void create(),true);
-          control(t("查看最近订单","Review recent orders"),()=>void showRecent(),true);
+          if(subscriptionConflict)control(t("重新查询原订阅订单","Refresh original subscription orders"),()=>void showSubscriptionBlockers(),true);
+          else{
+            control(t("使用原操作 ID 恢复订单","Resume with same operation ID"),()=>void create(),true);
+            control(t("查看最近订单","Review recent orders"),()=>void showRecent(),true);
+          }
         }else render();
       }
+    }
+    /**
+     * Every entry is retrieved from the currently authenticated user's own order lists.
+     * Do not infer an old fiat order from only the BoltUtil list, and never cancel
+     * an ambiguous payment or create another invoice as an automatic recovery.
+     */
+    async function showSubscriptionBlockers(){
+      blockerPanel.hidden=false;blockerList.replaceChildren();
+      blockerExplanation.textContent=t(
+        "正在同时核对人民币订阅订单与 USDT 订阅订单…",
+        "Checking your existing fiat and USDT subscription orders…");
+      const [fiat,cryptoOrders]=await Promise.allSettled([
+        api<{orders:FiatSubscription[]}>("/v1/subscriptions/orders"),
+        api<{orders:Order[]}>("/v1/boltutil/orders")
+      ]);
+      let found=0;
+      function addOriginal(href:string,description:string){
+        const row=document.createElement("p");row.className="fineprint";
+        const a=document.createElement("a");a.className="underline";
+        a.href=href;a.textContent=description;
+        row.append(a);blockerList.append(row);found++;
+      }
+      if(fiat.status==="fulfilled"&&Array.isArray(fiat.value.orders)){
+        for(const item of fiat.value.orders){
+          if(found>=10)break;
+          if(!item||typeof item.id!=="string"||!/^[A-Za-z0-9_-]{1,80}$/.test(item.id))continue;
+          const queued=item.status==="paid"&&item.periodStatus==="queued"&&item.checkout?.paymentConfirmed===true;
+          if(!["pending","unknown","manual_review","refund_pending"].includes(item.status)&&!queued)continue;
+          addOriginal("/subscription-checkout/?order="+encodeURIComponent(item.id),
+            t("人民币订阅原单","Fiat subscription invoice")+" · "+
+            (queued?t("已付款，等待下一期生效","Paid, next period queued"):item.status)+
+            " · "+String(item.planCode||"")+" · "+t("查看和核验","Review and verify"));
+        }
+      }
+      if(cryptoOrders.status==="fulfilled"&&Array.isArray(cryptoOrders.value.orders)){
+        for(const item of cryptoOrders.value.orders){
+          if(found>=10)break;
+          if(!item||item.productType!=="subscription"||typeof item.id!=="string"||
+             !/^[0-9a-f-]{36}$/i.test(item.id)||!allowedNetworks.includes(item.network))continue;
+          if(!["creating","pending","unknown","manual_review"].includes(item.status))continue;
+          addOriginal("/usdt-checkout/?order="+encodeURIComponent(item.id),
+            "USDT · "+labels[item.network]+" · "+item.status+" · "+t("查看和核验原单","Review original invoice"));
+        }
+      }
+      blockerExplanation.textContent=found>0
+        ?t("找到 "+found+" 笔需要核验的原订阅订单。请点击对应原单处理；新订单仍被安全拦截。",
+          "Found "+found+" earlier subscription order(s). Open and verify the original; new payment is still blocked.")
+        :t("暂时无法从订单列表定位拦截记录（可能是已付款、待生效的续购）。请到账户中心检查订阅和原单；勿重复付款。",
+          "The blocking order could not be located (possibly a queued renewal). Check account subscription and payment history; do not pay twice.");
     }
     async function showRecent(){
       try{

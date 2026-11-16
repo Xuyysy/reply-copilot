@@ -106,3 +106,22 @@ test('Five-chain payment page distinguishes recipient amount from network fee, w
  assert.match(checkout,/never subtract it from the invoice amount/);
  assert.doesNotMatch(checkout,/gasFeeEstimate\s*=\s*[0-9]/);
 });
+
+test('USDT subscription conflict gives user an owner-scoped fiat + crypto original-order recovery, not a retrying cashier',()=>{
+ assert.match(checkout,/id="bolt-subscription-blocker"/);
+ assert.match(checkout,/id="bolt-blocker-list"/);
+ assert.match(checkout,/SUBSCRIPTION_PENDING_ORDER/);
+ assert.match(checkout,/SUBSCRIPTION_RENEWAL_QUEUED/);
+ assert.match(checkout,/await showSubscriptionBlockers\(\)/);
+ assert.match(checkout,/Promise\.allSettled\(\[/);
+ assert.match(checkout,/api<\{orders:FiatSubscription\[\]\}>\("\/v1\/subscriptions\/orders"\)/);
+ assert.match(checkout,/api<\{orders:Order\[\]\}>\("\/v1\/boltutil\/orders"\)/);
+ assert.match(checkout,/\/subscription-checkout\/\?order=/);
+ assert.match(checkout,/\/usdt-checkout\/\?order=/);
+ assert.match(checkout,/periodStatus==="queued"/);
+ assert.match(checkout,/item\.checkout\?\.paymentConfirmed===true/);
+ assert.match(checkout,/if\(subscriptionConflict\)control\(/);
+ assert.doesNotMatch(checkout,/if\(subscriptionConflict\)control\([^\n]*create\(\)/);
+ assert.match(checkout,/blockerList\.replaceChildren\(\)/);
+ assert.match(checkout,/await.*showSubscriptionBlockers/);
+});

@@ -367,3 +367,28 @@ test('Untrusted hosted URLs and non-PENDING provider creation never enable nativ
   }finally{f.sql.close();}
  }
 });
+
+test('Existing fiat subscription blocks USDT invoice without provider call; its original remains recoverable',async()=>{
+ const f=setup();
+ try{
+  const now=Date.now(),oldId='22222222-2222-4222-8222-222222222222';
+  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) VALUES(?,'test-user','basic-v1','purchase',6990,'pending',?,?,?,?,?)")
+   .run(oldId,now,now+300000,now,now,'existing-fiat-order');
+  f.sql.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,status,created_at,updated_at) VALUES(?,?,'mk99','test-mk99','test-fiat-trade','ALIPAY_H5',6990,'MD5','pending',?,?)")
+   .run('fiat-tx',oldId,now,now);
+  let providerCalls=0;
+  const attempted=await withProvider(request=>{providerCalls++;return mockCreate(request);},()=>
+    create(f,'POLYGON','subscription','pro'));
+  assert.equal(attempted.status,409,JSON.stringify(attempted.body));
+  assert.equal(attempted.body.code,'SUBSCRIPTION_PENDING_ORDER');
+  assert.equal(providerCalls,0,'blocked new subscription must never request real provider invoice');
+  assert.equal(count(f,'boltutil_orders'),0);
+  const fiat=await f.call('/v1/subscriptions/orders',{method:'GET'});
+  assert.equal(fiat.status,200);
+  assert.equal(fiat.body.orders.find(o=>o.id===oldId)?.status,'pending');
+  const usdt=await f.call('/v1/boltutil/orders',{method:'GET'});
+  assert.equal(usdt.status,200);
+  assert.deepEqual(usdt.body.orders,[],'old fiat invoice is intentionally not in BoltUtil list');
+  assert.equal(count(f,'subscription_orders'),1,'old subscription preserved, no new payment');
+ }finally{f.sql.close();}
+});
