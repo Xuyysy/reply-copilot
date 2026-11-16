@@ -35,6 +35,11 @@ export interface Env {
   BOLTUTIL_API_KEY?: string;
   BOLTUTIL_WEBHOOK_SECRET?: string;
   BOLTUTIL_CNY_PER_USDT_MICROS?: string;
+  /** Explicit release acknowledgements. These are not evidence of a live payment. */
+  BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED?: string;
+  BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED?: string;
+  /** Must exactly match the configured CNY/USDT micros quote; rate changes revoke approval. */
+  BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS?: string;
   BOLTUTIL_ADMIN_TEST_ENABLED?: string;
   BOLTUTIL_ADMIN_TEST_CREATE_ENABLED?: string;
   BOLTUTIL_ADMIN_TEST_SCHEMA_READY?: string;

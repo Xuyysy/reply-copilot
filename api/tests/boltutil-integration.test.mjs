@@ -18,6 +18,11 @@ function approveProductionOperatorFixture(f){
  for(const key of keys)
    f.sql.prepare("INSERT INTO system_settings(key,value,updated_at) VALUES(?,'1',1) ON CONFLICT(key) DO UPDATE SET value='1'").run(key);
 }
+function approveProductionEvidenceFixture(f){
+ f.env.BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED='1';
+ f.env.BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED='1';
+ f.env.BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS=f.env.BOLTUTIL_CNY_PER_USDT_MICROS;
+}
 function setup(){
  const f=fixture();
  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
@@ -199,6 +204,7 @@ test('Production paid USDT queued renewal activates only after expiry and one ve
  try{
   f.env.ENVIRONMENT='production';
   f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  approveProductionEvidenceFixture(f);
   approveProductionOperatorFixture(f);
   const first=await create(f,'TRC20','subscription','basic');
   assert.equal(first.status,201,JSON.stringify(first.body));
@@ -480,6 +486,7 @@ test('Production five-network checkout stays fail-closed until a separate explic
   assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);
 
   f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  approveProductionEvidenceFixture(f);
   // Even after operator approval, all other live readiness controls are mandatory.
   for(const [name,value] of [['BOLTUTIL_SCHEMA_READY','0'],['BOLTUTIL_API_KEY',''],['BOLTUTIL_WEBHOOK_SECRET',''],['BOLTUTIL_CNY_PER_USDT_MICROS','']]){
    const prior=f.env[name];f.env[name]=value;
@@ -517,6 +524,7 @@ test('Production webhook rejects uninitialized D1 and keeps signed original-orde
  try{
   f.env.ENVIRONMENT='production';
   f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  approveProductionEvidenceFixture(f);
   approveProductionOperatorFixture(f);
   const created=await create(f,'SOLANA');
   assert.equal(created.status,201,JSON.stringify(created.body));

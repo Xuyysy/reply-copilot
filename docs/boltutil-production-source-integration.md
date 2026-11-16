@@ -84,3 +84,32 @@ manual release verification still requires a separate successful full CI
 and Production Build triggered by push to release/production, pinned to the
 identical source SHA. D1 schema verification/migration, FX, wallet, callback
 and per-chain activation need separate human approvals.
+
+## Production release-readiness dashboard and fail-closed attestations
+
+The admin USDT panel now renders a **server-derived, read-only release blocker
+checklist** in addition to existing operator switches. The checklist is
+based solely on Worker bindings/flags and persisted operator switches. It
+does not query live D1 schema, call BoltUtil, verify merchant wallet ownership,
+approve an exchange rate or imply successful on-chain payment.
+
+Three additional Production-only prerequisites protect creation:
+- `BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED=1`, **only** after separately approved
+  Production D1 schema migration and independent structural verification.
+- `BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED=1`, **only** after owner-accepted
+  signed merchant handshake, wallet/token/network/callback verification.
+- `BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS` equals the actual
+  `BOLTUTIL_CNY_PER_USDT_MICROS` **exactly**. Any rate change immediately
+  revokes release approval and blocks new invoices. Do not use Staging test FX.
+
+These runtime acknowledgements themselves do not prove provider correctness.
+The existing `BOLTUTIL_ENABLED`, `BOLTUTIL_SCHEMA_READY`, create flag,
+per-network Worker flags, secrets and persisted operator master/chain flags
+remain independently required. Staging is not subject to these additional
+Production acknowledgements.
+
+The authorized admin panel never displays secret material, numeric quote,
+merchant address or private D1 records. Disabling any new-order gate does not
+block signed callbacks, existing order lookups, trusted reconciliation or
+previously earned entitlements. This feature changes source code only and
+does not configure any Production binding, perform D1 migration or deploy.

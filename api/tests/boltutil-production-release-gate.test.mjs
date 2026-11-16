@@ -19,7 +19,9 @@ test('production candidate starts fail-closed while original CNY payments and is
  assert.notEqual(worker.d1_databases[0].database_id,staging.d1_databases[0].database_id);
  assert.equal(BOLTUTIL_PRODUCTION_SOURCE_OFF_KEYS.length,9);
  for(const key of BOLTUTIL_PRODUCTION_SOURCE_OFF_KEYS)assert.notEqual(worker.vars[key],'1',key);
- for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS'])
+ for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS',
+   'BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED','BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED',
+   'BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS'])
    assert.equal(Object.hasOwn(worker.vars,key),false,key);
 });
 
@@ -28,7 +30,9 @@ test('each unsafe source-side USDT enable flag and any committed secret/FX fails
   const modified=structuredClone(worker);modified.vars[key]='1';
   assert.ok(productionBlockers(modified,staging).some(error=>error.includes(key)),key);
  }
- for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS']){
+ for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS',
+   'BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED','BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED',
+   'BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS']){
   const modified=structuredClone(worker);modified.vars[key]=key.includes('MICROS')?'7000000':'fixture-only';
   assert.ok(productionBlockers(modified,staging).some(error=>error.includes(key)),key);
  }

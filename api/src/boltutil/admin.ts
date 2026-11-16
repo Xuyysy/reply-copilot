@@ -8,7 +8,7 @@ import {SUPPORTED_BOLT_NETWORKS,type BoltNetwork} from "./contract";
 import {boltReadSchemaReady,boltCreateAuthorized} from "./environment";
 import {
   BOLT_CONTROL_KEYS,readBoltOperatorControl,boltControlRevision,
-  boltEnvironmentReady,boltEnvironmentNetworkEnabled,effectiveBoltNetworks,
+  boltEnvironmentReady,boltEnvironmentNetworkEnabled,effectiveBoltNetworks,boltReadiness,
   type BoltOperatorControl
 } from "./control";
 
@@ -16,7 +16,9 @@ export async function adminBoltControl(request:Request,env:Env):Promise<Response
   await requireAdminSession(request,env);
   const control=await readBoltOperatorControl(env);
   const networks=effectiveBoltNetworks(env,control);
+  const readiness=boltReadiness(env,control);
   return response({
+    readiness,
     environment:env.ENVIRONMENT,
     operatorEnabled:control.enabled,operatorNetworks:control.networks,
     revision:boltControlRevision(control),

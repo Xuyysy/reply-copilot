@@ -17,12 +17,28 @@ type BoltOrder={
 type AdminResponse={orders:BoltOrder[];available:boolean;networks:Network[];currency:"USDT";note:string};
 type PublicResponse={available:boolean;networks:Network[];currency:"USDT";independentMerchant:boolean};
 type Switches=Record<Network,boolean>;
+type ReadinessCheck={id:string;satisfied:boolean};
+type NetworkReadiness={network:Network;environmentEnabled:boolean;operatorEnabled:boolean;acceptingNewOrders:boolean;blockedBy:string[]};
+type Readiness={environment:string;checks:ReadinessCheck[];networks:NetworkReadiness[];acceptingNewOrders:boolean;environmentReady:boolean;missing:string[]};
 type AdminControl={
+  readiness:Readiness;
   operatorEnabled:boolean;operatorNetworks:Switches;revision:string;
   environmentReady:boolean;schemaReady:boolean;creationApproved:boolean;
   credentialsConfigured:boolean;rateConfigured:boolean;
   environmentNetworks:Switches;effectiveNetworks:Network[];available:boolean;
   environment:string;
+};
+const CHECK_LABELS:Record<string,[string,string]>={
+  schemaDeclared:["D1 结构就绪开关","D1 schema-ready runtime flag"],
+  schemaVerified:["Production D1 结构专项核验确认","Production D1 schema verification acknowledgment"],
+  globalEnabled:["Worker USDT 总门禁","Worker USDT global gate"],
+  productionCreateApproved:["Worker 环境建单授权","Worker environment create permission"],
+  apiKeyPresent:["BoltUtil 商户 API Secret 已绑定","BoltUtil API Secret present"],
+  webhookSecretPresent:["BoltUtil Webhook Secret 已绑定","BoltUtil webhook Secret present"],
+  providerVerificationAcknowledged:["商户验签联调确认标记","Provider signature handshake acknowledgment"],
+  quoteConfigured:["CNY/USDT 报价数值已配置","CNY/USDT quote configured"],
+  approvedQuoteMatches:["正式汇率审批值与当前报价完全一致","Approved FX exactly matches configured quote"],
+  operatorMasterEnabled:["后台 USDT 总开关","Admin USDT master switch"]
 };
 const NETWORKS:Array<{code:Network;label:string;chain:string}>=[
   {code:"TRC20",label:"TRON · TRC20",chain:"TRON"},
@@ -115,6 +131,44 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <section className="space-y-3 rounded-xl border p-4" data-testid="boltutil-production-readiness"
+          aria-label={t("USDT 上线准入检查","USDT release-readiness checks")}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="font-semibold">{t("五链收款 · 上线准入清单","Five-network payment release readiness")}</h4>
+            <Badge variant={control?.readiness.acceptingNewOrders?"secondary":"outline"}>
+              {control?.readiness.acceptingNewOrders?t("已有网络接受新订单","Accepting new invoices"):t("未开放新订单","New orders blocked")}
+            </Badge>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("此处读取 Worker 当前运行配置和后台开关，不执行生产 D1 结构查询或 BoltUtil 联调。标记为已确认不能代替真实数据库迁移、商户验签或链上付款验收。",
+               "These are Worker and operator declarations only, not a live D1 query, merchant handshake, or real on-chain acceptance test.")}
+          </p>
+          <div className="grid gap-2 md:grid-cols-2">
+            {(control?.readiness.checks||[]).map(check=><div key={check.id}
+              className="flex items-start justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+              <span>{t(CHECK_LABELS[check.id]?.[0]||check.id,CHECK_LABELS[check.id]?.[1]||check.id)}</span>
+              <Badge variant={check.satisfied?"secondary":"outline"}>
+                {check.satisfied?t("已配置","Configured"):t("未完成","Blocked")}
+              </Badge>
+            </div>)}
+          </div>
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{t("逐链实际准入","Per-network effective readiness")}</p>
+            {(control?.readiness.networks||[]).map(chain=><div key={chain.network}
+              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
+              <span>{chain.network}</span>
+              <span className="text-xs text-muted-foreground">
+                {t("云端","Cloud")}: {chain.environmentEnabled?"ON":"OFF"} ·
+                {t("后台","Admin")}: {chain.operatorEnabled?"ON":"OFF"} ·
+                {chain.acceptingNewOrders?t("可新建订单","Invoice creation allowed"):
+                  t("新订单阻断","Blocked")}
+              </span>
+            </div>)}
+          </div>
+          {!control?.readiness&&<p role="status" className="text-sm text-muted-foreground">
+            {loading?t("正在读取上线准入状态…","Loading release readiness…"):t("上线准入尚无数据。","Readiness data unavailable.")}
+          </p>}
+        </section>
         <section className="space-y-4 rounded-xl border p-4" aria-label={t("USDT 收款开关","USDT payment switches")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>

@@ -109,6 +109,10 @@ test("Production defaults CLOSED; Staging approval cannot enable Production",asy
     assert.equal(notReady.status,409);
     assert.equal(f.sql.prepare("SELECT count(*) n FROM admin_audit_logs").get().n,0);
     f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED="1";
+    // Worker-level evidence must be explicitly acknowledged before operator activation.
+    f.env.BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED="1";
+    f.env.BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED="1";
+    f.env.BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS=f.env.BOLTUTIL_CNY_PER_USDT_MICROS;
     const activated=await save(f,op({enabled:true,networks:all,expectedRevision:s.body.revision}));
     assert.equal(activated.status,200,JSON.stringify(activated.body));
     assert.deepEqual((await f.call("/v1/boltutil/availability",{method:"GET"})).body.networks,chains);

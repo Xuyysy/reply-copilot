@@ -21,7 +21,9 @@ export function productionBlockers(config,staging){
  if(v.XIAODOU_WEBHOOKS_ENABLED!=='1')errors.push('Production payment notifications must remain available for verified existing orders');
  for(const key of BOLTUTIL_PRODUCTION_SOURCE_OFF_KEYS)
   if(v[key]==='1')errors.push('Production source cannot activate USDT without separate approval: '+key);
- for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS'])
+ for(const key of ['BOLTUTIL_API_KEY','BOLTUTIL_WEBHOOK_SECRET','BOLTUTIL_CNY_PER_USDT_MICROS',
+   'BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED','BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED',
+   'BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS'])
   if(Object.hasOwn(v,key))errors.push('Version-controlled Production vars cannot include merchant secrets or FX: '+key);
  if(v.AI_MODE!=='production'||!(Number(v.DEEPSEEK_INPUT_USD_PER_MILLION)>0)||!(Number(v.DEEPSEEK_OUTPUT_USD_PER_MILLION)>0))errors.push('Real AI mode and conservative pricing required');
  for(const k of ['WEB_ORIGIN','API_ORIGIN']){try{const u=new URL(v[k]);if(u.protocol!=='https:'||u.origin!==v[k]||v[k]===staging.vars[k]||/staging|\.invalid/.test(u.hostname))throw new Error();}catch{errors.push('Invalid Production '+k);}}

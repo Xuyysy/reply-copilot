@@ -44,11 +44,63 @@ export function boltControlRevision(control:BoltOperatorControl):string{
   return [control.enabled,...SUPPORTED_BOLT_NETWORKS.map(n=>control.networks[n])]
     .map(v=>v?"1":"0").join("");
 }
+export type BoltReadinessCheck={
+  id:"schemaDeclared"|"schemaVerified"|"globalEnabled"|"productionCreateApproved"|
+    "apiKeyPresent"|"webhookSecretPresent"|"providerVerificationAcknowledged"|
+    "quoteConfigured"|"approvedQuoteMatches"|"operatorMasterEnabled";
+  satisfied:boolean;
+};
+export type BoltNetworkReadiness={
+  network:BoltNetwork;environmentEnabled:boolean;operatorEnabled:boolean;
+  acceptingNewOrders:boolean;blockedBy:string[];
+};
+export type BoltReadiness={
+  environment:string;checks:BoltReadinessCheck[];networks:BoltNetworkReadiness[];
+  acceptingNewOrders:boolean;environmentReady:boolean;missing:string[];
+};
+/** A statement of runtime flags, not an independent query of live D1/provider.
+ * Never leak merchant keys, rate values, tokens or buyer data in diagnostics.
+ */
+export function boltReadiness(env:Env,control:BoltOperatorControl):BoltReadiness{
+  const production=env.ENVIRONMENT==="production";
+  const rateValid=/^[1-9][0-9]{5,8}$/.test(env.BOLTUTIL_CNY_PER_USDT_MICROS??"");
+  const checks:BoltReadinessCheck[]=[
+    {id:"schemaDeclared",satisfied:boltReadSchemaReady(env)},
+    ...(production?[{id:"schemaVerified" as const,satisfied:env.BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED==="1"}]:[]),
+    {id:"globalEnabled",satisfied:env.BOLTUTIL_ENABLED==="1"},
+    {id:"productionCreateApproved",satisfied:boltCreateAuthorized(env)},
+    {id:"apiKeyPresent",satisfied:Boolean(env.BOLTUTIL_API_KEY)},
+    {id:"webhookSecretPresent",satisfied:Boolean(env.BOLTUTIL_WEBHOOK_SECRET)},
+    ...(production?[{id:"providerVerificationAcknowledged" as const,satisfied:env.BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED==="1"}]:[]),
+    {id:"quoteConfigured",satisfied:rateValid},
+    ...(production?[{id:"approvedQuoteMatches" as const,satisfied:rateValid&&
+      env.BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS===env.BOLTUTIL_CNY_PER_USDT_MICROS}]:[]),
+    {id:"operatorMasterEnabled",satisfied:control.enabled}
+  ];
+  const globalBlocked=checks.filter(c=>!c.satisfied).map(c=>c.id);
+  const networks=SUPPORTED_BOLT_NETWORKS.map(network=>{
+    const environmentEnabled=boltEnvironmentNetworkEnabled(env,network);
+    const operatorEnabled=control.networks[network];
+    const blockedBy=[...globalBlocked,
+      ...(!environmentEnabled?["networkEnvironmentDisabled"]:[]),
+      ...(!operatorEnabled?["networkOperatorDisabled"]:[])];
+    return {network,environmentEnabled,operatorEnabled,
+      acceptingNewOrders:blockedBy.length===0,blockedBy};
+  });
+  return {environment:env.ENVIRONMENT,checks,networks,
+    acceptingNewOrders:networks.some(network=>network.acceptingNewOrders),
+    environmentReady:boltEnvironmentReady(env),
+    missing:globalBlocked};
+}
 export function boltEnvironmentReady(env:Env):boolean{
   return boltReadSchemaReady(env)&&env.BOLTUTIL_ENABLED==="1"&&
     boltCreateAuthorized(env)&&Boolean(env.BOLTUTIL_API_KEY)&&
     Boolean(env.BOLTUTIL_WEBHOOK_SECRET)&&
-    /^[1-9][0-9]{5,8}$/.test(env.BOLTUTIL_CNY_PER_USDT_MICROS??"");
+    /^[1-9][0-9]{5,8}$/.test(env.BOLTUTIL_CNY_PER_USDT_MICROS??"")&&
+    (env.ENVIRONMENT!=="production"||
+      (env.BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED==="1"&&
+       env.BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED==="1"&&
+       env.BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS===env.BOLTUTIL_CNY_PER_USDT_MICROS));
 }
 export function boltEnvironmentNetworkEnabled(env:Env,n:BoltNetwork):boolean{
   const flag=n==="TRC20"?env.BOLTUTIL_TRC20_ENABLED:

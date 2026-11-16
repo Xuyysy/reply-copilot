@@ -80,7 +80,10 @@ def verify(folder: pathlib.Path, source_sha: str):
         if vars_.get(name) == "1":
             raise ValueError("USDT source gate unexpectedly enabled: " + name)
     for name in ("BOLTUTIL_API_KEY", "BOLTUTIL_WEBHOOK_SECRET",
-                 "BOLTUTIL_CNY_PER_USDT_MICROS"):
+                 "BOLTUTIL_CNY_PER_USDT_MICROS",
+                 "BOLTUTIL_PRODUCTION_SCHEMA_VERIFIED",
+                 "BOLTUTIL_PRODUCTION_PROVIDER_VERIFIED",
+                 "BOLTUTIL_PRODUCTION_APPROVED_CNY_PER_USDT_MICROS"):
         if name in vars_:
             raise ValueError("Merchant credentials/FX embedded in artifact: " + name)
     dbs = config.get("d1_databases", [])
