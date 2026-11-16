@@ -55,9 +55,9 @@ import Base from "../layouts/Base.astro";
   <style>
     .checkout-main-actions { margin-top: 14px; }
     #payment-method-options { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 10px; margin: 12px 0; }
-    #payment-method-options .checkout-payment-option { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
-    #payment-method-options .checkout-payment-option:has(input:checked) { border-color: var(--primary, #3465e5); box-shadow: inset 0 0 0 1px var(--primary, #3465e5); }
-    #payment-method-options .checkout-payment-option input { accent-color: var(--primary, #3465e5); }
+    #payment-method-options :global(.checkout-payment-option) { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+    #payment-method-options :global(.checkout-payment-option:has(input:checked)) { border-color: var(--primary, #3465e5); box-shadow: inset 0 0 0 1px var(--primary, #3465e5); }
+    #payment-method-options :global(.checkout-payment-option input) { accent-color: var(--primary, #3465e5); }
     .checkout-extra-actions { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
     /* Site-wide .button rules must never override the collapsed details state. */
     .checkout-extra-actions:not([open]) > :not(summary) { display: none !important; }
@@ -203,7 +203,9 @@ import Base from "../layouts/Base.astro";
       byId("package-description").textContent=(document.documentElement.lang==="en"?selected.description_en:selected.description_zh)||"";
       const pricingSummary=packageSummary(selected,document.documentElement.lang==="en"?"en":"zh");
       byId("package-fee").textContent=pricingSummary.fee;
-      byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
+      byId("package-cny").textContent=payWithUsdt
+        ?label("USDT 应付数量会在下一步由商户服务端报价，以最终订单为准。","The exact USDT amount will be quoted by the merchant on the next step. Verify the final invoice.")
+        :pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
       const offerBolt=Boolean(selected)&&!order&&boltAvailable&&payWithUsdt;
       show("checkout-usdt-link",offerBolt);
