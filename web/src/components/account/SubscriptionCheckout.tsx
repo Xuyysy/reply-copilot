@@ -36,6 +36,7 @@ export default function SubscriptionCheckout(){
  const [paymentNote,setPaymentNote]=useState('');
  const [blockingOrder,setBlockingOrder]=useState<SubscriptionOrder|null>(null);
  const [channel,setChannel]=useState('');
+ const [payWithUsdt,setPayWithUsdt]=useState(false);
  const [quote,setQuote]=useState<Quote>();
  const [error,setError]=useState<unknown>();
  const [busy,setBusy]=useState(false);
@@ -173,6 +174,9 @@ export default function SubscriptionCheckout(){
  const higherTier=currentSubscription?.status==='active'&&tierOrder.indexOf(target)>tierOrder.indexOf(currentSubscription.plan??'')&&tierOrder.indexOf(currentSubscription.plan??'')>=0;
  const canUpgradeNow=Boolean(higherTier&&currentSubscription?.expiresAt&&
    new Date(currentSubscription.expiresAt).getTime()-Date.now()>=24*60*60*1000);
+ const fiatCheckoutAvailable=Boolean(catalog&&catalog.checkoutAvailable&&catalog.paymentMethods.length>0);
+ const usdtSelected=Boolean(boltAvailable&&(payWithUsdt||!fiatCheckoutAvailable));
+ const usdtCheckoutHref='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'');
  return <div className="space-y-5">
   {loading?<p role="status">{t('正在读取订阅…','Loading subscription…')}</p>:null}
   {error?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
@@ -199,10 +203,12 @@ export default function SubscriptionCheckout(){
     <a className="button secondary" href="/pricing/">{t('返回套餐页重新购买','Return to plans and buy again')}</a>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>
   </section>:null}
-  {!id&&!loading&&plan&&catalog?.checkoutAvailable?<section className="pricing-card space-y-3">
+  {!id&&!loading&&plan&&catalog&&(fiatCheckoutAvailable||boltAvailable)?<section className="pricing-card space-y-3">
    <h2>{language==='en'?plan.name_en:plan.name_zh}</h2>
-   {upgrade?<p>{quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
-    :t('先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a quote first. With less than 24 hours remaining, purchase the next period.')}</p>
+   {upgrade?<p>{usdtSelected
+    ?t('USDT 升档补差价将在下一步由服务端报价；原到期时间不变。','The USDT cashier will quote the prorated upgrade; expiry stays unchanged.')
+    :quote?t(`本期升档补差价 ${price(quote.amountFen)}，原到期时间不变。`,`Upgrade for ${price(quote.amountFen)}. Your current expiry stays the same.`)
+    :t('人民币升档请先获取服务端报价。剩余不足 24 小时可购买下一期。','Get a server quote for a fiat upgrade. Buy the next period if less than 24 hours remain.')}</p>
     :<>
      <p>{price(plan.price_fen)} · {t('30 天，不自动续费。若已有订阅，则为下一期。','30 days, no auto-renewal. Active subscribers purchase their next period.')}</p>
      {currentSubscription?.status==='active'&&<p role="status" className="notice">{t('注意：你已有 '+(currentSubscription.plan??'').toUpperCase()+' 订阅。这里按完整价格购买下一期 '+target.toUpperCase()+'，当前订阅不会立即变更。','You already have '+(currentSubscription.plan??'').toUpperCase()+'. This purchases the NEXT '+target.toUpperCase()+' period at full price; your current subscription stays unchanged.')}</p>}
@@ -210,22 +216,23 @@ export default function SubscriptionCheckout(){
       <a className="button secondary" href={'/subscription-checkout/?plan='+encodeURIComponent(target)+'&upgrade=1'}>{t('改为本期升档（服务端报价）','Upgrade this period (server quote)')}</a></p>}
      {higherTier&&!canUpgradeNow&&<p className="fineprint">{t('本期剩余不足 24 小时，不能升档；只能购买下一期。','Less than 24 hours remain. You can only buy the next period.')}</p>}
     </>}
-   {upgrade&&!quote?<button className="button" disabled={busy} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>:<>
-    {quote?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
-    <fieldset disabled={busy}><legend>{t('支付方式','Payment method')}</legend>
-     {catalog.paymentMethods.map(value=><label key={value} className="block"><input type="radio" name="payment-method" checked={channel===value} onChange={()=>setChannel(value)} /> {value==='WECHAT_H5'?t('微信支付','WeChat Pay'):t('支付宝','Alipay')}</label>)}
-    </fieldset>
-    <p><a href="/terms/">{t('服务条款','Terms')}</a> · <a href="/refunds/">{t('退款说明','Refunds')}</a></p>
-    <button className="button" disabled={busy||!channel||Boolean(quote&&quote.expiresAt<=Date.now())} onClick={()=>void act('create')}>{t('确认金额并创建订单','Confirm amount and create order')}</button>
-    {quote?<button className="button secondary" disabled={busy} onClick={()=>void act('quote')}>{t('重新报价','Refresh quote')}</button>:null}
-   </>}
+   <fieldset disabled={busy}><legend>{t('支付方式','Payment method')}</legend>
+    <div className="grid gap-3 sm:grid-cols-2">
+     {fiatCheckoutAvailable&&catalog.paymentMethods.map(value=><label key={value} className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 ${!usdtSelected&&channel===value?'border-blue-500 ring-1 ring-blue-500':''}`}><input type="radio" name="payment-method" checked={!usdtSelected&&channel===value} onChange={()=>{setPayWithUsdt(false);setChannel(value);}} /> {value==='WECHAT_H5'?t('微信支付','WeChat Pay'):t('支付宝','Alipay')}</label>)}
+     {boltAvailable?<label className={`flex cursor-pointer items-center gap-3 rounded-xl border p-4 ${usdtSelected?'border-blue-500 ring-1 ring-blue-500':''}`}><input type="radio" name="payment-method" value="USDT" checked={usdtSelected} onChange={()=>setPayWithUsdt(true)} /> {t('USDT · 五链付款','USDT · Five-network payment')}</label>:null}
+    </div>
+   </fieldset>
+   {usdtSelected?<p className="text-sm text-muted-foreground">{t('下一步选择 TRON、Polygon、BNB、Ethereum 或 Solana；按服务端订单核对网络、收款地址及准确应付数量。','Choose TRON, Polygon, BNB, Ethereum or Solana next; verify the exact server-issued invoice before paying.')}</p>:null}
+   <p><a href="/terms/">{t('服务条款','Terms')}</a> · <a href="/refunds/">{t('退款说明','Refunds')}</a></p>
+   {usdtSelected
+    ?<a className="button" href={usdtCheckoutHref}>{t('继续使用 USDT 付款','Continue with USDT')}</a>
+    :upgrade&&!quote
+     ?<button className="button" disabled={busy} onClick={()=>void act('quote')}>{t('获取升档报价','Get upgrade quote')}</button>
+     :<button className="button" disabled={busy||!channel||Boolean(quote&&quote.expiresAt<=Date.now())} onClick={()=>void act('create')}>{t('确认金额并创建订单','Confirm amount and create order')}</button>}
+   {quote&&!usdtSelected?<p>{t('报价有效至','Quote expires at')} {new Date(quote.expiresAt).toLocaleTimeString()}</p>:null}
+   {quote&&!usdtSelected?<button className="button secondary" disabled={busy} onClick={()=>void act('quote')}>{t('重新报价','Refresh quote')}</button>:null}
   </section>:null}
-  {!id&&!loading&&catalog&&(!plan||!catalog.checkoutAvailable)?<p role="status">{t('所选订阅暂不可购买。永久额度购买不受影响。','This subscription is unavailable. Permanent credits are still available.')}</p>:null}
-  {!id&&!loading&&plan&&boltAvailable?<section className="pricing-card space-y-3">
-    <h3 className="font-semibold">USDT · {t('五链独立收款','Five-network payment')}</h3>
-    <p className="text-sm text-muted-foreground">{t('可选择 TRON、Polygon、BNB、Ethereum 或 Solana。真实应付数量以服务端订单报价为准。','Choose TRON, Polygon, BNB, Ethereum or Solana. The amount is determined by a verified server quote.')}</p>
-    <a className="button secondary" href={'/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'')}>{t('使用 USDT 付款','Pay with USDT')}</a>
-  </section>:null}
+  {!id&&!loading&&catalog&&(!plan||(!fiatCheckoutAvailable&&!boltAvailable))?<p role="status">{t('所选订阅暂不可购买。永久额度购买不受影响。','This subscription is unavailable. Permanent credits are still available.')}</p>:null}
   <a href="/pricing/">{t('查看套餐','View plans')}</a>
  </div>;
 }
