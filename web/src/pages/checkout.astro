@@ -5,7 +5,7 @@ import Base from "../layouts/Base.astro";
   <div class="container page-hero">
     <div class="eyebrow" data-zh="安全结账">Secure checkout</div>
     <h1 data-zh="永久额度包结账">Permanent credit pack checkout</h1>
-    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。官网标价以人民币显示，结账实付金额与官网展示一致；请在付款前核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Website prices are shown in CNY, matching the final amount charged. Verify the amount before paying.</p>
+    <p class="lead" data-zh="这是一次性购买的永久额度包，不是 30 天订阅。额度包不按天清零、不主动过期；订阅日额度用完后先使用剩余免费额度，免费额度耗尽后才扣本额度包。官网标价以人民币显示；支付宝、微信和 USDT 是独立付款渠道，各渠道实际应付金额以创建订单前后的服务端报价为准。付款前请核对。">This is a one-time permanent credit pack, not a 30-day subscription. Credits do not reset daily or expire automatically and are spent only after the subscription daily allowance and any remaining free credits. Website prices are shown in CNY. Fiat and USDT are separate payment routes; confirm the provider-verified amount for the selected route before paying.</p>
   </div>
   <section class="container" style="padding-bottom:100px">
     <div class="content-card" style="max-width:680px">
@@ -21,15 +21,12 @@ import Base from "../layouts/Base.astro";
         <div id="payment-method-options" role="radiogroup" aria-labelledby="payment-method-title"></div>
         <p id="payment-method-note" data-site-text="checkoutPaymentNote" data-zh="前往支付收银台完成付款。实际支付币种为人民币 CNY。">Continue to the payment cashier. The actual charge is in CNY.</p>
       </section>
-      <div id="checkout-usdt-choice" class="checkout-usdt-choice" hidden>
-        <p class="fineprint" data-zh="USDT 是独立于人民币收款的付款方式，本站显示经过服务端核验的网络、收款地址和应付金额。" data-en="USDT is independent of fiat checkout. This site presents server-verified network, recipient and amount.">USDT 是独立于人民币收款的付款方式，本站显示经过服务端核验的网络、收款地址和应付金额。</p>
-        <a id="checkout-usdt-link" class="button secondary" href="#" hidden data-zh="使用 USDT · 五链站内付款" data-en="Pay with USDT · Five networks">使用 USDT · 五链站内付款</a>
-      </div>
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
 
       <div class="button-row checkout-main-actions">
         <button id="create-order" class="button checkout-pay-button" type="button" disabled><span id="create-order-label" data-site-text="checkoutPayButton" data-site-dynamic-text="true" data-zh="使用支付宝付款">Pay with Alipay</span></button>
+        <a id="checkout-usdt-link" class="button checkout-pay-button" href="#" hidden data-zh="继续 USDT 五链收银台" data-en="Continue to USDT checkout">继续 USDT 五链收银台</a>
         <a id="cashier-link" class="button checkout-pay-button" href="#" target="_blank" rel="noopener noreferrer" hidden data-zh="打开支付宝收银台">Open Alipay cashier</a>
         <section id="wechat-qr-panel" class="checkout-wechat-qr" hidden aria-labelledby="wechat-qr-title">
           <h3 id="wechat-qr-title" data-zh="用微信扫码完成支付">Scan with WeChat to continue</h3>
@@ -57,6 +54,10 @@ import Base from "../layouts/Base.astro";
   </section>
   <style>
     .checkout-main-actions { margin-top: 14px; }
+    #payment-method-options { display: grid; grid-template-columns: repeat(auto-fit,minmax(160px,1fr)); gap: 10px; margin: 12px 0; }
+    #payment-method-options .checkout-payment-option { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; }
+    #payment-method-options .checkout-payment-option:has(input:checked) { border-color: var(--primary, #3465e5); box-shadow: inset 0 0 0 1px var(--primary, #3465e5); }
+    #payment-method-options .checkout-payment-option input { accent-color: var(--primary, #3465e5); }
     .checkout-extra-actions { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
     /* Site-wide .button rules must never override the collapsed details state. */
     .checkout-extra-actions:not([open]) > :not(summary) { display: none !important; }
@@ -96,6 +97,7 @@ import Base from "../layouts/Base.astro";
     let selected:Package|null = null;
     let paymentAvailable = false;
     let boltAvailable = false;
+    let payWithUsdt = false;
     let provider:"local_mock"|"xiaodou"|"xiaodou_epay"|"mk99"|null = null;
     let paymentMethods:PaymentMethod[]=[];
     let selectedChannel:Channel|null=null;
@@ -156,20 +158,32 @@ import Base from "../layouts/Base.astro";
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
       const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
-      const choicesVisible=unique.length>0&&!order;
+      const fiatChoices=paymentAvailable?unique:[];
+      if(!boltAvailable&&payWithUsdt)payWithUsdt=false;
+      if(!fiatChoices.length&&boltAvailable)payWithUsdt=true;
+      const choicesVisible=(fiatChoices.length>0||boltAvailable)&&!order;
       show("checkout-payment-method",choicesVisible);
       if(!selectedChannel||!unique.some(method=>method.channel===selectedChannel&&method.provider===selectedProvider)){selectedChannel=unique[0]?.channel??null;selectedProvider=unique[0]?.provider??null;}
-      for(const method of unique){
+      for(const method of fiatChoices){
         const item=document.createElement("label");item.className="checkout-payment-option";
-        const input=document.createElement("input");input.type="radio";input.name="payment-channel";input.value=paymentMethodKey(method);input.checked=method.channel===selectedChannel&&method.provider===selectedProvider;input.disabled=!paymentAvailable;
-        input.addEventListener("change",()=>{selectedChannel=method.channel;selectedProvider=method.provider;renderPaymentMethods();});
+        const input=document.createElement("input");input.type="radio";input.name="payment-channel";input.value=paymentMethodKey(method);input.checked=!payWithUsdt&&method.channel===selectedChannel&&method.provider===selectedProvider;input.disabled=!paymentAvailable;
+        input.addEventListener("change",()=>{payWithUsdt=false;selectedChannel=method.channel;selectedProvider=method.provider;render();});
         const text=document.createElement("strong");text.textContent=method.channel==="ALIPAY_H5"?"支付宝 Alipay":"微信支付 WeChat Pay";
+        item.append(input,text);root.append(item);
+      }
+      if(boltAvailable){
+        const item=document.createElement("label");item.className="checkout-payment-option";
+        const input=document.createElement("input");input.type="radio";input.name="payment-channel";input.value="USDT";input.checked=payWithUsdt;
+        input.addEventListener("change",()=>{payWithUsdt=true;render();});
+        const text=document.createElement("strong");text.textContent=label("USDT · 五链支付","USDT · Five networks");
         item.append(input,text);root.append(item);
       }
       byId("create-order-label").textContent=selectedChannel?paymentActionLabel(selectedChannel,"pay",document.documentElement.lang==="en"?"en":"zh"):label("暂不可付款","Payment unavailable");
       byId("epay-pay-text").textContent=paymentActionLabel("ALIPAY_H5","pay",document.documentElement.lang==="en"?"en":"zh");
       byId("cashier-link").textContent=paymentActionLabel(selectedChannel,"cashier",document.documentElement.lang==="en"?"en":"zh");
-      byId("payment-method-note").textContent=selectedProvider==="mk99"?label("前往收银台按渠道引导完成付款。实际支付币种为人民币 CNY。","Follow the cashier instructions for your payment method. Your payment is charged in CNY."):selectedChannel==="WECHAT_H5"?label("微信支付需要在微信内打开收银台完成支付；其他浏览器请按收银台引导操作。","WeChat Pay works in the WeChat browser. In other browsers, follow the cashier's instructions."):selectedChannel==="ALIPAY_H5"?label("前往收银台，使用支付宝完成付款。实际支付币种为人民币 CNY。","Continue to the cashier and pay with Alipay. Your payment is charged in CNY."):label("当前没有已放行的支付方式，暂时无法创建新订单。","No currently released payment methods; new orders are unavailable.");
+      byId("payment-method-note").textContent=payWithUsdt
+        ?label("USDT 将前往本站独立五链收银台，网络、收款地址和精确应付金额以服务端订单为准；不要向其他地址付款。","USDT continues to the separate five-network on-site cashier. Verify the exact network, recipient and amount on the server-created order.")
+        :selectedProvider==="mk99"?label("前往收银台按渠道引导完成付款。实际支付币种为人民币 CNY。","Follow the cashier instructions for your payment method. Your payment is charged in CNY."):selectedChannel==="WECHAT_H5"?label("微信支付需要在微信内打开收银台完成支付；其他浏览器请按收银台引导操作。","WeChat Pay works in the WeChat browser. In other browsers, follow the cashier's instructions."):selectedChannel==="ALIPAY_H5"?label("前往收银台，使用支付宝完成付款。实际支付币种为人民币 CNY。","Continue to the cashier and pay with Alipay. Your payment is charged in CNY."):label("当前没有已放行的支付方式，暂时无法创建新订单。","No currently released payment methods; new orders are unavailable.");
     }
     function render(){
       const restartableOrder=order?.paymentProtocol==="epay"&&["pending","unknown","failed","closed","expired"].includes(order.status);
@@ -191,10 +205,10 @@ import Base from "../layouts/Base.astro";
       byId("package-fee").textContent=pricingSummary.fee;
       byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
-      const offerBolt=Boolean(selected)&&!order&&boltAvailable;
-      show("checkout-usdt-choice",offerBolt);
+      const offerBolt=Boolean(selected)&&!order&&boltAvailable&&payWithUsdt;
       show("checkout-usdt-link",offerBolt);
       byId<HTMLAnchorElement>("checkout-usdt-link").href=offerBolt?"/usdt-checkout/?productType=credits&sku="+encodeURIComponent(selected.id):"#";
+      show("create-order",!order&&!payWithUsdt);
       byId("create-order").disabled=busy||!paymentAvailable||!selected.total_payment_fen||Boolean(order);
     }
     function showOrder(next:Order){
