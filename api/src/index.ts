@@ -1,5 +1,5 @@
 import {adminCreator} from './creator-momentum';
-import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder} from './boltutil/routes';
+import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
 import {adminBoltOrders} from './boltutil/admin';
 import {adminBoltTestCreate,adminBoltTestList,adminBoltTestRefresh,adminBoltTestWebhook,adminBoltTestDiagnose} from './boltutil/admin-probes';
@@ -66,6 +66,7 @@ export default {
       if(request.method==="POST"&&path==="/v1/boltutil/upgrade-quote")return await createBoltUpgradeQuote(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/orders")return await createBoltOrder(request,env);
       if(request.method==="GET"&&path==="/v1/boltutil/orders")return await listBoltOrders(request,env);
+      if(request.method==="GET"&&path==="/v1/boltutil/subscription-blockers")return await listBoltSubscriptionBlockers(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/webhook")return await boltWebhook(request,env);
       const boltRoute=path.match(/^\/v1\/boltutil\/orders\/([0-9a-f-]{36})(?:\/(refresh))?$/i);
       if(request.method==="GET"&&boltRoute&&!boltRoute[2])return await getBoltOrder(request,env,boltRoute[1]);

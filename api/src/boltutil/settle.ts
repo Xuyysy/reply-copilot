@@ -3,7 +3,7 @@ import {ApiFailure} from "../types";
 import {sha256,nowMs,uuid} from "../security";
 import {response} from "../http";
 import {verifyBoltWebhook,boltRequest} from "./client";
-import {VerifiedPayment,verifiedPayment,distinctSettlement,tokenRawUnits,equalAddress,NETWORKS,type BoltNetwork} from "./contract";
+import {VerifiedPayment,verifiedPayment,distinctSettlement,tokenRawUnits,equalAddress,normalizedBoltTransactionHash,NETWORKS,type BoltNetwork} from "./contract";
 import {SUBSCRIPTION_PERIOD_MS,SUBSCRIPTION_DAY_MS} from "../../../domain/subscription-policy.js";
 
 type Local = {
@@ -38,7 +38,7 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
   const order=await localOrder(env,externalId);
   if(!order)throw new ApiFailure(404,"BOLTUTIL_ORDER_NOT_FOUND","订单不存在。");
   if(order.status==="paid"&&order.applied_at!==null){
-    if(callback&&(String(callback.txHash).toLowerCase()!==order.tx_hash||callback.network!==order.network))
+    if(callback&&(typeof callback.txHash!=="string"||normalizedBoltTransactionHash(callback.txHash,order.network)!==order.tx_hash||callback.network!==order.network))
       throw new ApiFailure(409,"BOLTUTIL_TX_CONFLICT","付款证据不一致。");
     return;
   }
@@ -71,26 +71,26 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
        !order.receiving_address||!equalAddress(order.receiving_address,trusted.address,order.network) ||
        order.payable_token_raw!==tokenRawUnits(trusted.amountMicros,order.network).toString() ||
        trusted.amountMicros<BigInt(order.quoted_usdt_micros) ||
-       (order.tx_hash!==null&&order.tx_hash.toLowerCase()!==trusted.txHash.toLowerCase()))
+       (order.tx_hash!==null&&normalizedBoltTransactionHash(order.tx_hash,order.network)!==trusted.txHash))
       throw new RangeError("payment vs order mismatch");
   }catch{
     await failReview(env,order,nowMs());
     throw new ApiFailure(409,"BOLTUTIL_PAYMENT_MISMATCH","链上付款与订单快照不一致，已进入人工核对。");
   }
   const now=nowMs(),eventId=callback&&typeof callback.eventId==="string"&&
-    /^[A-Za-z0-9_-]{6,128}$/.test(callback.eventId)?callback.eventId:"query:"+trusted.txHash.toLowerCase();
+    /^[A-Za-z0-9_-]{6,128}$/.test(callback.eventId)?callback.eventId:"query:"+trusted.txHash;
   const digest=await sha256(JSON.stringify({externalId,txHash:trusted.txHash,amount:String(trusted.amountMicros),
     paid:String(trusted.paidMicros),status:trusted.status,origin:callback?"webhook":"query"}));
   const statements:D1PreparedStatement[]=[
     env.DB.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND external_order_id=? AND network=?) ON CONFLICT DO NOTHING")
       .bind(eventId,externalId,trusted.status,trusted.network,trusted.txHash,digest,now,order.id,externalId,order.network),
-    env.DB.prepare("UPDATE boltutil_orders SET status='paid',paid_usdt_micros=?,tx_hash=?,paid_at=COALESCE(paid_at,?),updated_at=? WHERE id=? AND external_order_id=? AND status IN ('creating','pending','unknown','paid') AND payable_usdt_micros=? AND network=? AND lower(receiving_address)=lower(?) AND (tx_hash IS NULL OR tx_hash=?) AND EXISTS(SELECT 1 FROM boltutil_payment_events WHERE external_order_id=? AND network=? AND tx_hash=?)")
-      .bind(Number(trusted.paidMicros),trusted.txHash.toLowerCase(),now,now,order.id,externalId,
-        Number(trusted.amountMicros),order.network,trusted.address,trusted.txHash,externalId,order.network,trusted.txHash)
+    env.DB.prepare("UPDATE boltutil_orders SET status='paid',paid_usdt_micros=?,tx_hash=?,paid_at=COALESCE(paid_at,?),updated_at=? WHERE id=? AND external_order_id=? AND status IN ('creating','pending','unknown','paid') AND payable_usdt_micros=? AND network=? AND (CASE WHEN network='SOLANA' THEN receiving_address=? ELSE lower(receiving_address)=lower(?) END) AND (tx_hash IS NULL OR tx_hash=?) AND EXISTS(SELECT 1 FROM boltutil_payment_events WHERE external_order_id=? AND network=? AND tx_hash=?)")
+      .bind(Number(trusted.paidMicros),trusted.txHash,now,now,order.id,externalId,
+        Number(trusted.amountMicros),order.network,trusted.address,trusted.address,trusted.txHash,externalId,order.network,trusted.txHash)
   ];
   // Use explicit paid proof in every write; no fiat payment_transactions rows are created.
-  const paidProof="EXISTS(SELECT 1 FROM boltutil_orders b JOIN boltutil_payment_events e ON e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash WHERE b.id=? AND b.status='paid' AND b.tx_hash=? AND b.payable_usdt_micros=? AND b.network=? AND lower(b.receiving_address)=lower(?) AND EXISTS(SELECT 1 FROM users u WHERE u.id=b.user_id AND u.status='active' AND u.archived_at IS NULL))";
-  const args=[order.id,trusted.txHash,Number(trusted.amountMicros),order.network,trusted.address];
+  const paidProof="EXISTS(SELECT 1 FROM boltutil_orders b JOIN boltutil_payment_events e ON e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash WHERE b.id=? AND b.status='paid' AND b.tx_hash=? AND b.payable_usdt_micros=? AND b.network=? AND (CASE WHEN b.network='SOLANA' THEN b.receiving_address=? ELSE lower(b.receiving_address)=lower(?) END) AND EXISTS(SELECT 1 FROM users u WHERE u.id=b.user_id AND u.status='active' AND u.archived_at IS NULL))";
+  const args=[order.id,trusted.txHash,Number(trusted.amountMicros),order.network,trusted.address,trusted.address];
   if(order.product_type==="credits"){
     statements.push(
       env.DB.prepare("UPDATE recharge_orders SET status='paid',paid_at=COALESCE(paid_at,?) WHERE id=? AND user_id=? AND status IN ('pending','awaiting_payment','paid') AND payment_method='boltutil' AND "+paidProof)

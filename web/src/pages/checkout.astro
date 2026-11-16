@@ -22,7 +22,7 @@ import Base from "../layouts/Base.astro";
         <p id="payment-method-note" data-site-text="checkoutPaymentNote" data-zh="前往支付收银台完成付款。实际支付币种为人民币 CNY。">Continue to the payment cashier. The actual charge is in CNY.</p>
       </section>
       <div id="checkout-usdt-choice" class="checkout-usdt-choice" hidden>
-        <p id="checkout-usdt-note" class="fineprint">USDT 支付将在下一步选择 TRON、Polygon 或 BNB 网络。</p>
+        <p id="checkout-usdt-note" class="fineprint">USDT 支付将在下一步选择 TRON、Polygon、BNB、Ethereum 或 Solana 网络；付款在本站完成，无需跳转 BoltUtil。</p>
         <a id="checkout-usdt-link" class="button checkout-pay-button" href="#" hidden>继续选择 USDT 网络</a>
       </div>
       <p id="checkout-status" role="status" aria-live="polite"></p>
@@ -162,7 +162,7 @@ import Base from "../layouts/Base.astro";
       const usdtRadio=document.createElement('input');usdtRadio.type='radio';usdtRadio.name='payment-channel';
       usdtRadio.value='USDT';usdtRadio.checked=paymentRail==='usdt';
       usdtRadio.addEventListener('change',()=>{paymentRail='usdt';render();});
-      const usdtText=document.createElement('strong');usdtText.textContent=boltAvailable?'USDT · TRON / Polygon / BNB':'USDT · '+label('暂未开放','Not available');
+      const usdtText=document.createElement('strong');usdtText.textContent=boltAvailable?'USDT · 五链站内付款':'USDT · '+label('暂未开放','Not available');
       usdtItem.append(usdtRadio,usdtText);root.append(usdtItem);
       const selectedUsdt=paymentRail==='usdt'&&!order;
       show('checkout-usdt-choice',selectedUsdt);

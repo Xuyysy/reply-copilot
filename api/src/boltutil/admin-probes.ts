@@ -42,6 +42,11 @@ export async function adminBoltTestList(request:Request,env:Env):Promise<Respons
 /** Admin explicitly confirms a fixed 1-USDT mainnet order; no product/entitlement is associated. */
 export async function adminBoltTestCreate(request:Request,env:Env):Promise<Response>{
  requireEnabled(env);
+ // Retired staging admin mainnet test UI: fail closed for new creation.
+ // Historical signed callbacks, read-only diagnostics and existing-order
+ // reconciliation must remain available independently of this creation flag.
+ if(env.BOLTUTIL_ADMIN_TEST_CREATE_ENABLED!=="1")
+   throw new ApiFailure(503,"BOLTUTIL_ADMIN_TEST_CREATE_RETIRED","管理员历史实付测试已停止新建订单。");
  const admin=await requireAdminSession(request,env,true);
  requireWebOrigin(request,env);
  const body=await jsonBody(request,2048);
@@ -51,7 +56,7 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
     typeof body.operationId!=="string"||!/^[0-9a-f-]{36}$/i.test(body.operationId))
    throw new ApiFailure(400,"BOLTUTIL_ADMIN_TEST_CONFIRMATION","请确认本次真实主网小额支付测试。");
  let network:BoltNetwork;
- try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","该网络不支持测试。");}
+ try{network=parseBoltNetwork(body.network);if(network==="ERC20"||network==="SOLANA")throw new Error("Admin probe network not approved");}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","该网络尚未开放管理员小额测试。");}
  const existing=await env.DB.prepare("SELECT * FROM boltutil_admin_test_orders WHERE operation_id=?")
    .bind(body.operationId).first<Probe>();
  if(existing){
@@ -96,11 +101,11 @@ export async function adminBoltTestCreate(request:Request,env:Env):Promise<Respo
      .bind(Number(micros),pay.rawAmount,pay.address,provider.checkoutUrl,time.expireTimestamp,nowMs(),id).run();
  }catch{
    // Provider errors can be rejected or uncertain; do not assume no invoice exists.
-   // Record only the whitelisted stage, HTTP status and short provider code.
+   // Record only the whitelisted stage, HTTP status, business code and fixed reason category.
    // NEVER record the API key, secret or raw merchant response in D1 or client.
    const issue=failure as BoltCreateFailure|null;
    const safe=issue
-     ? "CREATE_"+issue.stage.toUpperCase()+"_HTTP_"+(issue.httpStatus??"NA")+"_CODE_"+(issue.providerCode??"NA")
+     ? "CREATE_"+issue.stage.toUpperCase()+"_HTTP_"+(issue.httpStatus??"NA")+"_CODE_"+(issue.providerCode??"NA")+(issue.reason?"_REASON_"+issue.reason:"")
      : "CREATE_LOCAL_RESPONSE_VALIDATION_FAILED";
    await env.DB.prepare("UPDATE boltutil_admin_test_orders SET status='unknown',provider_status=?,updated_at=? WHERE id=? AND status='creating'")
       .bind(safe,nowMs(),id).run();

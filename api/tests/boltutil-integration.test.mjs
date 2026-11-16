@@ -7,19 +7,23 @@ import {fixture,withProvider} from './helpers/payment-v2.mjs';
 const NETWORKS=[
  ['TRC20',6,'T'+'1'.repeat(33),'f'.repeat(64)],
  ['POLYGON',6,'0x'+'a'.repeat(40),'0x'+'b'.repeat(64)],
- ['BEP20',18,'0x'+'a'.repeat(40),'0x'+'c'.repeat(64)]
+ ['BEP20',18,'0x'+'a'.repeat(40),'0x'+'c'.repeat(64)],
+ ['ERC20',6,'0x'+'a'.repeat(40),'0x'+'d'.repeat(64)],
+ ['SOLANA',6,'4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw','2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T']
 ];
 const secret='test-only-boltutil-secret-never-live';
 function setup(){
  const f=fixture();
  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
+ f.sql.exec(readFileSync(new URL('../sql-proposals/0030_boltutil_five_networks_staging.sql',import.meta.url),'utf8'));
  Object.assign(f.env,{
    SUBSCRIPTIONS_ENABLED:'1',SUBSCRIPTION_PURCHASES_ENABLED:'1',
    BOLTUTIL_ENABLED:'1',BOLTUTIL_SCHEMA_READY:'1',
    BOLTUTIL_STAGING_CREATE_ENABLED:'1',BOLTUTIL_API_KEY:'test-bolt-key',
    BOLTUTIL_WEBHOOK_SECRET:secret,BOLTUTIL_CNY_PER_USDT_MICROS:'7000000',
    BOLTUTIL_TRC20_ENABLED:'1',BOLTUTIL_POLYGON_ENABLED:'1',
-   BOLTUTIL_BEP20_ENABLED:'1'
+   BOLTUTIL_BEP20_ENABLED:'1',BOLTUTIL_ERC20_ENABLED:'1',
+   BOLTUTIL_SOLANA_ENABLED:'1'
  });
  return f;
 }
@@ -107,9 +111,11 @@ test('USDT availability unaffected by MK99/Xiaodou merchant toggle, but independ
      f.sql.prepare("UPDATE system_settings SET value=? WHERE key='active_merchant'").run(merchant);
      const r=await f.call('/v1/boltutil/availability',{method:'GET'});
      assert.equal(r.body.available,true,JSON.stringify(r.body));
-     assert.deepEqual(r.body.networks,['TRC20','POLYGON','BEP20']);
+     assert.deepEqual(r.body.networks,['TRC20','POLYGON','BEP20','ERC20','SOLANA']);
    }
    f.env.BOLTUTIL_BEP20_ENABLED='0';
+   assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,['TRC20','POLYGON','ERC20','SOLANA']);
+   f.env.BOLTUTIL_SOLANA_ENABLED='0';f.env.BOLTUTIL_ERC20_ENABLED='0';
    assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,['TRC20','POLYGON']);
    f.env.BOLTUTIL_ENABLED='0';
    assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false);
@@ -309,3 +315,116 @@ for(const [network] of NETWORKS){
     });
   }
 }
+
+test('Native on-site checkout needs only verified provider payment details, not a hosted checkout URL',async()=>{
+ for(const network of ['TRC20','POLYGON','BEP20','ERC20','SOLANA']){
+  const f=setup();
+  try{
+   const created=await withProvider(async request=>{
+    const result=await mockCreate(request).json();
+    delete result.data.checkoutUrl;
+    return Response.json(result);
+   },()=>f.call('/v1/boltutil/orders',{body:{
+    productType:'credits',sku:'starter',network,idempotencyKey:crypto.randomUUID()
+   }}));
+   assert.equal(created.status,201,JSON.stringify(created.body));
+   const o=created.body.order;
+   assert.equal(o.status,'pending');
+   assert.equal(o.checkoutUrl,null);
+   assert.equal(o.network,network);
+   assert.equal(typeof o.address,'string');
+   assert.ok(o.amount&&o.expiresAt>Date.now());
+   const grant=await refresh(f,o);
+   assert.equal(grant.status,200,JSON.stringify(grant.body));
+   assert.equal(grant.body.order.entitlementApplied,true);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+   assert.equal((await refresh(f,o)).body.order.entitlementApplied,true);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+  }finally{f.sql.close();}
+ }
+});
+test('Untrusted hosted URLs and non-PENDING provider creation never enable native payment or grant credits',async()=>{
+ for(const modification of [
+  data=>{data.checkoutUrl='https://evil.example/steal';},
+  data=>{data.checkoutUrl='javascript:alert(1)';},
+  data=>{data.checkoutUrl='';},
+  data=>{data.status='EXPIRED';},
+  data=>{data.payment.address=data.payment.address.replace('a','b');data.payment.address='0x'+'0'.repeat(40);}
+ ]){
+  const f=setup();try{
+   const result=await withProvider(async request=>{
+    const created=await mockCreate(request).json();
+    modification(created.data);
+    return Response.json(created);
+   },()=>f.call('/v1/boltutil/orders',{body:{
+    productType:'credits',sku:'starter',network:'POLYGON',idempotencyKey:crypto.randomUUID()
+   }}));
+   assert.equal(result.status,202,JSON.stringify(result.body));
+   assert.equal(result.body.order.status,'unknown');
+   assert.equal(result.body.order.checkoutUrl,null);
+   assert.equal(result.body.order.address,null);
+   assert.equal(row(f,"SELECT COUNT(*) AS n FROM credit_ledger WHERE kind='purchase_grant'").n,0);
+  }finally{f.sql.close();}
+ }
+});
+
+test('Existing fiat subscription blocks USDT invoice without provider call; its original remains recoverable',async()=>{
+ const f=setup();
+ try{
+  const now=Date.now(),oldId='22222222-2222-4222-8222-222222222222';
+  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) VALUES(?,'test-user','basic-v1','purchase',6990,'pending',?,?,?,?,?)")
+   .run(oldId,now,now+300000,now,now,'existing-fiat-order');
+  f.sql.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,status,created_at,updated_at) VALUES(?,?,'mk99','test-mk99','test-fiat-trade','ALIPAY_H5',6990,'MD5','pending',?,?)")
+   .run('fiat-tx',oldId,now,now);
+  let providerCalls=0;
+  const attempted=await withProvider(request=>{providerCalls++;return mockCreate(request);},()=>
+    create(f,'POLYGON','subscription','pro'));
+  assert.equal(attempted.status,409,JSON.stringify(attempted.body));
+  assert.equal(attempted.body.code,'SUBSCRIPTION_PENDING_ORDER');
+  assert.equal(providerCalls,0,'blocked new subscription must never request real provider invoice');
+  assert.equal(count(f,'boltutil_orders'),0);
+  const fiat=await f.call('/v1/subscriptions/orders',{method:'GET'});
+  assert.equal(fiat.status,200);
+  assert.equal(fiat.body.orders.find(o=>o.id===oldId)?.status,'pending');
+  const usdt=await f.call('/v1/boltutil/orders',{method:'GET'});
+  assert.equal(usdt.status,200);
+  assert.deepEqual(usdt.body.orders,[],'old fiat invoice is intentionally not in BoltUtil list');
+  assert.equal(count(f,'subscription_orders'),1,'old subscription preserved, no new payment');
+ }finally{f.sql.close();}
+});
+
+test('Staging cross-rail blocker endpoint includes old fiat, USDT and paid queued renewal without creating new provider invoices',async()=>{
+ const f=setup();
+ try{
+  const now=Date.now(),fiatId='55555555-5555-4555-8555-555555555555';
+  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) VALUES(?,'test-user','basic-v1','purchase',6990,'pending',?,?,?,?,?)")
+    .run(fiatId,now,now+300000,now,now,'fiat-pending-source');
+  f.sql.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,status,created_at,updated_at) VALUES(?,?,'mk99','merchant','trade-555','ALIPAY_H5',6990,'MD5','pending',?,?)")
+    .run('fiat-tx-555',fiatId,now,now);
+  const fiat=await f.call('/v1/boltutil/subscription-blockers',{method:'GET'});
+  assert.equal(fiat.status,200,JSON.stringify(fiat.body));
+  assert.deepEqual(fiat.body.orders.map(o=>[o.id,o.rail,o.status]),[[fiatId,'fiat','pending']]);
+  f.sql.prepare("UPDATE subscription_orders SET status='closed' WHERE id=?").run(fiatId);
+  const first=await create(f,'POLYGON','subscription','basic');
+  assert.equal(first.status,201,JSON.stringify(first.body));
+  const paid=await refresh(f,first.body.order);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  const next=await create(f,'TRC20','subscription','pro');
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  const confirmed=await refresh(f,next.body.order);
+  assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+  const queued=f.sql.prepare("SELECT status FROM subscription_periods WHERE source_order_id=?").get(next.body.order.subscriptionOrderId);
+  assert.equal(queued.status,'queued');
+  const blockers=await f.call('/v1/boltutil/subscription-blockers',{method:'GET'});
+  assert.equal(blockers.status,200,JSON.stringify(blockers.body));
+  const record=blockers.body.orders.find(x=>x.subscriptionOrderId===next.body.order.subscriptionOrderId);
+  assert.ok(record,JSON.stringify(blockers.body));
+  assert.equal(record.id,next.body.order.id);
+  assert.equal(record.rail,'usdt');
+  assert.equal(record.status,'queued');
+  const attempts=f.sql.prepare("SELECT count(*) n FROM boltutil_orders").get().n;
+  assert.equal(attempts,2,'read-only blocker lookup must not create another invoice');
+  f.env.ENVIRONMENT='production';
+  assert.equal((await f.call('/v1/boltutil/subscription-blockers',{method:'GET'})).status,404);
+ }finally{f.sql.close();}
+});

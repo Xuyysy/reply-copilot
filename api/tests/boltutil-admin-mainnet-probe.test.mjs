@@ -16,7 +16,7 @@ function setup({admin=true,enabled=true}={}){
   f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('test-session',?)").run(Date.now()+60000);
  }
  Object.assign(f.env,{ADMIN_PORTAL_ENABLED:'1',BOLTUTIL_ADMIN_TEST_SCHEMA_READY:'1',
-  BOLTUTIL_ADMIN_TEST_ENABLED:enabled?'1':'0',BOLTUTIL_API_KEY:'local-test-only',
+  BOLTUTIL_ADMIN_TEST_ENABLED:enabled?'1':'0',BOLTUTIL_ADMIN_TEST_CREATE_ENABLED:'1',BOLTUTIL_API_KEY:'local-test-only',
   BOLTUTIL_WEBHOOK_SECRET:'local-test-only-secret',BOLTUTIL_ENABLED:'0',BOLTUTIL_STAGING_CREATE_ENABLED:'0'});
  return f;
 }
@@ -198,4 +198,80 @@ test('Admin tests are explicitly unlimited but still enforce positive identity v
  assert.match(method,/I_ACCEPT_REAL_1_USDT_MAINNET/);
  assert.match(method,/micros>1100000n/);
  assert.match(method,/operation_id=\?/);
+});
+
+test('Staging 400 create reasons are mapped to fixed safe hints, never raw merchant details',async()=>{
+ for(const [message,expected] of [
+  ['Polygon receiving wallet not configured','WALLET_CONFIG'],
+  ['Webhook is not enabled','WEBHOOK_CONFIG'],
+  ['Network POLYGON is unavailable','NETWORK_ASSET'],
+  ['Minimum amount is 2 USDT','AMOUNT_MINIMUM'],
+  ['externalOrderId already exists','DUPLICATE_ORDER'],
+  ['Invalid HMAC signature','SIGNATURE'],
+  ['Daily quota reached','RATE_QUOTA'],
+  ['unexpected error with API_KEY=secret_do_not_echo',null]
+ ]){
+  const f=setup();try{
+   const r=await withProvider(()=>Response.json({code:400,message},{status:400}),
+    ()=>f.call(route,{body:req('POLYGON')}));
+   assert.equal(r.status,202);
+   const label=r.body.order.providerStatus;
+   assert.equal(label,'CREATE_HTTP_HTTP_400_CODE_400'+(expected?'_REASON_'+expected:''));
+   assert.equal(r.body.order.status,'unknown');
+   assert.equal(r.body.order.checkoutUrl,null);
+   assert.doesNotMatch(JSON.stringify(r.body),/secret_do_not_echo|Polygon receiving wallet not configured|Webhook is not enabled|Network POLYGON is unavailable/);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+  }finally{f.sql.close();}
+ }
+});
+
+
+test('Expanded BoltUtil error classification understands inactive merchant setup and nested error messages without leaking raw response',async()=>{
+ const cases=[
+  [{code:400,error:{message:'No active wallet for POLYGON, token=secret_raw_wallet'}},'WALLET_CONFIG'],
+  [{code:400,data:{message:'Merchant webhook is inactive'}},'WEBHOOK_CONFIG'],
+  [{code:400,message:'No enabled network for USDT POLYGON'},'NETWORK_ASSET'],
+  [{code:400,detail:'Minimum amount must be greater than 1 USDT'},'AMOUNT_MINIMUM'],
+  [{code:400,error:'External order ID already exists'},'DUPLICATE_ORDER'],
+  [{code:400,msg:'Invalid HMAC signature'},'SIGNATURE'],
+  [{code:400,msg:'Daily request quota exceeded'},'RATE_QUOTA'],
+  [{code:400,error:{message:'unclassified raw server: password=secret_raw_wallet'}},null]
+ ];
+ for(const [payload,expected] of cases){
+  const f=setup();try{
+   const res=await withProvider(()=>Response.json(payload,{status:400}),
+      ()=>f.call(route,{body:req('POLYGON')}));
+   assert.equal(res.status,202);
+   assert.equal(res.body.order.providerStatus,'CREATE_HTTP_HTTP_400_CODE_400'+(expected?'_REASON_'+expected:''));
+   assert.equal(res.body.order.checkoutUrl,null);
+   assert.doesNotMatch(JSON.stringify(res.body),/secret_raw_wallet|password=|No active wallet|Merchant webhook is inactive/);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").get().n,0);
+  }finally{f.sql.close();}
+ }
+});
+test('Retired Staging mainnet test checkout is absent, while server creation remains default-off and historical signed callbacks remain',()=>{
+ const ui=readFileSync(new URL('../../web/src/components/admin/AdminBoltUtilPanel.tsx',import.meta.url),'utf8');
+ const server=readFileSync(new URL('../src/boltutil/admin-probes.ts',import.meta.url),'utf8');
+ assert.doesNotMatch(ui,/admin-boltutil-checkout-blocked|admin-boltutil-checkout-ready|管理员专用 · 三链|I_ACCEPT_REAL_1_USDT_MAINNET/);
+ assert.doesNotMatch(ui,/admin\/boltutil\/test-orders/);
+ assert.match(server,/BOLTUTIL_ADMIN_TEST_CREATE_ENABLED!=="1"/);
+ assert.match(server,/BOLTUTIL_ADMIN_TEST_CREATE_RETIRED/);
+ assert.match(server,/export async function adminBoltTestWebhook/);
+ assert.match(server,/export async function adminBoltTestRefresh/);
+ assert.match(server,/export async function adminBoltTestDiagnose/);
+});
+
+test('Retired admin mainnet test creation fails closed without separate explicit create authorization',async()=>{
+ const f=setup();try{
+  delete f.env.BOLTUTIL_ADMIN_TEST_CREATE_ENABLED;
+  let called=false;
+  const blocked=await withProvider(()=>{called=true;throw Error('should never create a real merchant invoice');},
+    ()=>f.call(route,{body:req('TRC20')}));
+  assert.equal(blocked.status,503,JSON.stringify(blocked.body));
+  assert.equal(blocked.body.code,'BOLTUTIL_ADMIN_TEST_CREATE_RETIRED');
+  assert.equal(called,false,'retired test must never contact merchant create API');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM boltutil_admin_test_orders").get().n,0);
+  const history=await f.call(route,{method:'GET'});
+  assert.equal(history.status,200,'authenticated historic test listing stays available');
+ }finally{f.sql.close();}
 });
