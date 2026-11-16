@@ -63,7 +63,7 @@ jobs:
           js='\n'.join(p.read_text(errors='replace') for p in Path('web/dist').rglob('*.js'))
           for marker in ['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_RENEWAL_QUEUED',
                          '/v1/subscriptions/orders','/v1/boltutil/orders',
-                         'subscriptionConflict','showSubscriptionBlockers']:
+                         '/subscription-checkout/?order=','/usdt-checkout/?order=']:
               assert marker in js, 'Missing blocked subscription recovery marker '+marker
           assert 'https://api-staging.x-reply-helper.top' in js
           print('PASS original fiat subscription and USDT order recovery compiled')
