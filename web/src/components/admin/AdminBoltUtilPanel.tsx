@@ -98,7 +98,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
     }finally{setSaving(false);}
   }
   const settled=(data?.orders||[]).filter(o=>o.status==="paid"&&o.applied_at!==null).length;
-  const review=(data?.orders||[]).filter(o=>o.status==="manual_review"||
+  const manualReviewCount=(data?.orders||[]).filter(o=>o.status==="manual_review"||
     (o.status==="paid"&&o.applied_at===null)).length;
   return <div className="space-y-4" data-testid="admin-boltutil-usdt">
     <Card>
@@ -217,7 +217,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("订单数","Orders")}</div><div className="mt-1 font-semibold tabular-nums">{data?.orders.length??"—"}</div></div>
           <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("付款并已发权益","Paid and applied")}</div><div className="mt-1 font-semibold tabular-nums">{data?settled:"—"}</div></div>
-          <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("待人工复核／待发权益","Review / unapplied")}</div><div className="mt-1 font-semibold tabular-nums">{data?review:"—"}</div></div>
+          <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("待人工复核／待发权益","Review / unapplied")}</div><div className="mt-1 font-semibold tabular-nums">{data?manualReviewCount:"—"}</div></div>
         </div>
         <div className="flex flex-wrap gap-2">
           <input className="h-10 min-w-0 flex-1 rounded-md border px-3 text-sm" aria-label={t("搜索订单、用户或交易哈希","Search orders, users or transaction hashes")}
