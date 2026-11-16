@@ -17,6 +17,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  const status=['closed','failed','refunded','paid','unknown'].includes(mode)?mode:mode==='unavailable'?'closed':'pending';
  const order={id:fixtureId,packageId:'starter',packageName:'原套餐 snapshot',credits:400,displayPriceCents:149,displayCurrency:'USD',baseAmountFen:990,serviceFeeFen:0,feeRateBps:0,amountFen:1043,currency:'CNY',merchantPricing:{rateBps:500,costCoverageFen:53,status:'estimate_unverified'},status,riskState:mode==='risk'?'manual_review':'clear',creditedAt:status==='paid'?1:null,paidAt:status==='paid'?1:null,paymentProvider:mode==='epay'?'xiaodou_epay':mode.startsWith('rsa2-')?'xiaodou':'mk99',paymentProtocol:mode==='epay'?'epay':mode.startsWith('rsa2-')?'rsa2':'mk99',paymentChannel:mode.startsWith('rsa2-')?'ALIPAY_H5':'WECHAT_H5',paymentUrl:mode==='epay'||mode==='rsa2-no-cashier'?null:mode==='badurl'?'https://evil.invalid/': 'https://cashier.fixture.invalid/pay/example',paymentCashierOrigin:'https://cashier.fixture.invalid'};
  window.fetch=async(url,init={})=>{if(!String(url).startsWith('https://checkout.fixture.invalid'))throw Error('External requests forbidden');const p=new URL(url).pathname;window.__calls.push([p,init.method||'GET']);
+ if(p==='/v1/boltutil/availability')return Response.json({available:false,networks:[]});
  if(p==='/v1/packages')return Response.json({packages:mode==='unavailable'?[]:[pkg],paymentAvailable:true,paymentProvider:'mk99',paymentMethods:[{provider:'mk99',channel:'ALIPAY_H5'},{provider:'mk99',channel:'WECHAT_H5'},{provider:'xiaodou_epay',channel:'ALIPAY_H5'}]});
  if(p==='/v1/auth/csrf')return Response.json({csrfToken:'synthetic-only'});
  if(p==='/v1/me')return Response.json({user:{userId:'synthetic-user'}});
@@ -84,6 +85,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
  const nav=await evaluate('window.__navigation');assert.equal(nav.prevented,false,'ordinary purchase must retain native navigation');assert.equal(nav.target,'_blank');assert.equal(nav.rel,'noopener noreferrer');assert.equal(nav.url,'https://cashier.fixture.invalid/pay/'+(mode==='newsuccess-latest'?'latest':'example'));assert.equal(await evaluate('window.__calls.length'),before,'no asynchronous query inserted into normal cashier click');
  assert.equal(await evaluate('window.__creates'),1,'cashier click never creates a second transaction');
  }
- await navigate(base+'?order=bad');await until('document.querySelector("#checkout-status").textContent.includes("订单编号无效")');assert.equal(await evaluate('window.__calls.length'),0);
+ await navigate(base+'?order=bad');await until('document.querySelector("#checkout-status").textContent.includes("订单编号无效")');assert.deepEqual(await evaluate('window.__calls.filter(c=>c[0]!=="/v1/boltutil/availability")'),[],
+   'an invalid order ID permits only a read-only payment-availability check, never an order fetch or purchase');
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });

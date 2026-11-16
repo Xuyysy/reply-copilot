@@ -20,16 +20,17 @@ test('pricing preserves fiat product links and independent USDT access',()=>{
 });
 test('permanent credit checkout only renders backend-authorized fiat methods plus independent USDT',()=>{
  const credit=readFileSync(new URL('../src/pages/checkout.astro',import.meta.url),'utf8');
- assert.match(credit,/uniquePaymentMethods\(paymentMethods\.filter\(method=>method\.provider===provider\)\)/);
+ assert.match(credit,/uniquePaymentMethods\(paymentMethods\)/);
  assert.match(credit,/show\("checkout-usdt-choice",offerBolt\)/);
  assert.match(credit,/id="checkout-usdt-link"/);
  assert.match(credit,/boltAvailable=state\.available===true/);
  assert.match(credit,/show\("checkout-usdt-link",offerBolt\)/);
  assert.match(credit,/\/v1\/boltutil\/availability/);
  assert.match(credit,/\/v1\/packages/);
- assert.match(credit,/paymentMethods\.some\(m=>m\.provider===selectedProvider&&m\.channel===selectedChannel\)/);
+ assert.match(credit,/unique\.some\(method=>method\.channel===selectedChannel&&method\.provider===selectedProvider\)/);
  assert.match(credit,/selectedChannel=paymentMethods\[0\]\?\.channel/);
- assert.doesNotMatch(credit,/扫码后将在手机微信中打开小豆收银台/);
+ assert.match(credit,/扫码后将在手机微信中打开小豆收银台/);
+ assert.match(credit,/safeMk99Cashier/);
 });
 test('Production subscription checkout preserves verified fiat return flow and gates independent USDT option',()=>{
  const subscription=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
@@ -138,10 +139,10 @@ test('Production-aligned USDT subscriber blocker lookup includes fiat and paid q
  assert.doesNotMatch(checkout,/cancelBoltOrder|confirmBoltPaymentWithoutProvider/);
 });
 
-test("Staging admin only shows five-chain payment operations, not retired mainnet probe",()=>{
+test("Production admin includes five-chain operator controls, not retired probe or test-order creation",()=>{
  const sub=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
- assert.match(sub,/TRON \/ Polygon \/ BNB \/ Ethereum \/ Solana/);
- assert.match(sub,/下一步选择 TRON、Polygon、BNB、Ethereum 或 Solana 网络/);
+ assert.match(sub,/TRON、Polygon、BNB、Ethereum 或 Solana/);
+ assert.match(sub,/五链独立收款/);
  assert.doesNotMatch(sub,/下一步选择 TRON、Polygon 或 BNB/);
  assert.match(panel,/lg:grid-cols-5/);
  assert.doesNotMatch(panel,/admin-boltutil-mainnet-test/);

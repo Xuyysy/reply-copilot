@@ -155,7 +155,7 @@ import Base from "../layouts/Base.astro";
     }
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
-      const unique=uniquePaymentMethods(paymentMethods.filter(method=>method.provider===provider)) as PaymentMethod[];
+      const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
       const choicesVisible=unique.length>0&&!order;
       show("checkout-payment-method",choicesVisible);
       if(!selectedChannel||!unique.some(method=>method.channel===selectedChannel&&method.provider===selectedProvider)){selectedChannel=unique[0]?.channel??null;selectedProvider=unique[0]?.provider??null;}

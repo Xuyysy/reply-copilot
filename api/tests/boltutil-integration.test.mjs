@@ -193,6 +193,34 @@ test('TRON Basic -> BSC Pro next-period renewal starts only after old 30-day per
    assert.equal(active.duration,30*86400000);
  }finally{f.sql.close();}
 });
+
+test('Production paid USDT queued renewal activates only after expiry and one verified BoltUtil event',async()=>{
+ const f=setup();
+ try{
+  f.env.ENVIRONMENT='production';
+  f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  approveProductionOperatorFixture(f);
+  const first=await create(f,'TRC20','subscription','basic');
+  assert.equal(first.status,201,JSON.stringify(first.body));
+  assert.equal((await refresh(f,first.body.order)).status,200);
+  const second=await create(f,'POLYGON','subscription','pro');
+  assert.equal(second.status,201,JSON.stringify(second.body));
+  assert.equal((await refresh(f,second.body.order)).status,200);
+  const queued=row(f,"SELECT id,start_at,end_at FROM subscription_periods WHERE status='queued'");
+  assert.ok(queued?.id);
+  assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.plan,'basic');
+  const old=row(f,"SELECT id,start_at,end_at FROM subscription_periods WHERE status='active'");
+  f.sql.prepare("UPDATE subscription_periods SET start_at=?,end_at=? WHERE id=?")
+    .run(old.start_at-30*86400000-1000,old.end_at-30*86400000-1000,old.id);
+  const after=await f.call('/v1/usage',{method:'GET'});
+  assert.equal(after.status,200,JSON.stringify(after.body));
+  assert.equal(after.body.subscription.plan,'pro');
+  const active=row(f,"SELECT id,end_at-start_at duration FROM subscription_periods WHERE status='active'");
+  assert.equal(active.id,queued.id);
+  assert.equal(active.duration,30*86400000);
+ }finally{f.sql.close();}
+});
+
 test('a signed-looking but wrong-network provider confirmation triggers review without any entitlement',async()=>{
  const f=setup();
  try{
