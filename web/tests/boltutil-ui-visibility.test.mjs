@@ -17,14 +17,20 @@ test('pricing preserves fiat product links and independent USDT access',()=>{
  const packs=pricing.slice(pricing.indexOf("function render(){const box"),pricing.indexOf("async function load(){"));
  assert.match(packs,/link\.href=\`\/checkout\?package=/);
  assert.doesNotMatch(packs,/const usdt=document.createElement/);
+ assert.doesNotMatch(packs,/const crypto=document.createElement/);
+ assert.doesNotMatch(packs,/\/usdt-checkout\/\?productType=credits/);
 });
 test('permanent credit checkout only renders backend-authorized fiat methods plus independent USDT',()=>{
  const credit=readFileSync(new URL('../src/pages/checkout.astro',import.meta.url),'utf8');
  assert.match(credit,/uniquePaymentMethods\(paymentMethods\)/);
- assert.match(credit,/show\("checkout-usdt-choice",offerBolt\)/);
+ assert.doesNotMatch(credit,/checkout-usdt-choice/);
+ assert.match(credit,/input\.value="USDT"/);
+ assert.match(credit,/input\.name="payment-channel"/);
+ assert.match(credit,/payWithUsdt=true;render\(\)/);
  assert.match(credit,/id="checkout-usdt-link"/);
  assert.match(credit,/boltAvailable=state\.available===true/);
  assert.match(credit,/show\("checkout-usdt-link",offerBolt\)/);
+ assert.match(credit,/show\("create-order",!order&&!payWithUsdt\)/);
  assert.match(credit,/\/v1\/boltutil\/availability/);
  assert.match(credit,/\/v1\/packages/);
  assert.match(credit,/unique\.some\(method=>method\.channel===selectedChannel&&method\.provider===selectedProvider\)/);
@@ -38,6 +44,10 @@ test('Production subscription checkout preserves verified fiat return flow and g
  assert.match(subscription,/markPaymentCashierOpened/);
  assert.match(subscription,/hasPaymentCashierOpened/);
  assert.match(subscription,/catalog\.paymentMethods\.map/);
+ assert.match(subscription,/name="payment-method" value="USDT"/);
+ assert.match(subscription,/usdtSelected/);
+ assert.match(subscription,/fiatCheckoutAvailable\|\|boltAvailable/);
+ assert.match(subscription,/upgrade&&!quote/);
  assert.match(subscription,/\/v1\/boltutil\/availability/);
  assert.match(subscription,/boltAvailable/);
  assert.match(subscription,/\/usdt-checkout\/\?productType=subscription&sku=/);
