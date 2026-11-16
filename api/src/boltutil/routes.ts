@@ -8,24 +8,22 @@ import {quoteSubscriptionUpgrade,SUBSCRIPTION_DAY_MS} from "../../../domain/subs
 import {subscriptionsEnabled,subscriptionAccount} from "../subscription-account";
 import {quoteFromCnyFen,formatMicros,decimalMicros,parseBoltNetwork,validReceivingAddress,tokenRawUnits,NETWORKS,SUPPORTED_BOLT_NETWORKS,type BoltNetwork} from "./contract";
 import {boltRequest} from "./client";
-import {boltCreateAuthorized,boltReadSchemaReady} from "./environment";
+import {boltReadSchemaReady} from "./environment";
+import {readBoltOperatorControl,boltEnvironmentReady,boltEnvironmentNetworkEnabled,
+  effectiveBoltNetworks,type BoltOperatorControl} from "./control";
 import {settleBoltPayment} from "./settle";
 
 export function boltAvailable(env:Env):boolean {
-  return boltReadSchemaReady(env) && env.BOLTUTIL_ENABLED==="1" &&
-    boltCreateAuthorized(env) && !!env.BOLTUTIL_API_KEY &&
-    !!env.BOLTUTIL_WEBHOOK_SECRET && !!env.BOLTUTIL_CNY_PER_USDT_MICROS &&
-    /^[1-9][0-9]{5,8}$/.test(env.BOLTUTIL_CNY_PER_USDT_MICROS);
+  return boltEnvironmentReady(env);
 }
-function networkEnabled(env:Env,network:BoltNetwork):boolean {
-  const flag=network==="TRC20"?env.BOLTUTIL_TRC20_ENABLED:
-    network==="POLYGON"?env.BOLTUTIL_POLYGON_ENABLED:
-    network==="BEP20"?env.BOLTUTIL_BEP20_ENABLED:
-    network==="ERC20"?env.BOLTUTIL_ERC20_ENABLED:env.BOLTUTIL_SOLANA_ENABLED;
-  return boltAvailable(env)&&flag==="1";
+function networkEnabled(env:Env,network:BoltNetwork,control:BoltOperatorControl):boolean {
+  return boltAvailable(env)&&control.enabled&&control.networks[network]&&boltEnvironmentNetworkEnabled(env,network);
 }
-function enabled(env:Env):void {
-  if(!boltAvailable(env)) throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 收款通道暂未开放。");
+async function enabled(env:Env):Promise<BoltOperatorControl> {
+  if(!boltAvailable(env))throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 收款通道暂未开放。");
+  const control=await readBoltOperatorControl(env);
+  if(!control.enabled)throw new ApiFailure(503,"BOLTUTIL_UNAVAILABLE","USDT 收款通道暂未开放。");
+  return control;
 }
 async function owner(request:Request,env:Env,write:boolean){
   const {session,token}=await sessionFor(request,env);
@@ -66,12 +64,13 @@ function onlyId(v:unknown):string {
   return v;
 }
 export async function publicBoltAvailability(request:Request,env:Env):Promise<Response>{
-  const networks=SUPPORTED_BOLT_NETWORKS.filter(network=>networkEnabled(env,network));
+  const control=await readBoltOperatorControl(env);
+  const networks=effectiveBoltNetworks(env,control);
   return response({available:networks.length>0,currency:"USDT",networks,
     products:["credits","subscription"],independentMerchant:true},200,env,request);
 }
 export async function createBoltUpgradeQuote(request:Request,env:Env):Promise<Response>{
-  enabled(env);if(!subscriptionsEnabled(env)||env.SUBSCRIPTION_PURCHASES_ENABLED!=="1")
+  await enabled(env);if(!subscriptionsEnabled(env)||env.SUBSCRIPTION_PURCHASES_ENABLED!=="1")
     throw new ApiFailure(503,"SUBSCRIPTION_UNAVAILABLE","订阅暂未开放。");
   const user=await owner(request,env,true),body=await jsonBody(request,1024);
   if(Object.keys(body).length!==1||!["basic","pro","max","ultra"].includes(String(body.planCode)))
@@ -147,12 +146,12 @@ export async function getBoltOrder(request:Request,env:Env,id:string):Promise<Re
   return response({order:snapshot(row)},200,env,request);
 }
 export async function createBoltOrder(request:Request,env:Env):Promise<Response>{
-  enabled(env);
+  const control=await enabled(env);
   const user=await owner(request,env,true),body=await jsonBody(request,1024);
   const productType=body.productType,sku=body.sku,quoteId=body.quoteId,idempotencyKey=body.idempotencyKey;
   let network:BoltNetwork;
   try{network=parseBoltNetwork(body.network);}catch{throw new ApiFailure(400,"BOLTUTIL_NETWORK_INVALID","仅支持 TRC20、Polygon、BEP20、ERC20、Solana。");}
-  if(!networkEnabled(env,network))throw new ApiFailure(503,"BOLTUTIL_NETWORK_UNAVAILABLE","该 USDT 网络尚未开放。");
+  if(!networkEnabled(env,network,control))throw new ApiFailure(503,"BOLTUTIL_NETWORK_UNAVAILABLE","该 USDT 网络尚未开放。");
   if(!["credits","subscription"].includes(String(productType))||typeof sku!=="string"||
     !/^[a-z0-9_-]{1,64}$/i.test(sku)||typeof idempotencyKey!=="string"||
     !/^[A-Za-z0-9_-]{8,80}$/.test(idempotencyKey)||

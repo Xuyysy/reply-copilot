@@ -16,6 +16,14 @@ type BoltOrder={
 };
 type AdminResponse={orders:BoltOrder[];available:boolean;networks:Network[];currency:"USDT";note:string};
 type PublicResponse={available:boolean;networks:Network[];currency:"USDT";independentMerchant:boolean};
+type Switches=Record<Network,boolean>;
+type AdminControl={
+  operatorEnabled:boolean;operatorNetworks:Switches;revision:string;
+  environmentReady:boolean;schemaReady:boolean;creationApproved:boolean;
+  credentialsConfigured:boolean;rateConfigured:boolean;
+  environmentNetworks:Switches;effectiveNetworks:Network[];available:boolean;
+  environment:string;
+};
 const NETWORKS:Array<{code:Network;label:string;chain:string}>=[
   {code:"TRC20",label:"TRON · TRC20",chain:"TRON"},
   {code:"POLYGON",label:"Polygon PoS",chain:"Polygon"},
@@ -31,10 +39,16 @@ function usdt(value:number|null):string{
 function when(value:number|null):string{
   return typeof value==="number"&&Number.isFinite(value)?new Date(value).toLocaleString():"—";
 }
-export default function AdminBoltUtilPanel({active,language}:{active:boolean;language:Language}){
+export default function AdminBoltUtilPanel({active,language,write}:{active:boolean;language:Language;write:(path:string,body:Record<string,unknown>)=>Promise<any>}){
   const t=(zh:string,en:string)=>phrase(language,zh,en);
   const [data,setData]=useState<AdminResponse|null>(null);
   const [availability,setAvailability]=useState<PublicResponse|null>(null);
+  const [control,setControl]=useState<AdminControl|null>(null);
+  const [draft,setDraft]=useState<{enabled:boolean;networks:Switches}|null>(null);
+  const [reason,setReason]=useState("");
+  const [review,setReview]=useState(false);
+  const [saving,setSaving]=useState(false);
+  const [notice,setNotice]=useState("");
   const [loading,setLoading]=useState(false);
   const [error,setError]=useState("");
   const [reload,setReload]=useState(0);
@@ -46,10 +60,12 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
     setLoading(true);setError("");
     void Promise.all([
       api<AdminResponse>("/v1/admin/boltutil/orders"),
-      api<PublicResponse>("/v1/boltutil/availability")
-    ]).then(([orders,status])=>{
+      api<PublicResponse>("/v1/boltutil/availability"),
+      api<AdminControl>("/v1/admin/boltutil/control")
+    ]).then(([orders,status,settings])=>{
       if(!live)return;
-      setData(orders);setAvailability(status);
+      setData(orders);setAvailability(status);setControl(settings);
+      setDraft({enabled:settings.operatorEnabled,networks:{...settings.operatorNetworks}});
     }).catch((cause:unknown)=>{
       if(live)setError(cause instanceof Error?cause.message:t("读取 USDT 收款状态失败。","Unable to load USDT payment status."));
     }).finally(()=>{if(live)setLoading(false);});
@@ -61,6 +77,26 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
       (!word||[o.external_order_id,o.id,o.email,o.user_id,o.tx_hash||"",o.status].some(v=>v.toLowerCase().includes(word))));
   },[data,query,network]);
   const enabledNetworks=availability?.networks||[];
+  const dirty=Boolean(control&&draft&&(control.operatorEnabled!==draft.enabled||
+    NETWORKS.some(n=>control.operatorNetworks[n.code]!==draft.networks[n.code])));
+  const changeMaster=(value:boolean)=>{setDraft(s=>s?{...s,enabled:value}:s);setReview(false);setNotice("");};
+  const changeNetwork=(network:Network,value:boolean)=>{setDraft(s=>s?{...s,networks:{...s.networks,[network]:value}}:s);setReview(false);setNotice("");};
+  async function saveControl(){
+    if(!draft||!control||!dirty||saving)return;
+    setSaving(true);setError("");setNotice("");
+    try{
+      await write("/v1/admin/boltutil/control",{
+        enabled:draft.enabled,networks:draft.networks,expectedRevision:control.revision,
+        confirm:true,reason:reason.trim()
+      });
+      setReview(false);setReason("");
+      setNotice(t("USDT 开关已保存；实际可用状态仍受服务端安全门禁约束。",
+        "USDT switches saved; Cloudflare safety ceilings still determine live availability."));
+      setReload(x=>x+1);
+    }catch(cause){
+      setError(cause instanceof Error?cause.message:t("保存失败，请刷新后重试。","Unable to save. Refresh and retry."));
+    }finally{setSaving(false);}
+  }
   const settled=(data?.orders||[]).filter(o=>o.status==="paid"&&o.applied_at!==null).length;
   const review=(data?.orders||[]).filter(o=>o.status==="manual_review"||
     (o.status==="paid"&&o.applied_at===null)).length;
@@ -79,6 +115,63 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        <section className="space-y-4 rounded-xl border p-4" aria-label={t("USDT 收款开关","USDT payment switches")}>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="font-semibold">{t("USDT 收款总开关","USDT new-order master switch")}</h4>
+              <p className="mt-1 text-xs text-muted-foreground">{t("只影响新的 USDT 支付订单，历史付款、签名通知、查单及权益核验继续运行；不影响人民币收款。","Only blocks new USDT orders. Existing payments, signed notifications and reconciliation remain; fiat payments are unaffected.")}</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm font-semibold">
+              <input type="checkbox" aria-label={t("开启 USDT 收款","Enable USDT payments")}
+                disabled={loading||saving||!draft} checked={draft?.enabled??false}
+                onChange={e=>changeMaster(e.target.checked)}/>
+              {draft?.enabled?t("拟开启","On"):t("关闭","Off")}
+            </label>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {NETWORKS.map(n=><label key={n.code} className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+              <input type="checkbox" className="mt-0.5"
+                aria-label={t("开启 "+n.label,"Enable "+n.label)}
+                disabled={loading||saving||!draft} checked={draft?.networks[n.code]??false}
+                onChange={e=>changeNetwork(n.code,e.target.checked)}/>
+              <span className="min-w-0"><span className="block font-medium">{n.label}</span>
+                <span className="text-xs text-muted-foreground">
+                  {control?.environmentNetworks[n.code]?
+                    t("云端网络门禁已配置","Cloud network ceiling configured"):
+                    t("云端网络门禁关闭","Cloud network ceiling disabled")}
+                </span>
+              </span>
+            </label>)}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("环境","Environment")}: {control?.environment??"—"} ·
+            {t("安全门禁","Cloud ceiling")}: {control?.environmentReady?t("就绪","Ready"):t("未就绪","Not ready")} ·
+            {t("表结构","Schema")}: {control?.schemaReady?t("已标记就绪","Flagged ready"):t("未就绪","Not ready")} ·
+            {t("正式汇率","Approved FX")}: {control?.rateConfigured?t("已配置","Configured"):t("未配置","Missing")}
+          </p>
+          <p className="text-xs text-muted-foreground">{t("开关保存在独立的运营配置中；Production 默认关闭。Worker 环境变量仍是不可绕过的最高级授权。任何启用操作都需要密码二次验证和审计。","Settings are independent operator controls; Production defaults closed. Worker bindings are non-overridable ceilings. Enabling requires password reauthentication and an audit trail.")}</p>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium" htmlFor="boltutil-control-reason">{t("变更原因（至少 8 字）","Reason for change (8+ characters)")}</label>
+            <input id="boltutil-control-reason" className="h-10 w-full rounded-md border px-3 text-sm" maxLength={500}
+              value={reason} onChange={e=>{setReason(e.target.value);setReview(false);}}
+              placeholder={t("例如：暂停 Polygon 网络新订单","e.g. Pause new Polygon orders")}/>
+          </div>
+          {dirty&&!review&&<Button type="button" variant="outline"
+            disabled={saving||loading||reason.trim().length<8}
+            onClick={()=>setReview(true)}>{t("复核并保存 USDT 开关","Review USDT switches")}</Button>}
+          {review&&draft&&<div className="space-y-2 rounded-lg border p-3" role="alert">
+            <p className="text-sm font-medium">{t("确认保存：","Confirm new settings: ")}
+              {draft.enabled?t("总开关开启","Master ON"):t("总开关关闭","Master OFF")} ·
+              {NETWORKS.filter(n=>draft.networks[n.code]).map(n=>n.code).join(" / ")||t("五链全部关闭","All networks OFF")}
+            </p>
+            <p className="text-xs text-muted-foreground">{t("云端门禁未完成前，启用总开关将被服务端拒绝。停止新订单不会停止历史订单核验。","The server rejects master activation until cloud gates are ready. Pausing new orders preserves historical settlement.")}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button disabled={saving} onClick={()=>void saveControl()}>{saving?t("保存中…","Saving…"):t("确认提交并记录审计","Confirm and audit")}</Button>
+              <Button variant="outline" disabled={saving} onClick={()=>setReview(false)}>{t("取消","Cancel")}</Button>
+            </div>
+          </div>}
+          {notice&&<p role="status" className="text-sm text-emerald-700">{notice}</p>}
+        </section>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
           {NETWORKS.map(n=><div className="rounded-lg border p-3" key={n.code}>
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -94,12 +187,12 @@ export default function AdminBoltUtilPanel({active,language}:{active:boolean;lan
           {availability?.available
             ?t("已启用网络以独立开关为准。请确认 BoltUtil 钱包和定价配置，才能进行真实付款验收。",
                "Networks use independent switches. Verify merchant wallet and quote configuration before live payment acceptance.")
-            :t("Staging 的 USDT 页面和后端已部署，但收款密钥／报价／独立开关尚未配置，因此全部网络保持关闭。无需切换 MK99 或小豆。",
-               "Staging UI and API are deployed, but payment secrets, price quote and independent switches are not configured. All networks remain disabled regardless of MK99/Xiaodou.")}
+            :t("USDT 新订单当前不可用。请检查后台运营开关和 Worker 安全门禁；无需切换 MK99 或小豆。",
+               "New USDT checkout is unavailable. Check operator switches and Cloudflare ceilings; no fiat merchant switch is needed.")}
         </div>
         <p className="text-xs text-muted-foreground">
-          {t("此页只读，不会创建订单、改变商户、修改密钥或发放权益。密钥仅通过 Cloudflare Worker Secrets 配置，不在网页中展示或输入。",
-             "Read-only: no invoice creation, merchant changes, secret updates or entitlement grants. API keys belong in Cloudflare Worker Secrets, never in this page.")}
+          {t("下方订单列表只读；上方开关操作需管理员验证并记录审计。密钥仅存 Cloudflare Worker Secrets，不在网页展示或输入。",
+             "Orders below are read-only; switch changes require admin verification and audit. Secrets stay in Cloudflare Worker bindings and are never displayed or entered here.")}
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button variant="outline" disabled={loading} onClick={()=>setReload(x=>x+1)}>
