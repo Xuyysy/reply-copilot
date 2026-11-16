@@ -2,6 +2,7 @@ import {adminCreator} from './creator-momentum';
 import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
 import {adminBoltOrders,adminBoltControl,updateAdminBoltControl} from './boltutil/admin';
+import {adminBoltReconciliation,adminBoltOrderEvidence} from './boltutil/reconciliation';
 import {creatorMomentumInsights} from './creator-momentum-insights';
 import {refreshSubscriptionMk99Payment} from './subscription-settlement';
 import {subscriptionMk99Notify} from './subscription-notify';
@@ -60,6 +61,9 @@ export default {
       if(env.ENVIRONMENT!=="development" && (!['staging','production'].includes(env.ENVIRONMENT)||[env.WEB_ORIGIN,env.API_ORIGIN].some(value=>!value?.startsWith('https://')||value.includes('.invalid'))||!/^chrome-extension:\/\/[a-p]{32}$/.test(env.EXTENSION_ORIGIN||''))) throw new ApiFailure(503,"ENVIRONMENT_NOT_CONFIGURED","服务环境尚未完成隔离配置。");
       if (request.method === "OPTIONS") return options(request, env);
       if(request.method==="GET"&&path==="/v1/admin/boltutil/orders")return await adminBoltOrders(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/boltutil/reconciliation")return await adminBoltReconciliation(request,env);
+      const boltEvidenceMatch=path.match(/^\/v1\/admin\/boltutil\/orders\/([0-9a-f-]{36})\/evidence$/i);
+      if(request.method==="GET"&&boltEvidenceMatch)return await adminBoltOrderEvidence(request,env,boltEvidenceMatch[1]);
       if(request.method==="GET"&&path==="/v1/admin/boltutil/control")return await adminBoltControl(request,env);
       if(request.method==="POST"&&path==="/v1/admin/boltutil/control")return await updateAdminBoltControl(request,env);
       if(request.method==="GET"&&path==="/v1/boltutil/availability")return await publicBoltAvailability(request,env);

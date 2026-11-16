@@ -5,6 +5,7 @@ import {Badge} from "../ui/badge";
 import {Button} from "../ui/button";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 import {Table,TableBody,TableCell,TableHead,TableHeader,TableRow} from "../ui/table";
+import AdminBoltReconciliationPanel from "./AdminBoltReconciliationPanel";
 
 type Network="TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
 type BoltOrder={
@@ -312,5 +313,6 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         </div>
       </CardContent>
     </Card>
+    <AdminBoltReconciliationPanel active={active} language={language}/>
   </div>;
 }
