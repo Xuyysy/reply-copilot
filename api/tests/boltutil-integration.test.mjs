@@ -12,6 +12,12 @@ const NETWORKS=[
  ['SOLANA',6,'4wBqpZM9xaSheZzJSMawUKKwhdpChKbZ5eu5ky4Vigw','2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T']
 ];
 const secret='test-only-boltutil-secret-never-live';
+// Isolated local fixture: explicit operator permission is a second gate in Production.
+function approveProductionOperatorFixture(f){
+ const keys=['boltutil_operator_enabled',...NETWORKS.map(([network])=>'boltutil_operator_'+network.toLowerCase())];
+ for(const key of keys)
+   f.sql.prepare("INSERT INTO system_settings(key,value,updated_at) VALUES(?,'1',1) ON CONFLICT(key) DO UPDATE SET value='1'").run(key);
+}
 function setup(){
  const f=fixture();
  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
@@ -452,8 +458,11 @@ test('Production five-network checkout stays fail-closed until a separate explic
    assert.equal((await f.call('/v1/boltutil/availability',{method:'GET'})).body.available,false,'required '+name);
    f.env[name]=prior;
   }
-  // Staging flag is irrelevant in Production.
+  // Staging flag is irrelevant in Production. Even a ready Worker ceiling
+  // cannot open real sales until the independent audited operator gate is armed.
   f.env.BOLTUTIL_STAGING_CREATE_ENABLED='0';
+  assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,[]);
+  approveProductionOperatorFixture(f);
   assert.deepEqual((await f.call('/v1/boltutil/availability',{method:'GET'})).body.networks,
    ['TRC20','POLYGON','BEP20','ERC20','SOLANA']);
   const created=await create(f,'ERC20');
@@ -480,6 +489,7 @@ test('Production webhook rejects uninitialized D1 and keeps signed original-orde
  try{
   f.env.ENVIRONMENT='production';
   f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+  approveProductionOperatorFixture(f);
   const created=await create(f,'SOLANA');
   assert.equal(created.status,201,JSON.stringify(created.body));
   const order=created.body.order;
