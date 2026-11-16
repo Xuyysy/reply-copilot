@@ -21,6 +21,10 @@ import Base from "../layouts/Base.astro";
         <div id="payment-method-options" role="radiogroup" aria-labelledby="payment-method-title"></div>
         <p id="payment-method-note" data-site-text="checkoutPaymentNote" data-zh="前往支付收银台完成付款。实际支付币种为人民币 CNY。">Continue to the payment cashier. The actual charge is in CNY.</p>
       </section>
+      <div id="checkout-usdt-choice" class="checkout-usdt-choice" hidden>
+        <p class="fineprint" data-zh="USDT 是独立于人民币收款的付款方式，本站显示经过服务端核验的网络、收款地址和应付金额。" data-en="USDT is independent of fiat checkout. This site presents server-verified network, recipient and amount.">USDT 是独立于人民币收款的付款方式，本站显示经过服务端核验的网络、收款地址和应付金额。</p>
+        <a id="checkout-usdt-link" class="button secondary" href="#" hidden data-zh="使用 USDT · 五链站内付款" data-en="Pay with USDT · Five networks">使用 USDT · 五链站内付款</a>
+      </div>
       <p id="checkout-status" role="status" aria-live="polite"></p>
       <p id="quota-result" hidden></p>
 
@@ -91,6 +95,7 @@ import Base from "../layouts/Base.astro";
     const byId = <T extends HTMLElement>(id:string) => document.getElementById(id) as T;
     let selected:Package|null = null;
     let paymentAvailable = false;
+    let boltAvailable = false;
     let provider:"local_mock"|"xiaodou"|"xiaodou_epay"|"mk99"|null = null;
     let paymentMethods:PaymentMethod[]=[];
     let selectedChannel:Channel|null=null;
@@ -150,7 +155,7 @@ import Base from "../layouts/Base.astro";
     }
     function renderPaymentMethods(){
       const root=byId<HTMLDivElement>("payment-method-options");if(typeof root.replaceChildren==="function")root.replaceChildren();else root.innerHTML="";
-      const unique=uniquePaymentMethods(paymentMethods) as PaymentMethod[];
+      const unique=uniquePaymentMethods(paymentMethods.filter(method=>method.provider===provider)) as PaymentMethod[];
       const choicesVisible=unique.length>0&&!order;
       show("checkout-payment-method",choicesVisible);
       if(!selectedChannel||!unique.some(method=>method.channel===selectedChannel&&method.provider===selectedProvider)){selectedChannel=unique[0]?.channel??null;selectedProvider=unique[0]?.provider??null;}
@@ -186,7 +191,11 @@ import Base from "../layouts/Base.astro";
       byId("package-fee").textContent=pricingSummary.fee;
       byId("package-cny").textContent=pricingSummary.cny||label("该套餐暂未配置人民币结算价。","This package has no CNY settlement price yet.");
       renderPaymentMethods();
-          byId("create-order").disabled=busy||!paymentAvailable||!selected.total_payment_fen||Boolean(order);
+      const offerBolt=Boolean(selected)&&!order&&boltAvailable;
+      show("checkout-usdt-choice",offerBolt);
+      show("checkout-usdt-link",offerBolt);
+      byId<HTMLAnchorElement>("checkout-usdt-link").href=offerBolt?"/usdt-checkout/?productType=credits&sku="+encodeURIComponent(selected.id):"#";
+      byId("create-order").disabled=busy||!paymentAvailable||!selected.total_payment_fen||Boolean(order);
     }
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
@@ -290,6 +299,15 @@ import Base from "../layouts/Base.astro";
       if(availabilityTimer)clearTimeout(availabilityTimer);
       availabilityTimer=setTimeout(()=>{availabilityTimer=null;void refreshAvailability();},250);
     }
+    async function refreshBoltAvailability(){
+      try{
+        const state=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');
+        boltAvailable=state.available===true&&state.networks.length>0;
+      }catch{boltAvailable=false;}
+      if(selected&&!order)render();
+    }
+    void refreshBoltAvailability();
+    window.addEventListener("focus",()=>void refreshBoltAvailability());
     window.addEventListener("focus",scheduleAvailabilityRefresh);
     document.addEventListener("visibilitychange",scheduleAvailabilityRefresh);
     async function startOrder(restart=false){
