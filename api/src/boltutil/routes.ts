@@ -103,6 +103,42 @@ export async function listBoltOrders(request:Request,env:Env):Promise<Response>{
     .bind(user.user_id).all<Order>();
   return response({orders:(rows.results??[]).map(snapshot)},200,env,request);
 }
+
+/**
+ * Production-aligned read-only original-order recovery for staging USDT.
+ * Unlike the fiat subscription list, this includes BoltUtil-backed orders
+ * and paid queued periods without needing a fiat payment transaction join.
+ * It never calls any payment provider or updates financial status.
+ */
+export async function listBoltSubscriptionBlockers(request:Request,env:Env):Promise<Response>{
+  if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1"||!subscriptionsEnabled(env))
+    throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
+  const user=await owner(request,env,false);
+  const rows=await env.DB.prepare(`SELECT o.id,o.status,o.kind,v.plan_code,
+    (SELECT b.id FROM boltutil_orders b WHERE b.subscription_order_id=o.id AND b.user_id=o.user_id
+      ORDER BY b.created_at DESC LIMIT 1) bolt_id,
+    (SELECT COUNT(*) FROM subscription_payment_transactions t
+      WHERE t.order_id=o.id AND t.merchant_provider IN ('mk99','xiaodou')) fiat_count,
+    EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id
+      AND p.user_id=o.user_id AND p.status='queued') queued
+    FROM subscription_orders o JOIN subscription_plan_versions v ON v.id=o.plan_version_id
+    WHERE o.user_id=? AND (
+      o.status IN ('pending','unknown','manual_review','refund_pending')
+      OR EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id
+          AND p.user_id=o.user_id AND p.status='queued'))
+    ORDER BY o.created_at DESC,o.id DESC LIMIT 20`)
+    .bind(user.user_id).all<{
+      id:string;status:string;kind:string;plan_code:string;
+      bolt_id:string|null;fiat_count:number;queued:number;
+    }>();
+  const orders=(rows.results??[]).map(row=>({
+    id:row.bolt_id??row.id,subscriptionOrderId:row.id,
+    rail:row.bolt_id?"usdt":row.fiat_count>0?"fiat":"account",
+    status:row.queued===1?"queued":row.status,planCode:row.plan_code,kind:row.kind
+  }));
+  return response({orders},200,env,request);
+}
+
 export async function getBoltOrder(request:Request,env:Env,id:string):Promise<Response>{
   if(env.ENVIRONMENT!=="staging"||env.BOLTUTIL_SCHEMA_READY!=="1")throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
   const user=await owner(request,env,false),row=await orderById(env,onlyId(id));

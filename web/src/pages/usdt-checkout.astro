@@ -276,8 +276,39 @@ import Base from "../layouts/Base.astro";
     async function showSubscriptionBlockers(){
       blockerPanel.hidden=false;blockerList.replaceChildren();
       blockerExplanation.textContent=t(
-        "正在同时核对人民币订阅订单与 USDT 订阅订单…",
-        "Checking your existing fiat and USDT subscription orders…");
+        "正在核对人民币、USDT 与待生效订阅原单…",
+        "Checking fiat, USDT and queued subscription orders…");
+      // Query the exact cross-rail subscription ledger. Its owner-bound SQL is
+      // also able to find paid queued crypto renewals not in the fiat list.
+      try{
+        const result=await api<{orders:Array<{
+          id:string;subscriptionOrderId:string;rail:"fiat"|"usdt"|"account";
+          status:string;planCode:string;kind:string
+        }>}>("/v1/boltutil/subscription-blockers");
+        const orders=Array.isArray(result.orders)?result.orders:[];
+        let found=0;
+        for(const item of orders){
+          if(found>=20)break;
+          if(!item||!["fiat","usdt","account"].includes(item.rail)||typeof item.id!=="string")continue;
+          const validFiat=/^[A-Za-z0-9_-]{1,80}$/.test(item.id);
+          const validUsdt=/^[0-9a-f-]{36}$/i.test(item.id);
+          if(item.rail==="fiat"&&!validFiat||item.rail==="usdt"&&!validUsdt)continue;
+          const url=item.rail==="usdt"?"/usdt-checkout/?order="+encodeURIComponent(item.id):
+            item.rail==="fiat"?"/subscription-checkout/?order="+encodeURIComponent(item.id):"/account/";
+          const row=document.createElement("p");row.className="fineprint";
+          const a=document.createElement("a");a.className="underline";a.href=url;
+          a.textContent=(item.rail==="usdt"?"USDT":item.rail==="fiat"?t("人民币订阅","Fiat subscription"):t("订阅账户","Subscription account"))+
+            " · "+(item.status==="queued"?t("已付款，等待下一期生效","Paid, next period queued"):item.status)+
+            " · "+String(item.planCode??"")+" · "+t("查看原单","Review original");
+          row.append(a);blockerList.append(row);found++;
+        }
+        blockerExplanation.textContent=found
+          ?t("已找到 "+found+" 笔需要核验的原订阅记录。请先处理原单；勿重复付款。",
+             "Found "+found+" original subscription record(s). Verify them before paying again.")
+          :t("暂无可定位的旧订阅订单。请检查账户订阅和付款历史，必要时联系管理员核对。",
+             "No matching original subscriptions found. Check account history or request support review.");
+        return;
+      }catch{/* Older API or temporary network error: fall back to existing owner-only lists. */}
       const [fiat,cryptoOrders]=await Promise.allSettled([
         api<{orders:FiatSubscription[]}>("/v1/subscriptions/orders"),
         api<{orders:Order[]}>("/v1/boltutil/orders")

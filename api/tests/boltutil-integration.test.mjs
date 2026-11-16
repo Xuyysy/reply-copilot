@@ -392,3 +392,39 @@ test('Existing fiat subscription blocks USDT invoice without provider call; its 
   assert.equal(count(f,'subscription_orders'),1,'old subscription preserved, no new payment');
  }finally{f.sql.close();}
 });
+
+test('Staging cross-rail blocker endpoint includes old fiat, USDT and paid queued renewal without creating new provider invoices',async()=>{
+ const f=setup();
+ try{
+  const now=Date.now(),fiatId='55555555-5555-4555-8555-555555555555';
+  f.sql.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,operation_id) VALUES(?,'test-user','basic-v1','purchase',6990,'pending',?,?,?,?,?)")
+    .run(fiatId,now,now+300000,now,now,'fiat-pending-source');
+  f.sql.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,payment_channel,amount_fen,notification_sign_type,status,created_at,updated_at) VALUES(?,?,'mk99','merchant','trade-555','ALIPAY_H5',6990,'MD5','pending',?,?)")
+    .run('fiat-tx-555',fiatId,now,now);
+  const fiat=await f.call('/v1/boltutil/subscription-blockers',{method:'GET'});
+  assert.equal(fiat.status,200,JSON.stringify(fiat.body));
+  assert.deepEqual(fiat.body.orders.map(o=>[o.id,o.rail,o.status]),[[fiatId,'fiat','pending']]);
+  f.sql.prepare("UPDATE subscription_orders SET status='closed' WHERE id=?").run(fiatId);
+  const first=await create(f,'POLYGON','subscription','basic');
+  assert.equal(first.status,201,JSON.stringify(first.body));
+  const paid=await refresh(f,first.body.order);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  const next=await create(f,'TRC20','subscription','pro');
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  const confirmed=await refresh(f,next.body.order);
+  assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+  const queued=f.sql.prepare("SELECT status FROM subscription_periods WHERE source_order_id=?").get(next.body.order.subscriptionOrderId);
+  assert.equal(queued.status,'queued');
+  const blockers=await f.call('/v1/boltutil/subscription-blockers',{method:'GET'});
+  assert.equal(blockers.status,200,JSON.stringify(blockers.body));
+  const record=blockers.body.orders.find(x=>x.subscriptionOrderId===next.body.order.subscriptionOrderId);
+  assert.ok(record,JSON.stringify(blockers.body));
+  assert.equal(record.id,next.body.order.id);
+  assert.equal(record.rail,'usdt');
+  assert.equal(record.status,'queued');
+  const attempts=f.sql.prepare("SELECT count(*) n FROM boltutil_orders").get().n;
+  assert.equal(attempts,2,'read-only blocker lookup must not create another invoice');
+  f.env.ENVIRONMENT='production';
+  assert.equal((await f.call('/v1/boltutil/subscription-blockers',{method:'GET'})).status,404);
+ }finally{f.sql.close();}
+});

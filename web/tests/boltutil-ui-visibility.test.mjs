@@ -125,3 +125,13 @@ test('USDT subscription conflict gives user an owner-scoped fiat + crypto origin
  assert.match(checkout,/blockerList\.replaceChildren\(\)/);
  assert.match(checkout,/await.*showSubscriptionBlockers/);
 });
+
+test('Production-aligned USDT subscriber blocker lookup includes fiat and paid queued USDT renewals',()=>{
+ assert.match(checkout,/\/v1\/boltutil\/subscription-blockers/);
+ assert.match(checkout,/rail:"fiat"\|"usdt"\|"account"/);
+ assert.match(checkout,/item\.status==="queued"/);
+ assert.match(checkout,/item\.rail==="usdt"\?"\/usdt-checkout\/\?order="/);
+ assert.match(checkout,/item\.rail==="fiat"\?"\/subscription-checkout\/\?order="/);
+ assert.match(checkout,/Older API or temporary network error/);
+ assert.doesNotMatch(checkout,/cancelBoltOrder|confirmBoltPaymentWithoutProvider/);
+});
