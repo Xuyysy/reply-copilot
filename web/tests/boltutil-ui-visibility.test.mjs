@@ -152,7 +152,9 @@ test('Production-aligned USDT subscriber blocker lookup includes fiat and paid q
 test("Production admin includes five-chain operator controls, not retired probe or test-order creation",()=>{
  const sub=readFileSync(new URL('../src/components/account/SubscriptionCheckout.tsx',import.meta.url),'utf8');
  assert.match(sub,/TRON、Polygon、BNB、Ethereum 或 Solana/);
- assert.match(sub,/五链独立收款/);
+ assert.match(sub,/USDT · 五链付款/);
+ assert.doesNotMatch(sub,/<h3[^>]*>USDT ·/);
+ assert.match(sub,/value="USDT" checked=\{usdtSelected\}/);
  assert.doesNotMatch(sub,/下一步选择 TRON、Polygon 或 BNB/);
  assert.match(panel,/lg:grid-cols-5/);
  assert.doesNotMatch(panel,/admin-boltutil-mainnet-test/);
