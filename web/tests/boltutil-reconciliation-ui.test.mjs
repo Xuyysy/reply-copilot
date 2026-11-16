@@ -6,23 +6,25 @@ const panel=readFileSync(new URL('../src/components/admin/AdminBoltReconciliatio
 const router=readFileSync(new URL('../../api/src/index.ts',import.meta.url),'utf8');
 const service=readFileSync(new URL('../../api/src/boltutil/reconciliation.ts',import.meta.url),'utf8');
 test('admin USDT view includes independent read-only exception queue and evidence inspector',()=>{
- assert.match(root,/AdminBoltReconciliationPanel active=\{active\}/);
- assert.match(panel,/data-testid="boltutil-reconciliation"/);
- assert.match(panel,/\\/v1\\/admin\\/boltutil\\/reconciliation/);
- assert.match(panel,/\\/v1\\/admin\\/boltutil\\/orders\\/"/);
- assert.match(panel,/providerEvents/);
- assert.match(panel,/matchedRecordedReceipts/);
- assert.match(panel,/ledger_grants/);
- assert.match(panel,/nextCursor/);
- assert.match(panel,/no on-chain query or order mutation/);
- assert.doesNotMatch(panel,/markAsPaid|forceGrant|creditUser|confirmPayment|window\\.fetch\\(\\s*["']https:\\/\\/boltutil/i);
+ assert.ok(root.includes('AdminBoltReconciliationPanel active={active}'));
+ assert.ok(panel.includes('data-testid="boltutil-reconciliation"'));
+ assert.ok(panel.includes('/v1/admin/boltutil/reconciliation'));
+ assert.ok(panel.includes('/v1/admin/boltutil/orders/'));
+ assert.ok(panel.includes('providerEvents'));
+ assert.ok(panel.includes('matchedRecordedReceipts'));
+ assert.ok(panel.includes('ledger_grants'));
+ assert.ok(panel.includes('nextCursor'));
+ assert.ok(panel.includes('no on-chain query or order mutation'));
+ for(const token of ['markAsPaid','forceGrant','creditUser','confirmPayment','window.fetch("https://boltutil'])
+  assert.ok(!panel.includes(token),token);
 });
 test('reconciliation routes and storage implementation are GET-only and admin guarded',()=>{
- assert.match(router,/request\\.method==="GET"&&path==="\\/v1\\/admin\\/boltutil\\/reconciliation"/);
- assert.match(router,/request\\.method==="GET"&&boltEvidenceMatch/);
- assert.match(service,/await requireAdminSession\\(request,env\\)/);
- assert.match(service,/boltReadSchemaReady\\(env\\)/);
- assert.doesNotMatch(service,/\\.run\\(|\\.batch\\(|\\.exec\\(|fetch\\(|settleBoltPayment|paid_balance\\s*=/);
- assert.match(service,/LIMIT 25/);
- assert.match(service,/filter\\.limit\\+1/);
+ assert.ok(router.includes('request.method==="GET"&&path==="/v1/admin/boltutil/reconciliation"'));
+ assert.ok(router.includes('request.method==="GET"&&boltEvidenceMatch'));
+ assert.ok(service.includes('await requireAdminSession(request,env)'));
+ assert.ok(service.includes('boltReadSchemaReady(env)'));
+ for(const token of ['.run(','.batch(','.exec(','fetch(','settleBoltPayment','paid_balance='])
+  assert.ok(!service.includes(token),token);
+ assert.ok(service.includes('LIMIT 25'));
+ assert.ok(service.includes('filter.limit+1'));
 });

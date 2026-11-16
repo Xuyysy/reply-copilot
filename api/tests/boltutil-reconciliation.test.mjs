@@ -124,6 +124,17 @@ test("detail shows only persisted linked event and entitlement evidence, never p
   assert.deepEqual(after,before,"evidence reads must not mutate finance or entitlements");
  }finally{f.sql.close();}
 });
+test("applied paid USDT with inconsistent linked credit order flags stays in the exception queue",async()=>{
+ const f=setup();try{
+  const order=seed(f,19,{status:"paid",applied:true,receipt:true,ledger:true});
+  f.sql.prepare("UPDATE recharge_orders SET status='awaiting_payment',credited_at=NULL WHERE id=?").run(order.fiat);
+  const r=await report(f);
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.summary.attention,1);
+  assert.equal(r.body.orders[0].review_reason,"missing_credit_order_state");
+  assert.equal((await detail(f,order.id)).body.entitlement.credit.status,"awaiting_payment");
+ }finally{f.sql.close();}
+});
 test("schema-unready report safely returns empty without BoltUtil table access; details are 404",async()=>{
  const f=setup({schema:false});try{
   const result=await report(f);
