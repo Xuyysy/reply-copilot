@@ -17,6 +17,8 @@ export interface Env {
   MAIL_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;
   PASSWORD_PEPPER?: string;
+  /** Optional CPU-limited password derivation for NEW hashes; default safe 100k. */
+  PASSWORD_FREE_CPU_ENABLED?: string;
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
