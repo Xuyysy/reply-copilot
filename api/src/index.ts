@@ -19,7 +19,7 @@ import type { Env } from "./types";
 import { ApiFailure } from "./types";
 import { failure, options, response } from "./http";
 import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
-import { entitlements, licenseDevices, me, usage,activity } from "./account";
+import { entitlements, licenseDevices, me, usage,activity,extensionBootstrap } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTestAccount,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
 import {packages,createOrder,findUnresolvedOrder,getOrder,refreshOrder,relaunchPayment,cancelUnpaidXiaodouOrder,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
@@ -115,6 +115,7 @@ export default {
       if (request.method === "POST" && path === "/v1/auth/reset-password") return await resetPassword(request,env);
       if (request.method === "GET" && path === "/v1/auth/csrf") return await csrf(request, env);
       if (request.method === "POST" && path === "/v1/auth/logout") return await logout(request, env);
+      if (request.method === "GET" && path === "/v1/extension/bootstrap") return await extensionBootstrap(request,env);
       if (request.method === "GET" && path === "/v1/me") return await me(request, env);
       if (request.method === "GET" && path === "/v1/entitlements") return await entitlements(request, env);
       if (request.method === "GET" && path === "/v1/creator-momentum/insights") return await creatorMomentumInsights(request,env);
