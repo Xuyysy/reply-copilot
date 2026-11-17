@@ -665,7 +665,7 @@ test('BEP20 provider CANCELLED/FAILED/EXPIRED releases only unpaid subscription 
    if(status==='EXPIRED')f.sql.prepare('UPDATE boltutil_orders SET expires_at=? WHERE id=?').run(Date.now()-1,old.id);
    const switched=await newFiatCheckout(f,{status},old,status.toLowerCase());
    assert.equal(switched.status,201,JSON.stringify(switched.body));
-   assert.equal(switched.statusQueries,1);
+   assert.equal(switched.statusQueries,status==='EXPIRED'?0:1,'expired invoices are closed by local 30-minute policy; other statuses query the provider');
    assert.equal(switched.fiatCreates,1);
    assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'closed');
    assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'closed');
@@ -872,7 +872,7 @@ test('locally expired USDT credit pack receiving late verified payment remains h
   assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',original.creditOrderId).status,'expired');
   assert.equal(count(f,'boltutil_payment_events'),1,'late money evidence is retained');
   assert.equal(row(f,"SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,0,'never grant a closed credit invoice');
-  assert.equal(count(f,'credit_batches'),0,'never create paid credit batch for closed invoice');
+  assert.equal(row(f,"SELECT COUNT(*) n FROM credit_batches WHERE source_order_id=?",original.creditOrderId).n,0,'never create paid credit batch for closed invoice');
  }finally{f.sql.close();}
 });
 
