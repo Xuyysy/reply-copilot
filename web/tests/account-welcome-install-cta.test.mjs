@@ -36,5 +36,5 @@ test("contact says DM me on X and uses the safely validated public profile confi
   assert.match(pending, /DM me on X/);
   assert.match(pending, /target="_blank" rel="noopener noreferrer"/);
   assert.match(pending, /<span>\{t\("私信我的 X", "DM me on X"\)\}<\/span>/);
-  assert.match(pending, /usage\.signupBenefit\?\.status === "pending"/);
+  assert.match(account, /usage\.signupBenefit\?\.status === "pending" && <Alert/);
 });
