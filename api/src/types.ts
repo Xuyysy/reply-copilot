@@ -21,6 +21,8 @@ export interface Env {
   PASSWORD_FREE_CPU_ENABLED?: string;
   /** Paid-only transitional rehash of verified legacy passwords. Never implicit. */
   PASSWORD_LEGACY_MIGRATION_ENABLED?: string;
+  /** Explicitly enabled after email-login staging E2E; safe-off otherwise. */
+  EMAIL_LOGIN_ENABLED?: string;
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;

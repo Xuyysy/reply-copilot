@@ -68,7 +68,7 @@ export async function verifyPassword(env: Env, password: string, stored: string 
   let mismatch = 0; for (let i=0;i<32;i++) mismatch |= actual[i]^expected[i];
   return mismatch === 0;
 }
-async function verifyTurnstile(request: Request, env: Env, token: unknown): Promise<void> {
+export async function verifyTurnstile(request: Request, env: Env, token: unknown, expectedAction: "register" | "login" = "register"): Promise<void> {
   if (typeof token !== "string" || token.length < 1 || token.length > 2048) throw new ApiFailure(400,"TURNSTILE_REQUIRED","请先完成人机验证。");
   if (!env.TURNSTILE_SECRET_KEY) throw new ApiFailure(503,"TURNSTILE_NOT_CONFIGURED","人机验证尚未配置。");
   if (env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN) && env.TURNSTILE_SECRET_KEY === "1x0000000000000000000000000000000AA" && token === "local-test-token") return;
@@ -80,14 +80,14 @@ async function verifyTurnstile(request: Request, env: Env, token: unknown): Prom
     const verify = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify",{method:"POST",body:form,signal:AbortSignal.timeout(10_000)});
     result = await verify.json();
   } catch { throw new ApiFailure(503,"TURNSTILE_UNAVAILABLE","人机验证暂时不可用，请稍后重试。"); }
-  if (!result.success || (env.ENVIRONMENT !== "development" && (result.hostname !== new URL(env.WEB_ORIGIN).hostname || result.action !== "register"))) throw new ApiFailure(400,"TURNSTILE_INVALID","人机验证失败，请重新尝试。");
+  if (!result.success || (env.ENVIRONMENT !== "development" && (result.hostname !== new URL(env.WEB_ORIGIN).hostname || result.action !== expectedAction))) throw new ApiFailure(400,"TURNSTILE_INVALID","人机验证失败，请重新尝试。");
 }
 async function newSession(env: Env, userId: string): Promise<{token:string; statement:D1PreparedStatement}> {
   const token = randomToken(); const now = nowMs();
   return {token,statement:env.DB.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,device_id,created_at,expires_at) VALUES(?,? ,?,'web',NULL,?,?)").bind(uuid(),await sha256(token),userId,now,now+SESSION_MS)};
 }
 const freshCode = () => String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6,"0");
-async function rate(request: Request,env: Env,purpose:string,email:string,now:number) {
+export async function rate(request: Request,env: Env,purpose:string,email:string,now:number) {
   const ip = await hmac(env,`ip:${request.headers.get("CF-Connecting-IP") || "local"}`);
   const address = await hmac(env,`email:${email}`);
   const localLogin = purpose === "login" && env.ENVIRONMENT === "development" && /^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(env.WEB_ORIGIN);

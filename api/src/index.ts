@@ -26,6 +26,7 @@ import { failure, options, response } from "./http";
 import { csrf, logout, requireCsrf, sessionFor, takeRate } from "./auth";
 import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
+import {requestEmailLoginCode,verifyEmailLoginCode} from "./email-login";
 import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTestAccount,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
 import {packages,createOrder,findUnresolvedOrder,getOrder,refreshOrder,relaunchPayment,cancelUnpaidXiaodouOrder,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
@@ -121,6 +122,8 @@ export default {
       if (isRegistration) return await register(request,env,registrationDiagnostics);
       if (request.method === "POST" && path === "/v1/auth/verify-registration") return await verifyRegistration(request,env);
       if (request.method === "POST" && path === "/v1/auth/login") return await passwordLogin(request,env);
+      if (request.method === "POST" && path === "/v1/auth/login-code/request") return await requestEmailLoginCode(request,env);
+      if (request.method === "POST" && path === "/v1/auth/login-code/verify") return await verifyEmailLoginCode(request,env);
       if (request.method === "POST" && path === "/v1/auth/request-password-reset") return await requestPasswordReset(request,env);
       if (request.method === "POST" && path === "/v1/auth/reset-password") return await resetPassword(request,env);
       if (request.method === "GET" && path === "/v1/auth/csrf") return await csrf(request, env);
