@@ -19,6 +19,8 @@ export interface Env {
   PASSWORD_PEPPER?: string;
   /** Optional CPU-limited password derivation for NEW hashes; default safe 100k. */
   PASSWORD_FREE_CPU_ENABLED?: string;
+  /** Paid-only transitional rehash of verified legacy passwords. Never implicit. */
+  PASSWORD_LEGACY_MIGRATION_ENABLED?: string;
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;

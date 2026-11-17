@@ -17,6 +17,7 @@ import {adminOperationsInsights} from "./admin-operations-insights";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
+import {adminAuthCpuReadiness} from './admin-auth-cpu-readiness';
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
 import {adminReauth,siteContent,updateContent,contentHistory,restoreContent} from "./admin-operations";
 import type { Env } from "./types";
@@ -103,6 +104,7 @@ export default {
       if(request.method==="POST"&&path==="/v1/admin/payment-platform-check")return await adminPaymentPlatformCheck(request,env);
       if(request.method==="GET"&&path==="/v1/admin/payments/xiaodou/pilot")return await adminXiaodouPilotStatus(request,env);
       if(request.method==="POST"&&path==="/v1/admin/payments/xiaodou/pilot")return await adminXiaodouPilotCheckout(request,env);
+      if(request.method==="GET"&&path==="/v1/admin/security/auth-cpu-readiness")return await adminAuthCpuReadiness(request,env);
       if(request.method==="POST"&&path==="/v1/admin/security/password")return await adminChangePassword(request,env);
       if(request.method==="POST"&&path==="/v1/admin/security/sessions/revoke-others")return await adminRevokeOtherSessions(request,env);
       if(request.method==="GET"&&path==="/v1/admin/campaigns")return await listCampaigns(request,env);

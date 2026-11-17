@@ -181,6 +181,25 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   if (!user?.password_hash || !await verifyPassword(env,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();
+  // Paid-only migration stage: re-derive 60k only *after* a correct password
+  // and a successful session write. Both switches must be explicitly enabled.
+  // The first old-hash verification still consumes its original CPU and MUST
+  // happen on Paid. An optimistic update never overwrites a concurrent reset,
+  // unfreeze/lock, or administrator credential change.
+  //
+  // This is best-effort housekeeping, not a reason to deny a valid login:
+  // do not disclose the stored work factor, password, hash or failure reason.
+  if (env.PASSWORD_FREE_CPU_ENABLED==="1" &&
+      env.PASSWORD_LEGACY_MIGRATION_ENABLED==="1" &&
+      user.status==="active" && !user.password_hash.startsWith("pbkdf2-sha256:60000:")) {
+    try {
+      const optimizedHash=await hashPassword(env,password);
+      await env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND status='active'")
+        .bind(optimizedHash,user.id,user.password_hash).run();
+    } catch {
+      // Successful authentication is independent of an optional rehash write.
+    }
+  }
   return response({ok:true},200,env,request,{"Set-Cookie":sessionCookie(session.token,SESSION_MS/1000)});
 }
 export async function requestPasswordReset(request: Request,env: Env): Promise<Response> {
