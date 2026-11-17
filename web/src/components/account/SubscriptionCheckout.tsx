@@ -131,7 +131,7 @@ export default function SubscriptionCheckout(){
       :t('仍待付款，但付款入口可能已失效，可重新生成二维码。','Still awaiting payment, but the cashier may have expired. You can request a new QR code.'))
      :t('平台暂未确认支付结果，请保留原订单，不要重复付款。','Payment is not confirmed. Keep the original order and avoid paying twice.'));
    }else if(action==='cancel'){
-    if(!window.confirm(t('确认取消这笔未付款订阅吗？如果已经支付，请先查验原订单。平台确认关单后才能重新购买。','Cancel this unpaid subscription? If you paid, verify the original order first. New purchases are allowed only after the merchant confirms closure.')))return;
+    if(!window.confirm(t('仅申请关闭当前这笔人民币原订单，不会取消 USDT 订单。如果已付款，请先查验原单；只有支付平台确认关单后才能重新购买。','This only requests closure of the currently displayed fiat order; it does not cancel USDT orders. If already paid, verify the original first. New purchases require merchant-confirmed closure.')))return;
     const result=await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id+'/cancel',{method:'POST',body:JSON.stringify({})});
     setOrder(result.order);setPayUrl(null);
     setPaymentNote(t('原订单已由支付平台确认关闭。现在可以返回套餐页重新购买。','Merchant confirmed the original order is closed. You may return to the plans and buy again.'));
@@ -198,7 +198,7 @@ export default function SubscriptionCheckout(){
    {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
     <button className="button secondary" disabled={busy} onClick={()=>void act('relaunch')}>{t('重新生成原订单二维码','Generate new QR code for this order')}</button>:null}
    {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
-    <button className="button secondary" disabled={busy} onClick={()=>void act('cancel')}>{t('取消未付款原订单（平台确认后可重买）','Cancel unpaid order (buy again once confirmed)')}</button>:null}
+    <button className="button secondary" disabled={busy} onClick={()=>void act('cancel')}>{t('申请关闭本笔人民币原订单（确认后可重买）','Request closure of this fiat order (buy again once confirmed)')}</button>:null}
    {['closed','failed'].includes(order.status)?
     <a className="button secondary" href="/pricing/">{t('返回套餐页重新购买','Return to plans and buy again')}</a>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>
