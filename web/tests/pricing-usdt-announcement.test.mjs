@@ -4,32 +4,34 @@ import {readFileSync} from 'node:fs';
 
 const pricing=readFileSync(new URL('../src/pages/pricing.astro',import.meta.url),'utf8');
 
-test('Production pricing announces USDT above both product sections, without a direct pay action',()=>{
- const start=pricing.indexOf('<aside id="pricing-usdt-announcement"');
- const end=pricing.indexOf('</aside>',start);
- assert.ok(start>0&&end>start,'the announcement exists');
- assert.ok(start<pricing.indexOf('id="subscription-section"'),'both subscription and credit buyers see the notice');
- const notice=pricing.slice(start,end);
- assert.match(notice,/hidden aria-live="polite"/);
- assert.match(notice,/data-zh="新增 USDT 支付方式"/);
- assert.match(notice,/Now accepting USDT/);
- assert.match(notice,/订阅和永久额度包现已支持 USDT/);
- assert.match(notice,/Subscriptions and permanent credit packs now support USDT/);
- for(const name of ['TRON','Polygon','BNB Chain','Ethereum','Solana'])assert.ok(notice.includes(name),name);
- assert.match(notice,/以服务端订单为准/);
- assert.doesNotMatch(notice,/<(?:a|button)\b/,'the announcement cannot bypass checkout selection');
+test('Production pricing uses two unobtrusive USDT chips beside product section labels, not a full-width banner',()=>{
+ assert.doesNotMatch(pricing,/id="pricing-usdt-announcement"/);
+ assert.doesNotMatch(pricing,/pricing-usdt-announcement-inner/);
+ const sub=pricing.indexOf('id="pricing-subscription-usdt-chip"');
+ const credit=pricing.indexOf('id="pricing-credit-usdt-chip"');
+ assert.ok(sub>pricing.indexOf('id="subscription-eyebrow"'),'subscription chip follows its existing small label');
+ assert.ok(sub<pricing.indexOf('id="subscription-title"'),'subscription chip precedes the headline');
+ assert.ok(credit>pricing.indexOf('data-zh="独立购买 · 超量补充"'),'credit chip follows its section label');
+ assert.ok(credit<pricing.indexOf('id="credit-packs-title"'),'credit chip precedes the credit-pack headline');
+ assert.equal((pricing.match(/class="pricing-usdt-chip" hidden/g)||[]).length,2,'both chips start hidden');
+ assert.equal((pricing.match(/data-zh="NEW · USDT 支付">NEW · USDT payments/g)||[]).length,2);
+ assert.match(pricing,/\.pricing-payment-kicker\{display:flex;align-items:center;gap:10px;flex-wrap:wrap;/);
+ assert.match(pricing,/\.pricing-usdt-chip\[hidden\]\{display:none\}/);
 });
 
-test('Production announcement is hidden until actual authenticated-independent availability confirms USDT',()=>{
- assert.match(pricing,/const syncUsdtAnnouncement=\(\)=>\{const announcement=document\.getElementById\("pricing-usdt-announcement"\);if\(announcement\)announcement\.hidden=!boltutilAvailable;\}/);
+test('USDT chips follow verified availability and remain hidden on error or disabled networks',()=>{
+ assert.match(pricing,/const syncUsdtChips=\(\)=>\{for\(const id of \["pricing-subscription-usdt-chip","pricing-credit-usdt-chip"\]\)/);
+ assert.match(pricing,/if\(chip\)chip\.hidden=!boltutilAvailable/);
  assert.match(pricing,/boltutilAvailable=state\.available===true&&Array\.isArray\(state\.networks\)&&state\.networks\.length>0/);
- assert.match(pricing,/catch\{boltutilAvailable=false;\}syncUsdtAnnouncement\(\);syncCreditPaymentNotice\(\);render\(\);/);
+ assert.match(pricing,/catch\{boltutilAvailable=false;\}syncUsdtChips\(\);syncCreditPaymentNotice\(\);render\(\);/);
  assert.match(pricing,/window\.addEventListener\("focus",\(\)=>\{[^\n]*checkBolt\(\)/);
 });
 
-test('Pricing preserves one checkout-entry per credit pack and no newly duplicated USDT shortcut',()=>{
+test('USDT announcement does not duplicate checkout buttons or alter credit and subscription purchases',()=>{
  assert.match(pricing,/link\.href=`\/checkout\?package=\$\{encodeURIComponent\(pkg\.id\)\}`/);
+ assert.match(pricing,/subscriptionPricingChoices/);
  assert.doesNotMatch(pricing,/const crypto=document\.createElement/);
- const banner=pricing.slice(pricing.indexOf('<aside id="pricing-usdt-announcement"'),pricing.indexOf('</aside>')+8);
- assert.doesNotMatch(banner,/\/usdt-checkout/);
+ assert.doesNotMatch(pricing,/<aside[^>]*pricing-usdt-announcement/);
+ const chipArea=pricing.slice(0,pricing.indexOf('<script>'));
+ assert.doesNotMatch(chipArea,/\/usdt-checkout\//);
 });
