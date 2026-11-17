@@ -605,6 +605,8 @@ h3 { font-size: 21px; letter-spacing: -.035em; }
 .public-refresh .public-panel-heading {margin-bottom:24px;}
 .public-refresh .public-panel-heading h2 {margin:7px 0 0;font-size:clamp(27px,3vw,38px);}
 .public-refresh .public-account-panel [data-slot="card"] {border-radius:var(--xrh-radius);border-color:var(--xrh-line);box-shadow:var(--xrh-shadow);}
+/* Unlayered global a { color: inherit } overrides Tailwind text-primary-foreground on link-buttons. */
+.public-refresh .public-account-panel .account-welcome-install-cta { color: #fff; }
 
 /* Accessible details use browser-native disclosure: no hydration or extra JS. */
 .public-refresh .faq-hero {margin-bottom:32px;}
