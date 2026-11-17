@@ -1,0 +1,73 @@
+name: CF Free readiness — read-only daily quota/CPU report
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Complete UTC days to inspect, counting backwards from yesterday
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "3"
+          - "5"
+          - "7"
+        default: "3"
+        required: true
+      expected_worker_version:
+        description: Optional active Production Worker version UUID
+        type: string
+        required: false
+      released_at_utc:
+        description: Optional deployment time (ISO UTC); mixed days will not pass
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: cf-free-readonly-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  read-only:
+    name: Validate inputs and query account-wide Cloudflare Analytics
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy'
+    environment: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify report gate on synthetic data first
+        run: node --test tests/cf-free-readiness.test.mjs
+      - name: Inspect complete UTC days via Cloudflare GraphQL only
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DAYS: ${{ inputs.days }}
+          EXPECTED_VERSION: ${{ inputs.expected_worker_version }}
+          RELEASE_AT: ${{ inputs.released_at_utc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--days "$DAYS")
+          if [[ -n "$EXPECTED_VERSION" ]]; then args+=(--expected-version "$EXPECTED_VERSION"); fi
+          if [[ -n "$RELEASE_AT" ]]; then args+=(--release-at "$RELEASE_AT"); fi
+          node scripts/cf-free-readiness.mjs "${args[@]}"
+          cat cf-free-readiness.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload sanitized readiness evidence (no tokens or user data)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf-free-readonly-readiness
+          path: |
+            cf-free-readiness.md
+            cf-free-readiness.json
+          if-no-files-found: ignore
+          retention-days: 14
