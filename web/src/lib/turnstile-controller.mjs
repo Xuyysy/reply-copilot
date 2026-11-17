@@ -13,7 +13,7 @@ export function loadTurnstile(win,doc,{retry=false,timeoutMs=15000}={}){
   if(!script.isConnected)doc.head.append(script);
  });loads.set(win,promise);void promise.finally(()=>{if(loads.get(win)===promise)loads.delete(win);}).catch(()=>{});return promise;
 }
-export function createTurnstileController({node,sitekey,onState,win=window,load=retry=>loadTurnstile(win,node.ownerDocument,{retry}),challengeMs=120000,tokenMs=290000,now=()=>performance.now()}){
+export function createTurnstileController({node,sitekey,onState,action='register',win=window,load=retry=>loadTurnstile(win,node.ownerDocument,{retry}),challengeMs=120000,tokenMs=290000,now=()=>performance.now()}){
  let epoch=0,id=null,api=null,token='',timer=null,observer=null,seenFrame=false,disposed=false;
  const clear=()=>{clearTimeout(timer);observer?.disconnect();observer=null;token='';if(id!==null){try{api?.remove(id);}catch{}id=null;}node.replaceChildren?.();};
  let started=now();
@@ -23,7 +23,7 @@ export function createTurnstileController({node,sitekey,onState,win=window,load=
   try{api=await load(retry);if(disposed||run!==epoch||!node.isConnected)return;
    const current=()=>!disposed&&run===epoch&&node.isConnected;
    const fail=code=>{if(current())invalidate(code);};emit('verifying');
-   const rendered=api.render(node,{sitekey,action:'register',appearance:'always',size:'flexible',retry:'never','refresh-expired':'manual','refresh-timeout':'manual','response-field':false,
+   const rendered=api.render(node,{sitekey,action,appearance:'always',size:'flexible',retry:'never','refresh-expired':'manual','refresh-timeout':'manual','response-field':false,
     callback:value=>{if(!current()||token)return;if(typeof value!=='string'||!value.trim()||value.length>2048){fail('invalid_callback');return;}token=value;clearTimeout(timer);timer=setTimeout(()=>fail('verification_expired'),tokenMs);emit('verified');},
     'error-callback':code=>{fail(typeof code==='string'&&/^\d{3,6}$/.test(code)?code:'challenge_failed');return true;},
     'expired-callback':()=>fail('verification_expired'),'timeout-callback':()=>fail('challenge_timeout'),

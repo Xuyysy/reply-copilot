@@ -11,9 +11,9 @@ import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 
 import { createTurnstileController } from "../../lib/turnstile-controller.mjs";
 
-type View = "login" | "register" | "verify" | "reset-request" | "reset-finish";
+type View = "login" | "login-code-request" | "login-code-finish" | "register" | "verify" | "reset-request" | "reset-finish";
 
-export default function AuthPanel({ localVerification, sitekey }: { localVerification: boolean; sitekey: string }) {
+export default function AuthPanel({ localVerification, sitekey, emailCodeLoginEnabled = false }: { localVerification: boolean; sitekey: string; emailCodeLoginEnabled?: boolean }) {
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [view, setView] = useState<View>(() => typeof location !== "undefined" && new URL(location.href).searchParams.get("mode") === "register" ? "register" : "login");
@@ -41,8 +41,8 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
 
   useEffect(() => { mounted.current=true;return()=>{mounted.current=false;}; }, []);
   useEffect(() => {
-    if (view !== "register" || localVerification || !sitekey || !turnstileNode.current) return;
-    const controller=createTurnstileController({node:turnstileNode.current,sitekey,onState:setVerification});
+    if ((view !== "register" && view !== "login-code-request") || localVerification || !sitekey || !turnstileNode.current) return;
+    const controller=createTurnstileController({node:turnstileNode.current,sitekey,onState:setVerification,action:view==="login-code-request"?"login":"register"});
     turnstile.current=controller;void controller.start();
     return()=>{controller.dispose();if(turnstile.current===controller)turnstile.current=null;};
   }, [view,localVerification,sitekey]);
@@ -52,7 +52,7 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
     if (deviceCode && /^[A-F0-9]{8}$/.test(deviceCode)) void api("/v1/me").then(() => redirect(), () => {});
   }, []);
 
-  function switchView(next: View) { setView(next); setNotice(null); setCode(""); }
+  function switchView(next: View) { setView(next); setNotice(null); setCode(""); if(next==="login-code-request"&&identity.includes("@"))setEmail(identity); }
   function redirect() {
     const deviceCode = new URL(location.href).searchParams.get("device_code");
     location.href = deviceCode && /^[A-F0-9]{8}$/.test(deviceCode) ? `/account?device_code=${deviceCode}` : "/account";
@@ -84,11 +84,40 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
     });
   }
 
+  function sendEmailLoginCode(event: FormEvent) {
+    if(pendingRef.current||Date.now()<resendUntil){event.preventDefault();return;}
+    const token=localVerification?"local-test-token":turnstile.current?.consume()||"";
+    if(!token){event.preventDefault();setNotice({text:t("请先完成人机验证。","Complete verification first."),error:true});return;}
+    void request(event,"/v1/auth/login-code/request",{email,turnstileToken:token},()=>{
+      setView("login-code-finish");setCode("");setResendUntil(Date.now()+60_000);
+      setNotice({text:t("若邮箱已关联有效账号，请检查收件箱和垃圾邮件。","If this is an active account, check your inbox and spam folder.")});
+    });
+  }
+
   return <Card className="mx-auto w-full max-w-[540px] border-border shadow-[0_24px_72px_rgb(24_49_75_/_0.08)]">
-    <CardHeader><CardTitle>{view === "verify" ? t("验证邮箱", "Verify email") : view.startsWith("reset") ? t("找回密码", "Reset password") : t("欢迎使用 x-Reply-Helper", "Welcome to x-Reply-Helper")}</CardTitle></CardHeader>
+    <CardHeader><CardTitle>{view.startsWith("login-code") ? t("邮箱验证码登录","Email code sign-in") : view === "verify" ? t("验证邮箱", "Verify email") : view.startsWith("reset") ? t("找回密码", "Reset password") : t("欢迎使用 x-Reply-Helper", "Welcome to x-Reply-Helper")}</CardTitle></CardHeader>
     <CardContent className="space-y-5">
-      <Tabs value={view === "verify" ? "register" : view.startsWith("reset") ? "reset" : view} onValueChange={value => switchView(value === "reset" ? "reset-request" : value as View)}><TabsList className="grid w-full grid-cols-3"><TabsTrigger disabled={pending} value="login">{t("登录", "Sign in")}</TabsTrigger><TabsTrigger disabled={pending} value="register">{t("注册", "Register")}</TabsTrigger><TabsTrigger disabled={pending} value="reset">{t("忘记密码", "Reset")}</TabsTrigger></TabsList></Tabs>
+      <Tabs value={view === "verify" ? "register" : view.startsWith("reset") ? "reset" : view.startsWith("login-code") ? "login" : view} onValueChange={value => switchView(value === "reset" ? "reset-request" : value as View)}><TabsList className="grid w-full grid-cols-3"><TabsTrigger disabled={pending} value="login">{t("登录", "Sign in")}</TabsTrigger><TabsTrigger disabled={pending} value="register">{t("注册", "Register")}</TabsTrigger><TabsTrigger disabled={pending} value="reset">{t("忘记密码", "Reset")}</TabsTrigger></TabsList></Tabs>
       {view === "login" && <form className="space-y-4" onSubmit={event => void request(event, "/v1/auth/login", { identity, password }, redirect)}><Field label={t("用户名或邮箱", "Username or email")}><Input autoFocus autoComplete="username" value={identity} onChange={event => setIdentity(event.target.value)} required /></Field><Field label={t("密码", "Password")}><PasswordInput language={language} value={password} setValue={setPassword} shown={showPassword} setShown={setShowPassword} autoComplete="current-password" /></Field><Submit pending={pending} label={t("登录", "Sign in")} /></form>}
+      {view === "login" && emailCodeLoginEnabled && <button type="button" className="text-sm text-primary underline" disabled={pending} onClick={()=>switchView("login-code-request")}>{t("邮箱验证码登录（无需密码）","Sign in with an email code instead")}</button>}
+
+      {view === "login-code-request" && emailCodeLoginEnabled && <form className="space-y-4" onSubmit={sendEmailLoginCode}>
+        <p className="text-sm text-muted-foreground">{t("仅用于已验证邮箱的现有账户，不会创建新账户。","Existing verified accounts only; no new account is created.")}</p>
+        <Field label={t("账户邮箱","Account email")}><Input autoFocus type="email" autoComplete="email" value={email} onChange={event=>setEmail(event.target.value)} required /></Field>
+        {localVerification ? <p className="text-xs text-muted-foreground">{t("本地模拟人机验证","Local verification mode")}</p> :
+         sitekey ? <div className="space-y-2"><div ref={turnstileNode} style={{minHeight:70,maxWidth:"100%"}} />
+           <p role="status" className="text-xs text-muted-foreground">{verification.phase==="verified"?t("验证完成","Verified"):t("发送前请完成人机验证","Complete verification before sending")}</p>
+           {verification.phase==="failed" && <Button type="button" variant="outline" onClick={()=>void turnstile.current?.retry()}>{t("重新验证","Verify again")}</Button>}
+         </div> : <Alert variant="destructive"><AlertDescription>{t("邮箱登录暂不可用：未配置人机验证。","Email sign-in requires verification.")}</AlertDescription></Alert>}
+        <Submit pending={pending} disabled={(!localVerification&&verification.phase!=="verified")||now<resendUntil||(!localVerification&&!sitekey)} label={t("发送登录验证码","Send sign-in code")} />
+        <button type="button" className="text-sm text-primary underline" onClick={()=>switchView("login")}>{t("返回密码登录","Use password instead")}</button>
+      </form>}
+      {view === "login-code-finish" && emailCodeLoginEnabled && <form className="space-y-4" onSubmit={event=>void request(event,"/v1/auth/login-code/verify",{email,code},redirect)}>
+        <p className="text-sm text-muted-foreground">{t("验证码申请发送至","Code requested for")} <strong>{email}</strong></p>
+        <Field label={t("6 位验证码","6-digit code")}><Input autoFocus inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} value={code} onChange={event=>setCode(event.target.value)} required /></Field>
+        <Submit pending={pending} label={t("登录","Sign in")} />
+        <button type="button" className="text-sm text-primary underline" onClick={()=>switchView("login-code-request")}>{t("修改邮箱或重新发送","Edit email or resend")}</button>
+      </form>}
       {view === "register" && <form className="space-y-4" onSubmit={sendRegistration}><fieldset disabled={pending} className="contents">{validReferralCode&&<p data-testid="referral-signup-notice" className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">{t("好友邀请福利：首次绑定插件领 200 次免费额度，成功收到第一条 AI 回复再送 50 次，合计 250 次。","Friend invite: get 200 free credits when you first connect the extension, plus 50 after your first delivered AI reply—250 in total.")}</p>}{!validReferralCode&&<p className="text-sm text-muted-foreground">{t("验证邮箱完成注册，首次绑定插件可领 200 次免费额度。","Verify your email to register, then get 200 free credits on your first extension connection.")}</p>}<Field label={t("用户名", "Username")}><Input autoFocus autoComplete="username" minLength={3} maxLength={24} value={username} onChange={event => setUsername(event.target.value)} required /></Field><Field label={t("邮箱", "Email")}><Input type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} required /></Field><p role="note" data-registration-email-tip className="text-xs text-muted-foreground">{t("验证码发送后若未收到，请检查垃圾邮箱或广告邮件文件夹。","If your verification code doesn't arrive, check your spam or promotions folder.")}</p><Field label={t("密码，至少 12 位", "Password, at least 12 characters")}><PasswordInput language={language} value={password} setValue={setPassword} shown={showPassword} setShown={setShowPassword} autoComplete="new-password" minLength={12} /></Field>{localVerification ? <p className="rounded-lg bg-accent p-3 text-sm text-accent-foreground">{t("本地开发使用模拟人机验证；验证码写入本机 Worker 日志。", "Local development uses mock verification. The code appears in the Worker log.")}</p> : sitekey ? <div className="space-y-2">
         <div ref={turnstileNode} style={{minHeight:70,maxWidth:"100%"}} />
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">{verification.phase === "verified" ? t("验证成功，可以发送验证码。","Verification successful. You can send the code.") : verification.phase === "failed" ? t("验证未完成，请重新验证。","Verification did not complete. Try verification again.") : verification.phase === "submitted" ? pending ? t("正在发送验证码，请稍候…","Sending the verification code. Please wait…") : t("再次发送前请重新验证。","Verify again before sending another code.") : verification.phase === "verifying" ? t("请完成人机验证。","Complete the verification.") : t("人机验证加载中，请稍候…","Loading verification. Please wait…")}</p>
