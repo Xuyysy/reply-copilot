@@ -52,15 +52,21 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
     await failReview(env,order,nowMs());
     throw new ApiFailure(409,"BOLTUTIL_ACCOUNT_HELD","账户无法接受新权益，已进入人工复核。");
   }
-  if(order.status==="closed"&&!callback)return; // Closed invoice remains visible; do not re-query on GET.
   if(order.status==="manual_review"||order.status==="closed"&&order.product_type!=="subscription")
     throw new ApiFailure(409,"BOLTUTIL_PAYMENT_REVIEW","此订单需要人工核对。");
-  const data=await boltRequest(env,"/api/v1/order/status",{externalOrderId:externalId});
+  let data:Record<string,unknown>;
+  try{data=await boltRequest(env,"/api/v1/order/status",{externalOrderId:externalId});}
+  catch(error){
+    // A previously closed invoice stays closed if the provider cannot be
+    // queried. Never mark it paid from an outage or a browser-reported result.
+    if(order.status==="closed"&&!callback)return;
+    throw error;
+  }
   if(!isConfirmed(data.status)){
     // Only a provider-authenticated, identity-matched, strictly unpaid terminal
     // response may release an old BoltUtil subscription blocking new checkout.
     // EXPIRED alone may later receive a confirmed payment; never auto-grant it.
-    if(!callback&&order.product_type==="subscription")
+    if(!callback&&order.product_type==="subscription"&&order.status!=="closed")
       await closeProviderConfirmedUnpaidBoltSubscription(env,externalId,data);
     return;
   }
