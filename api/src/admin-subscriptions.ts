@@ -187,6 +187,10 @@ export async function adminSubscriptionFinance(request:Request,env:Env):Promise<
  await requireAdminSession(request,env);
  requireSubscriptionFeature(env);
  const from=nowMs()-30*86400000;
+ // Keep verified payment totals fresh, but only load 30-day subscription usage
+ // and AI provider cost history when specifically requested by an operator.
+ // Requests without view=summary retain the full legacy response.
+ const summaryOnly=new URL(request.url).searchParams.get('view')==='summary';
  const [orders,usage]=await Promise.all([
   env.DB.prepare(`SELECT o.kind,COUNT(*) orders,SUM(o.amount_fen) gross_paid_fen,
     SUM(CASE WHEN o.status='refunded' THEN o.amount_fen ELSE 0 END) full_refunded_fen,
@@ -195,13 +199,13 @@ export async function adminSubscriptionFinance(request:Request,env:Env):Promise<
    WHERE o.paid_at>=? AND t.merchant_provider IN ('mk99','xiaodou')
      AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=o.amount_fen AND e.body_sha256 IS NOT NULL)
    GROUP BY o.kind`).bind(from).all(),
-  env.DB.prepare(`SELECT
+  summaryOnly?Promise.resolve(null):env.DB.prepare(`SELECT
     (SELECT COUNT(*) FROM subscription_usage_events WHERE created_at>=? AND event_type='consume') consumed,
     (SELECT COALESCE(SUM(c.estimated_cost_micro_usd),0) FROM ai_usage_costs c
       JOIN subscription_ai_allocations a ON a.user_id=c.user_id AND a.request_id=c.request_id
       WHERE c.created_at>=?) cost_micro_usd`).bind(from,from).first()
  ]);
- return response({from,orders:orders.results??[],usage},200,env,request);
+ return response({from,orders:orders.results??[],usage,detailScope:summaryOnly?'summary':'full'},200,env,request);
 }
 
 
