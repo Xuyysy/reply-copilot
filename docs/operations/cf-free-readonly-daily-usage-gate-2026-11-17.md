@@ -71,3 +71,11 @@ Next CPU diagnostic, if thresholds remain exceeded: Cloudflare CPU profiling/tra
 ## Default-branch read-only workflow promotion (2026-11-17)
 
 An independently reviewed copy of this script, synthetic tests, documentation and the manual workflow was proposed for `main` solely to make GitHub Actions `workflow_dispatch` available on the default branch. That workflow is owner-only, pins the `production` GitHub Environment for protected Cloudflare secret scope, and has only `contents: read` GitHub permissions. Its successful execution means a report was generated, **never** that Cloudflare Free is safe. No application deployment, plan change, production/staging D1 SQL or account mutation occurs. This historical release-branch runbook remains valid for the original source SHA.
+
+## Optional production CPU capture — diagnostic, not a free-plan gate
+
+The default-branch manual workflow can optionally run a `10/20/40/50` second CPU capture against an **exact active production Worker version** using Cloudflare's read-only-on-resource profiling API. It never generates Worker requests, deploys changes, runs D1 SQL, or alters any configuration. The capture API uses POST only to initiate a transient diagnostic sample.
+
+Provide the actual active version UUID in `expected_worker_version`; without it the opt-in capture fails closed. The reporter parses the CPU pprof profile in memory, filters sample labels, omits raw binary, and uploads only summarized function names and self CPU. Profiles with fewer than five application samples or less than 5ms application CPU return `INSUFFICIENT_APP_SAMPLES`. This is common when isolates are idle; never attribute their GC/idle samples to a business route.
+
+The report is **not route attribution or proof of Free eligibility**, and even an actionable profile only nominates a hotspot for isolated tests. `certifiedForFree` remains false. Do not weaken password hashing, enable migrations, or deploy from a profile alone. Provider reference: https://developers.cloudflare.com/workers/observability/profiling-in-production/ .
