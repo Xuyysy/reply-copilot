@@ -18,7 +18,10 @@ import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
 import { createAccountPrewarmer } from "../services/account-prewarm.js";
+import { createGenerationContextPrewarmer } from "../services/generation-context-prewarm.js";
 
+// Observational proxy: time since context creation AFTER static module imports.
+const workerReadyAfterImportsMs=Math.max(0,Math.round(performance.now()));
 let performanceEnabled = false;
 const performanceSamples = globalThis.ReplyCopilotPerformance.createCollector();
 globalThis.replyCopilotPerformanceReport = () => performanceSamples.report();
@@ -29,10 +32,13 @@ const history = new HistoryService();
 const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
+const generationContextPrewarmer=createGenerationContextPrewarmer({
+  read:()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]),
+});
 // Staging opt-in only: reuse the existing read-only account cache, not a parallel entitlement source.
 const accountPrewarmer = createAccountPrewarmer({
   readAccount: () => accountStates.getState(),
-  readPreferences: () => storage.getBehaviorPreferences(),
+  readPreferences: () => Promise.all([storage.getBehaviorPreferences(),generationContextPrewarmer.get()]),
 });
 const accountClient = new AccountClient();
 const momentum=new MomentumStore();
@@ -107,8 +113,9 @@ chrome.storage.onChanged.addListener((changes, area) => {
     performanceEnabled=changes.generationPerformanceEnabled.newValue===true;
     void chrome.tabs.query({url:["https://x.com/*","https://twitter.com/*"]}).then(tabs=>Promise.allSettled(tabs.filter(tab=>Number.isInteger(tab.id)).map(tab=>chrome.tabs.sendMessage(tab.id,{type:"REPLY_COPILOT_PERFORMANCE_STATE",enabled:performanceEnabled})))).catch(()=>{});
   }
+  if (area === "local" && (changes.voiceProfile || changes.replyStyleProfile || changes.replyHistory)) generationContextPrewarmer.invalidate();
   if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
-  if (area === "local" && changes.replyCopilotAccountToken) { accountPrewarmer.reset(); momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); void broadcastMomentum(); }
+  if (area === "local" && changes.replyCopilotAccountToken) { generationContextPrewarmer.invalidate(); accountPrewarmer.reset(); momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); void broadcastMomentum(); }
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -167,7 +174,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!fromXPage || sender.frameId !== 0) {
       sendResponse({ok:false}); return false;
     }
-    sendResponse({ok:true, workerUptimeMs:Math.max(0,Math.round(performance.now()))});
+    sendResponse({ok:true, workerUptimeMs:Math.max(0,Math.round(performance.now())),workerReadyAfterImportsMs});
     return false;
   }
   if (message?.type === "REPLY_COPILOT_PREWARM_ACCOUNT") {
@@ -178,7 +185,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ok:false}); return false;
     }
     void accountPrewarmer.prime().then(
-      ({kind,elapsedMs}) => sendResponse({ok:kind!=="failed",kind,elapsedMs,workerUptimeMs:Math.round(performance.now())}),
+      ({kind,elapsedMs}) => sendResponse({ok:kind!=="failed",kind,elapsedMs,workerUptimeMs:Math.round(performance.now()),workerReadyAfterImportsMs}),
       () => sendResponse({ok:false,kind:"failed"})
     );
     return true;
@@ -282,7 +289,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
       const controller = new AbortController(); activeRequests.get(message.requestId)?.abort(); activeRequests.set(message.requestId, controller);
       try {
-        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
+        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>RUNTIME_CONFIG.channel==="staging"
+          ?generationContextPrewarmer.get()
+          :Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
         const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");

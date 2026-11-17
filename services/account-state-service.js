@@ -3,7 +3,7 @@ import { AccountClient } from "./account-client.js";
 import { createAccountState, EMPTY_ACCOUNT_STATE } from "../domain/account-state.js";
 
 export class AccountStateService {
-  constructor({ config = RUNTIME_CONFIG, client = new AccountClient({ config }) } = {}) { this.config = config; this.client = client; this.pending = null; this.cached = null; this.cachedAt = 0; this.cachedToken = null; }
+  constructor({ config = RUNTIME_CONFIG, client = new AccountClient({ config }) } = {}) { this.config = config; this.client = client; this.pending = null; this.cached = null; this.cachedAt = 0; this.cachedToken = null; this.bootstrapCapability = null; }
   async getState({ force = false } = {}) {
     if (!force && this.cached && Date.now() - this.cachedAt < 30000) return this.cached;
     if (this.pending) return this.pending;
@@ -43,7 +43,25 @@ export class AccountStateService {
     const token=await this.client.token();
     if (!this.config.hostedApiUrl || !token) return EMPTY_ACCOUNT_STATE;
     try {
-      const [account, entitlement, usage] = await Promise.all([this.client.fetchCurrentUser(), this.client.fetchEntitlement(), this.client.fetchUsage()]);
+      // Staging-only opt-in. Old Staging Workers may lack bootstrap; ONLY a
+      // verified legacy 404 permits fallback, never an auth/network failure.
+      let account,entitlement,usage;
+      if(this.config.channel==="staging"&&this.bootstrapCapability!==false&&typeof this.client.fetchBootstrap==="function"){
+        let bootstrap=null;
+        try{bootstrap=await this.client.fetchBootstrap();}
+        catch(error){if(error?.status!==404||error?.code!=="NOT_FOUND")throw error;this.bootstrapCapability=false;}
+        if(bootstrap){
+          if(!bootstrap.user?.userId||!["credits_available","credits_exhausted","frozen"].includes(bootstrap.status)||!bootstrap.quota||!bootstrap.subscription)
+            throw new Error("Invalid extension bootstrap state");
+          this.bootstrapCapability=true;
+          account={user:bootstrap.user};
+          entitlement={status:bootstrap.status,entitlement:bootstrap.entitlement};
+          usage={quota:bootstrap.quota,subscription:bootstrap.subscription};
+        }
+      }
+      if(!account)[account,entitlement,usage]=await Promise.all([
+        this.client.fetchCurrentUser(),this.client.fetchEntitlement(),this.client.fetchUsage()
+      ]);
       if(await this.client.token()!==token){this.cachedToken=null;return createAccountState({status:'auth_unavailable'},'server');}
       this.cachedToken=token;
       return createAccountState({ status: entitlement.status, user: account.user, features: entitlement.features ? {...entitlement.features,verifiedAt:Date.now()} : null, entitlement: entitlement.entitlement, trial: entitlement.trial, quota: usage.quota, subscription: usage.subscription, license: entitlement.license }, "server");
