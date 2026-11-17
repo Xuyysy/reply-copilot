@@ -11,9 +11,9 @@ const SESSION_MS = 30 * 86400_000;
 // Free-tier CPU headroom opt-in: new/reset credentials use a shorter PBKDF2
 // verifier only after PASSWORD_FREE_CPU_ENABLED=1 and a rollback-compatible release.
 // This deliberately trades offline brute-force resistance for lower per-request
- // CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
- // 100k/210k historical hashes must remain verifiable: never silently rewrite
- // them without the plaintext password and never skip their full verification.
+// CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
+// 100k/210k historical hashes must remain verifiable: never silently rewrite
+// them without the plaintext password and never skip their full verification.
 // Never switch the creation cost simply by deploying this release. First ship
 // the verifier compatibility, then independently enable the Free CPU mode.
 const DEFAULT_ITERATIONS = 100_000;
