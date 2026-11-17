@@ -110,6 +110,7 @@ export default function SubscriptionCheckout(){
  async function act(action:'quote'|'create'|'refresh'|'relaunch'|'cancel'){
   if(operation.current)return;
   operation.current=true;setBusy(true);setError(undefined);setPaymentNote('');
+  if(action==='create'){setBlockingOrder(null);setUnpaidBoltOrderId(null);}
   try{
    if(action==='quote'){
     setQuote((await api<{quote:Quote}>('/v1/subscriptions/upgrade-quote',{method:'POST',body:JSON.stringify({planCode:target})})).quote);
@@ -149,7 +150,7 @@ export default function SubscriptionCheckout(){
      (cause.order as SubscriptionOrder|undefined)?.retryAvailable===true;
    if(canRetry){
      // Do not latch the original UNKNOWN order or reuse its idempotency key.
-     key.current=null;setPayUrl(null);setBlockingOrder(null);
+     key.current=null;setPayUrl(null);setBlockingOrder(null);setUnpaidBoltOrderId(null);
      if(upgrade)setQuote(undefined);
      setPaymentNote(t('未生成收银台，已解除购买限制；请重新点击购买。','No cashier was issued. You may start a new purchase.'));
    }else if(cause instanceof ApiError&&cause.order&&typeof cause.order==='object'&&'id' in cause.order&&typeof cause.order.id==='string'&&orderPattern.test(cause.order.id)){
@@ -176,6 +177,12 @@ export default function SubscriptionCheckout(){
   setOrder(value);setId(value.id);
   history.replaceState(null,'','/subscription-checkout/?order='+encodeURIComponent(value.id));
  }
+ // Suppress only the redundant conflict alert when the specific, actionable
+ // USDT recovery guidance below is available; retain unrelated error alerts.
+ const actionableUnpaidUsdtConflict=Boolean(
+  unpaidBoltOrderId&&error instanceof ApiError&&
+  ['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_ORDER_CONFLICT'].includes(error.code)
+ );
  const signedOut=error instanceof ApiError&&error.status===401;
  const tierOrder=['basic','pro','max','ultra'];
  const higherTier=currentSubscription?.status==='active'&&tierOrder.indexOf(target)>tierOrder.indexOf(currentSubscription.plan??'')&&tierOrder.indexOf(currentSubscription.plan??'')>=0;
@@ -186,17 +193,18 @@ export default function SubscriptionCheckout(){
  const usdtCheckoutHref='/usdt-checkout/?productType=subscription&sku='+encodeURIComponent(target)+(upgrade?'&upgrade=1':'');
  return <div className="space-y-5">
   {loading?<p role="status">{t('正在读取订阅…','Loading subscription…')}</p>:null}
-  {error?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
-  {blockingOrder?<p role="status">{blockingOrder.periodStatus==='queued'
+  {error&&!actionableUnpaidUsdtConflict?<div role="alert" className="notice">{readableError(error,language)} {t('付款结果不明时，请在账户中心查看原单。','If payment is uncertain, check the original order in your account.')}</div>:null}
+  {blockingOrder&&!actionableUnpaidUsdtConflict?<p role="status">{blockingOrder.periodStatus==='queued'
    ?t('你已有付款成功、等待生效的下一期订阅。','You already have a paid renewal queued for the next period.')
    :t('检测到一笔需要先处理的原订单。','An earlier order needs your attention.')}
    {' '}<a className="underline" href={'/subscription-checkout/?order='+encodeURIComponent(blockingOrder.id)}>{t('查看并继续原订单','Open the original order')}</a>
   </p>:null}
-  {unpaidBoltOrderId&&<p role="status" className="notice">
-   {t('之前的 USDT 订阅订单尚未处理。若没有发起转账，点击下方链接打开原单并选择「取消本站订单」，然后返回购买支付宝订单。已经转账，请先核验，切勿取消。',
-      'An earlier USDT subscription is unresolved. If no transfer was sent, open it and cancel the local invoice, then return to choose Alipay. If you sent funds, verify the payment first.')}
-   {' '}<a className="underline" href={'/usdt-checkout/?order='+encodeURIComponent(unpaidBoltOrderId)}>{t('查看并关闭旧 USDT 订单','Open and cancel old USDT invoice')}</a>
-  </p>}
+  {unpaidBoltOrderId&&<div role="status" className="notice">
+   <p className="font-semibold">{t('已有未完成的 USDT 订阅订单','An earlier USDT subscription is still open')}</p>
+   <p className="mt-2">{t('如果尚未转账，请打开旧订单并选择「取消本站订单」，之后重新使用支付宝或 USDT 下单。如果已经转账，请先核验付款，不要取消。',
+      'If you have not sent funds, open the old invoice and cancel it locally before choosing Alipay or USDT again. If you already transferred funds, verify payment instead of cancelling.')}</p>
+   <a className="button mt-4 w-full sm:w-auto" href={'/usdt-checkout/?order='+encodeURIComponent(unpaidBoltOrderId)}>{t('查看并关闭旧 USDT 订单','Open and cancel old USDT invoice')}</a>
+  </div>}
   {signedOut?<a className="button" href="/login/">{t('登录后返回购买','Sign in, then return to checkout')}</a>:null}
   {order?<section className="pricing-card space-y-3">
    <p className="break-all">{t('订单号','Order')}: {order.id}</p>
