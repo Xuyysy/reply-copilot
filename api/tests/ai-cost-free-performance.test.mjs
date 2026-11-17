@@ -45,7 +45,7 @@ test('optimized cost aggregation exactly preserves legacy, managed, unresolved, 
    const assigned=mode===0?null:mode===5?'00000000-0000-4000-8000-000000000001':id;
    const version=mode===1||mode===2?1:mode===5?999:2;
    const at=i%4===0?month-1:i%4===1?month:i%4===2?today:today-1;
-   insert.run('cost-'+i,mode===0?'mock':mode===5?'forgotten-model':'synthetic-'+mode,
+   insert.run('cost-'+i,mode===0?(i%12===0?'mock':'legacy-model'):mode===5?'forgotten-model':'synthetic-'+mode,
      i%13===0?0:i%7, i%17===0?0:i%11, i%19===0?0:i%23,at,assigned,assigned?version:null);
   }
   const oldRows=f.sql.prepare(ORIGINAL_COST_SQL).all(...args);
@@ -61,12 +61,20 @@ test('optimized cost aggregation exactly preserves legacy, managed, unresolved, 
 test('local workerd D1 rows_read improves with history size; no external calls or live data',{timeout:120000},async()=>{
  const f=await localPerformanceDb(2000);
  try {
+  // The old join is costly when cost rows actually reference immutable model
+  // versions. All-mock rows would make it look artificially equal (+1 read).
+  const configId='22222222-2222-4222-8222-222222222222';
+  await f.db.prepare("INSERT INTO ai_provider_configs(id,display_name,latest_version,created_at,updated_at,updated_by) VALUES(?,'Synthetic provider',1,1,1,'u0')").bind(configId).run();
+  await f.db.prepare(`INSERT INTO ai_provider_config_versions
+    (config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by)
+    VALUES(?,1,'qwen','openai_chat','https://example.invalid','synthetic-model','synthetic-key-material-not-a-secret-000000000000000000',300000,1000000,512,10000,'{}','[]',1,'u0')`).bind(configId).run();
+  await f.db.prepare("UPDATE ai_usage_costs SET provider_config_id=?,provider_config_version=1").bind(configId).run();
   const bound=[NOW-5*DAY,NOW-DAY,NOW-DAY,NOW-DAY,NOW-DAY];
   const baseline=await measure(f.db,ORIGINAL_COST_SQL,bound);
   const improved=await measure(f.db,COST_HISTORY_SQL,bound);
   assert.deepEqual(improved.results,baseline.results);
   assert.equal(improved.rowsWritten,0);
-  assert.ok(improved.rowsRead<=baseline.rowsRead,JSON.stringify({
+  assert.ok(improved.rowsRead<baseline.rowsRead,JSON.stringify({
     beforeRowsRead:baseline.rowsRead,afterRowsRead:improved.rowsRead,
     beforePlan:baseline.plan,afterPlan:improved.plan
   }));
