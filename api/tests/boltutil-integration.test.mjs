@@ -88,9 +88,14 @@ for(const [network] of NETWORKS){
      const expectedCny=row(f,'SELECT price_cny_fen FROM recharge_packages WHERE id=?','starter').price_cny_fen;
      assert.equal(row(f,'SELECT base_amount_fen FROM boltutil_orders WHERE id=?',initial.body.order.id).base_amount_fen,expectedCny,'USDT must not inherit MK99 fee uplift');
      const order=initial.body.order;
+     const pendingFeature=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});
+     assert.equal(pendingFeature.body.features.interactionMomentum.eligible,false,'pending USDT cannot unlock momentum');
      const paid=await refresh(f,order);
      assert.equal(paid.status,200,JSON.stringify(paid.body));
      assert.equal(paid.body.order.entitlementApplied,true);
+     const feature=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});
+     assert.equal(feature.body.features.interactionMomentum.eligible,true,'settled USDT credit pack unlocks momentum');
+     assert.equal((await f.call('/v1/creator-momentum/insights',{method:'GET'})).status,200);
      const after=await refresh(f,order);
      assert.equal(after.status,200,JSON.stringify(after.body));
      assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,400);
@@ -109,6 +114,9 @@ for(const [network] of NETWORKS){
      assert.equal(result.body.order.entitlementApplied,true);
      const account=await f.call('/v1/usage',{method:'GET'});
      assert.equal(account.body.subscription.status,'active',JSON.stringify(account.body));
+     const feature=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});
+     assert.equal(feature.body.features.interactionMomentum.eligible,true,'active USDT subscription unlocks momentum');
+     assert.equal((await f.call('/v1/creator-momentum/insights',{method:'GET'})).status,200);
      assert.equal(account.body.subscription.dailyLimit,500);
      assert.equal(count(f,'subscription_periods'),1);
      assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,0);
@@ -551,5 +559,50 @@ test('Production webhook rejects uninitialized D1 and keeps signed original-orde
   assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
   assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,400);
   assert.equal(count(f,'boltutil_payment_events'),1);
+ }finally{f.sql.close();}
+});
+
+
+test('BoltUtil momentum access requires provider-confirmed completed credit settlement, not checkout or arbitrary balance',async()=>{
+ const f=setup();try{
+  const created=await create(f,'TRC20');
+  assert.equal(created.status,201);
+  const eligible=async()=>{const r=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});return r.body.features?.interactionMomentum?.eligible===true;};
+  assert.equal(await eligible(),false);
+  assert.equal((await refresh(f,created.body.order,{status:'PENDING'})).status,200);
+  assert.equal(await eligible(),false);
+  assert.equal((await refresh(f,created.body.order)).status,200);
+  assert.equal(await eligible(),true);
+  const cases=[
+   ["UPDATE boltutil_orders SET status='manual_review'","UPDATE boltutil_orders SET status='paid'"],
+   ["UPDATE boltutil_orders SET applied_at=NULL","UPDATE boltutil_orders SET applied_at=paid_at"],
+   ["UPDATE boltutil_orders SET paid_usdt_micros=0","UPDATE boltutil_orders SET paid_usdt_micros=payable_usdt_micros"],
+   ["UPDATE recharge_orders SET credited_at=NULL","UPDATE recharge_orders SET credited_at=paid_at"],
+   ["UPDATE credit_batches SET status='refund_pending' WHERE source_kind='purchase'","UPDATE credit_batches SET status='active' WHERE source_kind='purchase'"]
+  ];
+  for(const [hold,restore] of cases){f.sql.exec(hold);assert.equal(await eligible(),false,'held or incomplete settlement denies');f.sql.exec(restore);assert.equal(await eligible(),true);}
+  f.sql.exec('DELETE FROM boltutil_payment_events');
+  assert.equal(await eligible(),false,'missing provider proof denies');
+ }finally{f.sql.close();}
+});
+test('BoltUtil momentum stays fail closed when crypto schema disabled or account frozen',async()=>{
+ const f=setup();try{
+  const created=await create(f,'POLYGON');
+  assert.equal((await refresh(f,created.body.order)).status,200);
+  const eligible=async()=>{const r=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});return r.body.features?.interactionMomentum?.eligible===true;};
+  f.env.BOLTUTIL_SCHEMA_READY='0';assert.equal(await eligible(),false);
+  f.env.BOLTUTIL_SCHEMA_READY='1';assert.equal(await eligible(),true);
+  f.sql.exec("UPDATE users SET status='frozen'");assert.equal(await eligible(),false);
+ }finally{f.sql.close();}
+});
+test('BoltUtil active subscription momentum access requires active period and settled order',async()=>{
+ const f=setup();try{
+  const created=await create(f,'BEP20','subscription','basic');
+  assert.equal((await refresh(f,created.body.order)).status,200);
+  const eligible=async()=>{const r=await f.call('/v1/entitlements?feature=interactionMomentum',{method:'GET'});return r.body.features?.interactionMomentum?.eligible===true;};
+  assert.equal(await eligible(),true);
+  f.sql.exec("UPDATE boltutil_orders SET status='manual_review'");assert.equal(await eligible(),false);
+  f.sql.exec("UPDATE boltutil_orders SET status='paid'");assert.equal(await eligible(),true);
+  f.sql.exec("UPDATE subscription_periods SET status='revoked'");assert.equal(await eligible(),false);
  }finally{f.sql.close();}
 });
