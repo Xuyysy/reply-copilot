@@ -14,7 +14,7 @@ import { createTurnstileController } from "../../lib/turnstile-controller.mjs";
 type View = "login" | "login-code-request" | "login-code-finish" | "register" | "verify" | "reset-request" | "reset-finish";
 
 export default function AuthPanel({ localVerification, sitekey }: { localVerification: boolean; sitekey: string }) {
-  const emailCodeLoginEnabled = import.meta.env.PUBLIC_EMAIL_LOGIN_ENABLED === '1';
+  const emailCodeLoginEnabled = import.meta.env?.PUBLIC_EMAIL_LOGIN_ENABLED === '1';
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [view, setView] = useState<View>(() => typeof location !== "undefined" && new URL(location.href).searchParams.get("mode") === "register" ? "register" : "login");
