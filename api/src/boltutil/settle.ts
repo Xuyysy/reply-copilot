@@ -119,21 +119,6 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
     return;
   }
   const statements:D1PreparedStatement[]=[
-      env.DB.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND external_order_id=? AND status='closed' AND product_type='subscription') ON CONFLICT DO NOTHING")
-        .bind(eventId,externalId,trusted.status,trusted.network,trusted.txHash,digest,now,order.id,externalId),
-      env.DB.prepare("UPDATE boltutil_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),paid_usdt_micros=?,tx_hash=?,updated_at=? WHERE id=? AND external_order_id=? AND status='closed' AND product_type='subscription' AND paid_at IS NULL AND applied_at IS NULL AND tx_hash IS NULL AND EXISTS(SELECT 1 FROM boltutil_payment_events WHERE external_order_id=? AND network=? AND tx_hash=?)")
-        .bind(now,Number(trusted.paidMicros),trusted.txHash,now,order.id,externalId,externalId,trusted.network,trusted.txHash),
-      env.DB.prepare("UPDATE subscription_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),updated_at=? WHERE id=? AND user_id=? AND status='closed' AND applied_at IS NULL AND EXISTS(SELECT 1 FROM boltutil_orders b WHERE b.subscription_order_id=subscription_orders.id AND b.user_id=subscription_orders.user_id AND b.id=? AND b.status='manual_review' AND b.tx_hash=?)")
-        .bind(now,now,order.subscription_order_id,order.user_id,order.id,trusted.txHash),
-      env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM boltutil_orders b JOIN subscription_orders o ON o.id=b.subscription_order_id AND o.user_id=b.user_id WHERE b.id=? AND b.user_id=? AND b.status='manual_review' AND b.tx_hash=? AND o.status='manual_review' AND o.applied_at IS NULL AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id)) THEN 1 ELSE 0 END")
-        .bind(claim,order.id,order.user_id,trusted.txHash),
-      env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(claim)
-    ];
-    try{await env.DB.batch(statements);}
-    catch{throw new ApiFailure(503,"BOLTUTIL_LATE_PAYMENT_REVIEW_UNCONFIRMED","关闭后到账证据待复核，请联系支持。");}
-    return;
-  }
-  const statements:D1PreparedStatement[]=[
     env.DB.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND external_order_id=? AND network=?) ON CONFLICT DO NOTHING")
       .bind(eventId,externalId,trusted.status,trusted.network,trusted.txHash,digest,now,order.id,externalId,order.network),
     env.DB.prepare("UPDATE boltutil_orders SET status='paid',paid_usdt_micros=?,tx_hash=?,paid_at=COALESCE(paid_at,?),updated_at=? WHERE id=? AND external_order_id=? AND status IN ('creating','pending','unknown','paid') AND payable_usdt_micros=? AND network=? AND (CASE WHEN network='SOLANA' THEN receiving_address=? ELSE lower(receiving_address)=lower(?) END) AND (tx_hash IS NULL OR tx_hash=?) AND EXISTS(SELECT 1 FROM boltutil_payment_events WHERE external_order_id=? AND network=? AND tx_hash=?)")
