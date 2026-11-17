@@ -10,7 +10,7 @@ const DEFAULT_SCRIPT='reply-copilot-api-production';
 const DEFAULT_DB='d9df7d23-9b9c-44ac-a33a-c24474c15691';
 const DAY_MS=86_400_000;
 const positiveInt=value=>Number.isInteger(Number(value))&&Number(value)>0?Number(value):null;
-const safeNumber=value=>Number.isFinite(Number(value))&&Number(value)>=0?Number(value):null;
+const safeNumber=value=>value!==null&&value!==undefined&&Number.isFinite(Number(value))&&Number(value)>=0?Number(value):null;
 
 export function completeUtcDay(daysAgo=1,now=Date.now()){
  if(!Number.isInteger(daysAgo)||daysAgo<1||daysAgo>14)throw Error('daysAgo must be 1 through 14; partial UTC days are forbidden');
