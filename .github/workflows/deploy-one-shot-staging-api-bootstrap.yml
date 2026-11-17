@@ -1,0 +1,130 @@
+name: One-shot approved Staging API bootstrap deployment
+on:
+  push:
+    branches:
+      - ops/one-shot-staging-api-bootstrap-20261118
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xrh-staging-api-worker-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging-api:
+    if: github.repository == 'Xuyysy/reply-copilot' && github.event.created == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: staging
+    env:
+      SOURCE_SHA: d7a7a62de0430e9e2c8ea870067f55ed7f0e96c1
+      EXPECTED_BASE_SHA: 80157d05d4793a02c557aea35ef60e9493768001
+      EXPECTED_DEPLOYMENT_ID: 979ddd4a-da3c-412c-9568-3feee73e4ce5
+      EXPECTED_VERSION_ID: ea96f683-eb16-43bb-b73a-78390b199ab8
+      CI_RUN_ID: "44120650275"
+      SCRIPT_NAME: reply-copilot-api-staging
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Verify exact-SHA full Push CI; never run an untested commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" --jq             '.head_sha + " " + .status + " " + .conclusion + " " + .event' > "$RUNNER_TEMP/ci-identity"
+          test "$(cat "$RUNNER_TEMP/ci-identity")" = "$SOURCE_SHA completed success push"
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Checkout exactly the reviewed API source, not workflow branch content
+        uses: actions/checkout@v4
+        with:
+          ref: d7a7a62de0430e9e2c8ea870067f55ed7f0e96c1
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Validate source ancestry and minimal source diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD^)" = "$EXPECTED_BASE_SHA"
+          git diff --name-only "$EXPECTED_BASE_SHA" "$SOURCE_SHA" > "$RUNNER_TEMP/changed"
+          printf '%s\n'             'api/src/account.ts'             'api/src/index.ts'             'api/tests/extension-bootstrap.test.mjs'             'docs/experiments/staging-api-bootstrap-isolated-integration-20261117.md'             > "$RUNNER_TEMP/expected-changed"
+          diff -u "$RUNNER_TEMP/expected-changed" "$RUNNER_TEMP/changed"
+          node -e 'const c=JSON.parse(require("fs").readFileSync("api/wrangler.jsonc","utf8")); if(c.env.staging.name!=="reply-copilot-api-staging"||c.env.staging.vars.ENVIRONMENT!=="staging"||c.env.staging.vars.API_ORIGIN!=="https://api-staging.x-reply-helper.top"||c.env.staging.d1_databases[0].database_id!=="cd44bb44-b525-42c4-b286-2cc84dae7fdb") process.exit(1)'
+
+      - name: Verify remote deployment version and preserve all current bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT_NAME"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/deployments?per_page=1" > "$RUNNER_TEMP/deployment-before.json"
+          jq -e --arg dep "$EXPECTED_DEPLOYMENT_ID" --arg ver "$EXPECTED_VERSION_ID" '.success==true and .result.deployments[0].id==$dep and .result.deployments[0].versions[0].version_id==$ver and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/deployment-before.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/versions/$EXPECTED_VERSION_ID" > "$RUNNER_TEMP/version-before.json"
+          jq -e --arg sha "$EXPECTED_BASE_SHA" '.success==true and .result.annotations["workers/commit_sha"]==$sha' "$RUNNER_TEMP/version-before.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/settings" > "$RUNNER_TEMP/settings-before.json"
+          jq -e '.success==true and .result.compatibility_date=="2026-10-14" and any(.result.bindings[]; .type=="plain_text" and .name=="ENVIRONMENT" and .text=="staging") and any(.result.bindings[]; .type=="d1" and .name=="DB" and .id=="cd44bb44-b525-42c4-b286-2cc84dae7fdb")' "$RUNNER_TEMP/settings-before.json" >/dev/null
+          jq -S '[.result.bindings[]|{name,type,text:(if .type=="plain_text" then .text else null end), id:(if .type=="d1" then .id else null end)}]|sort_by(.name)' "$RUNNER_TEMP/settings-before.json" > "$RUNNER_TEMP/bindings-before.json"
+          test "$(jq length "$RUNNER_TEMP/bindings-before.json")" -ge 45
+
+      - name: Install source-locked Wrangler and typecheck
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Validate Staging and API types
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+
+      - name: Build the exact source locally without publishing
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd api
+          ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict --dry-run --outdir "$RUNNER_TEMP/staging-dry-run"
+          test -n "$(find "$RUNNER_TEMP/staging-dry-run" -type f -name '*.js' -print -quit)"
+
+      - name: Fresh drift check immediately before the approved deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT_NAME"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/deployments?per_page=1" > "$RUNNER_TEMP/deployment-immediate.json"
+          jq -e --arg dep "$EXPECTED_DEPLOYMENT_ID" '.success==true and .result.deployments[0].id==$dep' "$RUNNER_TEMP/deployment-immediate.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/settings" > "$RUNNER_TEMP/settings-immediate.json"
+          jq -S '[.result.bindings[]|{name,type,text:(if .type=="plain_text" then .text else null end), id:(if .type=="d1" then .id else null end)}]|sort_by(.name)' "$RUNNER_TEMP/settings-immediate.json" > "$RUNNER_TEMP/bindings-immediate.json"
+          cmp "$RUNNER_TEMP/bindings-before.json" "$RUNNER_TEMP/bindings-immediate.json"
+
+      - name: Deploy ONLY the approved Staging API Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd api
+          ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict
+
+      - name: Verify deployment and all preexisting bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$SCRIPT_NAME"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/deployments?per_page=1" > "$RUNNER_TEMP/deployment-after.json"
+          jq -e --arg previous "$EXPECTED_DEPLOYMENT_ID" '.success==true and .result.deployments[0].id!=$previous and .result.deployments[0].versions[0].percentage==100' "$RUNNER_TEMP/deployment-after.json" >/dev/null
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$ROOT/settings" > "$RUNNER_TEMP/settings-after.json"
+          jq -S '[.result.bindings[]|{name,type,text:(if .type=="plain_text" then .text else null end), id:(if .type=="d1" then .id else null end)}]|sort_by(.name)' "$RUNNER_TEMP/settings-after.json" > "$RUNNER_TEMP/bindings-after.json"
+          cmp "$RUNNER_TEMP/bindings-before.json" "$RUNNER_TEMP/bindings-after.json"
+          printf 'Staging Worker deployment ID: '
+          jq -r '.result.deployments[0].id' "$RUNNER_TEMP/deployment-after.json"
+          printf 'Staging Worker version ID: '
+          jq -r '.result.deployments[0].versions[0].version_id' "$RUNNER_TEMP/deployment-after.json"
+          curl -fsS "https://api-staging.x-reply-helper.top/health" | jq -e '.ok==true and .service=="reply-copilot-api"' >/dev/null
+          HTTP="$(curl -sS -o "$RUNNER_TEMP/bootstrap-anonymous.json" -w '%{http_code}' "https://api-staging.x-reply-helper.top/v1/extension/bootstrap")"
+          test "$HTTP" = 401
+          jq -e '.code=="AUTH_REQUIRED"' "$RUNNER_TEMP/bootstrap-anonymous.json" >/dev/null
+          echo 'PASS: Staging health, unauthenticated endpoint guard, and all remote bindings are preserved.'
