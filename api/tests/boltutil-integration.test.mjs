@@ -738,7 +738,8 @@ test('original USDT order refresh can reconcile provider cancellation and remain
   assert.equal(closed.body.order.status,'closed');
   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'closed');
   assert.equal(count(f,'subscription_periods'),0);
-  const again=await f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}});
+  const again=await withProvider(request=>unpaidBoltTerminalResponse(request,old),
+    ()=>f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}}));
   assert.equal(again.status,200,JSON.stringify(again.body));
   assert.equal(again.body.order.status,'closed');
  }finally{f.sql.close();}
@@ -767,6 +768,30 @@ test('late confirmed transfer after provider-closed USDT invoice records payment
   assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'manual_review');
   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'manual_review');
   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',switched.body.order.id).status,'pending');
+  assert.equal(count(f,'boltutil_payment_events'),1);
+  assert.equal(count(f,'subscription_periods'),0);
+  assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
+ }finally{f.sql.close();}
+});
+
+test('manual original-order refresh after late BoltUtil confirmation safely records review but grants no subscription',async()=>{
+ const f=setup();try{
+  const old=originalBolt(f,await create(f,'BEP20','subscription','basic'));
+  const closed=await withProvider(req=>unpaidBoltTerminalResponse(req,old),
+    ()=>f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}}));
+  assert.equal(closed.status,200,JSON.stringify(closed.body));
+  assert.equal(closed.body.order.status,'closed');
+  const event={status:'CONFIRMED',amount:old.amount,paidAmount:old.amount,
+    shortfallAmount:'0',settlementType:'EXACT',manuallyAccepted:false,
+    currency:'USDT',network:'BEP20',externalOrderId:old.externalOrderId,
+    destinationAddress:old.address,txHash:NETWORKS[2][3]};
+  const late=await withProvider(req=>{
+   assert.equal(new URL(req.url).pathname,'/api/v1/order/status');
+   return Response.json({code:200,data:event});
+  },()=>f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}}));
+  assert.equal(late.status,200,JSON.stringify(late.body));
+  assert.equal(late.body.order.status,'manual_review');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'manual_review');
   assert.equal(count(f,'boltutil_payment_events'),1);
   assert.equal(count(f,'subscription_periods'),0);
   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
