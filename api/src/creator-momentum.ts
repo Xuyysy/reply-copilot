@@ -23,7 +23,34 @@ export async function creatorFeature(env:Env,userId:string){
  AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id AND b.status IN ('refund_pending','manual_review'))) eligible`).bind(KEY,userId).first<{config:string|null;eligible:number}>();
  // A verified, currently active subscription also proves paid eligibility.
  // Never use available credit balance to infer that money was received.
- const eligible=row?.eligible===1 || (await subscriptionAccount(env,userId)).status==='active';
+ const fiatEligible=row?.eligible===1;
+ // BoltUtil intentionally never creates fiat payment_transactions rows. Verify
+ // its independent signed/status-queried settlement before granting access.
+ // Do not access crypto tables before their environment-specific D1 migration.
+ let cryptoEligible=false;
+ if(!fiatEligible && (env.ENVIRONMENT==='production'||env.ENVIRONMENT==='staging') && env.BOLTUTIL_SCHEMA_READY==='1'){
+   const crypto=await env.DB.prepare(`SELECT EXISTS(
+     SELECT 1 FROM recharge_orders o
+     JOIN users u ON u.id=o.user_id
+     JOIN boltutil_orders b ON b.credit_order_id=o.id AND b.user_id=o.user_id AND b.product_type='credits'
+     WHERE o.user_id=? AND u.status='active' AND u.archived_at IS NULL
+       AND o.payment_method='boltutil' AND o.status='paid'
+       AND o.paid_at IS NOT NULL AND o.credited_at IS NOT NULL
+       AND b.status='paid' AND b.paid_at IS NOT NULL AND b.applied_at IS NOT NULL
+       AND b.tx_hash IS NOT NULL AND b.receiving_address IS NOT NULL
+       AND b.payable_usdt_micros>=1000000 AND b.paid_usdt_micros>=b.payable_usdt_micros
+       AND EXISTS(SELECT 1 FROM boltutil_payment_events e
+         WHERE e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash
+           AND e.status IN ('CONFIRMED','COMPLETED') AND e.body_sha256 IS NOT NULL AND e.body_sha256<>'')
+       AND EXISTS(SELECT 1 FROM credit_ledger l
+         WHERE l.user_id=o.user_id AND l.kind='purchase_grant' AND l.reference_id=o.id AND l.paid_delta>0)
+       AND NOT EXISTS(SELECT 1 FROM credit_batches cb
+         WHERE cb.source_order_id=o.id AND cb.status IN ('refund_pending','manual_review','refunded'))
+   ) eligible`).bind(userId).first<{eligible:number}>();
+   cryptoEligible=crypto?.eligible===1;
+ }
+ // Existing fiat and active subscription proofs remain authoritative.
+ const eligible=fiatEligible||cryptoEligible||(await subscriptionAccount(env,userId)).status==='active';
  return {eligible,policy:parse(row?.config??undefined)};
 }
 async function history(env:Env){
