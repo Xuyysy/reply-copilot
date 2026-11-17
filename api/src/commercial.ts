@@ -1,5 +1,6 @@
 import {adminHistoricalStats} from "./admin-historical-stats";
 import {RECENT_LEDGER_SQL,USER_USAGE_SQL,GENERATION_TOTALS_SQL} from "./admin-read-queries.js";
+import {ADMIN_EXACT_GENERATIONS_SQL} from './admin-user-directory-queries.js';
 import {operation,commitOperation} from "./admin-operations";
 import {projectPackagePricing} from "./pricing";
 import type {Env,Session} from "./types";
@@ -125,8 +126,8 @@ export async function adminLedger(request:Request,env:Env):Promise<Response>{awa
 export async function adminAudits(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({audits:(await env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 100").all()).results},200,env,request);}
 export async function adminUserDetail(request:Request,env:Env,userId:string):Promise<Response>{
  await admin(request,env);const user=await env.DB.prepare("SELECT id,email,username,status,role,created_at,is_test_account,archived_at,admin_note,(SELECT max(ts) FROM (SELECT max(s.created_at) ts FROM sessions s WHERE s.user_id=users.id UNION ALL SELECT max(r.created_at) FROM ai_requests r WHERE r.user_id=users.id UNION ALL SELECT max(o.paid_at) FROM recharge_orders o WHERE o.user_id=users.id)) last_active_at FROM users WHERE id=?").bind(userId).first();if(!user)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
- const [orders,ledger,usage]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare(USER_USAGE_SQL).bind(userId).all()]);
- return response({user,quota:await balance(env,userId),orders:orders.results,ledger:ledger.results,usage:usage.results},200,env,request);
+ const [orders,ledger,usage,exact]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare(USER_USAGE_SQL).bind(userId).all(),env.DB.prepare(ADMIN_EXACT_GENERATIONS_SQL).bind(userId).first<{generations:number}>()]);
+ return response({user:{...user,generations:Number(exact?.generations||0)},quota:await balance(env,userId),orders:orders.results,ledger:ledger.results,usage:usage.results},200,env,request);
 }
 export async function adminTestAccount(request:Request,env:Env,userId:string,archive=false):Promise<Response>{
  const actor=await admin(request,env,true),body=await jsonBody(request,2048);if(userId===actor.user_id)throw new ApiFailure(400,"SELF_MODIFICATION_DENIED","不能将管理员归档为测试账户。");

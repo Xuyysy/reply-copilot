@@ -5,6 +5,7 @@ import {operation,commitOperation} from './admin-operations';
 import {activityPredicate} from './campaigns';
 import {jsonBody} from './security';
 import {response} from './http';
+import {ADMIN_USER_DIRECTORY_SELECT} from './admin-user-directory-queries.js';
 export function userFilters(request:Request){
  const p=new URL(request.url).searchParams,q=(p.get('q')??'').trim().slice(0,100),where=["(?='' OR instr(lower(u.email),lower(?))>0 OR instr(lower(COALESCE(u.username,'')),lower(?))>0 OR instr(lower(u.id),lower(?))>0)"],args:(string|number)[]=[q,q,q,q];
  for(const [key,operator] of [['registeredFrom','>='],['registeredTo','<=']] as const){const v=p.get(key);if(v){const n=Number(v);if(!Number.isSafeInteger(n)||n<0)throw new ApiFailure(400,'INVALID_FILTER','时间筛选无效。');where.push(`u.created_at${operator}?`);args.push(n);}}
@@ -24,7 +25,15 @@ export function userFilters(request:Request){
 }
  return {where:where.join(' AND '),args};
 }
-export async function filteredUsers(request:Request,env:Env){await requireAdminSession(request,env);const f=userFilters(request);const rows=await env.DB.prepare(`SELECT u.id,u.username,u.email,u.email_verified_at,u.created_at,u.status,u.role,u.is_test_account,u.archived_at,u.admin_note,(SELECT max(ts) FROM (SELECT max(s.created_at) ts FROM sessions s WHERE s.user_id=u.id UNION ALL SELECT max(r.created_at) FROM ai_requests r WHERE r.user_id=u.id UNION ALL SELECT max(o.paid_at) FROM recharge_orders o WHERE o.user_id=u.id UNION ALL SELECT max(so.paid_at) FROM subscription_orders so WHERE so.user_id=u.id)) last_active_at,COALESCE(a.free_balance,0) free_balance,COALESCE(a.paid_balance,0) paid_balance,(SELECT count(*) FROM ai_requests r WHERE r.user_id=u.id AND r.status='succeeded' AND r.consumed=1 AND r.delivery_confirmation_id IS NOT NULL AND r.delivery_confirmation_id<>'' AND r.delivery_confirmed_at IS NOT NULL) generations FROM users u LEFT JOIN credit_accounts a ON a.user_id=u.id WHERE ${f.where} ORDER BY u.created_at DESC,u.id LIMIT 200`).bind(...f.args).all();return response({users:rows.results},200,env,request);}
+export async function filteredUsers(request:Request,env:Env){
+ await requireAdminSession(request,env);
+ const f=userFilters(request);
+ // Use an indexable, LIMIT-bounded directory projection. Avoid computing
+ // lifetime scans for every row on every admin dashboard refresh.
+ const rows=await env.DB.prepare(`${ADMIN_USER_DIRECTORY_SELECT} WHERE ${f.where}
+   ORDER BY u.created_at DESC,u.id LIMIT 200`).bind(...f.args).all();
+ return response({users:rows.results,perUserStats:'detail_only'},200,env,request);
+}
 export async function saveUserNote(request:Request,env:Env,id:string){const actor=await requireAdminSession(request,env,true),body=await jsonBody(request,5000);if(typeof body.note!=='string'||body.note.length>2000)throw new ApiFailure(400,'INVALID_NOTE','备注最多2000字。');const before=await env.DB.prepare('SELECT admin_note FROM users WHERE id=?').bind(id).first();if(!before)throw new ApiFailure(404,'USER_NOT_FOUND','用户不存在。');const op=await operation(env,actor,body,'user_note',id);await commitOperation(env,op,[env.DB.prepare('UPDATE users SET admin_note=? WHERE id=?').bind(body.note.trim(),id)],before,{note:body.note.trim()});return response({ok:true},200,env,request);}
 function orderQuery(request:Request){const p=new URL(request.url).searchParams,q=(p.get('q')??'').trim().slice(0,100),status=p.get('status')??'',where=["(?='' OR instr(lower(o.id),lower(?))>0 OR instr(lower(u.email),lower(?))>0 OR instr(lower(COALESCE(t.provider_trade_id,'')),lower(?))>0)"],args:(string|number)[]=[q,q,q,q];if(status){if(!['paid','pending','unknown','failed','closed','refunded','awaiting_payment'].includes(status))throw new ApiFailure(400,'INVALID_FILTER','订单状态筛选无效。');where.push('COALESCE(t.status,o.status)=?');args.push(status==='awaiting_payment'?'pending':status);}return {where:where.join(' AND '),args};}
 const orderSelect=`SELECT o.id,o.user_id,o.package_name,o.credits,o.amount_cents,o.status,o.credited_at,o.created_at,o.paid_at,u.email,CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.provider END provider,CASE WHEN t.merchant_provider='mk99' THEN 'mk99' ELSE t.payment_protocol END payment_protocol,t.amount_fen,t.currency payment_currency,t.status payment_status,(SELECT provider_code FROM payment_attempts a WHERE a.transaction_id=t.id ORDER BY a.attempt_number DESC LIMIT 1) latest_error_code FROM recharge_orders o JOIN users u ON u.id=o.user_id LEFT JOIN payment_transactions t ON t.order_id=o.id`;
