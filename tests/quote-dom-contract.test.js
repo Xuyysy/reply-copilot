@@ -1,0 +1,31 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+const ui=readFileSync(new URL("../content/quote-assistant.js",import.meta.url),"utf8");
+const controller=readFileSync(new URL("../content/quote-composer.js",import.meta.url),"utf8");
+const manifest=JSON.parse(readFileSync(new URL("../manifest.json",import.meta.url),"utf8"));
+test("Quote UI and capture are Staging-only, require trusted human Repost -> Quote",()=>{
+ assert.match(controller,/window.top !== window/);
+ assert.match(controller,/isStaging/);
+ assert.match(controller,/event.isTrusted/);
+ assert.match(controller,/\[data-testid="retweet"\]/);
+ assert.match(controller,/\[role="menuitem"\]/);
+ assert.match(controller,/post\.sourceUrl/);
+ assert.match(controller,/post\.handle/);
+ assert.match(controller,/previewMatches\(dialog,post\)/);
+ assert.match(controller,/candidates.length===1/);
+ assert.ok(manifest.content_scripts[0].js.includes("content/quote-assistant.js"));
+ assert.ok(manifest.content_scripts[0].js.includes("content/quote-composer.js"));
+});
+test("Quote uses a distinct authenticated generation mode and protects existing X drafts",()=>{
+ assert.match(controller,/REPLY_COPILOT_GENERATE_QUOTE/);
+ assert.match(controller,/REPLY_COPILOT_CANCEL/);
+ assert.match(controller,/adapter\.hasContent\(editor\)/);
+ assert.match(controller,/adapter\.focusEmpty\(editor\)/);
+ assert.match(controller,/adapter\.insertOnce/);
+ assert.match(controller,/adapter\.readText\(editor\)/);
+ assert.match(controller,/REPLY_COPILOT_HISTORY/);
+ assert.doesNotMatch(controller,/querySelector\(['"]\[data-testid="tweetButton"/);
+ assert.match(ui,/只填入草稿，不自动发布/);
+ assert.match(ui,/可编辑的 Quote 草稿/);
+});

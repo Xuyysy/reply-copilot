@@ -17,5 +17,8 @@ export function normalizeAiInput(body) {
   // Protocol v2 opt-in is necessary for ja/ko. Keep v1 exactly unchanged so
   // existing request hashes and idempotent recovery remain byte-compatible.
   const v2 = body.outputSchemaVersion === 2;
-  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle, ...(v2 ? {outputSchemaVersion:2} : {}) };
+  // Unspecified / explicit Reply stays byte-identical for old request hashes.
+  const generationKind = body.generationKind === undefined ? "reply" : body.generationKind;
+  if (!["reply","quote"].includes(generationKind) || (generationKind === "quote" && !v2)) throw new TypeError("Invalid AI input");
+  return { requestId, post: { text, url }, profile, history, styleStats, replyStyle, ...(v2 ? {outputSchemaVersion:2} : {}), ...(generationKind === "quote" ? {generationKind:"quote"} : {}) };
 }

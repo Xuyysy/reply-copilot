@@ -7,6 +7,7 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
+import { buildQuotePrompts } from "../../prompts/quote-prompt-builder.js";
 import { buildLiveProductionV3Prompts } from "../../prompts/prompt-v3-live-parity.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
@@ -63,7 +64,9 @@ async function provider(env: Env, system: string, user: string, mode:"mock"|"rea
   if (mode === "mock") {
     if (user.includes("REPLY_COPILOT_FORCE_FAIL")) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","本地模拟上游失败。");
     const delay=user.includes("REPLY_COPILOT_SLOW_TEST")?1500:Math.min(1000,Math.max(0,Number(env.AI_MOCK_DELAY_MS)||0));if(delay&&env.ENVIRONMENT==="development")await new Promise(resolve=>setTimeout(resolve,delay));
-    return {raw:JSON.stringify({ recommendation: "reply", defaultStyle: "natural", language: "en", replies: { natural: "That detail really stayed with me. Thanks for putting it into words.", light_humor: "Well, this was more relatable than my inbox needed today.", thoughtful: "The quiet consistency behind this is easy to miss, but it matters." }, reason: "A conversational response fits the post.", quoteCandidate: null }),usage:{model:"mock",inputTokens:0,outputTokens:0,costMicroUsd:env.ENVIRONMENT==="development"?Math.max(0,Number(env.AI_MOCK_COST_MICRO_USD)||0):0}};
+    const quoteMock = system.includes("AI_QUOTE_MODE");
+    const quoteReplies = { natural: "That one detail changes how I see the whole situation.", light_humor: "Apparently my future self wants to file a complaint already.", thoughtful: "The interesting tension is what people are expected to accept as normal." };
+    return {raw:JSON.stringify(quoteMock ? {recommendation:"quote",defaultStyle:"natural",language:"en",replies:quoteReplies,reason:"This deserves a standalone perspective.",quoteCandidate:quoteReplies.natural} : { recommendation: "reply", defaultStyle: "natural", language: "en", replies: { natural: "That detail really stayed with me. Thanks for putting it into words.", light_humor: "Well, this was more relatable than my inbox needed today.", thoughtful: "The quiet consistency behind this is easy to miss, but it matters." }, reason: "A conversational response fits the post.", quoteCandidate: null }),usage:{model:"mock",inputTokens:0,outputTokens:0,costMicroUsd:env.ENVIRONMENT==="development"?Math.max(0,Number(env.AI_MOCK_COST_MICRO_USD)||0):0}};
   }
   if (!env.DEEPSEEK_API_KEY) throw new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "托管 AI 尚未配置。");
   try {
@@ -104,7 +107,10 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
   const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildLiveProductionV3Prompts:buildPrompts;
-  const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
+  // Strictly isolated Staging trial. Existing Reply clients and Production stay unchanged.
+  if (input.generationKind === "quote" && env.ENVIRONMENT === "production") throw new ApiFailure(403,"QUOTE_STAGING_ONLY","AI Quote 暂时仅限测试环境。");
+  const builder = input.generationKind === "quote" ? buildQuotePrompts : promptBuilder;
+  const prompts = builder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
