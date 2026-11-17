@@ -9,7 +9,7 @@ import {fixture,temp} from './helpers/payment-v2.mjs';
 const modulePath=temp+'/password-cf-free.cjs';
 buildSync({entryPoints:[new URL('../src/password-auth.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',target:'node22',outfile:modulePath});
 const {hashPassword,verifyPassword}=createRequire(import.meta.url)(modulePath);
-const env={PASSWORD_PEPPER:'synthetic-local-pepper-which-is-not-a-production-secret'};
+const env={PASSWORD_PEPPER:'synthetic-local-pepper-which-is-not-a-production-secret',PASSWORD_FREE_CPU_ENABLED:'1'};
 const password='test-only-long-password-2026!';
 const salt='00'.repeat(16);
 function legacyHash(iterations){
@@ -25,6 +25,18 @@ test('Free CPU candidate creates 60k hashes with salt, pepper and full verificat
  assert.equal(await verifyPassword(env,'wrong-test-password',hash),false);
  assert.notEqual((await hashPassword(env,password)).split(':')[2],hash.split(':')[2],'independent salts');
  console.log(JSON.stringify({event:'local_cf_free_password_hash',iterations:60000,wallMs:Number(derivationMs.toFixed(2)),scope:'local Node only, not edge CPU limit proof'}));
+});
+
+test('safe default stays at 100k before an explicitly enabled compatible rollout',async()=>{
+ const defaults={PASSWORD_PEPPER:env.PASSWORD_PEPPER};
+ const before=await hashPassword(defaults,password);
+ assert.match(before,/^pbkdf2-sha256:100000:[0-9a-f]{32}:[0-9a-f]{64}$/);
+ assert.equal(await verifyPassword(defaults,password,before),true);
+ const invalidFlag=await hashPassword({...defaults,PASSWORD_FREE_CPU_ENABLED:'true'},password);
+ assert.match(invalidFlag,/^pbkdf2-sha256:100000:/,'only exact explicit 1 enables the lower work factor');
+ // Production with the switch OFF must still verify opt-in hashes issued earlier.
+ const fast=await hashPassword(env,password);
+ assert.equal(await verifyPassword(defaults,password,fast),true);
 });
 
 test('Free candidate preserves legacy 100k and 210k verifiers, rejects invalid work factors',async()=>{
