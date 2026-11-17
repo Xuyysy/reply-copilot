@@ -76,3 +76,31 @@ test('unresolved managed history is not relabeled as legacy or the active provid
  assert.equal(data.costByModel[0].configurationSource,'unresolved');assert.equal(data.costByModel[0].provider,'Unknown');assert.equal(data.costByModel[0].model,'old-model');
  assert.equal(data.cost.costMicroUsd,6);
 }));
+
+test('overview skips model-history SQL while keeping budget authorization and full cost endpoint intact',()=>withFixture(async f=>{
+ usage(f,'model-cost','deepseek-flash',today,20,40,300);
+ f.sql.prepare("INSERT INTO ai_budget_days(budget_day,settled_micro_usd,reserved_micro_usd) VALUES('2026-10-30',180,20)").run();
+ f.sql.exec("UPDATE system_settings SET value='400' WHERE key='daily_cost_limit_micro_usd'");
+ const seen=[],original=f.DB.prepare.bind(f.DB);
+ f.DB.prepare=sql=>{seen.push(sql);return original(sql);};
+ const overview=await f.call('/v1/admin/dashboard?view=overview',{method:'GET'});
+ assert.equal(overview.status,200,JSON.stringify(overview.body));
+ assert.equal(overview.body.detailScope,'overview');
+ assert.equal(overview.body.dailyCostMicroUsd,180,'budget settlement remains fresh');
+ assert.equal(overview.body.reservedCostMicroUsd,20,'in-flight budget remains authoritative');
+ assert.equal(overview.body.remainingBudgetMicroUsd,200);
+ assert.equal(overview.body.circuitOpen,false);
+ assert.equal(Object.hasOwn(overview.body,'cost'),false,'never pretend unqueried model spend is zero');
+ assert.equal(Object.hasOwn(overview.body,'costByModel'),false);
+ assert.equal(Object.hasOwn(overview.body,'aiService'),false);
+ assert.ok(!seen.some(sql=>sql.includes('FROM ai_usage_costs')),'no model cost scan on dashboard overview');
+ seen.length=0;
+ const full=await dashboard(f);
+ assert.equal(full.detailScope,'full');
+ assert.equal(full.cost.costMicroUsd,300);
+ assert.equal(full.todayCost.costMicroUsd,300);
+ assert.equal(full.costByModel.length,1);
+ assert.ok(seen.some(sql=>sql.includes('FROM ai_usage_costs')),'exact model attribution available on-demand');
+ const denied=await f.call('/v1/admin/dashboard?view=overview',{method:'GET',headers:{Cookie:'rc_session=bad'}});
+ assert.ok([401,403].includes(denied.status),'overview must never weaken admin authentication');
+}));
