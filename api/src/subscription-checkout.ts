@@ -8,6 +8,7 @@ import { Mk99Client, Mk99Error, mk99Config, type Mk99Config } from './mk99';
 import { configuredXiaodouMerchant } from './xiaodou-merchant';
 import { inspectCheckoutResponse,CheckoutValidationError } from './payment-checkout';
 import { subscriptionRetryableSql,subscriptionBlocksNewCheckoutSql } from './subscription-retry-release.js';
+import {reconcileClosedBoltSubscriptionsForUser} from './boltutil/terminal';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
 import { orderById, querySubscriptionPayment, reconcileUnpaidXiaodouTerminal } from './subscription-settlement';
@@ -196,6 +197,10 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
  const hasPredecessor=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status IN ('active','refund_pending','revoked') AND start_at<=? AND end_at>? LIMIT 1").bind(session.user_id,now,now).first();
  const queued=await env.DB.prepare("SELECT id FROM subscription_periods WHERE user_id=? AND status='queued' AND EXISTS(SELECT 1 FROM subscription_orders o WHERE o.id=subscription_periods.source_order_id AND o.status<>'refunded') LIMIT 1").bind(session.user_id).first();
  const kind=quoteId?'upgrade':hasPredecessor?'renewal':'purchase';
+
+ // A trusted BoltUtil terminal result may close only the old unpaid USDT invoice.
+ // This runs before existingFor and the atomic SQL overlap guard; inconclusive states remain blocked.
+ await reconcileClosedBoltSubscriptionsForUser(env,session.user_id);
 
  // An idempotency key never re-drives the same provider transaction. A fresh
  // key only bypasses linkless first-attempt UNKNOWNs with no financial proof.

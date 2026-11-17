@@ -606,3 +606,169 @@ test('BoltUtil active subscription momentum access requires active period and se
   f.sql.exec("UPDATE subscription_periods SET status='revoked'");assert.equal(await eligible(),false);
  }finally{f.sql.close();}
 });
+
+
+function enableFiatSwitchFixture(f){
+  Object.assign(f.env,{
+    SUBSCRIPTION_CHECKOUT_ENABLED:'1',
+    MK99_PID:'20881234567890',MK99_KEY:'local-fixture-not-a-real-merchant-key',
+    MK99_REQUEST_SIGN_TYPE:'MD5',MK99_NOTIFY_SIGN_TYPE:'MD5',
+    MK99_PROTOCOL_CONFIRMED:'1',MK99_AMOUNT_CONTRACT:'CNY_EXACT_BUYER_TOTAL',
+    MK99_CASHIER_ORIGINS:'https://cashier.example.test'
+  });
+  f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+  f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_mk99_enabled','payment_mk99_alipay_enabled','payment_mk99_alipay_released','payment_mk99_wechat_enabled','payment_mk99_wechat_released')");
+}
+function unpaidBoltTerminalResponse(request,order,changes={}){
+  assert.equal(new URL(request.url).pathname,'/api/v1/order/status');
+  assert.equal(JSON.parse(request.body).externalOrderId,
+    order.externalOrderId);
+  return Response.json({code:200,data:{
+    externalOrderId:order.externalOrderId,status:'CANCELLED',
+    amount:order.amount,paidAmount:null,shortfallAmount:null,
+    settlementType:null,manuallyAccepted:false,txHash:null,
+    paidAt:null,confirmedAt:null,completedAt:null,
+    currency:'USDT',network:order.network,destinationAddress:order.address,...changes
+  }});
+}
+function fiatCreateResponse(request){
+  assert.equal(new URL(request.url).pathname,'/openapi/pay/create');
+  const params=Object.fromEntries(new URLSearchParams(request.body));
+  return Response.json({code:1,data:{
+    trade_no:'MK99_paid_'+params.out_trade_no,out_trade_no:params.out_trade_no,
+    pay_url:'https://cashier.example.test/pay/'+params.out_trade_no
+  }});
+}
+function originalBolt(f,created){
+  const item=created.body.order;
+  return {...item,externalOrderId:row(f,'SELECT external_order_id FROM boltutil_orders WHERE id=?',item.id).external_order_id};
+}
+async function newFiatCheckout(f,provider,order,attempt){
+  let fiatCreates=0,statusQueries=0;
+  const result=await withProvider(request=>{
+    const pathname=new URL(request.url).pathname;
+    if(pathname==='/api/v1/order/status'){statusQueries++;return unpaidBoltTerminalResponse(request,order,provider);}
+    fiatCreates++;return fiatCreateResponse(request);
+  },()=>f.call('/v1/subscriptions/orders',{body:{
+    planCode:'basic',channel:'ALIPAY_H5',idempotencyKey:'fiat-after-crypto-'+attempt
+  }}));
+  return {...result,fiatCreates,statusQueries};
+}
+
+test('BEP20 provider CANCELLED/FAILED/EXPIRED releases only unpaid subscription and permits Alipay checkout',async()=>{
+ for(const status of ['CANCELLED','FAILED','EXPIRED']){
+  const f=setup();try{
+   enableFiatSwitchFixture(f);
+   const initial=await create(f,'BEP20','subscription','basic');
+   assert.equal(initial.status,201,JSON.stringify(initial.body));
+   const old=originalBolt(f,initial);
+   if(status==='EXPIRED')f.sql.prepare('UPDATE boltutil_orders SET expires_at=? WHERE id=?').run(Date.now()-1,old.id);
+   const switched=await newFiatCheckout(f,{status},old,status.toLowerCase());
+   assert.equal(switched.status,201,JSON.stringify(switched.body));
+   assert.equal(switched.statusQueries,1);
+   assert.equal(switched.fiatCreates,1);
+   assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'closed');
+   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'closed');
+   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',switched.body.order.id).status,'pending');
+   assert.equal(count(f,'subscription_payment_transactions'),1);
+   assert.equal(count(f,'subscription_periods'),0);
+   assert.equal(count(f,'boltutil_payment_events'),0);
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
+  }finally{f.sql.close();}
+ }
+});
+
+test('provider still pending, PAID, CONFIRMED, mismatched identity or partial transfer never releases pending USDT subscription',async()=>{
+ const cases=[
+  {name:'PENDING',provider:{status:'PENDING'}},
+  {name:'PAID',provider:{status:'PAID',paidAmount:'1.000'}},
+  {name:'CONFIRMED',provider:{status:'CONFIRMED',paidAmount:'1.000'}},
+  {name:'wrong-network',provider:{network:'TRC20'}},
+  {name:'wrong-order',provider:{externalOrderId:'OTHER_ORDER_123456'}},
+  {name:'wrong-address',provider:{destinationAddress:'0x'+'f'.repeat(40)}},
+  {name:'wrong-amount',provider:{amount:'1234.123'}},
+  {name:'partial-payment',provider:{paidAmount:'0.100'}},
+  {name:'has-tx-hash',provider:{txHash:'0x'+'a'.repeat(64)}},
+  {name:'manual-settlement',provider:{settlementType:'MANUAL_UNDERPAID'}},
+  {name:'expired-but-local-window-open',provider:{status:'EXPIRED'}}
+ ];
+ for(const entry of cases){
+  const f=setup();try{
+   enableFiatSwitchFixture(f);
+   const created=await create(f,'BEP20','subscription','basic');
+   assert.equal(created.status,201);
+   const old=originalBolt(f,created);
+   const attempt=await newFiatCheckout(f,entry.provider,old,entry.name);
+   assert.equal(attempt.status,409,entry.name+':'+JSON.stringify(attempt.body));
+   assert.equal(attempt.fiatCreates,0,entry.name+' must not reach fiat provider');
+   assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'pending',entry.name);
+   assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'pending',entry.name);
+   assert.equal(count(f,'subscription_payment_transactions'),0);
+   assert.equal(count(f,'subscription_periods'),0);
+  }finally{f.sql.close();}
+ }
+});
+
+test('USDT retry can create a new invoice on another network after BoltUtil confirms prior cancellation',async()=>{
+ const f=setup();try{
+  const old=originalBolt(f,await create(f,'TRC20','subscription','basic'));
+  let queries=0,creates=0;
+  const result=await withProvider(request=>{
+   if(new URL(request.url).pathname==='/api/v1/order/status'){
+    queries++;return unpaidBoltTerminalResponse(request,old);
+   }
+   creates++;return mockCreate(request);
+  },()=>f.call('/v1/boltutil/orders',{body:{
+   productType:'subscription',sku:'basic',network:'POLYGON',idempotencyKey:crypto.randomUUID()
+  }}));
+  assert.equal(result.status,201,JSON.stringify(result.body));
+  assert.equal(queries,1);assert.equal(creates,1);
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'closed');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'closed');
+  assert.equal(count(f,'boltutil_orders'),2);assert.equal(count(f,'subscription_orders'),2);
+ }finally{f.sql.close();}
+});
+
+test('original USDT order refresh can reconcile provider cancellation and remains read-only on subsequent checks',async()=>{
+ const f=setup();try{
+  const old=originalBolt(f,await create(f,'BEP20','subscription','basic'));
+  const closed=await withProvider(request=>unpaidBoltTerminalResponse(request,old),
+    ()=>f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}}));
+  assert.equal(closed.status,200,JSON.stringify(closed.body));
+  assert.equal(closed.body.order.status,'closed');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'closed');
+  assert.equal(count(f,'subscription_periods'),0);
+  const again=await f.call('/v1/boltutil/orders/'+old.id+'/refresh',{body:{}});
+  assert.equal(again.status,200,JSON.stringify(again.body));
+  assert.equal(again.body.order.status,'closed');
+ }finally{f.sql.close();}
+});
+
+test('late confirmed transfer after provider-closed USDT invoice records payment and holds review without a second entitlement',async()=>{
+ const f=setup();try{
+  enableFiatSwitchFixture(f);
+  const old=originalBolt(f,await create(f,'BEP20','subscription','basic'));
+  const switched=await newFiatCheckout(f,{status:'CANCELLED'},old,'late-ack');
+  assert.equal(switched.status,201,JSON.stringify(switched.body));
+  const event={eventId:'evt_late_bep20_001',status:'CONFIRMED',
+    amount:old.amount,paidAmount:old.amount,shortfallAmount:'0',
+    settlementType:'EXACT',manuallyAccepted:false,currency:'USDT',
+    network:'BEP20',externalOrderId:old.externalOrderId,
+    destinationAddress:old.address,txHash:NETWORKS[2][3]};
+  const ts=String(Date.now()),raw=JSON.stringify(event);
+  const signature=createHmac('sha256',secret).update(ts+'.'+raw).digest('hex');
+  const result=await withProvider(request=>{
+    assert.equal(new URL(request.url).pathname,'/api/v1/order/status');
+    return Response.json({code:200,data:event});
+  },()=>f.call('/v1/boltutil/webhook',{body:event,headers:{
+    'X-Bolt-Webhook-Timestamp':ts,'X-Bolt-Webhook-Signature':signature
+  }}));
+  assert.equal(result.status,200,JSON.stringify(result.body));
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',old.id).status,'manual_review');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',old.subscriptionOrderId).status,'manual_review');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',switched.body.order.id).status,'pending');
+  assert.equal(count(f,'boltutil_payment_events'),1);
+  assert.equal(count(f,'subscription_periods'),0);
+  assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
+ }finally{f.sql.close();}
+});
