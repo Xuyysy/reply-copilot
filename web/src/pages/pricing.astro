@@ -2,6 +2,13 @@
 import Base from "../layouts/Base.astro";
 ---
 <Base title="订阅与永久额度包" titleEn="Subscriptions and permanent credits">
+  <aside id="pricing-usdt-announcement" class="container pricing-usdt-announcement" hidden aria-live="polite">
+    <div class="pricing-usdt-announcement-inner">
+      <p class="pricing-usdt-announcement-label" data-zh="支付方式上新">New payment option</p>
+      <p class="pricing-usdt-announcement-title"><strong data-zh="新增 USDT 支付方式">Now accepting USDT</strong></p>
+      <p class="pricing-usdt-announcement-detail" data-zh="订阅和永久额度包现已支持 USDT。选择套餐并进入结账页，即可选择 USDT 付款；支持 TRON、Polygon、BNB Chain、Ethereum 和 Solana，实际可用网络、应付金额和收款地址以服务端订单为准。">Subscriptions and permanent credit packs now support USDT. Choose a plan, then select USDT at checkout. TRON, Polygon, BNB Chain, Ethereum and Solana are supported; confirm available networks, amount and recipient on your server-issued invoice.</p>
+    </div>
+  </aside>
   <section id="subscription-section" class="container section" hidden aria-labelledby="subscription-title" style="padding-top:36px">
     <div class="section-heading">
       <p class="eyebrow" id="subscription-eyebrow"></p>
@@ -53,6 +60,7 @@ import Base from "../layouts/Base.astro";
     let boltutilAvailable=false;
     let fiatCreditAvailable=false;
     const syncCreditPaymentNotice=()=>{const status=document.getElementById("payment-status");if(status)status.hidden=fiatCreditAvailable||boltutilAvailable;};
+    const syncUsdtAnnouncement=()=>{const announcement=document.getElementById("pricing-usdt-announcement");if(announcement)announcement.hidden=!boltutilAvailable;};
     let subscriptionPlans:SubscriptionPlan[]|null=null;
     const subscriptionNames=new Set(['basic','pro','max','ultra']);
     type BuyerState={state:'loading'|'guest'|'none'|'active'|'unavailable';plan:string|null;expiresAt:string|null;pendingOrderId:string|null;queuedOrderId:string|null};
@@ -169,7 +177,7 @@ import Base from "../layouts/Base.astro";
     const label=(zh:string,en:string)=>document.documentElement.lang==="en"?en:zh;
     function render(){const box=document.getElementById("packages")!;box.replaceChildren();if(!packages){box.textContent=label("套餐暂时无法加载，请稍后重试。","Packages are temporarily unavailable. Please retry.");return;}if(!packages.length){box.textContent=label("暂无可购买套餐。","No packages are available.");return;}for(const pkg of packages){const summary=packageSummary(pkg,document.documentElement.lang);const card=document.createElement("div");card.className=pkg.featured?"content-card package-highlight":"content-card";if(summary.badge){const badge=document.createElement("p");badge.className="package-badge";badge.textContent=summary.badge;card.append(badge);}const kind=document.createElement("p");kind.className="eyebrow";kind.textContent=label("永久额度 · 不主动过期","Permanent credits · No automatic expiration");const heading=document.createElement("h3");heading.textContent=summary.name;const price=document.createElement("strong");price.textContent=summary.price;const detail=document.createElement("p");detail.textContent=summary.credits;const description=document.createElement("p");description.textContent=(document.documentElement.lang==="en"?pkg.description_en:pkg.description_zh)||"";const cny=document.createElement("p");cny.textContent=summary.cny;const fee=document.createElement("p");fee.textContent=summary.fee;const link=document.createElement("a");link.className="button secondary";link.href=`/checkout?package=${encodeURIComponent(pkg.id)}`;link.textContent=label("查看额度包","View credit pack");card.append(kind,heading,price,detail,description,cny,fee,link);
       box.append(card);}}
-    async function checkBolt(){try{const state=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');boltutilAvailable=state.available===true&&state.networks.length>0;}catch{boltutilAvailable=false;}syncCreditPaymentNotice();render();}
+    async function checkBolt(){try{const state=await api<{available:boolean;networks:string[]}>('/v1/boltutil/availability');boltutilAvailable=state.available===true&&Array.isArray(state.networks)&&state.networks.length>0;}catch{boltutilAvailable=false;}syncUsdtAnnouncement();syncCreditPaymentNotice();render();}
     void checkBolt();
     async function load(){try{const data=await api<{packages:Package[];paymentAvailable:boolean}>("/v1/packages");packages=data.packages;fiatCreditAvailable=data.paymentAvailable;syncCreditPaymentNotice();render();}catch{packages=null;render();}}void load();window.addEventListener("reply-copilot-language",render);
     let refreshTimer:ReturnType<typeof setTimeout>|undefined;
@@ -187,6 +195,11 @@ import Base from "../layouts/Base.astro";
     document.getElementById("free-retry")?.addEventListener("click",()=>void loadFree());void loadFree();window.addEventListener("reply-copilot-language",renderFree);
   </script>
   <style>
+  .pricing-usdt-announcement{padding-top:24px}
+  .pricing-usdt-announcement-inner{border:1px solid #bfd7fa;border-radius:16px;background:linear-gradient(115deg,#eef6ff,#fff);padding:16px 20px}
+  .pricing-usdt-announcement-label{margin:0 0 4px;color:#24549b;font-weight:700;font-size:.8rem}
+  .pricing-usdt-announcement-title{margin:0 0 6px;color:#15294b;font-size:1.08rem}
+  .pricing-usdt-announcement-detail{margin:0;color:#42516c;line-height:1.65;font-size:.94rem}
   :global(.package-highlight){border:1px solid #94b8e7;background:#f8fbff}
   :global(.package-badge){font-size:12px;font-weight:600;color:#2361a8}
   .subscription-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:16px}
