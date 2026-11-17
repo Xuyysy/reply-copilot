@@ -1,5 +1,5 @@
 import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
-import BoltOrdersList from './BoltOrdersList';
+import {BoltOrderActions,BoltPaymentBadge,BoltStandaloneOrderRow,boltPaymentStatus,type BoltOrder} from './AccountBoltOrder';
 import ReferralInviteCard from "./ReferralInviteCard";
 import {loadAccountSnapshot} from "../../lib/account-load.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -27,7 +27,7 @@ const DEFAULT_CHROME_STORE_URL = "https://chromewebstore.google.com/detail/fgfja
 type Account = { user: { userId: string; username: string | null; email: string; role: string; emailVerified: boolean } };
 type SubscriptionUsage = {status:"none"|"active";plan:"basic"|"pro"|"max"|"ultra"|null;dailyLimit:number;usedToday:number;reservedToday:number;remainingToday:number;resetAt:string|null;expiresAt:string|null;startAt:string|null};
 type Usage = { quota: { freeRemaining: number; paidRemaining: number; totalRemaining: number }; signupBenefit?: { status: "pending" | "granted"; amount: number } | null; subscription?:SubscriptionUsage; availableNow?:number };
-type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_status?: string; risk_state?:string; credited_at?:number|null; paid_at?:number|null; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number; amount_contract?:string|null }> };
+type Activity = { ledger: Array<{ kind: string; free_delta: number; paid_delta: number; created_at: number }>; orders: Array<{ id: string; package_name: string; credits: number; status: string; provider?: string; payment_protocol?: string; payment_channel?:string; payment_status?: string; risk_state?:string; credited_at?:number|null; paid_at?:number|null; checkout?:{outcome:string;issue:string}|null; created_at: number; refund_eligibility?:string; base_amount_fen?:number; service_fee_fen?:number; total_amount_fen?:number; amount_contract?:string|null }> };
 type Data = { account: Account; usage: Usage; activity: Activity | null };
 type Authorization = "none" | "checking" | "pending" | "approved" | "expired" | "invalid" | "used" | "error";
 type OrderRefreshFeedback = { orderId: string; message: string; code?: string; requestId?: string; diagnostic?: { stage: string; upstreamHttpStatus: number | null } };
@@ -39,6 +39,29 @@ export default function AccountDashboard() {
   languageRef.current = language;
   const t = (zh: string, en: string) => phrase(language, zh, en);
   const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
+  const [boltOrders,setBoltOrders]=useState<BoltOrder[]>([]);
+  const [closingBoltOrderId,setClosingBoltOrderId]=useState<string|null>(null);
+  const [boltOrderNotice,setBoltOrderNotice]=useState("");
+  async function cancelBoltOrder(order:BoltOrder){
+    if(!['pending','unknown'].includes(order.status)||closingBoltOrderId)return;
+    if(!window.confirm(t(
+      "仅在未向旧 USDT 收款地址发起转账时取消。本站关闭不能撤销链上转账。若已经转账，请先核验，不能直接取消。确定关闭订单？",
+      "Cancel only if you have not sent USDT. Closing the local invoice cannot reverse a blockchain transfer. If you paid, verify first. Close this invoice?"
+    )))return;
+    const owner=accountOwner.current;
+    setClosingBoltOrderId(order.id);setBoltOrderNotice("");
+    try{
+      const result=await api<{order:BoltOrder}>("/v1/boltutil/orders/"+encodeURIComponent(order.id)+"/cancel",{
+        method:"POST",body:JSON.stringify({confirm:true})
+      });
+      if(accountOwner.current===owner){
+        setBoltOrders(current=>current.map(row=>row.id===order.id?{...row,...result.order}:row));
+        setBoltOrderNotice(t("本站订单已关闭，可以重新选择支付方式。","Local invoice closed. You can choose a new payment method."));
+      }
+    }catch(error){
+      if(accountOwner.current===owner)setBoltOrderNotice(readableError(error,languageRef.current));
+    }finally{setClosingBoltOrderId(null);}
+  }
   const [subscriptionPlans,setSubscriptionPlans]=useState<string[]>([]);
   const [data, setData] = useState<Data | null>(null);
   const [welcomeLinks, setWelcomeLinks] = useState({chromeStoreUrl: DEFAULT_CHROME_STORE_URL, xProfileUrl: ""});
@@ -311,17 +334,24 @@ export default function AccountDashboard() {
   }
   const userId=data?.account.user.userId;
   useEffect(()=>{
-    setSubscriptionOrders([]);setSubscriptionPlans([]);
+    setSubscriptionOrders([]);setSubscriptionPlans([]);setBoltOrders([]);setBoltOrderNotice('');
     if(state!=="ready"||!userId||validCode)return;
     let active=true;
     void api<{orders:SubscriptionOrder[]}>("/v1/subscriptions/orders").then(result=>{
       if(active)setSubscriptionOrders(result.orders);
     }).catch(()=>{});
+    void api<{orders:BoltOrder[]}>("/v1/boltutil/orders").then(result=>{
+      if(active&&Array.isArray(result.orders))setBoltOrders(result.orders);
+    }).catch(()=>{ /* Fiat history still renders if USDT history is unavailable. */ });
     void api<{plans:{plan_code:string}[];checkoutAvailable:boolean}>("/v1/subscriptions/plans").then(result=>{
       if(active&&result.checkoutAvailable)setSubscriptionPlans(result.plans.map(plan=>plan.plan_code));
     }).catch(()=>{});
     return()=>{active=false;};
   },[state,userId,validCode]);
+  // Credit purchases already appear in /v1/activity. Join BoltUtil by the
+  // underlying recharge-order ID so each purchase appears exactly once.
+  const creditBoltExtras=boltOrders.filter(order=>order.productType==="credits"&&
+    !data?.activity?.orders.some(row=>row.id===order.creditOrderId));
   const signInHref = validCode ? `/login?mode=login&device_code=${validCode}` : "/login?mode=login";
   const registerHref = validCode ? `/login?mode=register&device_code=${validCode}` : "/login?mode=register";
   if (state === "loading") return <div className="space-y-5" aria-label={t("正在读取账户", "Loading account")}><Skeleton className="h-32 w-full rounded-xl" /><div className="grid grid-cols-3 gap-4">{[0, 1, 2].map(item => <Skeleton key={item} className="h-36 rounded-xl" />)}</div><Skeleton className="h-48 w-full rounded-xl" /></div>;
@@ -470,32 +500,65 @@ export default function AccountDashboard() {
       <CardContent className="min-w-0 space-y-3">
         <details data-subscription-orders className="group min-w-0 rounded-xl border border-border bg-card">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0"><strong className="block">{t("订阅订单", "Subscription orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{subscriptionOrders.length ? t(`共 ${subscriptionOrders.length} 条记录 · 点击展开`, `${subscriptionOrders.length} orders · Expand to view`) : t("暂无订阅订单", "No subscription orders")}</span></span>
+            <span className="min-w-0">
+              <strong className="block">{t("订阅订单","Subscription orders")}</strong>
+              <span className="mt-1 block text-xs text-muted-foreground">{subscriptionOrders.length+boltOrders.filter(o=>o.productType==="subscription").length
+                ?t("共 "+(subscriptionOrders.length+boltOrders.filter(o=>o.productType==="subscription").length)+" 条记录 · 点击展开",
+                   (subscriptionOrders.length+boltOrders.filter(o=>o.productType==="subscription").length)+" orders · Expand to view")
+                :t("暂无订阅订单","No subscription orders")}</span>
+            </span>
             <span aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
           </summary>
-          <div className="space-y-3 border-t border-border px-4 py-3">
-            {subscriptionOrders.length ? subscriptionOrders.map(order=><div key={order.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3 last:border-b-0 last:pb-0">
-              <p className="min-w-0 break-words text-sm"><strong className="uppercase">{order.planCode}</strong> · ¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")} · {subscriptionStatus(order,language)}</p>
-              {order.status==='paid'&&order.periodStatus==='queued'&&<span className="text-sm text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</span>}
-              <a className="button secondary" data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{order.status==="pending"&&order.riskState==="clear"?t("继续支付","Continue payment"):['pending','unknown'].includes(order.status)?t("查验原订单","Verify original order"):t("查看原订单","View original order")}</a>
-            </div>) : <p className="text-sm text-muted-foreground">{t("暂无订阅订单。", "No subscription orders yet.")}</p>}
-            <BoltOrdersList productType="subscription"/>
+          <div className="min-w-0 border-t border-border px-4 py-3">
+            {subscriptionOrders.length||boltOrders.some(o=>o.productType==="subscription")
+              ?<ul className="divide-y divide-border">
+                {subscriptionOrders.map(order=><li key={order.id} className="flex min-w-0 flex-col gap-3 py-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <strong className="uppercase">{order.planCode}</strong>
+                      <Badge variant="outline" className="font-medium">{order.channel?.includes("WECHAT")?t("微信支付","WeChat Pay"):t("支付宝","Alipay")}</Badge>
+                    </div>
+                    <p className="text-muted-foreground">¥{(order.amountFen/100).toFixed(2)} · {order.kind==="upgrade"?t("升档","Upgrade"):order.kind==="renewal"?t("续购","Renewal"):t("首购","Purchase")}</p>
+                    <p className="text-xs text-muted-foreground">{subscriptionStatus(order,language)}</p>
+                    {order.status==='paid'&&order.periodStatus==='queued'&&<p className="text-xs text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</p>}
+                  </div>
+                  {['pending','unknown','manual_review','refund_pending'].includes(order.status)&&<a className="button secondary shrink-0" data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{order.status==="pending"&&order.riskState==="clear"?t("继续支付","Continue payment"):t("核验原订单","Verify original order")}</a>}
+                </li>)}
+                {boltOrders.filter(o=>o.productType==="subscription").map(order=>
+                  <BoltStandaloneOrderRow key={order.id} order={order} closing={closingBoltOrderId===order.id} onCancel={cancelBoltOrder}/>)}
+              </ul>
+              :<p className="py-4 text-sm text-muted-foreground">{t("暂无订阅订单。","No subscription orders yet.")}</p>}
+            {boltOrderNotice&&<p role="status" className="mt-2 text-xs">{boltOrderNotice}</p>}
           </div>
         </details>
         <details data-credit-orders className="group min-w-0 rounded-xl border border-border bg-card">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 focus-visible:rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary [&::-webkit-details-marker]:hidden">
-            <span className="min-w-0"><strong className="block">{t("充值订单", "Top-up orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{activity === null ? t("暂时无法读取订单", "Orders unavailable") : activity.orders.length ? t(`共 ${activity.orders.length} 条记录 · 点击展开`, `${activity.orders.length} orders · Expand to view`) : t("暂无充值订单", "No top-up orders")}</span></span>
+            <span className="min-w-0"><strong className="block">{t("充值订单", "Top-up orders")}</strong><span className="mt-1 block text-xs text-muted-foreground">{activity === null ? t("暂时无法读取订单", "Orders unavailable") : (activity.orders.length+creditBoltExtras.length) ? t(`共 ${activity.orders.length+creditBoltExtras.length} 条记录 · 点击展开`, `${activity.orders.length+creditBoltExtras.length} orders · Expand to view`) : t("暂无充值订单", "No top-up orders")}</span></span>
             <span aria-hidden="true" className="shrink-0 text-muted-foreground transition-transform group-open:rotate-180">⌄</span>
           </summary>
-          <div className="min-w-0 border-t border-border px-4 py-3">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : activity.orders.length ? <ul className="divide-y divide-border">{activity.orders.map(order => {const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0"><strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong><p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{orderPriceSummary(order,language)}</p>{order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">{order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&order.payment_status==="pending"&&order.status==="awaiting_payment"&&order.risk_state==="clear"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.paid_at==null&&order.credited_at==null&&<Button size="sm" asChild><a data-credit-continue href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button>}
+          <div className="min-w-0 border-t border-border px-4 py-3">{activity === null ? <p className="py-8 text-center text-sm text-muted-foreground">{t("订单暂时无法读取。", "Orders are temporarily unavailable.")}</p> : (activity.orders.length||creditBoltExtras.length) ? <ul className="divide-y divide-border">{activity.orders.map(order => {const bolt=boltOrders.find(b=>b.productType==="credits"&&b.creditOrderId===order.id);const refundLabels:Record<string,[string,string]>={eligible:["可申请退款","Refund eligible"],used_ineligible:["已使用，不支持普通退款","Used; ordinary refund unavailable"],refund_pending:["退款处理中","Refund processing"],refunded:["已退款","Refunded"],manual_review:["需要人工处理","Manual review required"],not_paid:["未支付","Not paid"]};const paymentLabels:Record<string,[string,string]>={awaiting_payment:["待付款","Awaiting payment"],pending:["待付款","Pending payment"],unknown:["待确认","Unconfirmed"],paid:["已付款","Paid"],failed:["支付失败","Payment failed"],closed:["已关闭","Closed"],refunded:["已退款","Refunded"]};const canRefresh=canRefreshPaymentOrder(order);const feedback=orderRefreshFeedback?.orderId===order.id?orderRefreshFeedback:null;return <li key={order.id} className="flex flex-wrap items-center justify-between gap-4 py-3 text-sm"><div className="min-w-0">
+    <div className="flex flex-wrap items-center gap-2">
+      <strong>{order.package_name} · {order.credits} {t("次", "credits")}</strong>
+      {bolt?<BoltPaymentBadge order={bolt}/>
+        :<Badge variant="outline" className="font-medium">{order.payment_channel?.includes("WECHAT")?t("微信支付","WeChat Pay")
+        :order.payment_channel?.includes("ALIPAY")?t("支付宝","Alipay"):t("人民币","CNY")}</Badge>}
+    </div>
+    <p className="text-muted-foreground">{date(order.created_at)} · <span className="break-all">{order.id}</span></p><p className="text-muted-foreground">{bolt?(bolt.amount??bolt.quotedAmount)+" USDT":orderPriceSummary(order,language)}</p>
+    {order.payment_protocol==="mk99"&&["failed","refunded"].includes(order.payment_status||"")&&<a className="mt-2 inline-block underline" href="/feedback">{t("联系客服","Contact support")}</a>}{!bolt&&order.checkout&&order.checkout.outcome!=="ready"&&<p className="mt-2 text-muted-foreground">{checkoutOrderMessage({status:order.payment_status,checkout:order.checkout},language)}</p>}<div className="mt-2 flex flex-wrap items-center gap-2">
+      {bolt&&<BoltOrderActions order={bolt} closing={closingBoltOrderId===bolt.id} onCancel={cancelBoltOrder}/>}
+      {!bolt&&order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&order.payment_status==="pending"&&order.status==="awaiting_payment"&&order.risk_state==="clear"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.paid_at==null&&order.credited_at==null&&<Button size="sm" asChild><a data-credit-continue href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button>}
               {order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&["pending","unknown"].includes(order.payment_status||"")&&!(order.payment_status==="pending"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.risk_state==="clear")&&<Button size="sm" variant="outline" asChild><a data-credit-review href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("查验／处理旧订单","Verify / resolve old order")}</a></Button>}
               {order.payment_protocol==="epay"&&order.payment_status==="pending"&&<Button size="sm" variant="outline" asChild><a href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue original payment")}</a></Button>}
-              {canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{phrase(language,...(paymentLabels[order.payment_status||""]||[order.status,order.status]))}</Badge></li>;})}</ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}</div>
-          <BoltOrdersList productType="credits"/>
+              {canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{bolt?boltPaymentStatus(bolt,language)
+      :phrase(language,...(paymentLabels[order.payment_status||""]||paymentLabels[order.status]||[order.status,order.status]))}</Badge></li>;})}
+          {creditBoltExtras.map(order=><BoltStandaloneOrderRow key={order.id} order={order}
+            closing={closingBoltOrderId===order.id} onCancel={cancelBoltOrder}/>)}
+          </ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}
+          {boltOrderNotice&&<p role="status" className="mt-2 text-xs">{boltOrderNotice}</p>}
+          </div>
         </details>
       </CardContent>
     </Card>
-    <Card><CardContent className="flex items-center justify-between gap-5 p-6"><div><h3 className="mb-1 text-lg font-semibold">{t("按需充值", "Top up when needed")}</h3><p className="text-sm text-muted-foreground">{t("待付款订单不会增加额度，到账以服务端确认的支付记录为准。", "Pending orders do not grant credits. Credits are added only after server-confirmed payment.")}</p></div><Button variant="outline" asChild><a href="/pricing">{t("查看套餐", "View plans")}<ArrowRight /></a></Button></CardContent></Card>
     {message && !validCode && <Alert role="status"><AlertDescription>{message}</AlertDescription></Alert>}
     <div className="flex gap-3"><Button variant="outline" disabled={busy} onClick={() => void logout()}>{t("退出登录", "Sign out")}</Button>{account.user.role === "admin" && <Button variant="outline" asChild><a href="/admin">{t("管理后台", "Admin")}</a></Button>}</div>
   </div>;
