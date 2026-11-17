@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { safeSiteLink } from "../src/lib/site-content.mjs";
 
 const account = readFileSync(new URL("../src/components/account/AccountDashboard.tsx", import.meta.url), "utf8");
+const css = readFileSync(new URL("../src/styles/global.css", import.meta.url), "utf8");
 const pending = account.split('usage.signupBenefit?.status === "pending" && <Alert')[1]?.split('<div className="grid grid-cols-1 gap-4 sm:grid-cols-3">')[0] ?? "";
 
 test("pending welcome credits show a focused bilingual installation CTA without changing eligibility", () => {
@@ -37,4 +38,11 @@ test("contact says DM me on X and uses the safely validated public profile confi
   assert.match(pending, /target="_blank" rel="noopener noreferrer"/);
   assert.match(pending, /<span>\{t\("私信我的 X", "DM me on X"\)\}<\/span>/);
   assert.match(account, /usage\.signupBenefit\?\.status === "pending" && <Alert/);
+});
+
+test("Chrome install CTA keeps high-contrast white text over the brand-blue background", () => {
+  assert.match(pending, /className="account-welcome-install-cta"/);
+  assert.ok(css.includes(".public-refresh .public-account-panel .account-welcome-install-cta { color: #fff; }"));
+  assert.match(css, /--xrh-brand: #315be8/);
+  assert.ok(css.includes("a { color: inherit; text-decoration: none; }"));
 });
