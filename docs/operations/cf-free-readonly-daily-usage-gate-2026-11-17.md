@@ -12,14 +12,14 @@ Read-only Cloudflare GraphQL (2026-11-17 07:15 UTC 15-minute sample) showed Prod
 
 `scripts/cf-free-readiness.mjs` queries **only Cloudflare GraphQL Analytics** for 1–7 *complete UTC days*; it does not execute D1 SQL, Cloudflare configuration updates, Workers deployments or third-party requests. It makes a single authorized, read-only API POST per day with a narrow fixed query.
 
-It deliberately sums **all D1 databases in the account** (not only Production D1) and **all Workers requests**. It also reports Production Worker versions and Production D1 rows so the user can understand which deployment was active. It compares aggregate metrics against the currently documented Workers Free and D1 quotas:
+It deliberately sums **all D1 databases in the account** (not only Production D1) and **all Workers invocation counts** (including Cron conservatively, while separately identifying HTTP fetch CPU). It also reports Production Worker versions and Production D1 rows so the user can understand which deployment was active. It compares aggregate metrics against the currently documented Workers Free and D1 quotas:
 
 | Gate | Account-level or per-request limit |
 |---|---|
 | Worker requests | 100,000 per UTC day (all Workers) |
 | D1 rows read | 5,000,000 per UTC day (all databases) |
 | D1 rows written | 100,000 per UTC day (all databases) |
-| Worker CPU | 10ms per invocation (all Workers, not just P95) |
+| Worker CPU | 10ms per HTTP fetch invocation (across Workers, not just P95); Cron classified separately |
 
 Source: https://developers.cloudflare.com/workers/platform/limits/ and https://developers.cloudflare.com/d1/platform/pricing/.
 
