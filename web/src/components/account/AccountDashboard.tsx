@@ -408,7 +408,7 @@ export default function AccountDashboard() {
               : <span>{t("私信我的 X", "DM me on X")}</span>}</p>
           </div>
           <Button size="sm" asChild className="shrink-0">
-            <a data-testid="account-welcome-install" href={welcomeLinks.chromeStoreUrl} target="_blank" rel="noopener noreferrer">{t("立即安装插件", "Install extension now")}<ArrowRight size={16}/></a>
+            <a data-testid="account-welcome-install" className="account-welcome-install-cta" href={welcomeLinks.chromeStoreUrl} target="_blank" rel="noopener noreferrer">{t("立即安装插件", "Install extension now")}<ArrowRight size={16}/></a>
           </Button>
         </div>
       </AlertDescription>
