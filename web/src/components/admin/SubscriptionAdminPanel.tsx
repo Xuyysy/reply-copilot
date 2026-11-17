@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import type {Language} from '../../lib/language';
 import {phrase,readableError} from '../../lib/language';
 import {api,ApiError} from '../../lib/api';
@@ -13,7 +13,7 @@ type SubscriptionOrder={id:string;user_id:string;email:string;kind:'purchase'|'r
 const price=(fen:number)=>'¥'+(fen/100).toFixed(2);
 
 type Finance={orders:{kind:string;orders:number;gross_paid_fen:number;full_refunded_fen:number;held_orders:number}[];
- usage:{consumed:number;cost_micro_usd:number}};
+ usage:{consumed:number;cost_micro_usd:number}|null;detailScope?:'summary'|'full'};
 type Controls={language:Language;active:boolean;busy:boolean;write:(path:string,body:object)=>Promise<unknown>;
  confirm:(title:string,description:string,action:()=>Promise<void>)=>void};
 export default function SubscriptionAdminPanel({language,active,busy,write,confirm}:Controls){
@@ -22,6 +22,9 @@ export default function SubscriptionAdminPanel({language,active,busy,write,confi
  const [plans,setPlans]=useState<Plan[]>([]);
  const [editing,setEditing]=useState<Plan|null>(null);
  const [finance,setFinance]=useState<Finance|null>(null);
+ const [usageLoadState,setUsageLoadState]=useState<'idle'|'loading'|'loaded'|'error'>('idle');
+ const [usageError,setUsageError]=useState('');
+ const financeRequestVersion=useRef(0);
  const [kind,setKind]=useState('');
  const [orderStatus,setOrderStatus]=useState('');
  const [users,setUsers]=useState<Subscriber[]>([]);
@@ -32,7 +35,8 @@ export default function SubscriptionAdminPanel({language,active,busy,write,confi
  const [refresh,setRefresh]=useState(0);
  useEffect(()=>{
   if(!active)return;
-  let mounted=true;setState('loading');setError('');
+  let mounted=true;const revision=++financeRequestVersion.current;
+  setState('loading');setError('');setFinance(null);setUsageLoadState('idle');setUsageError('');
   const query=new URLSearchParams();
   if(status)query.set('status',status);
   if(plan)query.set('plan',plan);
@@ -41,16 +45,28 @@ export default function SubscriptionAdminPanel({language,active,busy,write,confi
    api<{plans:Plan[]}>('/v1/admin/subscriptions/plans'),
    api<{users:Subscriber[]}>('/v1/admin/subscriptions/users'+(query.size?'?'+query.toString():'')),
    api<{orders:SubscriptionOrder[]}>('/v1/admin/subscriptions/orders?'+orderQuery),
-   api<Finance>('/v1/admin/subscriptions/finance')
+   api<Finance>('/v1/admin/subscriptions/finance?view=summary')
   ]).then(([p,u,o,f])=>{
-   if(!mounted)return;setPlans(p.plans);setUsers(u.users);setOrders(o.orders);setFinance(f);setState('ready');
+   if(!mounted||revision!==financeRequestVersion.current)return;setPlans(p.plans);setUsers(u.users);setOrders(o.orders);setFinance(f);setState('ready');
   }).catch((cause:unknown)=>{
-   if(!mounted)return;
+   if(!mounted||revision!==financeRequestVersion.current)return;
    if(cause instanceof ApiError && cause.status===404){setState('unavailable');return;}
    setError(readableError(cause,language));setState('error');
   });
-  return()=>{mounted=false;};
+  return()=>{mounted=false;financeRequestVersion.current++;};
  },[active,refresh,status,plan,kind,orderStatus,language]);
+ const loadExactUsage=()=>{
+  if(!active||state!=='ready'||usageLoadState==='loading')return;
+  const revision=++financeRequestVersion.current;
+  setUsageLoadState('loading');setUsageError('');
+  void api<Finance>('/v1/admin/subscriptions/finance').then(full=>{
+   if(revision!==financeRequestVersion.current)return;
+   setFinance(full);setUsageLoadState('loaded');
+  }).catch((cause:unknown)=>{
+   if(revision!==financeRequestVersion.current)return;
+   setUsageError(readableError(cause,language));setUsageLoadState('error');
+  });
+ };
  const date=(v:number|null)=>v==null?'—':new Date(v).toLocaleString(language==='en'?'en-US':'zh-CN');
  return <div className="space-y-5" data-testid="subscription-admin-panel">
   <Card><CardHeader><CardTitle>{t('订阅套餐与用户','Subscriptions and subscribers')}</CardTitle></CardHeader><CardContent className="space-y-3">
@@ -117,7 +133,15 @@ export default function SubscriptionAdminPanel({language,active,busy,write,confi
    {finance&&<div className="rounded border p-3">
      <strong>{t('最近 30 天 · 已核验订阅付款','Last 30 days · Verified subscription payments')}</strong>
      {finance.orders.map(row=><p key={row.kind}>{row.kind} · {row.orders} · {t('实收总额','Gross received')} {price(row.gross_paid_fen)} · {t('全额退款','Full refunds')} {price(row.full_refunded_fen)} · {t('待复核','Under review')} {row.held_orders}</p>)}
-     <p>{t('订阅成功生成','Delivered subscription generations')} {finance.usage.consumed} · {t('估算上游成本','Estimated upstream cost')} ${(finance.usage.cost_micro_usd/1_000_000).toFixed(4)}</p>
+     {finance.usage
+       ?<p>{t('订阅成功生成','Delivered subscription generations')} {finance.usage.consumed} · {t('估算上游成本','Estimated upstream cost')} ${(finance.usage.cost_micro_usd/1_000_000).toFixed(4)}</p>
+       :<div className="mt-2 space-y-2">
+         <p className="text-xs text-muted-foreground">{t('为节约 D1 读取量，30 天生成量与上游成本在需要时才统计。','To conserve D1 reads, 30-day generations and upstream cost are calculated on demand.')}</p>
+         <Button type="button" variant="outline" disabled={busy||usageLoadState==='loading'} onClick={loadExactUsage}>
+           {usageLoadState==='loading'?t('正在计算精确使用量…','Calculating exact usage…'):t('查看近30天精确用量与成本','Load exact 30-day usage and cost')}
+         </Button>
+         {usageLoadState==='error'?<p role="alert" className="text-sm text-destructive">{usageError}</p>:null}
+        </div>}
    </div>}
    <div className="max-h-[30rem] overflow-auto rounded border" role="region" tabIndex={0} aria-label={t('订阅订单列表','Subscription orders')}>
     <Table className="min-w-[850px]"><TableHeader><TableRow>{[t('用户','User'),t('订单','Order'),t('商品类型','Purchase type'),t('金额','Amount'),t('状态','Status'),t('付款证据','Payment evidence'),t('创建时间','Created')].map(label=><TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader>
