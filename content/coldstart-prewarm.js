@@ -14,7 +14,7 @@
   const MIN_INTERVAL_MS = 30_000;
   let lastSentAt = null;
   let pending = false;
-  const stats = {attempts:0,prepared:0,cooldowns:0,failures:0,lastRttMs:null,lastWorkerUptimeMs:null,lastPreparationMs:null};
+  const stats = {attempts:0,prepared:0,cooldowns:0,failures:0,lastRttMs:null,lastWorkerUptimeMs:null,lastWorkerReadyAfterImportsMs:null,lastPreparationMs:null};
   const active = () => {
     try { return Boolean(chrome.runtime?.id && document.visibilityState === "visible" && document.hasFocus() !== false); }
     catch { return false; }
@@ -39,6 +39,7 @@
           if (result.kind === "cooldown") stats.cooldowns++;
           else stats.prepared++;
           if (Number.isFinite(result.workerUptimeMs)) stats.lastWorkerUptimeMs = result.workerUptimeMs;
+          if (Number.isFinite(result.workerReadyAfterImportsMs)) stats.lastWorkerReadyAfterImportsMs = result.workerReadyAfterImportsMs;
           if (Number.isFinite(result.elapsedMs)) stats.lastPreparationMs = result.elapsedMs;
         } else stats.failures++;
       }).catch(() => { stats.failures++; }).finally(() => {

@@ -43,6 +43,7 @@ export class AccountClient {
     return data;
     } finally {if(timer)clearTimeout(timer);}
   }
+  fetchBootstrap() { return this.request("/v1/extension/bootstrap"); }
   fetchCurrentUser() { return this.request("/v1/me"); }
   fetchEntitlement() { return this.request("/v1/entitlements"); }
   fetchUsage() { return this.request("/v1/usage"); }
