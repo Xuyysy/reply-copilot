@@ -3,7 +3,7 @@ import {api} from "../../lib/api";
 import {phrase,useLanguage} from "../../lib/language";
 
 type BoltOrder={id:string;productType:"credits"|"subscription";network:"TRC20"|"POLYGON"|"BEP20"|"ERC20"|"SOLANA";
-  amount:string|null;quotedAmount:string;status:string;entitlementApplied:boolean;paidAt:number|null};
+  amount:string|null;quotedAmount:string;status:string;entitlementApplied:boolean;paidAt:number|null;expiresAt:number|null};
 export default function BoltOrdersList({productType}:{productType:"credits"|"subscription"}){
   const language=useLanguage();
   const t=(zh:string,en:string)=>phrase(language,zh,en);
@@ -11,7 +11,11 @@ export default function BoltOrdersList({productType}:{productType:"credits"|"sub
   const [error,setError]=useState(false);
   useEffect(()=>{
     let live=true;
-    api<{orders:BoltOrder[]}>("/v1/boltutil/orders")
+    // Reconcile only *unpaid*, locally expired USDT invoices. No provider calls
+    // or financial grants; a later real transfer is routed to manual review.
+    void api("/v1/boltutil/expire",{method:"POST",body:"{}"})
+      .catch(()=>null)
+      .then(()=>api<{orders:BoltOrder[]}>("/v1/boltutil/orders"))
       .then(data=>{if(live&&Array.isArray(data.orders))setOrders(data.orders);})
       .catch(()=>{if(live)setError(true);});
     return ()=>{live=false;};
@@ -26,12 +30,18 @@ export default function BoltOrdersList({productType}:{productType:"credits"|"sub
           <div><p><strong>{o.productType==="credits"?t("永久额度包","Permanent credits"):t("订阅","Subscription")}</strong>
             {" · "}{o.network}{" · "}{o.amount??o.quotedAmount} USDT</p>
             <p className="fineprint">{o.entitlementApplied?t("权益已到账","Entitlement applied"):
-              o.status==="manual_review"?t("人工审核","Manual review"):
+              o.status==="manual_review"?t("到账证据待人工复核","Payment awaiting manual review"):
               o.status==="paid"?t("已付款，权益核对中","Paid; entitlement pending"):
-              t("未核实到账","Unconfirmed")}</p></div>
-          <a className="button secondary" href={"/usdt-checkout/?order="+encodeURIComponent(o.id)}>
-            {t("查看原订单","Open order")}
-          </a>
+              o.status==="closed"?t("订单已关闭，可以重新下单","Invoice closed; you can order again"):
+              o.status==="pending"&&o.expiresAt!==null&&o.expiresAt>Date.now()?t("待付款，可继续支付","Awaiting payment; invoice available"):
+              o.status==="pending"&&o.expiresAt!==null&&o.expiresAt<=Date.now()?t("付款窗口已结束，正在核对关闭状态","Payment window ended; verifying closure"):
+              t("付款状态未核实","Payment unconfirmed")}</p></div>
+          <div className="flex flex-wrap gap-2">
+            <a className="button secondary" href={"/usdt-checkout/?order="+encodeURIComponent(o.id)}>
+              {o.status==="pending"&&o.expiresAt!==null&&o.expiresAt>Date.now()?t("继续支付","Continue payment"):t("查看原订单","Open order")}
+            </a>
+            {o.status==="closed"&&<a className="button" href="/pricing/">{t("重新下单","Order again")}</a>}
+          </div>
         </div>)}
       </div>
   </section>;

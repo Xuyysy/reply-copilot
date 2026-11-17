@@ -1,5 +1,5 @@
 import {adminCreator} from './creator-momentum';
-import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers} from './boltutil/routes';
+import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers,expireBoltOrders,cancelBoltOrder} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
 import {adminBoltOrders,adminBoltControl,updateAdminBoltControl,adminBoltProviderPing} from './boltutil/admin';
 import {adminBoltReconciliation,adminBoltOrderEvidence} from './boltutil/reconciliation';
@@ -71,9 +71,11 @@ export default {
       if(request.method==="GET"&&path==="/v1/boltutil/availability")return await publicBoltAvailability(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/upgrade-quote")return await createBoltUpgradeQuote(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/orders")return await createBoltOrder(request,env);
+      if(request.method==="POST"&&path==="/v1/boltutil/expire")return await expireBoltOrders(request,env);
       if(request.method==="GET"&&path==="/v1/boltutil/orders")return await listBoltOrders(request,env);
       if(request.method==="GET"&&path==="/v1/boltutil/subscription-blockers")return await listBoltSubscriptionBlockers(request,env);
       if(request.method==="POST"&&path==="/v1/boltutil/webhook")return await boltWebhook(request,env);
+      if(request.method==="POST"&&/^\/v1\/boltutil\/orders\/[0-9a-f-]{36}\/cancel$/i.test(path))return await cancelBoltOrder(request,env,path.split("/")[4]);
       const boltOrderRoute=path.match(/^\/v1\/boltutil\/orders\/([0-9a-f-]{36})(?:\/(refresh))?$/i);
       if(request.method==="GET"&&boltOrderRoute&&!boltOrderRoute[2])return await getBoltOrder(request,env,boltOrderRoute[1]);
       if(request.method==="POST"&&boltOrderRoute?.[2]==="refresh")return await refreshBoltOrder(request,env,boltOrderRoute[1]);

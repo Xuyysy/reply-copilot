@@ -133,6 +133,32 @@ import Base from "../layouts/Base.astro";
       try{sessionStorage.removeItem(attemptStorageKey(network));}catch{/* Optional storage. */}
     }
     let pollTimer:number|null=null,pollCount=0;
+    let expiryTimer:number|null=null;
+    const attemptedExpiry=new Set<string>();
+    function scheduleLocalExpiry(){
+      if(expiryTimer!==null){window.clearTimeout(expiryTimer);expiryTimer=null;}
+      if(!order||order.status!=="pending"||!order.expiresAt)return;
+      const due=order.expiresAt-Date.now();
+      if(due<=0){
+        if(!attemptedExpiry.has(order.id))void closeExpiredLocally();
+      }else{
+        expiryTimer=window.setTimeout(()=>{expiryTimer=null;void closeExpiredLocally();},Math.min(due+200,2147483647));
+      }
+    }
+    async function closeExpiredLocally(force=false){
+      if(!order||busy||order.status!=="pending"||!order.expiresAt||order.expiresAt>Date.now())return;
+      const id=order.id;
+      if(attemptedExpiry.has(id)&&!force)return;
+      attemptedExpiry.add(id);
+      try{
+        await api("/v1/boltutil/expire",{method:"POST",body:"{}"});
+        const result=await api<{order:Order}>("/v1/boltutil/orders/"+encodeURIComponent(id));
+        if(order?.id===id)setOrder(result.order);
+      }catch{
+        report("本站关单尚未确认，请手动重试，不要再转账到旧地址。",
+          "Local closure could not be verified. Retry; do not send funds to the old address.");
+      }
+    }
     const en=()=>document.documentElement.lang==="en";
     const t=(zh:string,english:string)=>en()?english:zh;
     function report(zh:string,english:string){message.textContent=t(zh,english);}
@@ -151,7 +177,7 @@ import Base from "../layouts/Base.astro";
       pollTimer=window.setInterval(()=>{
         if(pollCount>=20){stopPolling();report("自动查询已暂停，可手动点击「安全查询付款状态」，请勿重复支付。","Automatic checks paused. Use Verify payment status; do not pay again.");return;}
         if(document.hidden||busy||order?.status!=="pending")return;
-        if(order.expiresAt&&Date.now()>=order.expiresAt){stopPolling();render();return;}
+        if(order.expiresAt&&Date.now()>=order.expiresAt){stopPolling();render();scheduleLocalExpiry();return;}
         pollCount++;void refresh(true);
       },15000);
     }
@@ -198,19 +224,47 @@ import Base from "../layouts/Base.astro";
       if(order.entitlementApplied)report("付款已由平台确认，权益已入账。","Provider-confirmed payment; entitlements applied.");
       else if(order.status==="paid")report("平台已确认付款，权益仍在核对，请保留原单。","Payment verified; entitlement is being reconciled.");
       else if(order.status==="manual_review")report("付款证据需人工核对，请勿重复付款。","Payment needs manual review. Do not pay again.");
+      else if(order.status==="closed")report("本站订单已关闭，不能继续使用本订单付款。可以重新下单；如已转账请联系支持核对。",
+        "This invoice is closed locally and cannot be paid here. You may order again; contact support if you already transferred funds.");
       else if(validPending)report("站内收银台已就绪，等待钱包转账。页面会自动刷新付款状态。","On-site cashier ready. Awaiting wallet transfer; status checks automatically.");
-      else if(order.status==="pending")report("订单已过期或缺少可靠付款信息，请勿转账，先查询原单。","Expired or incomplete invoice. Do not transfer; verify original order.");
+      else if(order.status==="pending"&&order.expiresAt&&Date.now()>=order.expiresAt)report("付款窗口已结束，本站正在关闭订单。请勿转账到旧地址。",
+        "Payment window ended; closing this invoice locally. Do not transfer to the old address.");
+      else if(order.status==="pending")report("缺少可靠付款信息，请勿转账，请先查验原单。","Payment information is incomplete. Do not transfer; verify the original invoice.");
       else report("平台订单状态未确认。没有可信付款信息，请勿转账或重复下单。","Provider status unconfirmed. Do not send funds or create duplicates.");
       if(!order.entitlementApplied)control(t("安全查询付款状态","Verify payment status"),()=>void refresh(),true);
+      if(validPending)control(t("尚未转账？取消本站订单并更换支付方式","Not paid? Cancel invoice and change payment method"),()=>void cancelLocalOrder(),true);
+      if(order.status==="closed"){
+        const link=document.createElement("a");link.href="/pricing/";link.className="button";
+        link.textContent=t("重新下单","Order again");buttons.append(link);
+      }else if(order.status==="pending"&&order.expiresAt&&Date.now()>=order.expiresAt){
+        control(t("确认关闭过期订单","Confirm local closure"),()=>void closeExpiredLocally(true));
+      }
       if(order.entitlementApplied){
         const link=document.createElement("a");link.href="/account/";link.className="button";
         link.textContent=t("查看到账权益","View entitlements");buttons.append(link);
       }
       autoPoll();
     }
+    async function cancelLocalOrder(){
+      if(!order||busy||order.status!=="pending")return;
+      if(!window.confirm(t(
+        "仅在尚未向旧 USDT 地址发起转账时取消。本站停止展示付款地址，但无法撤回已发出的链上交易。如果已经转账，请不要取消，应查询付款。确认关闭本站订单并重新选择支付方式吗？",
+        "Cancel only if you have NOT sent USDT. Closing the local invoice cannot reverse an on-chain transfer. If you already sent funds, verify the payment instead. Close this invoice and choose a new payment method?"
+      )))return;
+      const id=order.id;
+      busy=true;
+      try{
+        const res=await api<{order:Order}>("/v1/boltutil/orders/"+encodeURIComponent(id)+"/cancel",
+          {method:"POST",body:JSON.stringify({confirm:true})});
+        if(order?.id===id)setOrder(res.order);
+      }catch(e){
+        report(e instanceof Error?e.message:"本站取消未成功，请查询原订单。",
+          "Local cancellation failed. Verify the original invoice.");
+      }finally{busy=false;}
+    }
     function setOrder(next:Order){
       if(productType&&sku)clearAttempt(next.network);
-      order=next;history.replaceState(null,"","/usdt-checkout/?order="+encodeURIComponent(next.id));render();
+      order=next;history.replaceState(null,"","/usdt-checkout/?order="+encodeURIComponent(next.id));render();scheduleLocalExpiry();
       recentContainer.hidden=true;
     }
     async function refresh(silent=false){
@@ -390,7 +444,7 @@ import Base from "../layouts/Base.astro";
           "Choose an enabled network. The exact amount and recipient will be displayed here.");
       }catch{report("无法确认 USDT 通道状态，请勿付款。","Cannot confirm USDT availability. Do not pay.");}
     }
-    window.addEventListener("pagehide",stopPolling);
+    window.addEventListener("pagehide",()=>{stopPolling();if(expiryTimer!==null)window.clearTimeout(expiryTimer);});
     void init();
   </script>
 </Base>
