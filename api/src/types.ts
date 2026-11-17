@@ -21,6 +21,10 @@ export interface Env {
   PASSWORD_FREE_CPU_ENABLED?: string;
   /** Paid-only transitional rehash of verified legacy passwords. Never implicit. */
   PASSWORD_LEGACY_MIGRATION_ENABLED?: string;
+  /** Explicitly opt in to PBKDF2-10k for NEW credentials. Weaker than OWASP standard. */
+  PASSWORD_FAST_CPU_ENABLED?: string;
+  /** After all users migrate, refuse expensive 60k/100k/210k verifications. */
+  PASSWORD_LEGACY_COST_GUARD_ENABLED?: string;
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;

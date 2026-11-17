@@ -8,18 +8,18 @@ import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sh
 import { response } from "./http";
 
 const SESSION_MS = 30 * 86400_000;
-// Free-tier CPU headroom opt-in: new/reset credentials use a shorter PBKDF2
-// verifier only after PASSWORD_FREE_CPU_ENABLED=1 and a rollback-compatible release.
-// This deliberately trades offline brute-force resistance for lower per-request
-// CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
-// 100k/210k historical hashes must remain verifiable: never silently rewrite
-// them without the plaintext password and never skip their full verification.
-// Never switch the creation cost simply by deploying this release. First ship
-// the verifier compatibility, then independently enable the Free CPU mode.
+// Cost-first PBKDF2 migration: 10k is an intentional, materially weaker
+// password hashing work factor for Cloudflare Free CPU experimentation.
+// Still use per-user 128-bit salts, a server-side secret pepper, constant-time
+// comparison, min 12-character passwords and the existing strict rate limits.
+// All flags are safe-off. Deploy 10k *verification* before creating 10k hashes;
+// a pre-compatibility release cannot verify newly issued 10k credentials.
 const DEFAULT_ITERATIONS = 100_000;
 const FREE_ITERATIONS = 60_000;
-const SUPPORTED_ITERATIONS = new Set([FREE_ITERATIONS, DEFAULT_ITERATIONS, 210_000]);
+const FAST_ITERATIONS = 10_000;
+const SUPPORTED_ITERATIONS = new Set([FAST_ITERATIONS, FREE_ITERATIONS, DEFAULT_ITERATIONS, 210_000]);
 function creationIterations(env: Env): number {
+  if (env.PASSWORD_FAST_CPU_ENABLED === "1") return FAST_ITERATIONS;
   return env.PASSWORD_FREE_CPU_ENABLED === "1" ? FREE_ITERATIONS : DEFAULT_ITERATIONS;
 }
 const encoder = new TextEncoder();
@@ -63,6 +63,10 @@ export async function verifyPassword(env: Env, password: string, stored: string 
   const parts = stored?.split(":") || [];
   const iterations = Number(parts[1]);
   if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || !SUPPORTED_ITERATIONS.has(iterations) || String(iterations) !== parts[1] || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
+  // Explicit Free-cutover guard: avoid executing 60k/100k/210k PBKDF2 at all.
+  // Old accounts must first migrate on Paid or use the EXISTING password reset.
+  // Generic invalid-credentials response avoids leaking which accounts are old.
+  if (env.PASSWORD_FAST_CPU_ENABLED === "1" && env.PASSWORD_LEGACY_COST_GUARD_ENABLED === "1" && iterations !== FAST_ITERATIONS) return false;
   const actual = fromHex(await derive(env,password,fromHex(parts[2]),iterations));
   const expected = fromHex(parts[3]);
   let mismatch = 0; for (let i=0;i<32;i++) mismatch |= actual[i]^expected[i];
@@ -181,17 +185,15 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   if (!user?.password_hash || !await verifyPassword(env,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();
-  // Paid-only migration stage: re-derive 60k only *after* a correct password
-  // and a successful session write. Both switches must be explicitly enabled.
-  // The first old-hash verification still consumes its original CPU and MUST
-  // happen on Paid. An optimistic update never overwrites a concurrent reset,
-  // unfreeze/lock, or administrator credential change.
-  //
-  // This is best-effort housekeeping, not a reason to deny a valid login:
-  // do not disclose the stored work factor, password, hash or failure reason.
-  if (env.PASSWORD_FREE_CPU_ENABLED==="1" &&
+  // Only after successful password verification and session creation, migrate
+  // an old hash to the explicitly chosen target work factor. On a Paid plan,
+  // the first legacy verification may exceed Cloudflare Free's 10ms CPU cap.
+  // The existing optimistic compare-and-swap prevents racing a password reset.
+  // Never migrate frozen accounts or expose the stored work factor to callers.
+  const migratedTarget = creationIterations(env);
+  if ((env.PASSWORD_FAST_CPU_ENABLED==="1" || env.PASSWORD_FREE_CPU_ENABLED==="1") &&
       env.PASSWORD_LEGACY_MIGRATION_ENABLED==="1" &&
-      user.status==="active" && !user.password_hash.startsWith("pbkdf2-sha256:60000:")) {
+      user.status==="active" && !user.password_hash.startsWith("pbkdf2-sha256:"+migratedTarget+":")) {
     try {
       const optimizedHash=await hashPassword(env,password);
       await env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND status='active'")
