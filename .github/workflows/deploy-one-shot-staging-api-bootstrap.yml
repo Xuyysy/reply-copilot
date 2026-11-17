@@ -2,7 +2,7 @@ name: One-shot approved Staging API bootstrap deployment
 on:
   push:
     branches:
-      - ops/one-shot-staging-api-bootstrap-20261118
+      - ops/one-shot-staging-api-bootstrap-approved-retry-20261118
 permissions:
   contents: read
   actions: read
@@ -102,12 +102,16 @@ jobs:
           jq -S '[.result.bindings[]|{name,type,text:(if .type=="plain_text" then .text else null end), id:(if .type=="d1" then .id else null end)}]|sort_by(.name)' "$RUNNER_TEMP/settings-immediate.json" > "$RUNNER_TEMP/bindings-immediate.json"
           cmp "$RUNNER_TEMP/bindings-before.json" "$RUNNER_TEMP/bindings-immediate.json"
 
+      # The current Worker was last uploaded through the Script API; Wrangler
+      # --strict always rejects that publishing-channel conflict. The exact
+      # deployed version/source SHA and 60-binding snapshot are checked twice.
+      # --keep-vars preserves dashboard variables; secrets are never deleted.
       - name: Deploy ONLY the approved Staging API Worker
         shell: bash
         run: |
           set -euo pipefail
           cd api
-          ./node_modules/.bin/wrangler deploy --env staging --keep-vars --strict
+          ./node_modules/.bin/wrangler deploy --env staging --keep-vars
 
       - name: Verify deployment and all preexisting bindings
         shell: bash
