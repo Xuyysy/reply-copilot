@@ -1,0 +1,166 @@
+name: Check or upload inactive Staging Worker version
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact successful release/production full CI source SHA
+        type: string
+        required: true
+      ci_run_id:
+        description: Successful release/production full push CI run ID
+        type: string
+        required: true
+      expected_active_version:
+        description: Exact current Staging Worker active version UUID
+        type: string
+        required: true
+      mode:
+        type: choice
+        options: ["check", "upload"]
+        default: "check"
+        required: true
+      confirmation:
+        description: CHECK_ONLY or UPLOAD_STAGING_VERSION_ONLY
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: reply-copilot-staging-worker-inactive-upload
+  cancel-in-progress: false
+jobs:
+  check-or-upload:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy'
+    environment: staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      EXPECTED: ${{ inputs.expected_active_version }}
+      MODE: ${{ inputs.mode }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Validate exact successful release CI and upload intent
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$EXPECTED" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
+          [[ "$MODE:$CONFIRMATION" == "check:CHECK_ONLY" || "$MODE:$CONFIRMATION" == "upload:UPLOAD_STAGING_VERSION_ONLY" ]] || exit 1
+          test "$CLOUDFLARE_ACCOUNT_ID" = "cb5fc919a9f05dcf39b3ca29c9538a1f"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo
+            and .head_branch == "release/production" and .event == "push"
+            and .status == "completed" and .conclusion == "success"
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+      - name: Checkout exact CI-approved source, no persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Validate Staging-only configuration without remote D1 SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 - <<'PY'
+          import json
+          cfg=json.load(open('api/wrangler.jsonc'))
+          st=cfg['env']['staging']
+          assert st['name']=='reply-copilot-api-staging'
+          assert st['vars']['ENVIRONMENT']=='staging'
+          assert st['vars']['API_ORIGIN']=='https://api-staging.x-reply-helper.top'
+          assert st['d1_databases'][0]['binding']=='DB'
+          assert st['d1_databases'][0]['database_id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert cfg['env']['production']['d1_databases'][0]['database_id']!='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert 'EMAIL_LOGIN_ENABLED' not in st['vars']
+          assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in st['vars']
+          print('PASS Staging-only config and default-off password mode')
+          PY
+      - name: Check exact currently deployed Staging version and D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+            > "$RUNNER_TEMP/live.json"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/settings" \
+            > "$RUNNER_TEMP/bindings.json"
+          python3 - <<'PY'
+          import json,os
+          base=os.environ['RUNNER_TEMP']
+          d=json.load(open(base+'/live.json'))
+          s=json.load(open(base+'/bindings.json'))
+          assert d['success'] and s['success']
+          versions=d['result']['deployments'][0]['versions']
+          assert len(versions)==1 and versions[0]['percentage']==100
+          assert versions[0]['version_id']==os.environ['EXPECTED']
+          bindings={b['name']:b for b in s['result']['bindings']}
+          assert set(b['type'] for b in bindings.values()) <= {'plain_text','secret_text','d1'}
+          assert bindings['DB']['type']=='d1' and bindings['DB']['id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in bindings
+          assert 'EMAIL_LOGIN_ENABLED' not in bindings
+          config=json.load(open('api/wrangler.jsonc'))['env']['staging']['vars']
+          for k,v in config.items():
+            assert bindings.get(k,{}).get('type')=='plain_text', 'Binding missing: '+k
+            assert bindings[k].get('text')==v, 'Binding differs: '+k
+          print('PASS current Staging version, 27+ secret bindings preserved and all configured vars match (values redacted)')
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Build and typecheck exact Staging code; never deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging \
+            --dry-run --outdir "$RUNNER_TEMP/staging-worker-compiled" --keep-vars --strict
+      - name: Optional inactive version upload, with active version rechecked twice
+        if: inputs.mode == 'upload'
+        shell: bash
+        run: |
+          set -euo pipefail
+          live() {
+            curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+              | jq -er '.result.deployments[0].versions | if length==1 and .[0].percentage==100 then .[0].version_id else error("Unexpected traffic split") end'
+          }
+          test "$(live)" = "$EXPECTED"
+          ./api/node_modules/.bin/wrangler versions upload --config api/wrangler.jsonc \
+            --env staging --keep-vars --strict --message "Staging 10k password candidate $SOURCE_SHA" \
+            > "$RUNNER_TEMP/staging-upload.log" 2>&1 || {
+              echo 'Cloudflare refused inactive upload; no traffic changed' >&2
+              exit 1
+            }
+          test "$(live)" = "$EXPECTED"
+          echo 'PASS: Inactive Staging Worker version uploaded; live traffic unchanged' >> "$GITHUB_STEP_SUMMARY"
+      - name: Final verified summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "### Staging Worker validation: $MODE"
+            echo "- Release source: $SOURCE_SHA"
+            echo "- Successful release CI run: $CI_RUN_ID"
+            echo "- Active Staging version preserved: $EXPECTED"
+            echo "- No Production deployment, no remote D1 SQL, no 10k activation"
+          } >> "$GITHUB_STEP_SUMMARY"
