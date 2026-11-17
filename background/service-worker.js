@@ -17,6 +17,7 @@ import { AccountClient, ACCOUNT_TOKEN_KEY, ACCOUNT_PENDING_DEVICE_KEY, ACCOUNT_B
 import { HostedAIClient } from "../services/hosted-ai-client.js";
 import { parseAIOutput } from "../utils/output-parser.js";
 import { DeliveryCoordinator } from "../services/delivery-coordinator.js";
+import { createAccountPrewarmer } from "../services/account-prewarm.js";
 
 let performanceEnabled = false;
 const performanceSamples = globalThis.ReplyCopilotPerformance.createCollector();
@@ -28,6 +29,11 @@ const history = new HistoryService();
 const profiles = new VoiceProfileService();
 const usage = new UsageService();
 const accountStates = new AccountStateService();
+// Staging opt-in only: reuse the existing read-only account cache, not a parallel entitlement source.
+const accountPrewarmer = createAccountPrewarmer({
+  readAccount: () => accountStates.getState(),
+  readPreferences: () => storage.getBehaviorPreferences(),
+});
 const accountClient = new AccountClient();
 const momentum=new MomentumStore();
 const momentumView=createMomentumView({accountStates,client:accountClient,momentum,storage:chrome.storage.local,broadcast:broadcastMomentum});
@@ -102,7 +108,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     void chrome.tabs.query({url:["https://x.com/*","https://twitter.com/*"]}).then(tabs=>Promise.allSettled(tabs.filter(tab=>Number.isInteger(tab.id)).map(tab=>chrome.tabs.sendMessage(tab.id,{type:"REPLY_COPILOT_PERFORMANCE_STATE",enabled:performanceEnabled})))).catch(()=>{});
   }
   if (area === "local" && changes.behaviorPreferences) void broadcastSettingsChanged();
-  if (area === "local" && changes.replyCopilotAccountToken) { momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); void broadcastMomentum(); }
+  if (area === "local" && changes.replyCopilotAccountToken) { accountPrewarmer.reset(); momentumView.invalidate(); accountStates.invalidate(); void broadcastSettingsChanged(); void broadcastMomentum(); }
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -163,6 +169,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     sendResponse({ok:true, workerUptimeMs:Math.max(0,Math.round(performance.now()))});
     return false;
+  }
+  if (message?.type === "REPLY_COPILOT_PREWARM_ACCOUNT") {
+    // Only signed extension code in the top-level X tab, and only the Staging
+    // extension, may perform this optional background read. No generated draft,
+    // credit reservation, delivery ACK, payment, or publishing side effect.
+    if (!fromXPage || sender.frameId !== 0 || RUNTIME_CONFIG.channel !== "staging") {
+      sendResponse({ok:false}); return false;
+    }
+    void accountPrewarmer.prime().then(
+      ({kind,elapsedMs}) => sendResponse({ok:kind!=="failed",kind,elapsedMs,workerUptimeMs:Math.round(performance.now())}),
+      () => sendResponse({ok:false,kind:"failed"})
+    );
+    return true;
   }
   if (message?.type === "REPLY_COPILOT_PERFORMANCE_SAMPLE") {
     if (fromXPage && sender.frameId === 0 && performanceEnabled) performanceSamples.record(message.sample);

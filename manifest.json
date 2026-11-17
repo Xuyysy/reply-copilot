@@ -64,7 +64,8 @@
         "content/composer-association.js",
         "content/momentum-presenter.js",
         "content/inline-assistant.js",
-        "content/content-script.js"
+        "content/content-script.js",
+        "content/coldstart-prewarm.js"
       ],
       "run_at": "document_idle"
     }
