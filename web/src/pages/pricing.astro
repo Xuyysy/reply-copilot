@@ -3,7 +3,7 @@ import Base from "../layouts/Base.astro";
 ---
 <Base title="订阅与永久额度包" titleEn="Subscriptions and permanent credits">
   <section id="subscription-section" class="container section" hidden aria-labelledby="subscription-title" style="padding-top:36px">
-    <div class="section-heading">
+    <div class="section-heading pricing-typography">
       <div class="pricing-payment-kicker">
         <p class="eyebrow" id="subscription-eyebrow"></p>
         <span id="pricing-subscription-usdt-chip" class="pricing-usdt-chip" hidden data-zh="NEW · USDT 支付">NEW · USDT payments</span>
@@ -26,7 +26,7 @@ import Base from "../layouts/Base.astro";
   </section>
   <div id="legacy-pricing-hero" class="container page-hero"><div class="eyebrow" data-zh="按量使用">Pay as you go</div><h1 data-site-text="packageTitle" data-zh="新人绑定后领 200 次，之后按需充值。">Claim 200 free generations after linking, then top up.</h1><p class="lead" data-site-text="packageBody" data-zh="无需订阅、买断或自备 API Key。每次生成三种候选，只消耗一次。额度不主动过期。">No subscription, license purchase, or personal API key. Three styles count as one generation. Credits do not expire.</p></div>
   <section class="container section" aria-labelledby="credit-packs-title" style="padding-top:20px">
-    <div class="section-heading">
+    <div class="section-heading pricing-typography">
       <div class="pricing-payment-kicker">
         <p class="eyebrow" data-zh="独立购买 · 超量补充">Buy separately · Extra generations</p>
         <span id="pricing-credit-usdt-chip" class="pricing-usdt-chip" hidden data-zh="NEW · USDT 支付">NEW · USDT payments</span>
@@ -194,6 +194,19 @@ import Base from "../layouts/Base.astro";
     document.getElementById("free-retry")?.addEventListener("click",()=>void loadFree());void loadFree();window.addEventListener("reply-copilot-language",renderFree);
   </script>
   <style>
+  /* Pricing titles are editorial headings, not oversized home-page hero text.
+     Keep these styles page-local and leave product cards and all checkouts untouched. */
+  :global(.public-refresh) .pricing-typography{max-width:min(100%,1040px);margin-bottom:30px}
+  :global(.public-refresh) .pricing-typography :is(h1,h2){color:var(--xrh-ink,#17233d);font-size:clamp(36px,3.8vw,54px);font-weight:750;line-height:1.2;letter-spacing:-.025em;margin-bottom:16px;text-wrap:pretty}
+  :global(.public-refresh) .pricing-typography .lead{max-width:770px;color:#617087;font-size:clamp(15px,1.25vw,17px);line-height:1.85;letter-spacing:0;margin-bottom:0;text-wrap:pretty}
+  :global(.public-refresh) .pricing-typography .pricing-payment-kicker{margin-bottom:14px;gap:10px}
+  :global(.public-refresh) .pricing-typography .pricing-payment-kicker .eyebrow{font-size:12px;font-weight:760;line-height:1.55;letter-spacing:.08em}
+  @media(max-width:640px){
+    :global(.public-refresh) .pricing-typography{margin-bottom:24px}
+    :global(.public-refresh) .pricing-typography :is(h1,h2){font-size:clamp(30px,7vw,40px);line-height:1.24;letter-spacing:-.02em;margin-bottom:12px}
+    :global(.public-refresh) .pricing-typography .lead{max-width:none;font-size:15px;line-height:1.8}
+    :global(.public-refresh) .pricing-typography .pricing-payment-kicker{margin-bottom:10px}
+  }
   .pricing-payment-kicker{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px}
   .pricing-payment-kicker .eyebrow{margin:0}
   .pricing-usdt-chip{display:inline-flex;align-items:center;border:1px solid #d9e5f7;border-radius:999px;background:#f4f8ff;padding:3px 9px;color:#40689d;font-size:.72rem;font-weight:600;line-height:1.4;white-space:nowrap}
