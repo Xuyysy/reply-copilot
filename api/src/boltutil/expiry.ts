@@ -13,17 +13,18 @@ type Candidate={
   product_type:"credits"|"subscription";credit_order_id:string|null;
   subscription_order_id:string|null;expires_at:number;
 };
-const evidenceFree=`b.status IN ('pending','unknown') AND b.expires_at IS NOT NULL AND MIN(b.expires_at,b.created_at+1800000)<=?
+const evidenceFree=`b.status IN ('pending','unknown') AND b.expires_at IS NOT NULL
   AND b.payable_usdt_micros IS NOT NULL AND b.receiving_address IS NOT NULL
   AND b.paid_at IS NULL AND b.applied_at IS NULL AND b.tx_hash IS NULL
   AND b.paid_usdt_micros IS NULL AND NOT EXISTS
   (SELECT 1 FROM boltutil_payment_events e WHERE e.external_order_id=b.external_order_id)`;
 
-async function closeOne(env:Env,order:Candidate,now:number):Promise<boolean>{
+async function closeOne(env:Env,order:Candidate,now:number,manual=false):Promise<boolean>{
   const claim=uuid();
   const b=env.DB.prepare(`UPDATE boltutil_orders AS b SET status='closed',updated_at=?
-    WHERE id=? AND user_id=? AND external_order_id=? AND ${evidenceFree}`)
-    .bind(now,order.id,order.user_id,order.external_order_id,now);
+    WHERE id=? AND user_id=? AND external_order_id=? AND ${evidenceFree}
+    ${manual?"":"AND MIN(b.expires_at,b.created_at+1800000)<=?"}`)
+    .bind(now,order.id,order.user_id,order.external_order_id,...(manual?[]:[now]));
   const joined=order.product_type==='subscription'
     ?env.DB.prepare(`UPDATE subscription_orders SET status='closed',updated_at=?
       WHERE id=? AND user_id=? AND status IN ('pending','unknown')
@@ -80,10 +81,26 @@ export async function closeExpiredUnpaidBoltOrdersForUser(
  const sql=`SELECT b.id,b.external_order_id,b.user_id,b.product_type,b.credit_order_id,
    b.subscription_order_id,b.expires_at FROM boltutil_orders b
    WHERE b.user_id=? AND ${onlyOrderId?"b.id=? AND ":""} ${evidenceFree}
+   AND MIN(b.expires_at,b.created_at+1800000)<=?
    ORDER BY b.expires_at ASC LIMIT 3`;
  const query=env.DB.prepare(sql).bind(...(onlyOrderId?[userId,onlyOrderId,now]:[userId,now]));
  const orders=await query.all<Candidate>();
  let count=0;
  for(const order of orders.results??[])if(await closeOne(env,order,now))count++;
  return count;
+}
+
+/** Explicit user cancellation before the deadline. Only fully unpaid, evidence-
+ * free originals can be locally closed. It does NOT cancel a merchant invoice
+ * or prevent a previously submitted transfer from being received on-chain. */
+export async function cancelUnpaidBoltOrderForUser(
+ env:Env,userId:string,orderId:string
+):Promise<boolean>{
+ if(!boltReadSchemaReady(env))return false;
+ const order=await env.DB.prepare(`SELECT b.id,b.external_order_id,b.user_id,b.product_type,
+   b.credit_order_id,b.subscription_order_id,b.expires_at
+   FROM boltutil_orders b WHERE b.user_id=? AND b.id=? AND ${evidenceFree}`)
+   .bind(userId,orderId).first<Candidate>();
+ if(!order)return false;
+ return closeOne(env,order,nowMs(),true);
 }

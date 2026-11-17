@@ -875,3 +875,57 @@ test('locally expired USDT credit pack receiving late verified payment remains h
   assert.equal(count(f,'credit_batches'),0,'never create paid credit batch for closed invoice');
  }finally{f.sql.close();}
 });
+
+test('owner may cancel an unpaid unexpired USDT credit invoice without provider access and repurchase safely',async()=>{
+ const f=setup();try{
+  const initial=await create(f,'BEP20','credits','starter');
+  assert.equal(initial.status,201,JSON.stringify(initial.body));
+  const id=initial.body.order.id;
+  let remoteCalls=0;
+  const cancelled=await withProvider(()=>{remoteCalls++;throw Error('local cancel must not contact provider');},
+    ()=>f.call('/v1/boltutil/orders/'+id+'/cancel',{body:{confirm:true}}));
+  assert.equal(cancelled.status,200,JSON.stringify(cancelled.body));
+  assert.equal(cancelled.body.order.status,'closed');
+  assert.equal(remoteCalls,0);
+  assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',initial.body.order.creditOrderId).status,'expired');
+  assert.equal(row(f,"SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,0);
+  const newOrder=await create(f,'POLYGON','credits','starter');
+  assert.equal(newOrder.status,201,JSON.stringify(newOrder.body));
+  assert.notEqual(newOrder.body.order.id,id);
+ }finally{f.sql.close();}
+});
+test('unpaid unexpired USDT subscription can be cancelled locally and switched to Alipay checkout',async()=>{
+ const f=setup();try{
+  enableFiatSwitchFixture(f);
+  const initial=await create(f,'TRC20','subscription','basic');
+  assert.equal(initial.status,201,JSON.stringify(initial.body));
+  const id=initial.body.order.id;
+  const cancelled=await f.call('/v1/boltutil/orders/'+id+'/cancel',{body:{confirm:true}});
+  assert.equal(cancelled.status,200,JSON.stringify(cancelled.body));
+  assert.equal(cancelled.body.order.status,'closed');
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',initial.body.order.subscriptionOrderId).status,'closed');
+  let upstreamCreate=0,upstreamStatus=0;
+  const fiat=await withProvider(request=>{
+    if(new URL(request.url).pathname==='/api/v1/order/status'){upstreamStatus++;throw Error('no need to poll cancelled old USDT');}
+    upstreamCreate++;return fiatCreateResponse(request);
+  },()=>f.call('/v1/subscriptions/orders',{body:{
+    planCode:'basic',channel:'ALIPAY_H5',idempotencyKey:'manual-cancel-to-alipay-001'
+  }}));
+  assert.equal(fiat.status,201,JSON.stringify(fiat.body));
+  assert.equal(upstreamCreate,1);assert.equal(upstreamStatus,0);
+  assert.equal(count(f,'subscription_periods'),0);
+ }finally{f.sql.close();}
+});
+test('owner cannot cancel a paid USDT invoice or an invoice with transaction evidence',async()=>{
+ const f=setup();try{
+  const created=await create(f,'POLYGON','credits','starter');
+  assert.equal(created.status,201);
+  const id=created.body.order.id;
+  assert.equal((await f.call('/v1/boltutil/orders/'+id+'/cancel',{body:{confirm:false}})).status,400);
+  assert.equal((await refresh(f,created.body.order)).status,200);
+  const denied=await f.call('/v1/boltutil/orders/'+id+'/cancel',{body:{confirm:true}});
+  assert.equal(denied.status,409,JSON.stringify(denied.body));
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',id).status,'paid');
+  assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',created.body.order.creditOrderId).status,'paid');
+ }finally{f.sql.close();}
+});

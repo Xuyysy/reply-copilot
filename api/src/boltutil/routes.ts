@@ -13,7 +13,7 @@ import {readBoltOperatorControl,boltEnvironmentReady,boltEnvironmentNetworkEnabl
   effectiveBoltNetworks,type BoltOperatorControl} from "./control";
 import {settleBoltPayment} from "./settle";
 import {reconcileClosedBoltSubscriptionsForUser} from "./terminal";
-import {closeExpiredUnpaidBoltOrdersForUser} from "./expiry";
+import {closeExpiredUnpaidBoltOrdersForUser,cancelUnpaidBoltOrderForUser} from "./expiry";
 
 export function boltAvailable(env:Env):boolean {
   return boltEnvironmentReady(env);
@@ -311,4 +311,19 @@ export async function expireBoltOrders(request:Request,env:Env):Promise<Response
  const user=await owner(request,env,true);
  const closed=await closeExpiredUnpaidBoltOrdersForUser(env,user.user_id);
  return response({ok:true,closed},200,env,request);
+}
+
+/** The owner may stop our own invoice and switch payment method. A transferred
+ * token can still arrive at the provider and is always held for manual review. */
+export async function cancelBoltOrder(request:Request,env:Env,id:string):Promise<Response>{
+ if(!boltReadSchemaReady(env))throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
+ const user=await owner(request,env,true),orderId=onlyId(id);
+ const body=await jsonBody(request,256);
+ if(body.confirm!==true)throw new ApiFailure(400,"BOLTUTIL_CANCEL_CONFIRM_REQUIRED","请确认尚未发起 USDT 转账。");
+ if(!await takeRate(env,"bolt-cancel:"+user.user_id,4,60000,nowMs()))
+   throw new ApiFailure(429,"TOO_MANY_REQUESTS","操作过于频繁，请稍后再试。");
+ const closed=await cancelUnpaidBoltOrderForUser(env,user.user_id,orderId);
+ if(!closed)throw new ApiFailure(409,"BOLTUTIL_CANCEL_UNAVAILABLE","该订单可能已有支付证据或权益，请先查询原单。");
+ const order=await orderById(env,orderId);
+ return response({ok:true,order:snapshot(order!)},200,env,request);
 }
