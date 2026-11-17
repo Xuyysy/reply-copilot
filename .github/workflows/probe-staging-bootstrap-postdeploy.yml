@@ -1,0 +1,42 @@
+name: Read-only post-deploy Staging Bootstrap smoke diagnosis
+on:
+  push:
+    branches:
+      - ops/staging-bootstrap-postdeploy-probe-20261118
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    if: github.repository == 'Xuyysy/reply-copilot' && github.event.created == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe public anonymous endpoints without database operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in health bootstrap; do
+            if [ "$name" = health ]; then
+              route="/health"
+            else
+              route="/v1/extension/bootstrap"
+            fi
+            printf '%s: ' "$name"
+            for attempt in 1 2 3; do
+              BODY="$RUNNER_TEMP/${name}-${attempt}.json"
+              code=$(curl --connect-timeout 8 --max-time 20 -sS -w '%{http_code}' -o "$BODY" "https://api-staging.x-reply-helper.top$route" || true)
+              printf 'try%s HTTP %s body=' "$attempt" "$code"
+              # Endpoints are explicitly unauthenticated; print only safe status fields.
+              jq -rc '{ok,service,code,message}' "$BODY" 2>/dev/null | head -c 180 || true
+              echo
+              if [ "$name" = health ] && [ "$code" = 200 ] && jq -e '.ok == true and .service == "reply-copilot-api"' "$BODY" >/dev/null 2>&1; then
+                echo "HEALTH_PASS"
+                break
+              fi
+              if [ "$name" = bootstrap ] && [ "$code" = 401 ] && jq -e '.code == "AUTH_REQUIRED"' "$BODY" >/dev/null 2>&1; then
+                echo "BOOTSTRAP_AUTH_PASS"
+                break
+              fi
+              sleep 3
+            done
+          done
