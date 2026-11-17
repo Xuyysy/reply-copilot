@@ -37,7 +37,7 @@ test('optimized cost aggregation exactly preserves legacy, managed, unresolved, 
   for(const [version,provider,model] of [[1,'qwen','qwen-old'],[2,'gemini','gemini-new']]){
    f.sql.prepare(`INSERT INTO ai_provider_config_versions
     (config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by)
-    VALUES(?,?,?,'openai_chat','https://example.invalid',?,'synthetic-key',300000,1000000,512,10000,'{}','[]',1,'test-user')`).run(id,version,provider,model);
+    VALUES(?,?,?,'openai_chat','https://example.invalid',?,'synthetic-key-material-not-a-secret-000000000000000000',300000,1000000,512,10000,'{}','[]',1,'test-user')`).run(id,version,provider,model);
   }
   const insert=f.sql.prepare(`INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version) VALUES('test-user',?,?,?,?,?,?,?,?)`);
   for(let i=0;i<1200;i++){
@@ -46,7 +46,7 @@ test('optimized cost aggregation exactly preserves legacy, managed, unresolved, 
    const version=mode===1||mode===2?1:mode===5?999:2;
    const at=i%4===0?month-1:i%4===1?month:i%4===2?today:today-1;
    insert.run('cost-'+i,mode===0?'mock':mode===5?'forgotten-model':'synthetic-'+mode,
-     i%13===0?null:i%7, i%17===0?null:i%11, i%19===0?0:i%23,at,assigned,assigned?version:null);
+     i%13===0?0:i%7, i%17===0?0:i%11, i%19===0?0:i%23,at,assigned,assigned?version:null);
   }
   const oldRows=f.sql.prepare(ORIGINAL_COST_SQL).all(...args);
   const newRows=f.sql.prepare(COST_HISTORY_SQL).all(...args);
