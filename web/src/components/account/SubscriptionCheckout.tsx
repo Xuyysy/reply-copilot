@@ -5,7 +5,7 @@ import {createVerifiedPaymentAutoCheck,markPaymentCashierOpened,hasPaymentCashie
 
 type Plan={plan_code:string;price_fen:number;daily_limit:number;name_zh:string;name_en:string};
 type Catalog={plans:Plan[];checkoutAvailable:boolean;paymentMethods:string[]};
-export type SubscriptionOrder={id:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;retryAvailable?:boolean;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
+export type SubscriptionOrder={id:string;channel?:string;merchantProvider?:'mk99'|'xiaodou';periodStatus?:string|null;retryAvailable?:boolean;planCode:string;kind:string;amountFen:number;status:string;riskState:string;
  checkout:{outcome:string;paymentUrl:string|null;paymentConfirmed:boolean}};
 type Quote={id:string;amountFen:number;expiresAt:number;periodEndsAt:number};
 type Refresh={orderStatus:string;providerStatus?:string;paymentConfirmed:boolean;entitlementApplied?:boolean};
