@@ -35,6 +35,7 @@ export default function SubscriptionCheckout(){
  const [payUrl,setPayUrl]=useState<string|null>(null);
  const [paymentNote,setPaymentNote]=useState('');
  const [blockingOrder,setBlockingOrder]=useState<SubscriptionOrder|null>(null);
+ const [unpaidBoltOrderId,setUnpaidBoltOrderId]=useState<string|null>(null);
  const [channel,setChannel]=useState('');
  const [payWithUsdt,setPayWithUsdt]=useState(false);
  const [quote,setQuote]=useState<Quote>();
@@ -155,6 +156,12 @@ export default function SubscriptionCheckout(){
      showOrder(cause.order as SubscriptionOrder);
    }
    if(!canRetry&&action==='create'&&cause instanceof ApiError&&['SUBSCRIPTION_PENDING_ORDER','SUBSCRIPTION_RENEWAL_QUEUED','SUBSCRIPTION_ORDER_CONFLICT'].includes(cause.code)){
+    // Resolve the user-owned USDT invoice, not a guessed fiat order ID.
+    try{
+      const original=await api<{orders:Array<{id:string;rail:string;status:string}>}>('/v1/boltutil/subscription-blockers');
+      const unpaid=original.orders.find(item=>item.rail==='usdt'&&['pending','unknown'].includes(item.status)&&/^[0-9a-f-]{36}$/i.test(item.id));
+      setUnpaidBoltOrderId(unpaid?.id??null);
+    }catch{setUnpaidBoltOrderId(null);}
     try{
      const result=await api<{orders:SubscriptionOrder[]}>('/v1/subscriptions/orders');
      const unresolved=result.orders.find(item=>['pending','unknown','manual_review','refund_pending'].includes(item.status))
@@ -185,6 +192,11 @@ export default function SubscriptionCheckout(){
    :t('检测到一笔需要先处理的原订单。','An earlier order needs your attention.')}
    {' '}<a className="underline" href={'/subscription-checkout/?order='+encodeURIComponent(blockingOrder.id)}>{t('查看并继续原订单','Open the original order')}</a>
   </p>:null}
+  {unpaidBoltOrderId&&<p role="status" className="notice">
+   {t('之前的 USDT 订阅订单尚未处理。若没有发起转账，点击下方链接打开原单并选择「取消本站订单」，然后返回购买支付宝订单。已经转账，请先核验，切勿取消。',
+      'An earlier USDT subscription is unresolved. If no transfer was sent, open it and cancel the local invoice, then return to choose Alipay. If you sent funds, verify the payment first.')}
+   {' '}<a className="underline" href={'/usdt-checkout/?order='+encodeURIComponent(unpaidBoltOrderId)}>{t('查看并关闭旧 USDT 订单','Open and cancel old USDT invoice')}</a>
+  </p>}
   {signedOut?<a className="button" href="/login/">{t('登录后返回购买','Sign in, then return to checkout')}</a>:null}
   {order?<section className="pricing-card space-y-3">
    <p className="break-all">{t('订单号','Order')}: {order.id}</p>

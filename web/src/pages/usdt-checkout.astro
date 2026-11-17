@@ -295,8 +295,8 @@ import Base from "../layouts/Base.astro";
         subscriptionConflict=e instanceof ApiError&&
           ["SUBSCRIPTION_PENDING_ORDER","SUBSCRIPTION_RENEWAL_QUEUED"].includes(e.code);
         if(subscriptionConflict){
-          report("已有订阅原单挡住了新的付款。请先核验下方原单，不要反复下单。",
-            "An earlier subscription blocks a new invoice. Review the original order below. Do not create another payment.");
+          report("已有未完成的订阅订单。若尚未付款，请打开下方原单点击「取消本站订单」，再重新选择支付宝或 USDT；已付款请先核验。",
+            "A previous subscription is unresolved. If no funds were sent, open the original below and cancel the local invoice before choosing Alipay or USDT. If paid, verify first.");
           await showSubscriptionBlockers();
         }else{
           report(e instanceof Error?e.message:"创建结果不明确，请先核对原订单。","Creation uncertain; check existing invoice first.");
@@ -348,8 +348,8 @@ import Base from "../layouts/Base.astro";
           row.append(a);blockerList.append(row);found++;
         }
         blockerExplanation.textContent=found
-          ?t("已找到 "+found+" 笔需要核验的原订阅记录。请先处理原单；勿重复付款。",
-             "Found "+found+" original subscription record(s). Verify them before paying again.")
+          ?t("找到 "+found+" 笔原订阅订单。没付款的可点击原单并选择「取消本站订单」，关闭后重新下单；已付款需先核验。",
+             "Found "+found+" original subscription record(s). If unpaid, open it and cancel the local invoice before reordering; if paid, verify first.")
           :t("暂无可定位的旧订阅订单。请检查账户订阅和付款历史，必要时联系管理员核对。",
              "No matching original subscriptions found. Check account history or request support review.");
         return;
