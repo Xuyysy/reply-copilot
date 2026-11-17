@@ -15,6 +15,9 @@ export async function admin(request:Request,env:Env,write=false):Promise<Session
 }
 export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const now=nowMs();const day=new Date(now).toISOString().slice(0,10);const month=day.slice(0,7);
+  // The standard admin landing page does not need to scan monthly model
+  // history. Keep the legacy complete response for callers without view=overview.
+  const summaryOnly=new URL(request.url).searchParams.get('view')==='overview';
   const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
   const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
     adminHistoricalStats(env,now,day),
@@ -26,19 +29,22 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
     env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
     env.DB.prepare("SELECT count(DISTINCT s.user_id) n FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.expires_at>? AND s.revoked_at IS NULL AND u.status='active'").bind(now).first<{n:number}>(),
     env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 10").all(),
-    aiCostDetails(env,env.AI_MODE || (env.AI_MOCK==="1"?"mock":"unconfigured"),dayStart,monthStart),
+    summaryOnly?Promise.resolve(null):aiCostDetails(env,env.AI_MODE || (env.AI_MOCK==="1"?"mock":"unconfigured"),dayStart,monthStart),
   ]);
   const settingsMap=new Map(settings.results.map(row=>[row.key,row.value]));
   const costSetting={value:settingsMap.get('daily_cost_limit_micro_usd')},aiEnabled={value:settingsMap.get('ai_enabled')};
-  const {cost,todayCost}=modelCosts;
-  const budgetLimitMicroUsd=Number(costSetting?.value||0),dailyCostMicroUsd=budget?.settled_micro_usd??todayCost.costMicroUsd,reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
+  const budgetLimitMicroUsd=Number(costSetting?.value||0),
+    dailyCostMicroUsd=budget?.settled_micro_usd??modelCosts?.todayCost.costMicroUsd??0,
+    reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
   return response({...history,activeUsers:activeUsers?.n||0,recentAudits:recentAudits.results,
     todayGenerations:generations?.todayGenerations||0,monthGenerations:generations?.monthGenerations||0,
-    monthRevenueCents:legacyRevenue?.n||0,monthRevenueFen:revenue?.n||0,cost,todayCost,
+    monthRevenueCents:legacyRevenue?.n||0,monthRevenueFen:revenue?.n||0,
+    ...(modelCosts?{cost:modelCosts.cost,todayCost:modelCosts.todayCost}:{}),
     dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,remainingBudgetMicroUsd:Math.max(0,budgetLimitMicroUsd-committed),budgetDay:day,
     budgetUsedPercent:budgetLimitMicroUsd>0?Math.min(100,Math.round(committed/budgetLimitMicroUsd*100)):null,
     costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,
-    abnormalRequests:errors?.n||0,costByModel:modelCosts.costByModel,aiService:{enabled:aiEnabled?.value==="1",...modelCosts.service}},200,env,request);
+    abnormalRequests:errors?.n||0,detailScope:summaryOnly?'overview':'full',
+    ...(modelCosts?{costByModel:modelCosts.costByModel,aiService:{enabled:aiEnabled?.value==="1",...modelCosts.service}}:{})},200,env,request);
 }
 export async function adminUsers(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const search=(new URL(request.url).searchParams.get("q")||"").trim().slice(0,100);
