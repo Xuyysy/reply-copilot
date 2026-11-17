@@ -12,7 +12,7 @@ function setup({status="active",role="user",verified=1,admin=false}={}){
  for(const f of readdirSync(path.join(root,"api/migrations")).filter(x=>/^\d{4}.*\.sql$/.test(x)).sort())
    s.exec(readFileSync(path.join(root,"api/migrations",f),"utf8"));
  s.prepare("INSERT INTO users(id,email,email_verified_at,created_at,status,role) VALUES(?,?,?,?,?,?)").run("u1",email,verified,now,status,role);
- if(admin)s.prepare("INSERT INTO site_administrator(id,user_id) VALUES(1,'u1')").run();
+ if(admin)s.prepare("INSERT INTO site_administrator(id,user_id,bound_at) VALUES(1,'u1',?)").run(now);
  return s;
 }
 function send(s){return s.prepare(REQUEST).run(email,codeHash,now+600000,now,now-60000);}
@@ -56,9 +56,10 @@ test("opt-in, Turnstile login action, global email budget and passwordless contr
  const ui=readFileSync(path.join(root,"web/src/components/auth/AuthPanel.tsx"),"utf8");
  const code=readFileSync(path.join(root,"api/src/email-login.ts"),"utf8");
  const auth=readFileSync(path.join(root,"api/src/auth.ts"),"utf8");
- assert.match(page,/PUBLIC_EMAIL_LOGIN_ENABLED === '1'/);
+ assert.match(page,/<AuthPanel client:load localVerification=\{localVerification\} sitekey=\{sitekey\} \/>/);
+ assert.match(ui,/PUBLIC_EMAIL_LOGIN_ENABLED === '1'/);
  assert.match(code,/EMAIL_LOGIN_ENABLED!=="1"/);
- assert.match(code,/verifyTurnstile\(request,env,body\.turnstileToken,"login"\)/);
+ assert.match(code,/verifyLoginTurnstile\(request,env,body\.turnstileToken\)/);
  assert.match(code,/email-login:global-send",40,86400_000/);
  assert.match(auth,/purpose==="login"\?"登录"/);
  assert.match(ui,/action:view==="login-code-request"\?"login":"register"/);

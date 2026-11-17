@@ -26,7 +26,7 @@ export async function sendCode(env: Env, email: string, code: string, purpose: "
     const sent = await fetch("https://api.resend.com/emails", {
       method: "POST", signal: controller.signal,
       headers: { Authorization: `Bearer ${env.MAIL_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: `x-Reply-Helper ${purposeText}验证码`, text: `您的 x-Reply-Helper ${purposeText}验证码：${code}。10 分钟内有效。如果不是您本人操作，请忽略此邮件。`, html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto"><h2>x-Reply-Helper</h2><p>您的${purposeText}验证码：</p><p style="font-size:32px;letter-spacing:8px;font-weight:700">${code}</p><p>10 分钟内有效。如果不是您本人操作，请忽略此邮件。</p></div>` }),
+      body: JSON.stringify({ from: env.MAIL_FROM, to: [email], subject: purpose === "reset" ? "x-Reply-Helper 重置密码验证码" : purpose === "login" ? "x-Reply-Helper 登录验证码" : "x-Reply-Helper 注册验证码", text: `您的 x-Reply-Helper ${purposeText}验证码：${code}。10 分钟内有效。如果不是您本人操作，请忽略此邮件。`, html: `<div style="font-family:system-ui,sans-serif;max-width:560px;margin:auto"><h2>x-Reply-Helper</h2><p>您的${purposeText}验证码：</p><p style="font-size:32px;letter-spacing:8px;font-weight:700">${code}</p><p>10 分钟内有效。如果不是您本人操作，请忽略此邮件。</p></div>` }),
     });
     if (!sent.ok) throw new Error("Mail provider rejected request");
   } catch { throw new ApiFailure(503, "MAIL_UNAVAILABLE", "邮件暂时无法发送，请稍后再试。"); }

@@ -2,11 +2,10 @@
 import Base from "../layouts/Base.astro";
 import AuthPanel from "../components/auth/AuthPanel";
 const localVerification = import.meta.env.DEV;
-const emailCodeLoginEnabled = import.meta.env.PUBLIC_EMAIL_LOGIN_ENABLED === '1';
 const sitekey = localVerification ? "" : (import.meta.env.PUBLIC_TURNSTILE_SITE_KEY || "");
 ---
 <Base title="注册与登录" titleEn="Sign in or register">
-  <section class="container public-auth-panel-wrap app-shell" aria-label="Account authentication"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} emailCodeLoginEnabled={emailCodeLoginEnabled} /></section>
+  <section class="container public-auth-panel-wrap app-shell" aria-label="Account authentication"><AuthPanel client:load localVerification={localVerification} sitekey={sitekey} /></section>
   <div id="auth-load-error" class="container notice" role="alert" hidden style="max-width:540px;margin:-80px auto 80px">
     <span data-zh="登录页面没有加载完成，请刷新页面重试。">The sign-in page did not finish loading. Please reload and try again.</span>
     <button id="auth-reload" class="button secondary" type="button" style="margin-left:12px"><span data-zh="刷新页面">Reload page</span></button>
