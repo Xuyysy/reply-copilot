@@ -14,3 +14,14 @@ test('AI input size and request ID are validated; histories remain bounded',()=>
  assert.equal(normalizeAiInput({...input,recentHistory:Array(30).fill({reply:'hi'})}).history.length,20);
  assert.equal(normalizeAiInput({...input,replyStyle:'unknown'}).replyStyle,'natural-friendly');
 });
+
+test('AI Quote V2 opt-in preserves old reply hashes and rejects invalid modes',()=>{
+ const previous=normalizeAiInput(input);
+ assert.equal(Object.hasOwn(previous,'generationKind'),false);
+ assert.deepEqual(normalizeAiInput({...input,generationKind:'reply'}),previous);
+ const quote=normalizeAiInput({...input,outputSchemaVersion:2,generationKind:'quote'});
+ assert.equal(quote.generationKind,'quote');
+ assert.equal(quote.outputSchemaVersion,2);
+ assert.throws(()=>normalizeAiInput({...input,generationKind:'quote'}));
+ assert.throws(()=>normalizeAiInput({...input,outputSchemaVersion:2,generationKind:'other'}));
+});

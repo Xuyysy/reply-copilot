@@ -248,7 +248,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void deliveryCoordinator.recoverPending({abandon:message.abandon}).then(state=>{accountStates.invalidate();return sendResponse({ok:true,...state,...(state.raw?{result:parseAIOutput(state.raw),raw:undefined}:{})});},error=>sendResponse({ok:false,error:error?.message||'恢复失败，请重试。',code:error?.code||'NETWORK_ERROR'}));
     return true;
   }
-  if (message?.type === "REPLY_COPILOT_GENERATE") {
+  if (message?.type === "REPLY_COPILOT_GENERATE" || message?.type === "REPLY_COPILOT_GENERATE_QUOTE") {
+    if (message.type === "REPLY_COPILOT_GENERATE_QUOTE" && !["staging","development"].includes(RUNTIME_CONFIG.channel)) {sendResponse({ok:false,error:"AI Quote 正在测试中。"});return false;}
     if (!fromXPage || typeof message.requestId !== "string" || typeof message.sourceText !== "string" || message.sourceText.length > 12000 || !/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/]+\/status\/\d+/.test(message.sourceUrl || "")) { sendResponse({ ok: false, error: "无法验证当前帖子。请打开侧边栏重试。" }); return false; }
     void (async () => {
       const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
@@ -256,7 +257,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });
-        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
+        const result = await engine.generateReplies({ postContext: { text: message.sourceText, url: message.sourceUrl }, voiceProfile, recentHistory:generationContext.recentHistory, requestId: message.requestId }, { styleStats:generationContext.styleStats, replyStyle, ...(message.type === "REPLY_COPILOT_GENERATE_QUOTE" ? {generationKind:"quote"} : {}), signal: controller.signal, performanceTrace: trace.enabled ? trace : undefined });
         if (controller.signal.aborted) throw new Error("这条生成请求已取消。");
         // ACK + receipt/history/usage have already been durably awaited together.
         // Labels are display-only: never start a refresh before returning a draft.
