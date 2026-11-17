@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fixture} from './helpers/payment-v2.mjs';
-import {AUTH_CPU_READINESS_SQL} from '../src/admin-auth-cpu-readiness.ts';
+import {AUTH_CPU_READINESS_SQL} from '../src/admin-auth-cpu-queries.js';
 
 function grantAdmin(f){
  f.env.ADMIN_PORTAL_ENABLED='1';
