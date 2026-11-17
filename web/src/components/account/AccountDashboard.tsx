@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
 import { bindingMessage, readBindingProof } from "../../lib/extension-binding";
 import { api, ApiError } from "../../lib/api";
+import { safeSiteLink } from "../../lib/site-content.mjs";
 import { phrase, readableError, useLanguage } from "../../lib/language";
 import { checkoutOrderMessage } from "../../lib/checkout-status.mjs";
 import { cleanPaymentReturn, createRefreshGate, watchPayment, watchAccountRefresh, paymentReturnOrder, rememberedPayment, pendingPaymentOrder, rememberPayment, createPaymentNotices } from "../../lib/payment-sync.mjs";
@@ -20,6 +21,8 @@ import { Button } from "../ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Skeleton } from "../ui/skeleton";
+
+const DEFAULT_CHROME_STORE_URL = "https://chromewebstore.google.com/detail/fgfjajofkapebgphfidblngcjomkbdaj";
 
 type Account = { user: { userId: string; username: string | null; email: string; role: string; emailVerified: boolean } };
 type SubscriptionUsage = {status:"none"|"active";plan:"basic"|"pro"|"max"|"ultra"|null;dailyLimit:number;usedToday:number;reservedToday:number;remainingToday:number;resetAt:string|null;expiresAt:string|null;startAt:string|null};
@@ -38,6 +41,19 @@ export default function AccountDashboard() {
   const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
   const [subscriptionPlans,setSubscriptionPlans]=useState<string[]>([]);
   const [data, setData] = useState<Data | null>(null);
+  const [welcomeLinks, setWelcomeLinks] = useState({chromeStoreUrl: DEFAULT_CHROME_STORE_URL, xProfileUrl: ""});
+  useEffect(() => {
+    if (data?.usage.signupBenefit?.status !== "pending") return;
+    let active = true;
+    void api<{content?: {chromeStoreUrl?: string; xProfileUrl?: string}}>("/v1/site").then(result => {
+      if (!active) return;
+      setWelcomeLinks({
+        chromeStoreUrl: safeSiteLink(result.content?.chromeStoreUrl, "chromeStoreUrl") || DEFAULT_CHROME_STORE_URL,
+        xProfileUrl: safeSiteLink(result.content?.xProfileUrl, "xProfileUrl"),
+      });
+    }).catch(() => { /* Keep the official Chrome Store fallback if public site settings cannot load. */ });
+    return () => { active = false; };
+  }, [data?.usage.signupBenefit?.status]);
   const [state, setState] = useState<"loading" | "signed-out" | "error" | "ready">("loading");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -381,7 +397,22 @@ export default function AccountDashboard() {
       </AlertDescription></Alert>}
       <Button variant="outline" asChild><a href="/pricing">{t("查看订阅与永久额度包","View subscriptions and permanent credits")}<ArrowRight size={16}/></a></Button>
     </CardContent></Card>}
-    {usage.signupBenefit?.status === "pending" && <Alert role="status"><AlertDescription>{t("新人免费额度待领取：请在 Chrome 插件中登录并连接账户。账户和已购买额度仍可正常使用；如有疑问，请联系客服。", "Your welcome credits are pending. Sign in and connect your account in the Chrome extension. Your account and purchased credits remain available; contact support if you need help.")}</AlertDescription></Alert>}
+    {usage.signupBenefit?.status === "pending" && <Alert role="status" data-testid="account-welcome-credits-pending" className="border-primary/30 bg-[#f3f8fd]">
+      <AlertDescription className="w-full">
+        <div className="flex w-full flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="min-w-0 space-y-1">
+            <p className="font-semibold text-foreground">{t("你的 200 次新人免费额度还未领取。", "Your 200 free AI replies are waiting to be claimed.")}</p>
+            <p>{t("完成邮箱验证后，安装并登录 Chrome 插件，连接账户即可领取。账户和已购买额度仍可正常使用。", "Verify your email, install and sign in to the Chrome extension, then link your account to claim them. Your account and purchased credits remain available.")}</p>
+            <p>{t("有疑问？", "Questions?")} {welcomeLinks.xProfileUrl
+              ? <a data-testid="account-welcome-x-dm" href={welcomeLinks.xProfileUrl} target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline underline-offset-2">{t("私信我的 X", "DM me on X")}</a>
+              : <span>{t("私信我的 X", "DM me on X")}</span>}</p>
+          </div>
+          <Button size="sm" asChild className="shrink-0">
+            <a data-testid="account-welcome-install" href={welcomeLinks.chromeStoreUrl} target="_blank" rel="noopener noreferrer">{t("立即安装插件", "Install extension now")}<ArrowRight size={16}/></a>
+          </Button>
+        </div>
+      </AlertDescription>
+    </Alert>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[usage.subscription?.status==="active"?t("原有免费及永久次数", "Welcome and permanent credits"):t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("永久付费额度", "Permanent purchased credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
     <ReferralInviteCard language={language}/>
     {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" && (connected || connectionProblem || autoBinding) ? waitingForExtension : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{connectionProblem && proof && <Button variant="outline" size="sm" onClick={retryConnection}>{t("重新检查连接", "Check connection again")}</Button>}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
