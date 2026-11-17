@@ -42,7 +42,7 @@ test("contact says DM me on X and uses the safely validated public profile confi
 
 test("Chrome install CTA keeps high-contrast white text over the brand-blue background", () => {
   assert.match(pending, /className="account-welcome-install-cta"/);
-  assert.match(css, /\\.public-refresh \\.public-account-panel \\.account-welcome-install-cta \\{ color: #fff; \\}/);
+  assert.ok(css.includes(".public-refresh .public-account-panel .account-welcome-install-cta { color: #fff; }"));
   assert.match(css, /--xrh-brand: #315be8/);
-  assert.match(css, /a \\{ color: inherit; text-decoration: none; \\}/);
+  assert.ok(css.includes("a { color: inherit; text-decoration: none; }"));
 });
