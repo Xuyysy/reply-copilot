@@ -41,6 +41,16 @@ test('10ms Free CPU is per-invocation: low P95 never excuses CPU maximum >10ms',
  assert.equal(result.metrics.production.maxCpuMs,16.5);
 });
 
+test('Cron CPU is not falsely classified as an HTTP request over the 10ms budget',()=>{
+ const cron={...makeWorker(prod,1,50_000),dimensions:{...makeWorker(prod,1,50_000).dimensions,eventType:'cron'}};
+ const raw={workers:[makeWorker(prod,20,4000),cron],d1:[makeDb(db,300,2)]};
+ const result=evaluateDay(raw,opts);
+ assert.equal(result.metrics.account.requests,21,'keep conservative total across all events');
+ assert.equal(result.metrics.production.requests,20,'fetch request count excludes Cron');
+ assert.equal(result.metrics.production.maxCpuMs,4);
+ assert.equal(result.verdict,'REVIEW_REQUIRED');
+});
+
 test('all-D1-read 5M, write 100k, all-Worker requests 100k and errors each block',()=>{
  const base={workers:[makeWorker(prod,100_000,5000,1)],d1:[makeDb(db,5_000_000,100_000)]};
  const result=evaluateDay(base,opts);
