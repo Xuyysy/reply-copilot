@@ -13,6 +13,7 @@ import {readBoltOperatorControl,boltEnvironmentReady,boltEnvironmentNetworkEnabl
   effectiveBoltNetworks,type BoltOperatorControl} from "./control";
 import {settleBoltPayment} from "./settle";
 import {reconcileClosedBoltSubscriptionsForUser} from "./terminal";
+import {closeExpiredUnpaidBoltOrdersForUser} from "./expiry";
 
 export function boltAvailable(env:Env):boolean {
   return boltEnvironmentReady(env);
@@ -39,7 +40,7 @@ type Order = {
   base_amount_fen:number;cny_per_usdt_micros:number;quoted_usdt_micros:number;
   payable_usdt_micros:number|null;paid_usdt_micros:number|null;
   receiving_address:string|null;tx_hash:string|null;checkout_url:string|null;
-  expires_at:number|null;status:string;paid_at:number|null;applied_at:number|null;
+  expires_at:number|null;created_at:number;status:string;paid_at:number|null;applied_at:number|null;
 };
 function snapshot(row:Order){
   const payable=row.payable_usdt_micros===null?null:formatMicros(BigInt(row.payable_usdt_micros));
@@ -49,7 +50,7 @@ function snapshot(row:Order){
     address:row.receiving_address,network:row.network,tokenContract:row.token_contract,
     tokenDecimals:row.token_decimals,rawAmount:row.payable_token_raw,currency:"USDT",
     checkoutUrl:row.status==="pending"?row.checkout_url:null,
-    expiresAt:row.expires_at,status:row.status,paidAt:row.paid_at,
+    expiresAt:row.expires_at===null?null:Math.min(row.expires_at,row.created_at+1800000),status:row.status,paidAt:row.paid_at,
     entitlementApplied:row.applied_at!==null};
 }
 async function orderById(env:Env,id:string):Promise<Order|null> {
@@ -178,6 +179,7 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
     if(!matched)throw new ApiFailure(409,"BOLTUTIL_IDEMPOTENCY_CONFLICT","原订单与本次商品或报价不一致。");
     return response({order:snapshot(existing),resumed:true},200,env,request);
   }
+  await closeExpiredUnpaidBoltOrdersForUser(env,user.user_id);
   const now=nowMs();
   if(!await takeRate(env,"bolt-checkout:"+user.user_id,8,60000,now))
     throw new ApiFailure(429,"TOO_MANY_REQUESTS","创建订单过于频繁。");
@@ -299,5 +301,14 @@ export async function refreshBoltOrder(request:Request,env:Env,id:string):Promis
   if(!await takeRate(env,"bolt-refresh:"+user.user_id,6,60000,nowMs()))
     throw new ApiFailure(429,"TOO_MANY_REQUESTS","查询过于频繁。");
   await settleBoltPayment(env,row.external_order_id,null);
+  await closeExpiredUnpaidBoltOrdersForUser(env,user.user_id,row.id);
   return getBoltOrder(request,env,id);
+}
+
+/** Explicit owner-confirmed local expiry reconciliation; no provider HTTP and no GET-side effect. */
+export async function expireBoltOrders(request:Request,env:Env):Promise<Response>{
+ if(!boltReadSchemaReady(env))throw new ApiFailure(404,"NOT_FOUND","接口不可用。");
+ const user=await owner(request,env,true);
+ const closed=await closeExpiredUnpaidBoltOrdersForUser(env,user.user_id);
+ return response({ok:true,closed},200,env,request);
 }

@@ -797,3 +797,81 @@ test('manual original-order refresh after late BoltUtil confirmation safely reco
   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.status,'none');
  }finally{f.sql.close();}
 });
+
+
+test('local 30-minute expiry closes unpaid USDT credits without touching fiat payments or granting a credit',async()=>{
+ const f=setup();try{
+  const old=await create(f,'POLYGON','credits','starter');
+  assert.equal(old.status,201,JSON.stringify(old.body));
+  const id=old.body.order.id;
+  const creditId=old.body.order.creditOrderId;
+  assert.equal((await f.call('/v1/boltutil/expire',{method:'POST',body:'{}'})).body.closed,0,'unexpired stays payable');
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',id).status,'pending');
+  f.sql.prepare("UPDATE boltutil_orders SET expires_at=? WHERE id=?").run(Date.now()-1,id);
+  const expired=await f.call('/v1/boltutil/expire',{method:'POST',body:'{}'});
+  assert.equal(expired.status,200,JSON.stringify(expired.body));
+  assert.equal(expired.body.closed,1);
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',id).status,'closed');
+  assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',creditId).status,'expired');
+  assert.equal(row(f,"SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,0);
+  assert.equal((await f.call('/v1/boltutil/orders/'+id,{method:'GET'})).body.order.checkoutUrl,null);
+  assert.equal((await f.call('/v1/boltutil/expire',{method:'POST',body:'{}'})).body.closed,0,'idempotent close');
+  const next=await create(f,'BEP20','credits','starter');
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  assert.notEqual(next.body.order.id,id);
+  assert.equal(count(f,'boltutil_orders'),2);
+ }finally{f.sql.close();}
+});
+test('local expiry releases unpaid USDT subscription for Alipay even when BoltUtil still says PENDING',async()=>{
+ const f=setup();try{
+  enableFiatSwitchFixture(f);
+  const usdt=await create(f,'BEP20','subscription','basic');
+  assert.equal(usdt.status,201,JSON.stringify(usdt.body));
+  const id=usdt.body.order.id,subId=usdt.body.order.subscriptionOrderId;
+  let upstream=0;
+  f.sql.prepare("UPDATE boltutil_orders SET expires_at=? WHERE id=?").run(Date.now()-1,id);
+  const res=await withProvider(request=>{upstream++;throw Error('Expiry is entirely local; never call BoltUtil status');},
+    ()=>f.call('/v1/boltutil/expire',{method:'POST',body:'{}'}));
+  assert.equal(res.status,200,JSON.stringify(res.body));
+  assert.equal(res.body.closed,1);
+  assert.equal(upstream,0);
+  assert.equal(row(f,'SELECT status FROM subscription_orders WHERE id=?',subId).status,'closed');
+  let fiatCreates=0,queries=0;
+  const next=await withProvider(request=>{
+   if(new URL(request.url).pathname==='/api/v1/order/status'){queries++;throw Error('Old USDT invoice must not block new fiat order');}
+   fiatCreates++;return fiatCreateResponse(request);
+  },()=>f.call('/v1/subscriptions/orders',{body:{planCode:'basic',channel:'ALIPAY_H5',idempotencyKey:'local-expiry-to-alipay-001'}}));
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  assert.equal(fiatCreates,1);assert.equal(queries,0);
+  assert.equal(count(f,'subscription_periods'),0);
+  assert.equal(count(f,'boltutil_payment_events'),0);
+ }finally{f.sql.close();}
+});
+test('local expiry does not close an unexpired, paid, event-backed or review-held BoltUtil invoice',async()=>{
+ const f=setup();try{
+  const paid=await create(f,'TRC20','credits','starter');
+  assert.equal((await refresh(f,paid.body.order)).status,200);
+  assert.equal(paid.status,201);
+  f.sql.prepare("UPDATE boltutil_orders SET expires_at=? WHERE id=?").run(Date.now()-1,paid.body.order.id);
+  const expired=await f.call('/v1/boltutil/expire',{method:'POST',body:'{}'});
+  assert.equal(expired.status,200,JSON.stringify(expired.body));
+  assert.equal(row(f,'SELECT status FROM boltutil_orders WHERE id=?',paid.body.order.id).status,'paid');
+  assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',paid.body.order.creditOrderId).status,'paid');
+ }finally{f.sql.close();}
+});
+test('locally expired USDT credit pack receiving late verified payment remains held and never credits account',async()=>{
+ const f=setup();try{
+  const created=await create(f,'BEP20','credits','starter');
+  assert.equal(created.status,201);
+  const original=created.body.order;
+  f.sql.prepare("UPDATE boltutil_orders SET expires_at=? WHERE id=?").run(Date.now()-1,original.id);
+  assert.equal((await f.call('/v1/boltutil/expire',{method:'POST',body:'{}'})).body.closed,1);
+  const late=await refresh(f,original);
+  assert.equal(late.status,200,JSON.stringify(late.body));
+  assert.equal(late.body.order.status,'manual_review');
+  assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',original.creditOrderId).status,'expired');
+  assert.equal(count(f,'boltutil_payment_events'),1,'late money evidence is retained');
+  assert.equal(row(f,"SELECT COUNT(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,0,'never grant a closed credit invoice');
+  assert.equal(count(f,'credit_batches'),0,'never create paid credit batch for closed invoice');
+ }finally{f.sql.close();}
+});

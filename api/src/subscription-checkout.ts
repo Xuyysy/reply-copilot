@@ -9,6 +9,7 @@ import { configuredXiaodouMerchant } from './xiaodou-merchant';
 import { inspectCheckoutResponse,CheckoutValidationError } from './payment-checkout';
 import { subscriptionRetryableSql,subscriptionBlocksNewCheckoutSql } from './subscription-retry-release.js';
 import {reconcileClosedBoltSubscriptionsForUser} from './boltutil/terminal';
+import {closeExpiredUnpaidBoltOrdersForUser} from './boltutil/expiry';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
 import { orderById, querySubscriptionPayment, reconcileUnpaidXiaodouTerminal } from './subscription-settlement';
@@ -200,6 +201,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
 
  // A trusted BoltUtil terminal result may close only the old unpaid USDT invoice.
  // This runs before existingFor and the atomic SQL overlap guard; inconclusive states remain blocked.
+ await closeExpiredUnpaidBoltOrdersForUser(env,session.user_id);
  await reconcileClosedBoltSubscriptionsForUser(env,session.user_id);
 
  // An idempotency key never re-drives the same provider transaction. A fresh
