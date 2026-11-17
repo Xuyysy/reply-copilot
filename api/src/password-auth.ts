@@ -8,19 +8,23 @@ import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sh
 import { response } from "./http";
 
 const SESSION_MS = 30 * 86400_000;
-// Free-tier CPU headroom opt-in: new/reset credentials use a shorter PBKDF2
-// verifier only after PASSWORD_FREE_CPU_ENABLED=1 and a rollback-compatible release.
-// This deliberately trades offline brute-force resistance for lower per-request
-// CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
-// 100k/210k historical hashes must remain verifiable: never silently rewrite
-// them without the plaintext password and never skip their full verification.
-// Never switch the creation cost simply by deploying this release. First ship
-// the verifier compatibility, then independently enable the Free CPU mode.
+// Low-fixed-cost PBKDF2 verifier. The ten-thousand-round profile is a
+// deliberate, below-OWASP-strength compromise requested by the operator.
+// NEVER store plaintext or fast unsalted SHA. Preserve per-user 16-byte salt,
+// secret pepper, 12-character minimum and existing IP/identity rate limits.
+// Stage A: deploy the compatible verifier with both gates OFF, and build an
+// explicit compatible rollback release BEFORE creating any 10k hashes.
+// Stage B: opt into 10k creation/migration on Workers Paid first.
+// The first legacy login still verifies all 60k/100k/210k old rounds and
+// rehashes only with the verified plaintext; never auto-downgrade a legacy
+// hash without a correct password. Free cutover requires readiness checks.
 const DEFAULT_ITERATIONS = 100_000;
 const FREE_ITERATIONS = 60_000;
-const SUPPORTED_ITERATIONS = new Set([FREE_ITERATIONS, DEFAULT_ITERATIONS, 210_000]);
+const TINY_ITERATIONS = 10_000;
+const SUPPORTED_ITERATIONS = new Set([TINY_ITERATIONS, FREE_ITERATIONS, DEFAULT_ITERATIONS, 210_000]);
 function creationIterations(env: Env): number {
-  return env.PASSWORD_FREE_CPU_ENABLED === "1" ? FREE_ITERATIONS : DEFAULT_ITERATIONS;
+  if (env.PASSWORD_FREE_CPU_ENABLED !== "1") return DEFAULT_ITERATIONS;
+  return env.PASSWORD_FREE_TINY_CPU_ENABLED === "1" ? TINY_ITERATIONS : FREE_ITERATIONS;
 }
 const encoder = new TextEncoder();
 function emailFrom(value: unknown): string {
@@ -181,8 +185,9 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   if (!user?.password_hash || !await verifyPassword(env,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();
-  // Paid-only migration stage: re-derive 60k only *after* a correct password
-  // and a successful session write. Both switches must be explicitly enabled.
+  // Paid-only staged rehash to the currently selected lower-cost verifier,
+  // *after* a correct old-password verification and a successful session
+  // write. The optional 10k profile requires a third explicit gate.
   // The first old-hash verification still consumes its original CPU and MUST
   // happen on Paid. An optimistic update never overwrites a concurrent reset,
   // unfreeze/lock, or administrator credential change.
@@ -191,7 +196,7 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   // do not disclose the stored work factor, password, hash or failure reason.
   if (env.PASSWORD_FREE_CPU_ENABLED==="1" &&
       env.PASSWORD_LEGACY_MIGRATION_ENABLED==="1" &&
-      user.status==="active" && !user.password_hash.startsWith("pbkdf2-sha256:60000:")) {
+      user.status==="active" && !user.password_hash.startsWith(`pbkdf2-sha256:${creationIterations(env)}:`)) {
     try {
       const optimizedHash=await hashPassword(env,password);
       await env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND password_hash=? AND status='active'")
