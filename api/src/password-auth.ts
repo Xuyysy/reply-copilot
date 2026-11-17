@@ -8,8 +8,13 @@ import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sh
 import { response } from "./http";
 
 const SESSION_MS = 30 * 86400_000;
-const ITERATIONS = 100_000;
-const SUPPORTED_ITERATIONS = new Set([ITERATIONS, 210_000]);
+// Free-tier CPU headroom: new/reset credentials use a shorter PBKDF2 verifier.
+// This deliberately trades offline brute-force resistance for lower per-request
+ // CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
+ // 100k/210k historical hashes must remain verifiable: never silently rewrite
+ // them without the plaintext password and never skip their full verification.
+const ITERATIONS = 60_000;
+const SUPPORTED_ITERATIONS = new Set([ITERATIONS, 100_000, 210_000]);
 const encoder = new TextEncoder();
 function emailFrom(value: unknown): string {
   const email = typeof value === "string" ? value.trim().toLowerCase() : "";
