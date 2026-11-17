@@ -36,12 +36,16 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  const totalRequests=sum(workers,x=>x.sum?.requests);
  const allErrors=sum(workers,x=>x.sum?.errors);
  const read=sum(d1,x=>x.sum?.rowsRead),written=sum(d1,x=>x.sum?.rowsWritten);
- const prodWorkers=workers.filter(x=>x.dimensions?.scriptName===script);
+ // Free's 10ms request budget is checked for HTTP fetch invocations.
+ // Cron triggers are separately classified (and still included in conservative
+ // account-wide invocation tallies), not mislabelled as a failing fetch.
+ const fetchWorkers=workers.filter(x=>x.dimensions?.eventType==='fetch');
+ const prodWorkers=fetchWorkers.filter(x=>x.dimensions?.scriptName===script);
  const prodRows=d1.filter(x=>x.dimensions?.databaseId===database);
  const prodRequests=sum(prodWorkers,x=>x.sum?.requests);
  const prodReads=sum(prodRows,x=>x.sum?.rowsRead);
  const prodErrors=sum(prodWorkers,x=>x.sum?.errors);
- const maxCpuMicros=Math.max(0,...workers.map(x=>safeNumber(x.max?.cpuTime)??0));
+ const maxCpuMicros=Math.max(0,...fetchWorkers.map(x=>safeNumber(x.max?.cpuTime)??0));
  const prodCpuMicros=Math.max(0,...prodWorkers.map(x=>safeNumber(x.max?.cpuTime)??0));
  const versions=[...new Set(prodWorkers.map(x=>x.dimensions?.scriptVersion).filter(Boolean))].sort();
  const causes=[];
@@ -51,7 +55,7 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  if(maxCpuMicros>=LIMITS.cpuMicros)causes.push('sampled invocation exceeded 10ms CPU');
  if(prodErrors>0||allErrors>0)causes.push('Worker execution errors observed');
  const uncertainties=[];
- if(workers.length===0||d1.length===0||prodRequests===0)uncertainties.push('missing or insufficient Worker/D1 samples');
+ if(fetchWorkers.length===0||d1.length===0||prodRequests===0)uncertainties.push('missing or insufficient fetch/D1 samples');
  if(workers.length>=5000||d1.length>=2000)uncertainties.push('analytics query hit dataset row limit');
  if(expectedVersion&&!versions.includes(expectedVersion))uncertainties.push('expected Worker version not observed');
  if(releaseAt){
