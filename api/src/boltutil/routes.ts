@@ -12,6 +12,7 @@ import {boltReadSchemaReady} from "./environment";
 import {readBoltOperatorControl,boltEnvironmentReady,boltEnvironmentNetworkEnabled,
   effectiveBoltNetworks,type BoltOperatorControl} from "./control";
 import {settleBoltPayment} from "./settle";
+import {reconcileClosedBoltSubscriptionsForUser} from "./terminal";
 
 export function boltAvailable(env:Env):boolean {
   return boltEnvironmentReady(env);
@@ -210,6 +211,8 @@ export async function createBoltOrder(request:Request,env:Env):Promise<Response>
         throw new ApiFailure(409,"SUBSCRIPTION_QUOTE_EXPIRED","升级报价已失效。");
       subKind="upgrade";periodId=q.period_id;baseFen=q.amount_fen;
     }else subKind=active?"renewal":"purchase";
+    // Provider-confirmed terminal unpaid USDT invoices may be safely closed before a new purchase.
+    await reconcileClosedBoltSubscriptionsForUser(env,user.user_id);
     const blocking=await env.DB.prepare("SELECT 1 FROM subscription_orders WHERE user_id=? AND status IN ('pending','unknown','manual_review','refund_pending') LIMIT 1")
       .bind(user.user_id).first();
     const queued=await env.DB.prepare("SELECT 1 FROM subscription_periods WHERE user_id=? AND status='queued' LIMIT 1")

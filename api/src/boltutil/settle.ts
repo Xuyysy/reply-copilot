@@ -4,6 +4,7 @@ import {sha256,nowMs,uuid} from "../security";
 import {response} from "../http";
 import {verifyBoltWebhook,boltRequest} from "./client";
 import {boltReadSchemaReady} from "./environment";
+import {closeProviderConfirmedUnpaidBoltSubscription} from "./terminal";
 import {VerifiedPayment,verifiedPayment,distinctSettlement,tokenRawUnits,equalAddress,normalizedBoltTransactionHash,NETWORKS,type BoltNetwork} from "./contract";
 import {SUBSCRIPTION_PERIOD_MS,SUBSCRIPTION_DAY_MS} from "../../../domain/subscription-policy.js";
 
@@ -51,11 +52,16 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
     await failReview(env,order,nowMs());
     throw new ApiFailure(409,"BOLTUTIL_ACCOUNT_HELD","账户无法接受新权益，已进入人工复核。");
   }
-  if(order.status==="manual_review"||order.status==="closed")
+  if(order.status==="closed"&&!callback)return; // Closed invoice remains visible; do not re-query on GET.
+  if(order.status==="manual_review"||order.status==="closed"&&order.product_type!=="subscription")
     throw new ApiFailure(409,"BOLTUTIL_PAYMENT_REVIEW","此订单需要人工核对。");
   const data=await boltRequest(env,"/api/v1/order/status",{externalOrderId:externalId});
   if(!isConfirmed(data.status)){
-    // Even EXPIRED is not final for delayed or wrongly matched transfers; preserve evidence.
+    // Only a provider-authenticated, identity-matched, strictly unpaid terminal
+    // response may release an old BoltUtil subscription blocking new checkout.
+    // EXPIRED alone may later receive a confirmed payment; never auto-grant it.
+    if(!callback&&order.product_type==="subscription")
+      await closeProviderConfirmedUnpaidBoltSubscription(env,externalId,data);
     return;
   }
   let trusted:VerifiedPayment;
@@ -82,6 +88,26 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
     /^[A-Za-z0-9_-]{6,128}$/.test(callback.eventId)?callback.eventId:"query:"+trusted.txHash;
   const digest=await sha256(JSON.stringify({externalId,txHash:trusted.txHash,amount:String(trusted.amountMicros),
     paid:String(trusted.paidMicros),status:trusted.status,origin:callback?"webhook":"query"}));
+  if(order.status==="closed"&&order.product_type==="subscription"){
+    // A later CONFIRMED/COMPLETED transaction after a provider-verified closure
+    // is retained as payment evidence and held for manual review. Never grant
+    // an old closed subscription or silently alter a newer fiat checkout.
+    const claim=uuid();
+    const statements:D1PreparedStatement[]=[
+      env.DB.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND external_order_id=? AND status='closed' AND product_type='subscription') ON CONFLICT DO NOTHING")
+        .bind(eventId,externalId,trusted.status,trusted.network,trusted.txHash,digest,now,order.id,externalId),
+      env.DB.prepare("UPDATE boltutil_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),paid_usdt_micros=?,tx_hash=?,updated_at=? WHERE id=? AND external_order_id=? AND status='closed' AND product_type='subscription' AND paid_at IS NULL AND applied_at IS NULL AND tx_hash IS NULL AND EXISTS(SELECT 1 FROM boltutil_payment_events WHERE external_order_id=? AND network=? AND tx_hash=?)")
+        .bind(now,Number(trusted.paidMicros),trusted.txHash,now,order.id,externalId,externalId,trusted.network,trusted.txHash),
+      env.DB.prepare("UPDATE subscription_orders SET status='manual_review',paid_at=COALESCE(paid_at,?),updated_at=? WHERE id=? AND user_id=? AND status='closed' AND applied_at IS NULL AND EXISTS(SELECT 1 FROM boltutil_orders b WHERE b.subscription_order_id=subscription_orders.id AND b.user_id=subscription_orders.user_id AND b.id=? AND b.status='manual_review' AND b.tx_hash=?)")
+        .bind(now,now,order.subscription_order_id,order.user_id,order.id,trusted.txHash),
+      env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM boltutil_orders b JOIN subscription_orders o ON o.id=b.subscription_order_id AND o.user_id=b.user_id WHERE b.id=? AND b.user_id=? AND b.status='manual_review' AND b.tx_hash=? AND o.status='manual_review' AND o.applied_at IS NULL AND NOT EXISTS(SELECT 1 FROM subscription_periods p WHERE p.source_order_id=o.id)) THEN 1 ELSE 0 END")
+        .bind(claim,order.id,order.user_id,trusted.txHash),
+      env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(claim)
+    ];
+    try{await env.DB.batch(statements);}
+    catch{throw new ApiFailure(503,"BOLTUTIL_LATE_PAYMENT_REVIEW_UNCONFIRMED","关闭后到账证据待复核，请联系支持。");}
+    return;
+  }
   const statements:D1PreparedStatement[]=[
     env.DB.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) SELECT ?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM boltutil_orders WHERE id=? AND external_order_id=? AND network=?) ON CONFLICT DO NOTHING")
       .bind(eventId,externalId,trusted.status,trusted.network,trusted.txHash,digest,now,order.id,externalId,order.network),
