@@ -125,3 +125,44 @@ test('admin hold requires CSRF and preserves recorded usage and permanent credit
   assert.equal(f.sql.prepare("SELECT count(*) n FROM admin_audit_logs WHERE action='subscription_order_hold'").get().n,1);
  }finally{f.sql.close();}
 });
+
+test('finance summary skips historical usage and provider-cost SQL while exact legacy finance stays correct',async()=>{
+ const f=fixture();
+ try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';grantAdmin(f);seedUnverifiedSubscriber(f);
+  const now=Date.now();
+  f.sql.prepare("INSERT INTO ai_requests(user_id,request_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at) VALUES('test-user','usage-1','2026-11-17','nonce','succeeded',1,'hash',?)").run(now);
+  f.sql.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) VALUES('test-user','usage-1','mock',2,3,150,?)").run(now);
+  f.sql.prepare("INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at) VALUES('test-user','unallocated-1','mock',1,1,700,?)").run(now);
+  f.sql.prepare("INSERT INTO subscription_ai_allocations(id,user_id,request_id,period_id,day_index,state,created_at) VALUES('alloc-1','test-user','usage-1','period1',2,'consumed',?)").run(now);
+  f.sql.prepare("INSERT INTO subscription_usage_events(id,user_id,period_id,request_id,day_index,event_type,created_at) VALUES('usage-event-1','test-user','period1','usage-1',2,'consume',?)").run(now);
+  const seen=[],original=f.DB.prepare.bind(f.DB);
+  f.DB.prepare=sql=>{seen.push(sql);return original(sql);};
+  const summary=await f.call('/v1/admin/subscriptions/finance?view=summary',{method:'GET'});
+  assert.equal(summary.status,200,JSON.stringify(summary.body));
+  assert.equal(summary.body.detailScope,'summary');
+  assert.equal(summary.body.usage,null,'unqueried history must not be shown as zero');
+  assert.equal(summary.body.from>now-31*DAY,true);
+  assert.ok(!seen.some(sql=>/subscription_usage_events|FROM ai_usage_costs/.test(sql)),'summary must not prepare either history SQL');
+  seen.length=0;
+  const full=await f.call('/v1/admin/subscriptions/finance',{method:'GET'});
+  assert.equal(full.status,200,JSON.stringify(full.body));
+  assert.equal(full.body.detailScope,'full');
+  assert.deepEqual(full.body.orders,summary.body.orders,'verified payment totals unchanged');
+  assert.deepEqual(full.body.usage,{consumed:1,cost_micro_usd:150},'only subscription-allocated provider cost counted');
+  assert.ok(seen.some(sql=>/subscription_usage_events/.test(sql)),'legacy exact usage remains available');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger").get().n,0,'read-only finance must not grant credits');
+ }finally{f.sql.close();}
+});
+
+test('subscription summary route requires active verified admin exactly as legacy full finance',async()=>{
+ const f=fixture();
+ try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';f.env.ADMIN_PORTAL_ENABLED='1';
+  for(const path of ['/v1/admin/subscriptions/finance?view=summary','/v1/admin/subscriptions/finance']){
+   assert.equal((await f.call(path,{method:'GET'})).status,403);
+  }
+  grantAdmin(f);
+  assert.equal((await f.call('/v1/admin/subscriptions/finance?view=summary',{method:'GET'})).status,200);
+ }finally{f.sql.close();}
+});
