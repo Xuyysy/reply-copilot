@@ -163,3 +163,10 @@ test("Production admin includes five-chain operator controls, not retired probe 
  assert.match(panel,/USDT 独立订单与异常记录/);
  assert.match(panel,/查看用户端五链收银台/);
 });
+
+test('Production USDT checkout starts with network selection, not staging-only copy',()=>{
+ assert.doesNotMatch(checkout,/Staging 测试|Staging test: real mainnet funds|无需跳转 BoltUtil/);
+ assert.match(checkout,/id="bolt-chain-picker"/);
+ assert.match(checkout,/id="bolt-fee-guidance"/);
+ assert.match(checkout,/收款地址二维码/);
+});

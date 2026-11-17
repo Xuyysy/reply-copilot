@@ -435,12 +435,12 @@ export async function cancelUnpaidXiaodouSubscriptionCheckout(request:Request,en
    throw new ApiFailure(404,'ORDER_NOT_FOUND','订单不存在。');
  let result:Awaited<ReturnType<ReturnType<typeof configuredXiaodouMerchant>['closePayment']>>;
  try{result=await configuredXiaodouMerchant(env).closePayment(original.provider_trade_id,{requestId:'xrh-sub-close-'+uuid()});}
- catch{throw new ApiFailure(502,'XIAODOU_CLOSE_UNAVAILABLE','小豆平台暂无法确认关单，请保留原订单。');}
+ catch{throw new ApiFailure(502,'XIAODOU_CLOSE_UNAVAILABLE','支付平台暂无法确认关闭这笔原订单，请保留原单并稍后核验。');}
  if(result.outTradeNo!==original.provider_trade_id||result.amountFen!==original.amount_fen||
     result.currency!=='CNY'||result.channel!==original.payment_channel)
-   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆关单结果与原订单不符，请勿重复付款。');
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付平台返回的关单结果与原订单不符，请勿重复付款。');
  if(!['CLOSE_REQUESTED','ALREADY_CLOSED'].includes(result.closeState)||result.status!=='CLOSED')
-   throw new ApiFailure(409,'SUBSCRIPTION_CLOSE_UNCONFIRMED','小豆尚未确认关闭原订单，请先查验支付状态。');
+   throw new ApiFailure(409,'SUBSCRIPTION_CLOSE_UNCONFIRMED','支付平台尚未确认关闭原订单，请先查验支付状态。');
  await reconcileUnpaidXiaodouTerminal(env,original,'CLOSED');
  const latest=await orderFor(env,orderId);
  if(!latest||latest.status!=='closed'||latest.transaction_status!=='closed')
