@@ -6,7 +6,7 @@ import {COST_HISTORY_SQL} from '../src/ai-cost-queries.js';
 
 // Historical query is kept only in this isolated regression test; never shipped
 // as a production maintenance command or executed against remote D1.
-const ORIGINAL_COST_SQL = \`WITH attributed AS (
+const ORIGINAL_COST_SQL = `WITH attributed AS (
   SELECT CASE WHEN u.provider_config_id IS NOT NULL THEN COALESCE(v.provider,'unknown')
       WHEN u.model='mock' THEN 'mock' ELSE 'deepseek' END providerCode,
     COALESCE(v.model_id,u.model) model,
@@ -24,7 +24,7 @@ const ORIGINAL_COST_SQL = \`WITH attributed AS (
   SUM(CASE WHEN created_at>=? THEN output_tokens ELSE 0 END) todayOutput,
   SUM(CASE WHEN created_at>=? THEN estimated_cost_micro_usd ELSE 0 END) todayCost
   FROM attributed GROUP BY providerCode,model,configurationSource
-  ORDER BY monthCost DESC,providerCode,model,configurationSource\`;
+  ORDER BY monthCost DESC,providerCode,model,configurationSource`;
 
 const month=Date.UTC(2026,10,1),today=Date.UTC(2026,10,17);
 const args=[month,today,today,today,today];
@@ -35,11 +35,11 @@ test('optimized cost aggregation exactly preserves legacy, managed, unresolved, 
   const id='33333333-3333-4333-8333-333333333333';
   f.sql.prepare("INSERT INTO ai_provider_configs(id,display_name,latest_version,created_at,updated_at,updated_by) VALUES(?,'Synthetic versions',2,1,1,'test-user')").run(id);
   for(const [version,provider,model] of [[1,'qwen','qwen-old'],[2,'gemini','gemini-new']]){
-   f.sql.prepare(\`INSERT INTO ai_provider_config_versions
+   f.sql.prepare(`INSERT INTO ai_provider_config_versions
     (config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by)
-    VALUES(?,?,?,'openai_chat','https://example.invalid',?,'synthetic-key',300000,1000000,512,10000,'{}','[]',1,'test-user')\`).run(id,version,provider,model);
+    VALUES(?,?,?,'openai_chat','https://example.invalid',?,'synthetic-key',300000,1000000,512,10000,'{}','[]',1,'test-user')`).run(id,version,provider,model);
   }
-  const insert=f.sql.prepare(\`INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version) VALUES('test-user',?,?,?,?,?,?,?,?)\`);
+  const insert=f.sql.prepare(`INSERT INTO ai_usage_costs(user_id,request_id,model,input_tokens,output_tokens,estimated_cost_micro_usd,created_at,provider_config_id,provider_config_version) VALUES('test-user',?,?,?,?,?,?,?,?)`);
   for(let i=0;i<1200;i++){
    const mode=i%6;
    const assigned=mode===0?null:mode===5?'00000000-0000-4000-8000-000000000001':id;
