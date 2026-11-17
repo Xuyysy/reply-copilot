@@ -47,3 +47,11 @@ test("foreground top-frame local warm heartbeat cannot spend credits or call hos
    assert.equal(networkCalls,0,"no account or model network requests");
  }finally{globalThis.fetch=beforeFetch}
 });
+
+test("prewarm handler rejects non-Staging clients without any hosted traffic",async()=>{
+  const response=await new Promise(resolve=>chrome.runtime.onMessage.listener(
+    {type:"REPLY_COPILOT_PREWARM_ACCOUNT"},
+    {id:"test-extension",url:"https://x.com/home",frameId:0},resolve
+  ));
+  assert.equal(response.ok,false);
+});
