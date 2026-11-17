@@ -8,13 +8,20 @@ import { hmac, jsonBody, nowMs, randomToken, requireWebOrigin, sessionCookie, sh
 import { response } from "./http";
 
 const SESSION_MS = 30 * 86400_000;
-// Free-tier CPU headroom: new/reset credentials use a shorter PBKDF2 verifier.
+// Free-tier CPU headroom opt-in: new/reset credentials use a shorter PBKDF2
+// verifier only after PASSWORD_FREE_CPU_ENABLED=1 and a rollback-compatible release.
 // This deliberately trades offline brute-force resistance for lower per-request
  // CPU. Retain the 12-char minimum, secret pepper and existing rate limits.
  // 100k/210k historical hashes must remain verifiable: never silently rewrite
  // them without the plaintext password and never skip their full verification.
-const ITERATIONS = 60_000;
-const SUPPORTED_ITERATIONS = new Set([ITERATIONS, 100_000, 210_000]);
+// Never switch the creation cost simply by deploying this release. First ship
+// the verifier compatibility, then independently enable the Free CPU mode.
+const DEFAULT_ITERATIONS = 100_000;
+const FREE_ITERATIONS = 60_000;
+const SUPPORTED_ITERATIONS = new Set([FREE_ITERATIONS, DEFAULT_ITERATIONS, 210_000]);
+function creationIterations(env: Env): number {
+  return env.PASSWORD_FREE_CPU_ENABLED === "1" ? FREE_ITERATIONS : DEFAULT_ITERATIONS;
+}
 const encoder = new TextEncoder();
 function emailFrom(value: unknown): string {
   const email = typeof value === "string" ? value.trim().toLowerCase() : "";
@@ -49,7 +56,8 @@ async function derive(env: Env, password: string, salt: Uint8Array, iterations: 
 }
 export async function hashPassword(env: Env, password: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  return `pbkdf2-sha256:${ITERATIONS}:${hex(salt)}:${await derive(env,password,salt,ITERATIONS)}`;
+  const iterations = creationIterations(env);
+  return `pbkdf2-sha256:${iterations}:${hex(salt)}:${await derive(env,password,salt,iterations)}`;
 }
 export async function verifyPassword(env: Env, password: string, stored: string | null): Promise<boolean> {
   const parts = stored?.split(":") || [];
