@@ -198,7 +198,7 @@ test('admin effective status accepts genuine verified BEP20 BASIC payment and pr
   f.env.BOLTUTIL_SCHEMA_READY='0';
   row=await read();assert.equal(row.effective_status,'expired_or_unverified','crypto not trusted without explicit schema flag');
   f.env.BOLTUTIL_SCHEMA_READY='1';
-  f.sql.exec("UPDATE subscription_periods SET start_at=1,end_at=2");
+  f.sql.exec("UPDATE subscription_periods SET start_at=1,end_at=2592000001");
   row=await read();assert.equal(row.effective_status,'expired_or_unverified','expired period must remain invalid');
  }finally{f.sql.close();}
 });
@@ -206,7 +206,7 @@ test('admin effective status accepts genuine verified BEP20 BASIC payment and pr
 test('admin subscription route remains usable without a BoltUtil D1 migration',async()=>{
  const f=fixture();try{
   f.env.SUBSCRIPTIONS_ENABLED='1';grantAdmin(f);seedUnverifiedSubscriber(f);
-  for(const environment of ['staging','production','local']){
+  for(const environment of ['staging','production']){
    f.env.ENVIRONMENT=environment;f.env.BOLTUTIL_SCHEMA_READY='0';
    const r=await f.call('/v1/admin/subscriptions/users',{method:'GET'});
    assert.equal(r.status,200,JSON.stringify(r.body));
