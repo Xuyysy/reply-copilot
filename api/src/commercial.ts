@@ -15,7 +15,8 @@ export async function admin(request:Request,env:Env,write=false):Promise<Session
 }
 export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   await admin(request,env);const now=nowMs();const day=new Date(now).toISOString().slice(0,10);const month=day.slice(0,7);
-  const view=new URL(request.url).searchParams.get('view');
+  const params=new URL(request.url).searchParams;
+  const view=params.get('view');
   // Historical bookkeeping is collapsed in the operator UI. Never scan the
   // full credit ledger, grants and lifetime orders until an admin expands it.
   // Keep the original full response for legacy callers without a view.
@@ -29,7 +30,10 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   }
   const summaryOnly=view==='overview';
   const deferHistory=summaryOnly||view==='cost';
-  const deferGenerationTotals=summaryOnly||view==='cost';
+  // Explicit UI opt-in is essential: the protected production workflow
+  // deploys Worker BEFORE Pages. Old Pages still call view=overview without
+  // this marker and must continue receiving their legacy exact count keys.
+  const deferGenerationTotals=(summaryOnly&&params.get('generation_counts')==='lazy')||view==='cost';
   const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
   const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
     deferHistory

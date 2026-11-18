@@ -34,7 +34,7 @@ test('CF Free: overview/cost skip the exact month scan without misrepresenting u
   confirmed(f,'missing-ack',{time:withinDay,marker:null});
   confirmed(f,'bad-ack',{time:withinDay,marker:''});
   const seen=spy(f);
-  for(const view of ['overview','cost']){
+  for(const view of ['overview&generation_counts=lazy','cost']){
    seen.length=0;
    const r=await get(f,'/v1/admin/dashboard?view='+view);
    assert.equal(r.status,200,JSON.stringify(r));
@@ -49,6 +49,12 @@ test('CF Free: overview/cost skip the exact month scan without misrepresenting u
   assert.deepEqual(exact.body,{todayGenerations:1,monthGenerations:1});
   assert.equal(seen.filter(monthScan).length,1,'explicit demand executes one exact ACK count');
   assert.equal(seen.some(q=>q.includes('FROM credit_ledger')),false,'no unrelated all-history ledger scan');
+  seen.length=0;
+  const oldOverview=await get(f,'/v1/admin/dashboard?view=overview');
+  assert.equal(oldOverview.status,200);
+  assert.equal(oldOverview.body.todayGenerations,1);
+  assert.equal(oldOverview.body.monthGenerations,1);
+  assert.equal(seen.filter(monthScan).length,1,'Worker-first rollout preserves old Pages exact KPIs');
   seen.length=0;
   const legacy=await get(f,'/v1/admin/dashboard');
   assert.equal(legacy.status,200);

@@ -30,3 +30,10 @@ test('rolling release: new Pages accepts focused or old full Worker ACK read sha
  assert.match(source,/typeof value!==\x27number\x27\|\|!Number\.isSafeInteger\(value\)/);
  assert.doesNotMatch(source,/metrics:\{\.\.\.previous\.metrics,\.\.\.exact\}/);
 });
+
+test('protected Worker-first rollout: only new Pages opt in to lazy counters, old Worker result remains valid',()=>{
+ assert.ok(source.includes('/v1/admin/dashboard?view=overview&generation_counts=lazy'));
+ assert.match(source,/setGenerationStatsLoaded\(typeof metrics\.todayGenerations===\x27number\x27/);
+ assert.match(source,/typeof metrics\.monthGenerations===\x27number\x27/);
+ assert.match(source,/generationStatsLoaded\?t\("刷新精确次数"/);
+});
