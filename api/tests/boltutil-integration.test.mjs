@@ -929,3 +929,193 @@ test('owner cannot cancel a paid USDT invoice or an invoice with transaction evi
   assert.equal(row(f,'SELECT status FROM recharge_orders WHERE id=?',created.body.order.creditOrderId).status,'paid');
  }finally{f.sql.close();}
 });
+
+
+const crossRailMerchant='20881234567890';
+function allowCrossRailFiat(f){
+ Object.assign(f.env,{
+  SUBSCRIPTION_CHECKOUT_ENABLED:'1',
+  MK99_PID:crossRailMerchant,MK99_KEY:'test-only-cross-rail-not-live',
+  MK99_REQUEST_SIGN_TYPE:'MD5',MK99_NOTIFY_SIGN_TYPE:'MD5',
+  MK99_PROTOCOL_CONFIRMED:'1',MK99_AMOUNT_CONTRACT:'CNY_EXACT_BUYER_TOTAL',
+  MK99_CASHIER_ORIGINS:'https://cashier.example.test'
+ });
+ f.sql.exec("UPDATE system_settings SET value='mk99' WHERE key='active_merchant'");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('payment_mk99_enabled','payment_mk99_alipay_enabled','payment_mk99_alipay_released','payment_mk99_wechat_enabled','payment_mk99_wechat_released')");
+}
+function productionCrossRail(f){
+ f.env.ENVIRONMENT='production';
+ f.env.BOLTUTIL_PRODUCTION_CREATE_ENABLED='1';
+ approveProductionEvidenceFixture(f);
+ approveProductionOperatorFixture(f);
+}
+async function crossRailFiatCheckout(f,planCode,quoteId=null){
+ let trade=null;
+ const body={planCode,channel:'ALIPAY_H5',idempotencyKey:crypto.randomUUID(),...(quoteId?{quoteId}:{})};
+ const result=await withProvider(request=>{
+  assert.equal(new URL(request.url).pathname,'/openapi/pay/create');
+  const params=Object.fromEntries(new URLSearchParams(request.body));
+  trade=params.out_trade_no;
+  return Response.json({code:1,data:{out_trade_no:trade,trade_no:'MK99_paid_'+trade,
+   pay_url:'https://cashier.example.test/pay/'+trade}});
+ },()=>f.call('/v1/subscriptions/orders',{body}));
+ return {...result,trade};
+}
+async function crossRailFiatVerify(f,order,amountFen){
+ return withProvider(request=>{
+  assert.equal(new URL(request.url).pathname,'/openapi/pay/query');
+  const trade=new URLSearchParams(request.body).get('out_trade_no');
+  assert.equal(trade,order.trade);
+  return Response.json({code:1,data:{
+   out_trade_no:trade,trade_no:'MK99_paid_'+trade,
+   trade_status:'TRADE_SUCCESS',total_amount:(amountFen/100).toFixed(2),
+   pid:crossRailMerchant,paytype_code:'alipay',currency:'CNY'
+  }});
+ },()=>f.call('/v1/subscriptions/orders/'+order.body.order.id+'/refresh',{method:'POST'}));
+}
+function setCrossRailUsed(f,countUsed){
+ const period=row(f,"SELECT id,start_at,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+ assert.ok(period?.id,'verified source must have one active subscription');
+ f.sql.prepare('INSERT INTO subscription_daily_usage(period_id,day_index,used,reserved,updated_at) VALUES(?,0,?,0,?)').run(period.id,countUsed,Date.now());
+ return period;
+}
+
+for(const mode of ['staging','production']){
+ test(mode+': verified BEP20 BASIC -> MK99 Alipay PRO upgrade preserves usage, expiry, proof and replay',async()=>{
+  const f=setup();
+  try{
+   allowCrossRailFiat(f);
+   if(mode==='production')productionCrossRail(f);
+   const purchase=await create(f,'BEP20','subscription','basic');
+   assert.equal(purchase.status,201,JSON.stringify(purchase.body));
+   const confirmed=await refresh(f,purchase.body.order);
+   assert.equal(confirmed.status,200,JSON.stringify(confirmed.body));
+   const before=setCrossRailUsed(f,4);
+   const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+   assert.equal(quote.status,200,JSON.stringify(quote.body));
+   assert.equal(quote.body.quote.amountFen,5000);
+   const next=await crossRailFiatCheckout(f,'pro',quote.body.quote.id);
+   assert.equal(next.status,201,JSON.stringify(next.body));
+   assert.equal(next.body.order.kind,'upgrade');
+   assert.equal(next.body.order.amountFen,5000);
+   assert.equal(row(f,"SELECT COUNT(*) n FROM subscription_payment_transactions WHERE order_id=?",
+    purchase.body.order.subscriptionOrderId).n,0,'do not forge a CNY proof for USDT purchase');
+   let paid=await crossRailFiatVerify(f,next,5000);
+   assert.equal(paid.status,200,JSON.stringify(paid.body));
+   assert.equal(paid.body.orderStatus,'paid');
+   assert.equal(paid.body.entitlementApplied,true);
+   paid=await crossRailFiatVerify(f,next,5000);
+   assert.equal(paid.status,200,JSON.stringify(paid.body));
+   assert.equal(count(f,'subscription_tier_changes'),1,'provider replay must not double-upgrade');
+   const after=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+   assert.deepEqual([after.id,after.end_at,after.daily_limit],[before.id,before.end_at,1000]);
+   const usage=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(usage.body.subscription.status,'active',JSON.stringify(usage.body));
+   assert.equal(usage.body.subscription.usedToday,4);
+   assert.equal(usage.body.subscription.remainingToday,996);
+   assert.equal(row(f,"SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").paid_balance,0);
+   assert.equal(count(f,'boltutil_payment_events'),1);
+  }finally{f.sql.close();}
+ });
+}
+
+test('USDT -> fiat Alipay upgrade with lost original signed crypto evidence is paid-but-held, never applied',async()=>{
+ const f=setup();
+ try{
+  allowCrossRailFiat(f);
+  productionCrossRail(f);
+  const purchase=await create(f,'BEP20','subscription','basic');
+  assert.equal(purchase.status,201);
+  assert.equal((await refresh(f,purchase.body.order)).status,200);
+  const before=setCrossRailUsed(f,4);
+  const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200,JSON.stringify(quote.body));
+  const next=await crossRailFiatCheckout(f,'pro',quote.body.quote.id);
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  f.sql.exec('DELETE FROM boltutil_payment_events');
+  const paid=await crossRailFiatVerify(f,next,5000);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  assert.equal(paid.body.orderStatus,'manual_review','authenticated new Alipay charge retained for review');
+  assert.equal(paid.body.entitlementApplied,false);
+  assert.equal(count(f,'subscription_tier_changes'),0);
+  const period=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+  assert.deepEqual([period.id,period.end_at,period.daily_limit],[before.id,before.end_at,500]);
+  assert.equal(row(f,'SELECT used FROM subscription_daily_usage WHERE period_id=? AND day_index=0',before.id).used,4);
+  assert.equal(count(f,'subscription_payment_events'),1,'do not lose the new real payment evidence');
+ }finally{f.sql.close();}
+});
+
+test('USDT -> fiat Alipay upgrade fails closed when BoltUtil D1 schema flag is disabled after checkout',async()=>{
+ const f=setup();
+ try{
+  allowCrossRailFiat(f);
+  productionCrossRail(f);
+  const purchase=await create(f,'BEP20','subscription','basic');
+  assert.equal(purchase.status,201);
+  assert.equal((await refresh(f,purchase.body.order)).status,200);
+  const quote=await f.call('/v1/subscriptions/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200);
+  const next=await crossRailFiatCheckout(f,'pro',quote.body.quote.id);
+  assert.equal(next.status,201,JSON.stringify(next.body));
+  f.env.BOLTUTIL_SCHEMA_READY='0';
+  const paid=await crossRailFiatVerify(f,next,5000);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  assert.equal(paid.body.orderStatus,'manual_review');
+  assert.equal(count(f,'subscription_tier_changes'),0);
+  assert.equal(row(f,"SELECT daily_limit FROM subscription_periods WHERE status='active'").daily_limit,500);
+  assert.equal(count(f,'subscription_payment_events'),1);
+ }finally{f.sql.close();}
+});
+
+test('MK99 fiat BASIC -> verified TRON USDT PRO upgrade preserves period and separate payment rails',async()=>{
+ const f=setup();
+ try{
+  allowCrossRailFiat(f);
+  productionCrossRail(f);
+  const source=await crossRailFiatCheckout(f,'basic');
+  assert.equal(source.status,201,JSON.stringify(source.body));
+  const paidSource=await crossRailFiatVerify(f,source,6990);
+  assert.equal(paidSource.status,200,JSON.stringify(paidSource.body));
+  const before=setCrossRailUsed(f,4);
+  const quote=await f.call('/v1/boltutil/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200,JSON.stringify(quote.body));
+  const upgrade=await create(f,'TRC20','subscription','pro',{quoteId:quote.body.quote.id});
+  assert.equal(upgrade.status,201,JSON.stringify(upgrade.body));
+  const paid=await refresh(f,upgrade.body.order);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  assert.equal(paid.body.order.entitlementApplied,true);
+  const period=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+  assert.deepEqual([period.id,period.end_at,period.daily_limit],[before.id,before.end_at,1000]);
+  assert.equal(count(f,'subscription_tier_changes'),1);
+  assert.equal(count(f,'subscription_payment_transactions'),1,'USDT upgrade must not create extra CNY proof');
+  const usage=await f.call('/v1/usage',{method:'GET'});
+  assert.equal(usage.body.subscription.usedToday,4);
+  assert.equal(usage.body.subscription.remainingToday,996);
+  assert.equal(row(f,"SELECT paid_balance FROM credit_accounts WHERE user_id='test-user'").paid_balance,0);
+ }finally{f.sql.close();}
+});
+
+test('fiat -> USDT upgrade with withdrawn fiat provider proof must be held rather than granted',async()=>{
+ const f=setup();
+ try{
+  allowCrossRailFiat(f);
+  productionCrossRail(f);
+  const source=await crossRailFiatCheckout(f,'basic');
+  assert.equal(source.status,201);
+  assert.equal((await crossRailFiatVerify(f,source,6990)).status,200);
+  const before=setCrossRailUsed(f,4);
+  const quote=await f.call('/v1/boltutil/upgrade-quote',{body:{planCode:'pro'}});
+  assert.equal(quote.status,200);
+  const upgrade=await create(f,'TRC20','subscription','pro',{quoteId:quote.body.quote.id});
+  assert.equal(upgrade.status,201,JSON.stringify(upgrade.body));
+  f.sql.exec('DELETE FROM subscription_payment_events');
+  const paid=await refresh(f,upgrade.body.order);
+  assert.equal(paid.status,200,JSON.stringify(paid.body));
+  assert.equal(paid.body.order.entitlementApplied,false);
+  assert.equal(paid.body.order.status,'manual_review');
+  assert.equal(count(f,'subscription_tier_changes'),0);
+  const period=row(f,"SELECT id,end_at,daily_limit FROM subscription_periods WHERE status='active'");
+  assert.deepEqual([period.id,period.end_at,period.daily_limit],[before.id,before.end_at,500]);
+  assert.equal(count(f,'boltutil_payment_events'),1,'independent verified payment remains auditable');
+ }finally{f.sql.close();}
+});
