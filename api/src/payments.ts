@@ -153,7 +153,7 @@ export async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,e
     if(row.transaction_id!==transaction.id||row.event_type!==event.eventType||Number(row.amount_fen)!==event.amountFen||row.currency!==event.currency)
       throw new ApiFailure(409,"PAYMENT_EVENT_CONFLICT","支付事件标识已用于其他订单或与当前订单信息不匹配。");
     const current=await transactionForOrder(env,orderId);
-    return {duplicate:true as const,quota:await balance(env,userId),status:current?.status??transaction.status};
+    return {duplicate:true as const,quota:await balance(env,userId),status:current?.risk_state==='manual_review'?'manual_review':current?.status??transaction.status};
   };
   const priorEvent=await duplicatePaymentState();
   if(priorEvent)return priorEvent;

@@ -114,6 +114,7 @@ for(const provider of ['xiaodou','mk99']){
      assert.equal(scalar(f,'SELECT count(*) n FROM credit_batches WHERE source_order_id=?',id).n,0);
      const second=await lateQuery(f,provider,type,id,first.trade,amount,key);
      assert.equal(second.status,200,JSON.stringify(second.body));
+     assert.equal(second.body.orderStatus,'manual_review','replayed proof must not be shown as ordinary paid');
      assert.equal(scalar(f,'SELECT paid_balance FROM credit_accounts').paid_balance,0);
     }
    }finally{f.sql.close();}
