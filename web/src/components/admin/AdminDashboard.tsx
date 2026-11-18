@@ -102,6 +102,9 @@ export default function AdminDashboard() {
   const [auditsLoaded, setAuditsLoaded] = useState(false);
   const [contentLoaded, setContentLoaded] = useState(false);
   const [costLoaded, setCostLoaded] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
   const [creating, setCreating] = useState(false);
   const say = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const read = <T,>(path: string) => api<T>(path);
@@ -129,7 +132,7 @@ export default function AdminDashboard() {
   };
 
   const load = useCallback(async () => {
-    setBusy(true); setAccess("loading"); setData(null); setNotice(""); setAuditsLoaded(false); setContentLoaded(false); setCostLoaded(false);
+    setBusy(true); setAccess("loading"); setData(null); setNotice(""); setAuditsLoaded(false); setContentLoaded(false); setCostLoaded(false); setHistoryLoaded(false); setHistoryLoadFailed(false);
     try {
       const metrics = await read<Metrics>("/v1/admin/dashboard?view=overview");
       const [users, packages, orders, settings] = await Promise.all([
@@ -160,12 +163,25 @@ export default function AdminDashboard() {
     }).catch(cause=>{if(live)say(readableError(cause,language),true);});
     return()=>{live=false;};
   },[access,tab,contentLoaded,language]);
+  // The collapsed legacy history panel is read only after expansion. A
+  // failed request does not silently display missing financial data as zero;
+  // close/reopen the panel to retry. The server checks admin auth for each read.
+  useEffect(() => {
+    if(access!=="ready"||tab!=="overview"||!historyOpen||historyLoaded||historyLoadFailed)return;
+    let live=true;
+    void read<Metrics>("/v1/admin/dashboard?view=history").then(history=>{
+      if(!live)return;
+      setData(previous=>previous&&({...previous,metrics:{...previous.metrics,...history}}));
+      setHistoryLoaded(true);
+    }).catch(cause=>{if(live){setHistoryLoadFailed(true);say(readableError(cause,language),true);}});
+    return()=>{live=false;};
+  },[access,tab,historyOpen,historyLoaded,historyLoadFailed,language]);
   // Cost history is expensive and not needed for the operations landing page.
   // Fetch exact monthly model attribution only when the AI cost workspace opens.
   useEffect(() => {
     if(access!=="ready"||tab!=="cost"||costLoaded)return;
     let live=true;
-    void read<Metrics>("/v1/admin/dashboard").then(full=>{
+    void read<Metrics>("/v1/admin/dashboard?view=cost").then(full=>{
       if(!live)return;
       setData(previous=>previous&&({...previous,metrics:{...previous.metrics,...full}}));
       setCostLoaded(true);
@@ -317,13 +333,16 @@ export default function AdminDashboard() {
             </Card>
           </div>
         </div>
-        <details className="admin-overview-secondary rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <details className="admin-overview-secondary rounded-xl border border-slate-200 bg-white px-4 py-3"
+          onToggle={event=>{setHistoryOpen(event.currentTarget.open);if(event.currentTarget.open)setHistoryLoadFailed(false);}}>
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-[13px] font-semibold text-slate-700">
             <span>{t("历史口径与更多运营指标","Legacy bookkeeping & more metrics")}</span>
             <span className="text-[11px] font-normal text-slate-400">{t("展开查看","Expand")}</span>
           </summary>
           <p className="mt-3 text-xs leading-5 text-slate-500">{t("以下额度包登记指标沿用旧统计口径；核验实收请以上方经营收入为准。","Legacy credit-pack bookkeeping differs from verified receipts above.")}</p>
-          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
+          {!historyLoaded?<p role="status" className="mt-3 text-sm text-slate-500">
+            {historyLoadFailed?t("历史指标读取失败，收起后重新展开即可重试。","Could not load historical metrics. Close and reopen to retry."):t("正在按需读取历史指标…","Loading historical metrics on demand…")}
+          </p>:<div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4">
             {([
               ["revenue7dFen",t("额度包近 7 天登记金额","Credit booked amount · 7d")],
               ["paidUsers",t("额度包已记账用户","Booked credit-pack users")],
@@ -346,7 +365,7 @@ export default function AdminDashboard() {
                     :String(data.metrics[key]??"—")}
                 </p>
               </div>)}
-          </div>
+          </div>}
         </details>
       </TabsContent>
       <TabsContent value="users" className="space-y-5"><Card><CardHeader><CardTitle>{t("用户管理", "Users")}</CardTitle></CardHeader><CardContent><form className="mb-5 flex flex-wrap gap-2" onSubmit={event => void searchUsers(event)}><Input aria-label={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} placeholder={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} value={search} onChange={event => setSearch(event.target.value)} /><Button variant="outline" disabled={busy}><Search size={15} />{t("搜索", "Search")}</Button></form><div className="mb-4 grid gap-3 sm:grid-cols-4"><Field label="付费状态"><select className="h-9 rounded border px-2" value={paidFilter} onChange={e=>setPaidFilter(e.target.value)}><option value="all">全部</option><option value="paid">已付费</option><option value="unpaid">未付费</option></select></Field><Field label="注册日期从"><Input type="date" value={registeredFrom} onChange={e=>setRegisteredFrom(e.target.value)}/></Field><Field label="注册日期至"><Input type="date" value={registeredTo} onChange={e=>setRegisteredTo(e.target.value)}/></Field><Field label="最近活跃起始日期"><Input type="date" value={activeSince} onChange={e=>setActiveSince(e.target.value)}/></Field></div><p className="mb-3 text-xs text-muted-foreground">设置筛选后点击搜索。活跃以会话创建、AI 请求或支付成功时间计算。</p><div className="mb-4 flex flex-wrap gap-2"><Button disabled={busy||!selected.length} variant="outline" onClick={()=>void run(()=>exportCsv("users",selected))}>导出所选用户 CSV</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量冻结", "Freeze selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "frozen"}); setSelected([]); await refresh(); }})}>{t("批量冻结", "Freeze selected")}</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量恢复", "Restore selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "active"}); setSelected([]); await refresh(); }})}>{t("批量恢复", "Restore selected")}</Button></div><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("用户", "User"), t("状态", "Status"), t("免费", "Free"), t("付费", "Paid"), t("已生成", "Generated"), t("操作", "Action")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.users.map(user => <TableRow key={user.id}><TableCell><input aria-label={`Select ${user.email}`} type="checkbox" checked={selected.includes(user.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, user.id] : ids.filter(id => id !== user.id))} /> <strong>{user.username || t("旧账户", "Legacy user")}</strong><div className="text-xs text-muted-foreground">{user.email}</div><div className="text-xs text-muted-foreground">ID {user.id}{user.is_test_account ? t(" · 测试账户", " · Test account") : ""}{user.archived_at ? t(" · 已归档", " · Archived") : ""}</div></TableCell><TableCell><Badge variant={user.status === "active" ? "secondary" : "destructive"}>{statusText(user.status, language)}</Badge></TableCell><TableCell>{user.free_balance}</TableCell><TableCell>{user.paid_balance}</TableCell><TableCell>{user.generations == null ? <span className="text-xs text-muted-foreground">{t("详情查看准确次数", "Open details for exact count")}</span> : user.generations}<div className="mt-1 text-xs text-muted-foreground">{t("注册日期", "Registered")}: {user.created_at?date(user.created_at,language):"—"}</div><div className="text-xs text-muted-foreground">{t("最近活动", "Last active")}: {user.last_active_at?date(user.last_active_at,language):t("详情查看", "View details")}</div></TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => setDetail(await read<UserDetail>(`/v1/admin/users/${encodeURIComponent(user.id)}`)))}>{t("详情", "Details")}</Button> <Button size="sm" variant="outline" disabled={busy} onClick={() => freeze(user)}>{user.status === "frozen" ? t("解冻", "Unfreeze") : t("冻结", "Freeze")}</Button></TableCell></TableRow>)}</TableBody></Table></div>{!data.users.length && <Empty text={t("没有匹配账户。", "No matching users.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("额度调整", "Adjust credits")}</CardTitle></CardHeader><CardContent><form className="grid grid-cols-2 gap-4 lg:grid-cols-4" onSubmit={adjust}><Field label={t("用户 ID", "User ID")}><Input required value={adjustUser} onChange={event => setAdjustUser(event.target.value)} /></Field><Field label={t("额度类型", "Credit type")}><select className="h-9 rounded-md border border-input bg-white px-3 text-sm" value={adjustKind} onChange={event => setAdjustKind(event.target.value)}><option value="free">{t("免费", "Free")}</option><option value="paid">{t("付费", "Paid")}</option></select></Field><Field label={t("调整次数，可填负数", "Amount, negative allowed")}><Input type="number" required min={-10000} max={10000} value={adjustDelta} onChange={event => setAdjustDelta(event.target.value)} /></Field><Field label={t("原因，至少 8 字", "Reason, at least 8 characters")}><Input required minLength={8} maxLength={500} value={adjustReason} onChange={event => setAdjustReason(event.target.value)} /></Field><Button className="col-span-2 lg:col-span-4 w-fit" disabled={busy}>{t("预览并确认调整", "Review adjustment")}</Button></form></CardContent></Card></TabsContent>
