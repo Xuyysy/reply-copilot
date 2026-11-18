@@ -35,7 +35,7 @@ test('permanent credit checkout only renders backend-authorized fiat methods plu
  assert.match(credit,/\/v1\/packages/);
  assert.match(credit,/unique\.some\(method=>method\.channel===selectedChannel&&method\.provider===selectedProvider\)/);
  assert.match(credit,/selectedChannel=paymentMethods\[0\]\?\.channel/);
- assert.match(credit,/扫码后将在手机微信中打开小豆收银台/);
+ assert.match(credit,/扫码后会在微信中打开支付页面/);
  assert.match(credit,/safeMk99Cashier/);
 });
 test('Production subscription checkout preserves verified fiat return flow and gates independent USDT option',()=>{

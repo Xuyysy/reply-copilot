@@ -35,6 +35,7 @@ test('cancel buttons guide a repurchase while preserving late payment warning an
  assert.match(subscription,/href="\/pricing\/"/);
  assert.match(account,/想重新购买其他套餐？/);
  assert.match(account,/想更换额度包或支付方式？/);
+ assert.match(account,/feedback\.code\.replace/);
  assert.match(credits,/之前打开的收银台仍可能收款/);
  assert.match(credits,/\/local-cancel/);
  assert.match(subscription,/confirm:true/);
