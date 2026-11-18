@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {fixture} from './helpers/payment-v2.mjs';
 
 const DAY=86400000;
@@ -164,5 +165,53 @@ test('subscription summary route requires active verified admin exactly as legac
   }
   grantAdmin(f);
   assert.equal((await f.call('/v1/admin/subscriptions/finance?view=summary',{method:'GET'})).status,200);
+ }finally{f.sql.close();}
+});
+
+
+test('admin effective status accepts genuine verified BEP20 BASIC payment and preserves used/remaining',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';f.env.ENVIRONMENT='production';f.env.BOLTUTIL_SCHEMA_READY='1';
+  grantAdmin(f);seedUnverifiedSubscriber(f);
+  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
+  f.sql.exec("DELETE FROM subscription_payment_transactions WHERE order_id='sub1'");
+  const now=Date.now(),hash='0x'+'a'.repeat(64);
+  f.sql.prepare("INSERT INTO boltutil_orders(id,external_order_id,user_id,operation_id,product_type,subscription_order_id,network,token_contract,token_decimals,base_amount_fen,cny_per_usdt_micros,quoted_usdt_micros,payable_usdt_micros,paid_usdt_micros,receiving_address,tx_hash,status,paid_at,applied_at,created_at,updated_at) VALUES('crypto-sub','ext-sub','test-user','op-sub','subscription','sub1','BEP20','0xabc',18,6990,6670000,10479761,10479761,10479761,?,?,'paid',?,?,1,1)")
+   .run('0x'+'1'.repeat(40),hash,now,now);
+  const read=async()=>{const r=await f.call('/v1/admin/subscriptions/users?status=active&plan=basic',{method:'GET'});assert.equal(r.status,200,JSON.stringify(r.body));assert.equal(r.body.users.length,1);return r.body.users[0];};
+  let row=await read();
+  assert.equal(row.effective_status,'expired_or_unverified','paid flag without provider evidence must remain invalid');
+  assert.equal(row.remaining_today,0);
+  f.sql.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) VALUES('crypto-event','ext-sub','CONFIRMED','BEP20',?,'sha256-verified',?)").run(hash,now);
+  row=await read();
+  assert.equal(row.effective_status,'active');
+  assert.equal(row.verified_crypto_paid_event,1);
+  assert.equal(row.verified_paid_event,0,'valid crypto has no fiat payment');
+  assert.equal(row.used_today,490);
+  assert.equal(row.reserved_today,2);
+  assert.equal(row.remaining_today,8);
+  f.sql.exec("UPDATE boltutil_orders SET paid_usdt_micros=0");
+  row=await read();assert.equal(row.effective_status,'expired_or_unverified');
+  f.sql.exec("UPDATE boltutil_orders SET paid_usdt_micros=payable_usdt_micros,status='manual_review'");
+  row=await read();assert.equal(row.effective_status,'expired_or_unverified');
+  f.sql.exec("UPDATE boltutil_orders SET status='paid'");
+  f.env.BOLTUTIL_SCHEMA_READY='0';
+  row=await read();assert.equal(row.effective_status,'expired_or_unverified','crypto not trusted without explicit schema flag');
+  f.env.BOLTUTIL_SCHEMA_READY='1';
+  f.sql.exec("UPDATE subscription_periods SET start_at=1,end_at=2");
+  row=await read();assert.equal(row.effective_status,'expired_or_unverified','expired period must remain invalid');
+ }finally{f.sql.close();}
+});
+
+test('admin subscription route remains usable without a BoltUtil D1 migration',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';grantAdmin(f);seedUnverifiedSubscriber(f);
+  for(const environment of ['staging','production','local']){
+   f.env.ENVIRONMENT=environment;f.env.BOLTUTIL_SCHEMA_READY='0';
+   const r=await f.call('/v1/admin/subscriptions/users',{method:'GET'});
+   assert.equal(r.status,200,JSON.stringify(r.body));
+   assert.equal(r.body.users.length,1);
+   assert.equal(r.body.users[0].effective_status,'expired_or_unverified');
+  }
  }finally{f.sql.close();}
 });
