@@ -2,6 +2,7 @@ import type { Env } from './types';
 import { ApiFailure } from './types';
 import { subscriptionDayWindow, subscriptionDailyAvailability } from '../../domain/subscription-policy.js';
 import { activateQueuedSubscriptionForUser } from './subscription-renewal';
+import {SUBSCRIPTION_RELEVANT_PERIOD_SQL} from './subscription-account-queries.js';
 
 // Deliberately OFF in all deployed environments until the entire subscription
 // payment + reservation + ACK + refunds pipeline is ready and migrated.
@@ -43,6 +44,15 @@ type ActivePeriod = {
 export async function subscriptionAccount(env: Env, userId: string, now: number = Date.now()): Promise<SubscriptionAccount> {
   if (!subscriptionsEnabled(env)) return { ...NONE };
   if (!Number.isSafeInteger(now) || now < 0) throw new ApiFailure(503, 'SUBSCRIPTION_CLOCK_INVALID', '订阅时间暂时不可用。');
+
+  // Most users have never bought a subscription. Avoid the fiat proof JOIN,
+  // BoltUtil proof JOIN and queued-activation lookup on that hot path. A user
+  // can only gain subscription quota from an active period or a queued paid
+  // period activated by the existing atomic renewal flow. This index-only
+  // preflight is NOT proof of payment; the original provider/evidence guards
+  // below remain the sole authority before any quota is granted.
+  const candidate=await env.DB.prepare(SUBSCRIPTION_RELEVANT_PERIOD_SQL).bind(userId).first<{candidate:number}>();
+  if(!candidate)return {...NONE};
 
   const activeQuery = () => env.DB.prepare(`SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code
     FROM subscription_periods p
