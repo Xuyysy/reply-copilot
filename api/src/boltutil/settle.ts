@@ -5,6 +5,7 @@ import {response} from "../http";
 import {verifyBoltWebhook,boltRequest} from "./client";
 import {boltReadSchemaReady} from "./environment";
 import {closeProviderConfirmedUnpaidBoltSubscription} from "./terminal";
+import {verifiedSubscriptionSourceSql} from "../subscription-payment-proof";
 import {VerifiedPayment,verifiedPayment,distinctSettlement,tokenRawUnits,equalAddress,normalizedBoltTransactionHash,NETWORKS,type BoltNetwork} from "./contract";
 import {SUBSCRIPTION_PERIOD_MS,SUBSCRIPTION_DAY_MS} from "../../../domain/subscription-policy.js";
 
@@ -152,7 +153,7 @@ export async function settleBoltPayment(env:Env,externalId:string,callback:Recor
     if(sub.kind==="upgrade"){
       const claim=uuid();
       statements.push(
-        env.DB.prepare("INSERT INTO subscription_tier_changes(id,period_id,order_id,previous_plan_version_id,next_plan_version_id,previous_daily_limit,next_daily_limit,charged_fen,effective_at,original_expires_at) SELECT ?,p.id,o.id,p.plan_version_id,v.id,p.daily_limit,v.daily_limit,o.amount_fen,?,p.end_at FROM subscription_orders o JOIN subscription_upgrade_quotes q ON q.order_id=o.id JOIN subscription_periods p ON p.id=q.period_id AND p.user_id=o.user_id JOIN subscription_plan_versions v ON v.id=o.plan_version_id WHERE o.id=? AND o.user_id=? AND o.status='paid' AND o.kind='upgrade' AND o.target_period_id=p.id AND o.amount_fen=q.amount_fen AND q.to_version_id=v.id AND q.from_version_id=p.plan_version_id AND q.period_end_at=p.end_at AND p.status='active' AND p.end_at-?>=? AND v.daily_limit>p.daily_limit AND "+paidProof+" ON CONFLICT(order_id) DO NOTHING")
+        env.DB.prepare("INSERT INTO subscription_tier_changes(id,period_id,order_id,previous_plan_version_id,next_plan_version_id,previous_daily_limit,next_daily_limit,charged_fen,effective_at,original_expires_at) SELECT ?,p.id,o.id,p.plan_version_id,v.id,p.daily_limit,v.daily_limit,o.amount_fen,?,p.end_at FROM subscription_orders o JOIN subscription_upgrade_quotes q ON q.order_id=o.id JOIN subscription_periods p ON p.id=q.period_id AND p.user_id=o.user_id JOIN subscription_orders source ON source.id=p.source_order_id AND source.user_id=p.user_id JOIN subscription_plan_versions v ON v.id=o.plan_version_id WHERE o.id=? AND o.user_id=? AND o.status='paid' AND o.kind='upgrade' AND o.target_period_id=p.id AND o.amount_fen=q.amount_fen AND q.to_version_id=v.id AND q.from_version_id=p.plan_version_id AND q.period_end_at=p.end_at AND p.status='active' AND p.end_at-?>=? AND v.daily_limit>p.daily_limit AND "+verifiedSubscriptionSourceSql(env)+" AND "+paidProof+" ON CONFLICT(order_id) DO NOTHING")
           .bind(claim,now,sub.id,order.user_id,now,SUBSCRIPTION_DAY_MS,...args),
         env.DB.prepare("UPDATE subscription_periods SET plan_version_id=?,daily_limit=(SELECT daily_limit FROM subscription_plan_versions WHERE id=?),updated_at=? WHERE id=? AND user_id=? AND EXISTS(SELECT 1 FROM subscription_tier_changes WHERE id=? AND period_id=subscription_periods.id)")
           .bind(sub.plan_version_id,sub.plan_version_id,now,sub.target_period_id,order.user_id,claim),

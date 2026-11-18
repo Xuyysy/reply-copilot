@@ -9,6 +9,7 @@ import { configuredXiaodouMerchant } from './xiaodou-merchant';
 import { SUBSCRIPTION_PERIOD_MS } from '../../domain/subscription-policy.js';
 import { recordSubscriptionRisk } from './subscription-risk';
 import { subscriptionsEnabled } from './subscription-account';
+import {verifiedSubscriptionSourceSql} from './subscription-payment-proof';
 
 // A new payment domain: NEVER call applyPaymentEvent() for subscriptions.
 // This endpoint cannot create charges, and stays OFF even if read-only
@@ -104,14 +105,13 @@ async function settleUpgrade(env:Env,o:Order,event:VerifiedSubscriptionEvent,now
     JOIN subscription_payment_transactions t ON t.order_id=x.id
     JOIN users u ON u.id=x.user_id
     JOIN subscription_orders source ON source.id=p.source_order_id AND source.user_id=p.user_id
-    JOIN subscription_payment_transactions origin ON origin.order_id=source.id
     WHERE x.id=? AND x.user_id=? AND x.status IN ('pending','unknown') AND x.applied_at IS NULL
       AND t.status='paid' AND t.risk_state='clear' AND t.provider_payment_id=?
       AND q.amount_fen=x.amount_fen AND t.amount_fen=x.amount_fen
       AND p.plan_version_id=q.from_version_id AND p.status='active' AND p.end_at=q.period_end_at
       AND p.start_at<=? AND p.end_at>? AND p.daily_limit<v.daily_limit
       AND u.status='active' AND u.archived_at IS NULL
-      AND source.status='paid' AND source.applied_at IS NOT NULL AND origin.status='paid' AND origin.risk_state='clear'
+      AND ${verifiedSubscriptionSourceSql(env)}
       AND ${proof}
     ON CONFLICT(order_id) DO NOTHING`).bind(claim,now,o.id,o.user_id,event.tradeNo,now,now,...proofParams),
   env.DB.prepare(`UPDATE subscription_periods SET plan_version_id=?,daily_limit=?,updated_at=?

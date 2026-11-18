@@ -12,6 +12,7 @@ import {reconcileClosedBoltSubscriptionsForUser} from './boltutil/terminal';
 import {closeExpiredUnpaidBoltOrdersForUser} from './boltutil/expiry';
 import { quoteSubscriptionUpgrade, SUBSCRIPTION_DAY_MS } from '../../domain/subscription-policy.js';
 import { subscriptionAccount, subscriptionsEnabled } from './subscription-account';
+import {verifiedSubscriptionSourceSql} from './subscription-payment-proof';
 import { orderById, querySubscriptionPayment, reconcileUnpaidXiaodouTerminal } from './subscription-settlement';
 
 // Explicit third switch: the subscription catalog and existing-order paid
@@ -240,11 +241,10 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
      FROM subscription_upgrade_quotes q JOIN subscription_periods p ON p.id=q.period_id AND p.user_id=q.user_id
      JOIN subscription_plan_versions v ON v.id=q.to_version_id
      JOIN subscription_orders source ON source.id=p.source_order_id AND source.user_id=q.user_id
-     JOIN subscription_payment_transactions paid ON paid.order_id=source.id
      JOIN users u ON u.id=q.user_id
      WHERE q.id=? AND q.user_id=? AND q.order_id IS NULL AND q.expires_at>?
        AND p.status='active' AND p.plan_version_id=q.from_version_id AND p.end_at=q.period_end_at AND p.end_at-?>=?
-       AND source.status='paid' AND source.applied_at IS NOT NULL AND paid.status='paid' AND paid.risk_state='clear'
+       AND ${verifiedSubscriptionSourceSql(env)}
        AND v.id=? AND v.current=1 AND v.active=1 AND v.daily_limit>p.daily_limit
        AND u.status='active' AND u.archived_at IS NULL
        AND NOT EXISTS(SELECT 1 FROM subscription_orders x WHERE x.user_id=q.user_id AND ${subscriptionBlocksNewCheckoutSql('x')})`)
