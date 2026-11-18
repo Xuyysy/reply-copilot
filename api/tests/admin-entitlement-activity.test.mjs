@@ -80,3 +80,35 @@ test('entitlement keyset pagination is stable and covers all rows exactly once',
   assert.equal(new Set([...first.body.items,...next.body.items].map(x=>x.id)).size,61);
  }finally{f.sql.close();}
 });
+
+test('CF Free: keyset pagination merges all bounded source branches without missing tied events',async()=>{
+ const f=adminFixture();try{
+  seed(f);
+  const at=Date.now()-100;
+  for(let i=0;i<61;i++)
+   f.sql.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,created_at) VALUES(?,'test-user','signup_grant',1,0,?,?)")
+    .run('merge-'+String(i).padStart(3,'0'),'merge-ref-'+i,at);
+  const ids=[],times=[];
+  let cursor=null,iterations=0;
+  do{
+   const q='?source=all'+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+   const r=await f.call('/v1/admin/entitlement-activity'+q,{method:'GET'});
+   assert.equal(r.status,200,JSON.stringify(r));
+   ids.push(...r.body.items.map(x=>x.id));
+   times.push(...r.body.items.map(x=>[x.occurred_at,x.id]));
+   cursor=r.body.nextCursor;iterations++;
+   assert.ok(iterations<8,'must terminate without repeated pages');
+  }while(cursor);
+  assert.equal(ids.length,69,'61 synthetic credit events plus eight independent seeded activity records');
+  assert.equal(new Set(ids).size,69,'stable cursor cannot duplicate or skip rows');
+  for(let i=1;i<times.length;i++)
+   assert.ok(times[i-1][0]>times[i][0]||(times[i-1][0]===times[i][0]&&times[i-1][1]>times[i][1]),
+      'same-timestamp ordering uses binary descending stable IDs');
+  const sub=await f.call('/v1/admin/entitlement-activity?source=subscription',{method:'GET'});
+  assert.equal(sub.status,200);assert.ok(sub.body.items.length>0);
+  assert.ok(sub.body.items.every(x=>x.source==='subscription'));
+  const byEmail=await f.call('/v1/admin/entitlement-activity?q=v2%40example.test',{method:'GET'});
+  assert.equal(byEmail.status,200);assert.equal(byEmail.body.items.length,50);
+  assert.equal((await f.call('/v1/admin/entitlement-activity?q=unknown%40example.test',{method:'GET'})).body.items.length,0);
+ }finally{f.sql.close();}
+});
