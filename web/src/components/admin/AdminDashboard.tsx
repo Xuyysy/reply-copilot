@@ -207,9 +207,16 @@ export default function AdminDashboard() {
     const id=++generationStatsRequest.current;
     setGenerationStatsLoading(true);setGenerationStatsFailed(false);
     try{
-      const exact=await read<{todayGenerations:number;monthGenerations:number}>("/v1/admin/dashboard?view=generations");
+      // An older Worker treats this new view as the legacy full dashboard.
+      // Accept only the two exact counters from either response shape, and
+      // never overwrite other dashboard metrics with a legacy full response.
+      const reply=await read<{todayGenerations?:number;monthGenerations?:number}>("/v1/admin/dashboard?view=generations");
       if(id!==generationStatsRequest.current)return;
-      setData(previous=>previous&&({...previous,metrics:{...previous.metrics,...exact}}));
+      const today=reply.todayGenerations,month=reply.monthGenerations;
+      if(typeof today!=='number'||!Number.isSafeInteger(today)||today<0||
+         typeof month!=='number'||!Number.isSafeInteger(month)||month<0)
+        throw new Error(t("精确生成统计响应无效，请重试。","Invalid exact generation totals; retry."));
+      setData(previous=>previous&&({...previous,metrics:{...previous.metrics,todayGenerations:today,monthGenerations:month}}));
       setGenerationStatsLoaded(true);
     }catch(cause){
       if(id===generationStatsRequest.current){
@@ -517,8 +524,14 @@ function UserDetailHistory({ detail, language }: { detail: UserDetail; language:
     const id=++countRequest.current;
     setCountLoading(true);setCountFailed(false);
     try{
-      const exact=await api<{generations:number}>("/v1/admin/users/"+encodeURIComponent(detail.user.id)+"?view=generations");
-      if(id===countRequest.current)setGenerations(exact.generations);
+      // During Pages-first rollout an older Worker may return the original
+      // full user detail instead of the focused generations response.
+      const exact=await api<{generations?:number;user?:{generations?:number|null}}>("/v1/admin/users/"+encodeURIComponent(detail.user.id)+"?view=generations");
+      if(id!==countRequest.current)return;
+      const value=typeof exact.generations==='number'?exact.generations:exact.user?.generations;
+      if(typeof value!=='number'||!Number.isSafeInteger(value)||value<0)
+        throw new Error("Invalid exact generation count response");
+      setGenerations(value);
     }catch{
       if(id===countRequest.current)setCountFailed(true);
     }finally{

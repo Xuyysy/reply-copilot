@@ -21,3 +21,12 @@ test('CF Free unloaded/failed counts use honest placeholders and remain retryabl
  assert.match(source,/countFailed&&<span role="status"/);
  assert.match(source,/key=\{detail.user.id\} detail=\{detail\}/);
 });
+
+test('rolling release: new Pages accepts focused or old full Worker ACK read shape without overwriting financial KPI',()=>{
+ assert.match(source,/typeof today!==\x27number\x27\|\|!Number\.isSafeInteger\(today\)/);
+ assert.match(source,/typeof month!==\x27number\x27\|\|!Number\.isSafeInteger\(month\)/);
+ assert.match(source,/monthGenerations:month/);
+ assert.match(source,/exact\.user\?\.generations/);
+ assert.match(source,/typeof value!==\x27number\x27\|\|!Number\.isSafeInteger\(value\)/);
+ assert.doesNotMatch(source,/metrics:\{\.\.\.previous\.metrics,\.\.\.exact\}/);
+});
