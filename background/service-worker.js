@@ -35,7 +35,7 @@ const accountStates = new AccountStateService();
 const generationContextPrewarmer=createGenerationContextPrewarmer({
   read:()=>Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]),
 });
-// Staging opt-in only: reuse the existing read-only account cache, not a parallel entitlement source.
+// Bounded Staging/Production read-only warmup, not an entitlement source; no generation or quota writes.
 const accountPrewarmer = createAccountPrewarmer({
   readAccount: () => accountStates.getState(),
   readPreferences: () => Promise.all([storage.getBehaviorPreferences(),generationContextPrewarmer.get()]),
@@ -178,10 +178,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   if (message?.type === "REPLY_COPILOT_PREWARM_ACCOUNT") {
-    // Only signed extension code in the top-level X tab, and only the Staging
-    // extension, may perform this optional background read. No generated draft,
-    // credit reservation, delivery ACK, payment, or publishing side effect.
-    if (!fromXPage || sender.frameId !== 0 || RUNTIME_CONFIG.channel !== "staging") {
+    // Only top-level signed extension messages from X pages in packaged builds.
+    // No generation, credit reservation, delivery ACK, payment or publication.
+    if (!fromXPage || sender.frameId !== 0 || !["staging","production"].includes(RUNTIME_CONFIG.channel)) {
       sendResponse({ok:false}); return false;
     }
     void accountPrewarmer.prime().then(
@@ -289,7 +288,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       const trace = globalThis.ReplyCopilotPerformance.createTrace({enabled:performanceEnabled && message.performanceEnabled===true});
       const controller = new AbortController(); activeRequests.get(message.requestId)?.abort(); activeRequests.set(message.requestId, controller);
       try {
-        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>RUNTIME_CONFIG.channel==="staging"
+        const [voiceProfile, replyStyle, generationContext] = await trace.measure("background_prepare",()=>["staging","production"].includes(RUNTIME_CONFIG.channel)
           ?generationContextPrewarmer.get()
           :Promise.all([profiles.get(),storage.getReplyStyle(),history.getGenerationContext(20)]));
         const engine = new ReplyEngine({ aiClient: aiProvider, historyService: history });

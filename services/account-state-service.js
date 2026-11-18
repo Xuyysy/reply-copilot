@@ -43,10 +43,10 @@ export class AccountStateService {
     const token=await this.client.token();
     if (!this.config.hostedApiUrl || !token) return EMPTY_ACCOUNT_STATE;
     try {
-      // Staging-only opt-in. Old Staging Workers may lack bootstrap; ONLY a
-      // verified legacy 404 permits fallback, never an auth/network failure.
+      // Packaged extension builds try authenticated bootstrap. An older API may
+      // lack the route; ONLY 404 NOT_FOUND permits fallback, not auth/network errors.
       let account,entitlement,usage;
-      if(this.config.channel==="staging"&&this.bootstrapCapability!==false&&typeof this.client.fetchBootstrap==="function"){
+      if(["staging","production"].includes(this.config.channel)&&this.bootstrapCapability!==false&&typeof this.client.fetchBootstrap==="function"){
         let bootstrap=null;
         try{bootstrap=await this.client.fetchBootstrap();}
         catch(error){if(error?.status!==404||error?.code!=="NOT_FOUND")throw error;this.bootstrapCapability=false;}
