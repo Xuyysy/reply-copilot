@@ -107,7 +107,7 @@ export default function SubscriptionCheckout(){
   };
  },[id,cashierOpened,order?.status,order?.checkout.paymentConfirmed,order?.merchantProvider]);
 
- async function act(action:'quote'|'create'|'refresh'|'relaunch'|'cancel'){
+ async function act(action:'quote'|'create'|'refresh'){
   if(operation.current)return;
   operation.current=true;setBusy(true);setError(undefined);setPaymentNote('');
   if(action==='create'){setBlockingOrder(null);setUnpaidBoltOrderId(null);}
@@ -130,20 +130,8 @@ export default function SubscriptionCheckout(){
     setPaymentNote(result.paymentConfirmed
      ?t('支付已核验，请查看账户权益。','Payment verified. Check your account entitlements.')
      :pending?(url?t('仍待付款，可继续打开原订单收银台。','Still awaiting payment. You can reopen the original cashier.')
-      :t('仍待付款，但付款入口可能已失效，可重新生成二维码。','Still awaiting payment, but the cashier may have expired. You can request a new QR code.'))
+      :t('仍待付款，但原收银台入口可能已失效。请保留原单并联系支持核对，勿重复付款。','Payment remains pending, but the cashier may be unavailable. Keep the original order and contact support before paying again.'))
      :t('平台暂未确认支付结果，请保留原订单，不要重复付款。','Payment is not confirmed. Keep the original order and avoid paying twice.'));
-   }else if(action==='cancel'){
-    if(!window.confirm(t('仅申请关闭当前这笔人民币原订单，不会取消 USDT 订单。如果已付款，请先查验原单；只有支付平台确认关单后才能重新购买。','This only requests closure of the currently displayed fiat order; it does not cancel USDT orders. If already paid, verify the original first. New purchases require merchant-confirmed closure.')))return;
-    const result=await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id+'/cancel',{method:'POST',body:JSON.stringify({})});
-    setOrder(result.order);setPayUrl(null);
-    setPaymentNote(t('原订单已由支付平台确认关闭。现在可以返回套餐页重新购买。','Merchant confirmed the original order is closed. You may return to the plans and buy again.'));
-   }else{
-    const result=await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+id+'/attempts',{method:'POST',body:JSON.stringify({})});
-    setOrder(result.order);
-    setPayUrl(result.order.status==='pending'?result.order.checkout.paymentUrl:null);
-    setPaymentNote(result.order.status==='pending'
-     ?t('已生成新的付款入口，旧二维码请勿再使用。','Fresh cashier generated. Do not reuse the previous QR code.')
-     :t('原订单已更新，请查看支付状态。','Original order updated. Check its payment status.'));
    }
   }catch(cause){
    const canRetry=action==='create'&&cause instanceof ApiError&&
@@ -215,10 +203,6 @@ export default function SubscriptionCheckout(){
    {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer" onClick={()=>{markPaymentCashierOpened('subscription',order.id);setCashierOpened(true);}}>{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
-   {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
-    <button className="button secondary" disabled={busy} onClick={()=>void act('relaunch')}>{t('重新生成原订单二维码','Generate new QR code for this order')}</button>:null}
-   {order.merchantProvider==='xiaodou'&&order.status==='pending'&&!order.checkout.paymentConfirmed?
-    <button className="button secondary" disabled={busy} onClick={()=>void act('cancel')}>{t('申请关闭本笔人民币原订单（确认后可重买）','Request closure of this fiat order (buy again once confirmed)')}</button>:null}
    {['closed','failed'].includes(order.status)?
     <a className="button secondary" href="/pricing/">{t('返回套餐页重新购买','Return to plans and buy again')}</a>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>
