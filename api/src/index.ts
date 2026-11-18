@@ -28,6 +28,7 @@ import { entitlements, licenseDevices, me, usage,activity } from "./account";
 import {register,verifyRegistration,passwordLogin,requestPasswordReset,resetPassword} from "./password-auth";
 import {adminBulkStatus,adminPackageCreate,adminAudits,adminUserDetail,adminTestAccount,adminDashboard,adminUsers,adminUserStatus,adminAdjust,adminPackages,adminPackageUpdate,adminOrders,adminSettings,adminSettingUpdate,adminLedger} from "./commercial";
 import {packages,createOrder,findUnresolvedOrder,getOrder,refreshOrder,relaunchPayment,cancelUnpaidXiaodouOrder,simulatePayment,xiaodouWebhook,epayNotify,requestRefund,requestUserRefund,simulateRefund,mk99Notify,adminMk99Check} from "./payments";
+import {cancelLocalFiatSubscription,cancelLocalFiatCredits} from "./fiat-local-cancel";
 import { approveDevice, deviceCodeStatus, exchangeDevice, requestDeviceCode } from "./device";
 import { generate } from "./ai";
 import { acknowledgeDelivery, recoverGeneration } from "./quota";
@@ -89,6 +90,7 @@ export default {
       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/refresh$/.test(path))return await refreshSubscriptionMk99Payment(request,env,path.split("/")[4]);
       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/attempts$/.test(path))return await relaunchSubscriptionCheckout(request,env,path.split("/")[4]);
       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/cancel$/.test(path))return await cancelUnpaidXiaodouSubscriptionCheckout(request,env,path.split("/")[4]);
+       if(request.method==="POST"&&/^\/v1\/subscriptions\/orders\/[0-9a-f-]{36}\/local-cancel$/i.test(path))return await cancelLocalFiatSubscription(request,env,path.split("/")[4]);
       if(request.method==="GET"&&path==="/v1/admin/subscriptions/finance")return await adminSubscriptionFinance(request,env);
       if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/plans\/(basic|pro|max|ultra)$/.test(path))return await publishSubscriptionPlan(request,env,path.split("/")[5]);
       if(request.method==="POST"&&/^\/v1\/admin\/subscriptions\/orders\/[a-zA-Z0-9_-]{1,80}\/verify$/.test(path))return await reviewSubscriptionPayment(request,env,path.split("/")[5]);
@@ -153,6 +155,7 @@ export default {
       if(request.method==="POST"&&orderRoute?.[2]==="refresh")return await refreshOrder(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="attempts")return await relaunchPayment(request,env,orderRoute[1]);
       if(request.method==="POST"&&orderRoute?.[2]==="close")return await cancelUnpaidXiaodouOrder(request,env,orderRoute[1]);
+       if(request.method==="POST"&&/^\/v1\/orders\/[0-9a-f-]{36}\/local-cancel$/i.test(path))return await cancelLocalFiatCredits(request,env,path.split("/")[3]);
       const userRefund=path.match(/^\/v1\/orders\/([0-9a-f-]{36})\/refunds$/i);
       if(request.method==="POST"&&userRefund)return await requestUserRefund(request,env,userRefund[1]);
       if (request.method === "GET" && path === "/v1/license/devices") return await licenseDevices(request, env);

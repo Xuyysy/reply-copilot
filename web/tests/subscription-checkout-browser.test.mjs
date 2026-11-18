@@ -92,7 +92,7 @@ test('Xiaodou pending subscription keeps cashier and verification without unused
   await until('document.body.textContent.includes("仍待付款")');
   assert.equal(await evaluate('document.querySelector("a[target]").href'),'https://cashier.fixture.invalid/original');
   const buttons=await evaluate('[...document.querySelectorAll("button")].map(b=>b.textContent.trim())');
-  assert.deepEqual(buttons,['查验付款状态']);
+  assert.deepEqual(buttons,['查验付款状态','未付款？取消本站订单']);
   assert.equal(await evaluate('document.body.textContent.includes("重新生成原订单二维码")'),false);
   assert.equal(await evaluate('document.body.textContent.includes("申请关闭本笔人民币原订单")'),false);
   assert.equal(await evaluate('window.__calls.filter(([method,p])=>method==="POST"&&p.endsWith("/attempts")).length'),0);

@@ -107,7 +107,7 @@ export default function SubscriptionCheckout(){
   };
  },[id,cashierOpened,order?.status,order?.checkout.paymentConfirmed,order?.merchantProvider]);
 
- async function act(action:'quote'|'create'|'refresh'){
+ async function act(action:'quote'|'create'|'refresh'|'local-cancel'){
   if(operation.current)return;
   operation.current=true;setBusy(true);setError(undefined);setPaymentNote('');
   if(action==='create'){setBlockingOrder(null);setUnpaidBoltOrderId(null);}
@@ -132,6 +132,20 @@ export default function SubscriptionCheckout(){
      :pending?(url?t('仍待付款，可继续打开原订单收银台。','Still awaiting payment. You can reopen the original cashier.')
       :t('仍待付款，但原收银台入口可能已失效。请保留原单并联系支持核对，勿重复付款。','Payment remains pending, but the cashier may be unavailable. Keep the original order and contact support before paying again.'))
      :t('平台暂未确认支付结果，请保留原订单，不要重复付款。','Payment is not confirmed. Keep the original order and avoid paying twice.'));
+   }else if(action==='local-cancel'){
+    if(!window.confirm(t(
+      '仅在未付款时取消。这里只关闭本站订单，无法撤销已提交给小豆或 MK99 的付款。如果已支付，请先查验付款状态。确定取消并重新选择支付方式吗？',
+      'Cancel only if you have not paid. This closes our local invoice but cannot reverse a Xiaodou or MK99 transfer. If paid, verify first. Cancel and choose another method?'
+    )))return;
+    await api('/v1/subscriptions/orders/'+encodeURIComponent(id)+'/local-cancel',{
+      method:'POST',body:JSON.stringify({confirm:true})
+    });
+    const current=(await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+encodeURIComponent(id))).order;
+    if(current.status!=='closed')throw new Error('ORDER_LOCAL_CANCEL_UNCONFIRMED');
+    setOrder(current);setPayUrl(null);
+    setPaymentNote(t('本站订单已关闭，可以返回套餐页重新选择支付宝或 USDT。若之前确实付款，请联系支持核对。',
+      'Local invoice closed. Return to plans to choose Alipay or USDT. Contact support if you already paid.'));
+
    }
   }catch(cause){
    const canRetry=action==='create'&&cause instanceof ApiError&&
@@ -203,6 +217,11 @@ export default function SubscriptionCheckout(){
    {order.status==='pending'&&!order.checkout.paymentConfirmed&&payUrl?<a className="button" href={payUrl} target="_blank" rel="noopener noreferrer" onClick={()=>{markPaymentCashierOpened('subscription',order.id);setCashierOpened(true);}}>{t('打开原订单收银台','Open original checkout')}</a>:null}
    {['pending','unknown','paid','manual_review','refund_pending'].includes(order.status)?
     <button className="button secondary" disabled={busy} onClick={()=>void act('refresh')}>{t('查验付款状态','Verify payment status')}</button>:null}
+   {['mk99','xiaodou'].includes(order.merchantProvider??'')&&['pending','unknown'].includes(order.status)&&
+       order.riskState==='clear'&&!order.checkout.paymentConfirmed?
+     <button className="button secondary" disabled={busy} type="button" onClick={()=>void act('local-cancel')}>
+       {t('未付款？取消本站订单','Not paid? Cancel local invoice')}
+     </button>:null}
    {['closed','failed'].includes(order.status)?
     <a className="button secondary" href="/pricing/">{t('返回套餐页重新购买','Return to plans and buy again')}</a>:null}
    <a className="button secondary" href="/account/">{t('返回账户查看权益','View account and entitlements')}</a>

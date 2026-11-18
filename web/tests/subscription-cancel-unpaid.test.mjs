@@ -20,3 +20,11 @@ test('retired QR regeneration and fiat order closure are not shown or called by 
  assert.match(source,/act\('refresh'\)/);
  assert.match(source,/付款入口可能已失效|原收银台入口可能已失效/);
 });
+
+test('Xiaodou and MK99 expose explicit local cancellation without bringing back redundant merchant controls',()=>{
+ assert.match(source,/['"]local-cancel['"]/);
+ assert.match(source,/未付款？取消本站订单/);
+ assert.match(source,/confirm:true/);
+ assert.match(source,/付款状态/);
+ assert.doesNotMatch(source,/重新生成原订单二维码|申请关闭本笔人民币原订单/);
+});

@@ -102,6 +102,45 @@ async function recordProviderFeeProjection(env:Env,transaction:PaymentTransactio
   transaction.provider_fee_projection_issue=next.issue;
   return next;
 }
+/** A late authenticated payment for a user-closed local invoice is money,
+ * but NEVER an authorization to credit the old invoice. Retain its proof and
+ * mark it for manual review, without changing paid_balance or credit_ledger. */
+async function holdLateLocalFiatCredit(env:Env,t:PaymentTransaction,event:PaymentEvent){
+ const now=nowMs(),evidenceId=uuid(),claim=uuid(),orderId=t.order_id,userId=t.order_user_id!;
+ const marker="EXISTS(SELECT 1 FROM payment_attempts a WHERE a.transaction_id=payment_transactions.id AND a.provider_code LIKE '%|USER_LOCAL_CANCEL')";
+ const match="EXISTS(SELECT 1 FROM recharge_orders o WHERE o.id=payment_transactions.order_id AND o.status='expired' AND o.user_id=? AND o.credited_at IS NULL AND o.paid_at IS NULL)";
+ let changes;
+ try{
+  const results=await env.DB.batch([
+   env.DB.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider) "+
+    "SELECT ?,t.provider,?,t.id,'PAYMENT_SUCCEEDED',?,'CNY',?,?,t.merchant_provider FROM payment_transactions t "+
+    "JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=? AND o.id=? AND o.user_id=? AND o.status='expired' "+
+    "AND o.paid_at IS NULL AND o.credited_at IS NULL AND t.merchant_provider IN ('xiaodou','mk99') "+
+    "AND t.status IN ('closed','paid') AND EXISTS(SELECT 1 FROM payment_attempts a WHERE a.transaction_id=t.id AND a.provider_code LIKE '%|USER_LOCAL_CANCEL') "+
+    "AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) "+
+    "AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id) "+
+    "ON CONFLICT(provider,provider_event_id) DO NOTHING")
+    .bind(evidenceId,event.eventId,event.amountFen,event.bodySha256??null,now,t.id,orderId,userId),
+   env.DB.prepare("UPDATE payment_transactions SET status='paid',risk_state='manual_review',paid_at=COALESCE(paid_at,?),"+
+    "actual_paid_fen=COALESCE(actual_paid_fen,?),updated_at=? WHERE id=? AND merchant_provider IN ('xiaodou','mk99') "+
+    "AND status IN ('closed','paid') AND risk_state IN ('clear','manual_review') AND "+marker+" AND "+match+" "+
+    "AND EXISTS(SELECT 1 FROM provider_payment_events e WHERE e.id=? AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=?)")
+    .bind(now,event.amountFen,now,t.id,userId,evidenceId,event.amountFen),
+   env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS("+
+    "SELECT 1 FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id "+
+    "WHERE o.id=? AND o.user_id=? AND o.status='expired' AND o.credited_at IS NULL "+
+    "AND t.id=? AND t.status='paid' AND t.risk_state='manual_review' "+
+    "AND EXISTS(SELECT 1 FROM provider_payment_events e WHERE e.id=? AND e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED') "+
+    "AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) "+
+    "AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)) THEN 1 ELSE 0 END")
+    .bind(claim,orderId,userId,t.id,evidenceId),
+   env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(claim)
+  ]);
+  changes=Number(results[0].meta?.changes??0);
+ }catch{throw new ApiFailure(409,"PAYMENT_LATE_LOCAL_CANCEL_REVIEW","关闭后的付款需要人工核对，未自动发放次数。");}
+ if(changes!==1)throw new ApiFailure(409,"PAYMENT_LATE_LOCAL_CANCEL_REVIEW","付款已记录或原单发生变化，请人工核对。");
+ return {duplicate:false,quota:await balance(env,userId),status:"manual_review"};
+}
 export async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,event:PaymentEvent):Promise<{duplicate:boolean;quota:{freeRemaining:number;paidRemaining:number;totalRemaining:number};status:string}> {
   if(event.currency!=="CNY")throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
   if(event.eventType==="PAYMENT_SUCCEEDED"&&event.amountFen!==transaction.amount_fen)throw new ApiFailure(409,"PAYMENT_MISMATCH","支付金额或币种与订单不符。");
@@ -118,6 +157,17 @@ export async function applyPaymentEvent(env:Env,transaction:PaymentTransaction,e
   };
   const priorEvent=await duplicatePaymentState();
   if(priorEvent)return priorEvent;
+  if(event.eventType==="PAYMENT_SUCCEEDED"&&["xiaodou","mk99"].includes(transaction.merchant_provider??"")){
+    const localCancel=await env.DB.prepare("SELECT 1 FROM payment_transactions t "+
+      "JOIN recharge_orders o ON o.id=t.order_id WHERE t.id=? AND o.id=? AND o.user_id=? "+
+      "AND o.status='expired' AND o.credited_at IS NULL AND o.paid_at IS NULL "+
+      "AND t.status IN ('closed','paid') AND t.risk_state IN ('clear','manual_review') "+
+      "AND EXISTS(SELECT 1 FROM payment_attempts a WHERE a.transaction_id=t.id AND a.provider_code LIKE '%|USER_LOCAL_CANCEL') "+
+      "AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.kind='purchase_grant' AND l.reference_id=o.id) "+
+      "AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.source_order_id=o.id)")
+     .bind(transaction.id,orderId,userId).first();
+    if(localCancel)return holdLateLocalFiatCredit(env,transaction,event);
+  }
   const eventId=uuid();
   const epayGuard=event.epayTradeNo?[
     env.DB.prepare("UPDATE payment_transactions SET epay_trade_no=? WHERE id=? AND payment_protocol='epay' AND (epay_trade_no IS NULL OR epay_trade_no=?)").bind(event.epayTradeNo,transaction.id,event.epayTradeNo),
@@ -394,6 +444,11 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
       const applied=await applyPaymentEvent(env,transaction,{eventId:`xrh-query-${transaction.id}`,eventType:"PAYMENT_SUCCEEDED",amountFen:Number(result.amountFen),currency:"CNY"});
       return response({ok:true,orderStatus:applied.status,providerFeeProjectionStatus:projection.status,quota:applied.quota},200,env,request);
     }
+    const localCancel=await env.DB.prepare("SELECT 1 FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id "+
+      "WHERE t.id=? AND t.status='closed' AND o.status='expired' "+
+      "AND EXISTS(SELECT 1 FROM payment_attempts a WHERE a.transaction_id=t.id AND a.provider_code LIKE '%|USER_LOCAL_CANCEL')")
+      .bind(transaction.id).first();
+    if(localCancel)return response({ok:true,orderStatus:"closed",localOnly:true,providerFeeProjectionStatus:projection.status,quota:await balance(env,session.user_id)},200,env,request);
     const orderStatus=state==="closed"?"expired":state==="failed"?"failed":"awaiting_payment",now=nowMs();
     await env.DB.batch([
       env.DB.prepare("UPDATE payment_transactions SET status=?,updated_at=? WHERE id=? AND status NOT IN ('paid','refunded')").bind(state,now,transaction.id),
