@@ -10,9 +10,9 @@ test('regular admin overview does not invoke expensive monthly AI history',()=>{
  assert.match(source,/setContentLoaded\(false\); setCostLoaded\(false\)/);
 });
 
-test('AI cost panel retains exact full endpoint and renders only after successful fetch',()=>{
+test('AI cost panel uses exact cost-only endpoint and renders only after successful fetch',()=>{
  assert.match(source,/if\(access!=="ready"\|\|tab!=="cost"\|\|costLoaded\)return;/);
- assert.match(source,/read<Metrics>\("\/v1\/admin\/dashboard"\)\.then\(full=>/);
+ assert.match(source,/read<Metrics>\("\/v1\/admin\/dashboard\?view=cost"\)\.then\(full=>/);
  assert.match(source,/metrics:\{\.\.\.previous\.metrics,\.\.\.full\}/);
  assert.match(source,/setCostLoaded\(true\)/);
  assert.match(source,/\{!costLoaded\?<p role="status"/);
