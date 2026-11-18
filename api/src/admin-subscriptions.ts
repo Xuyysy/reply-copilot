@@ -49,6 +49,20 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
   if (plan && !['basic','pro','max','ultra'].includes(plan))
     throw new ApiFailure(400,'INVALID_FILTER','订阅档位筛选无效。');
   const now=Date.now();
+  // Subscription eligibility already accepts verified BoltUtil payments; the
+  // administrator's display must follow the same proof without granting quotas.
+  // Never reference crypto tables if their independent migration is not ready.
+  const cryptoReady=['staging','production'].includes(env.ENVIRONMENT)&&env.BOLTUTIL_SCHEMA_READY==='1';
+  const cryptoProof=cryptoReady ? `
+    EXISTS(SELECT 1 FROM boltutil_orders b
+      WHERE b.subscription_order_id=o.id AND b.user_id=p.user_id
+        AND o.user_id=p.user_id
+        AND b.status='paid' AND b.paid_at IS NOT NULL AND b.applied_at IS NOT NULL
+        AND b.product_type='subscription' AND b.tx_hash IS NOT NULL AND b.receiving_address IS NOT NULL
+        AND b.payable_usdt_micros>=1000000 AND b.paid_usdt_micros>=b.payable_usdt_micros
+        AND EXISTS(SELECT 1 FROM boltutil_payment_events e
+          WHERE e.external_order_id=b.external_order_id AND e.network=b.network
+            AND e.tx_hash=b.tx_hash AND e.body_sha256 IS NOT NULL))` : '0';
   const rows=await env.DB.prepare(`SELECT p.id period_id,p.user_id,u.email,u.username,u.status account_status,
     p.status period_status,v.plan_code,p.daily_limit,p.start_at,p.end_at,p.created_at,
     u.archived_at account_archived_at,
@@ -60,6 +74,7 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
       AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
       AND e.amount_fen=t.amount_fen
       AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)) verified_paid_event,
+    ${cryptoProof} verified_crypto_paid_event,
     COALESCE(d.used,0) used_today,COALESCE(d.reserved,0) reserved_today
     FROM subscription_periods p
     JOIN users u ON u.id=p.user_id
@@ -73,13 +88,18 @@ export async function adminSubscriptionUsers(request: Request, env: Env): Promis
     ORDER BY p.created_at DESC,p.id DESC LIMIT 100`)
       .bind(now,now,now,status,status,plan,plan).all();
   return response({users:rows.results.map((row:Record<string,unknown>)=>{
+    // A crypto subscription has no corresponding fiat transaction row.
+    // Retain the original strict fiat proof for CNY subscriptions.
+    const fiatVerified=row.payment_status==='paid'&&row.transaction_paid_at!=null&&
+      row.risk_state==='clear'&&row.verified_paid_event===1&&
+      row.payment_currency==='CNY'&&row.payment_amount_fen===row.amount_fen&&
+      (env.ENVIRONMENT!=='production'||['mk99','xiaodou'].includes(String(row.merchant_provider)));
+    const cryptoVerified=cryptoReady&&row.verified_crypto_paid_event===1;
     const active=row.period_status==='active'&&typeof row.start_at==='number'&&
       typeof row.end_at==='number'&&row.start_at<=now&&now<row.end_at&&
       row.order_status==='paid'&&row.order_paid_at!=null&&row.order_applied_at!=null&&
-      row.payment_status==='paid'&&row.transaction_paid_at!=null&&row.risk_state==='clear'&&
-      row.verified_paid_event===1&&row.account_status==='active'&&row.account_archived_at==null&&
-      row.payment_currency==='CNY'&&row.payment_amount_fen===row.amount_fen&&
-      (env.ENVIRONMENT!=='production'||['mk99','xiaodou'].includes(String(row.merchant_provider)));
+      row.account_status==='active'&&row.account_archived_at==null&&
+      (fiatVerified||cryptoVerified);
     const used=Number(row.used_today)||0,reserved=Number(row.reserved_today)||0;
     const effectiveStatus=row.order_status==='refunded'?'revoked':
       ['refund_pending','manual_review'].includes(String(row.order_status))?'refund_pending':
