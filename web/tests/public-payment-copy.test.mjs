@@ -10,8 +10,8 @@ const customerSources=[
  '../src/lib/api.ts'
 ];
 // Merchant keys remain valid for routing, but customer-facing string values must not display them.
-const literalValues=source=>[...source.matchAll(/"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g)]
- .map(match=>match[1]??match[2]);
+const literalValues=source=>source.split('\n').flatMap(line=>[...line.matchAll(/"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g)]
+ .map(match=>match[1]??match[2]));
 const internalKey=value=>/^(?:xiaodou|xiaodou_epay|mk99|[A-Z][A-Z0-9_]+)$/.test(value);
 
 test('customer pages and confirmation copy never show internal merchant names',()=>{

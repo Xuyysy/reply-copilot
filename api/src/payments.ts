@@ -462,7 +462,7 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
 }
 export async function relaunchPayment(request:Request,env:Env,orderId:string):Promise<Response>{
   const session=await webSession(request,env,true),transaction=await paymentTransactionForOwner(env,orderId,session.user_id);
-  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","请使用原付款链接，MK99不支持自动重新建单。");
+  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","请使用原付款链接，当前订单不支持自动重新建单。");
   if(transaction.payment_protocol==="epay"){
     if(!await checkoutAllowedFor(env,transaction)||transaction.provider!=="xiaodou"||transaction.status!=="pending"||transaction.order_status!=="awaiting_payment")throw new ApiFailure(409,"ORDER_NOT_PAYABLE","当前订单不能恢复付款表单。");
     let form:ReturnType<typeof epayCheckout>;
@@ -615,7 +615,7 @@ export async function epayNotify(request:Request,env:Env):Promise<Response>{
 }
 
 async function submitRefund(request:Request,env:Env,transaction:PaymentTransaction,spec:{kind:"ordinary"|"special";principal:number;fee:number;credits:number;reason:string;reasonCategory:string;actorId:string|null;confirmed:boolean}):Promise<Response>{
-  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"REFUND_MANUAL_REVIEW_REQUIRED","MK99退款需要独立可信核对，当前不调用退款或调整额度。");
+  if(transaction.merchant_provider==="mk99")throw new ApiFailure(409,"REFUND_MANUAL_REVIEW_REQUIRED","这笔退款需要人工核对，系统不会自动退款或调整额度。");
   if(transaction.payment_protocol==="epay")throw new ApiFailure(409,"REFUND_MANUAL_REVIEW_REQUIRED","易支付退款需人工核对并通过商户后台处理，当前接口不会冻结或扣减额度。");
   if(!spec.confirmed||!Number.isSafeInteger(spec.principal)||spec.principal<0||!Number.isSafeInteger(spec.fee)||spec.fee<0||!Number.isSafeInteger(spec.credits)||spec.credits<0||spec.principal+spec.fee<1||spec.reason.length<4||spec.reason.length>256)throw new ApiFailure(400,"INVALID_REFUND","退款需要有效金额、原因和二次确认。");
   if(transaction.order_status!=="paid"||transaction.status!=="paid"||!transaction.credited_at)throw new ApiFailure(409,"ORDER_NOT_REFUNDABLE","只有已支付到账订单才能申请退款。");
