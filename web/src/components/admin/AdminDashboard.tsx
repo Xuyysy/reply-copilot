@@ -105,6 +105,10 @@ export default function AdminDashboard() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [historyLoadFailed, setHistoryLoadFailed] = useState(false);
+  const [generationStatsLoading,setGenerationStatsLoading]=useState(false);
+  const [generationStatsLoaded,setGenerationStatsLoaded]=useState(false);
+  const [generationStatsFailed,setGenerationStatsFailed]=useState(false);
+  const generationStatsRequest=useRef(0);
   const [creating, setCreating] = useState(false);
   const say = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const read = <T,>(path: string) => api<T>(path);
@@ -132,6 +136,8 @@ export default function AdminDashboard() {
   };
 
   const load = useCallback(async () => {
+    generationStatsRequest.current++;
+    setGenerationStatsLoading(false);setGenerationStatsLoaded(false);setGenerationStatsFailed(false);
     setBusy(true); setAccess("loading"); setData(null); setNotice(""); setAuditsLoaded(false); setContentLoaded(false); setCostLoaded(false); setHistoryLoaded(false); setHistoryLoadFailed(false);
     try {
       const metrics = await read<Metrics>("/v1/admin/dashboard?view=overview");
@@ -196,6 +202,23 @@ export default function AdminDashboard() {
     finally { busyGuard.current = false; setBusy(false); }
   };
   async function refresh() { await load(); }
+  async function loadExactGenerationStats(){
+    if(generationStatsLoading)return;
+    const id=++generationStatsRequest.current;
+    setGenerationStatsLoading(true);setGenerationStatsFailed(false);
+    try{
+      const exact=await read<{todayGenerations:number;monthGenerations:number}>("/v1/admin/dashboard?view=generations");
+      if(id!==generationStatsRequest.current)return;
+      setData(previous=>previous&&({...previous,metrics:{...previous.metrics,...exact}}));
+      setGenerationStatsLoaded(true);
+    }catch(cause){
+      if(id===generationStatsRequest.current){
+        setGenerationStatsFailed(true);say(readableError(cause,language),true);
+      }
+    }finally{
+      if(id===generationStatsRequest.current)setGenerationStatsLoading(false);
+    }
+  }
   async function searchUsers(event: FormEvent) { event.preventDefault(); await run(async () => { const response = await read<{ users: User[] }>(`/v1/admin/users?${new URLSearchParams({q:search,paid:paidFilter,...(registeredFrom?{registeredFrom:String(new Date(registeredFrom+"T00:00:00").getTime())}:{}),...(registeredTo?{registeredTo:String(new Date(registeredTo+"T00:00:00").getTime()+86400000-1)}:{}),...(activeSince?{activeSince:String(new Date(activeSince+"T00:00:00").getTime())}:{})})}`); setData(previous => previous && { ...previous, users: response.users }); }); }
   function freeze(user: User) {
     const next = user.status === "frozen" ? "active" : "frozen";
@@ -285,9 +308,14 @@ export default function AdminDashboard() {
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-2">
                 <CardTitle>{t("用户与 AI 使用","Users & AI activity")}</CardTitle>
-                <button type="button" onClick={()=>setTab("ledger")} className="text-xs font-semibold text-blue-700 hover:underline">
-                  {t("查看消耗流水","View usage ledger")}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={generationStatsLoading} onClick={()=>void loadExactGenerationStats()}>
+                    {generationStatsLoading?t("统计中…","Counting…"):generationStatsLoaded?t("刷新精确次数","Refresh exact counts"):t("查询精确次数","Load exact counts")}
+                  </Button>
+                  <button type="button" onClick={()=>setTab("ledger")} className="text-xs font-semibold text-blue-700 hover:underline">
+                    {t("查看消耗流水","View usage ledger")}
+                  </button>
+                </div>
               </CardHeader>
               <CardContent className="pt-1">
                 <div className="grid grid-cols-2 gap-2.5">
@@ -302,6 +330,8 @@ export default function AdminDashboard() {
                       <p className="admin-kpi-number mt-1.5 text-[23px] font-bold leading-none text-slate-900">{String(data.metrics[key]??"—")}</p>
                     </div>)}
                 </div>
+                {generationStatsFailed&&<p role="status" className="mt-2 text-sm text-rose-700">{t("精确生成次数读取失败，请点击重试。","Could not load exact generation counts. Retry above.")}</p>}
+                {!generationStatsLoaded&&!generationStatsLoading&&!generationStatsFailed&&<p className="mt-2 text-xs text-slate-500">{t("生成次数按需统计，未加载时显示 —，并非 0。","Generation counts are on demand. — means not loaded, not zero.")}</p>}
                 <p className="mt-3 text-[11px] leading-5 text-slate-400">
                   {t("活跃用户按未过期的官网或插件会话去重，生成指标与支付收入分开统计。","Active users are deduplicated by valid sessions. Generations and payment receipts are separate metrics.")}
                 </p>
@@ -368,7 +398,7 @@ export default function AdminDashboard() {
           </div>}
         </details>
       </TabsContent>
-      <TabsContent value="users" className="space-y-5"><Card><CardHeader><CardTitle>{t("用户管理", "Users")}</CardTitle></CardHeader><CardContent><form className="mb-5 flex flex-wrap gap-2" onSubmit={event => void searchUsers(event)}><Input aria-label={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} placeholder={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} value={search} onChange={event => setSearch(event.target.value)} /><Button variant="outline" disabled={busy}><Search size={15} />{t("搜索", "Search")}</Button></form><div className="mb-4 grid gap-3 sm:grid-cols-4"><Field label="付费状态"><select className="h-9 rounded border px-2" value={paidFilter} onChange={e=>setPaidFilter(e.target.value)}><option value="all">全部</option><option value="paid">已付费</option><option value="unpaid">未付费</option></select></Field><Field label="注册日期从"><Input type="date" value={registeredFrom} onChange={e=>setRegisteredFrom(e.target.value)}/></Field><Field label="注册日期至"><Input type="date" value={registeredTo} onChange={e=>setRegisteredTo(e.target.value)}/></Field><Field label="最近活跃起始日期"><Input type="date" value={activeSince} onChange={e=>setActiveSince(e.target.value)}/></Field></div><p className="mb-3 text-xs text-muted-foreground">设置筛选后点击搜索。活跃以会话创建、AI 请求或支付成功时间计算。</p><div className="mb-4 flex flex-wrap gap-2"><Button disabled={busy||!selected.length} variant="outline" onClick={()=>void run(()=>exportCsv("users",selected))}>导出所选用户 CSV</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量冻结", "Freeze selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "frozen"}); setSelected([]); await refresh(); }})}>{t("批量冻结", "Freeze selected")}</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量恢复", "Restore selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "active"}); setSelected([]); await refresh(); }})}>{t("批量恢复", "Restore selected")}</Button></div><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("用户", "User"), t("状态", "Status"), t("免费", "Free"), t("付费", "Paid"), t("已生成", "Generated"), t("操作", "Action")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.users.map(user => <TableRow key={user.id}><TableCell><input aria-label={`Select ${user.email}`} type="checkbox" checked={selected.includes(user.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, user.id] : ids.filter(id => id !== user.id))} /> <strong>{user.username || t("旧账户", "Legacy user")}</strong><div className="text-xs text-muted-foreground">{user.email}</div><div className="text-xs text-muted-foreground">ID {user.id}{user.is_test_account ? t(" · 测试账户", " · Test account") : ""}{user.archived_at ? t(" · 已归档", " · Archived") : ""}</div></TableCell><TableCell><Badge variant={user.status === "active" ? "secondary" : "destructive"}>{statusText(user.status, language)}</Badge></TableCell><TableCell>{user.free_balance}</TableCell><TableCell>{user.paid_balance}</TableCell><TableCell>{user.generations == null ? <span className="text-xs text-muted-foreground">{t("详情查看准确次数", "Open details for exact count")}</span> : user.generations}<div className="mt-1 text-xs text-muted-foreground">{t("注册日期", "Registered")}: {user.created_at?date(user.created_at,language):"—"}</div><div className="text-xs text-muted-foreground">{t("最近活动", "Last active")}: {user.last_active_at?date(user.last_active_at,language):t("详情查看", "View details")}</div></TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => setDetail(await read<UserDetail>(`/v1/admin/users/${encodeURIComponent(user.id)}`)))}>{t("详情", "Details")}</Button> <Button size="sm" variant="outline" disabled={busy} onClick={() => freeze(user)}>{user.status === "frozen" ? t("解冻", "Unfreeze") : t("冻结", "Freeze")}</Button></TableCell></TableRow>)}</TableBody></Table></div>{!data.users.length && <Empty text={t("没有匹配账户。", "No matching users.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("额度调整", "Adjust credits")}</CardTitle></CardHeader><CardContent><form className="grid grid-cols-2 gap-4 lg:grid-cols-4" onSubmit={adjust}><Field label={t("用户 ID", "User ID")}><Input required value={adjustUser} onChange={event => setAdjustUser(event.target.value)} /></Field><Field label={t("额度类型", "Credit type")}><select className="h-9 rounded-md border border-input bg-white px-3 text-sm" value={adjustKind} onChange={event => setAdjustKind(event.target.value)}><option value="free">{t("免费", "Free")}</option><option value="paid">{t("付费", "Paid")}</option></select></Field><Field label={t("调整次数，可填负数", "Amount, negative allowed")}><Input type="number" required min={-10000} max={10000} value={adjustDelta} onChange={event => setAdjustDelta(event.target.value)} /></Field><Field label={t("原因，至少 8 字", "Reason, at least 8 characters")}><Input required minLength={8} maxLength={500} value={adjustReason} onChange={event => setAdjustReason(event.target.value)} /></Field><Button className="col-span-2 lg:col-span-4 w-fit" disabled={busy}>{t("预览并确认调整", "Review adjustment")}</Button></form></CardContent></Card></TabsContent>
+      <TabsContent value="users" className="space-y-5"><Card><CardHeader><CardTitle>{t("用户管理", "Users")}</CardTitle></CardHeader><CardContent><form className="mb-5 flex flex-wrap gap-2" onSubmit={event => void searchUsers(event)}><Input aria-label={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} placeholder={t("搜索 ID、用户名或邮箱", "Search ID, username or email")} value={search} onChange={event => setSearch(event.target.value)} /><Button variant="outline" disabled={busy}><Search size={15} />{t("搜索", "Search")}</Button></form><div className="mb-4 grid gap-3 sm:grid-cols-4"><Field label="付费状态"><select className="h-9 rounded border px-2" value={paidFilter} onChange={e=>setPaidFilter(e.target.value)}><option value="all">全部</option><option value="paid">已付费</option><option value="unpaid">未付费</option></select></Field><Field label="注册日期从"><Input type="date" value={registeredFrom} onChange={e=>setRegisteredFrom(e.target.value)}/></Field><Field label="注册日期至"><Input type="date" value={registeredTo} onChange={e=>setRegisteredTo(e.target.value)}/></Field><Field label="最近活跃起始日期"><Input type="date" value={activeSince} onChange={e=>setActiveSince(e.target.value)}/></Field></div><p className="mb-3 text-xs text-muted-foreground">设置筛选后点击搜索。活跃以会话创建、AI 请求或支付成功时间计算。</p><div className="mb-4 flex flex-wrap gap-2"><Button disabled={busy||!selected.length} variant="outline" onClick={()=>void run(()=>exportCsv("users",selected))}>导出所选用户 CSV</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量冻结", "Freeze selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "frozen"}); setSelected([]); await refresh(); }})}>{t("批量冻结", "Freeze selected")}</Button><Button disabled={busy || !selected.length} variant="outline" onClick={() => setConfirm({title: t("批量恢复", "Restore selected"), description: selected.join(", "), action: async () => { await write("/v1/admin/users/bulk-status", {userIds: selected, status: "active"}); setSelected([]); await refresh(); }})}>{t("批量恢复", "Restore selected")}</Button></div><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("用户", "User"), t("状态", "Status"), t("免费", "Free"), t("付费", "Paid"), t("已生成", "Generated"), t("操作", "Action")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.users.map(user => <TableRow key={user.id}><TableCell><input aria-label={`Select ${user.email}`} type="checkbox" checked={selected.includes(user.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids, user.id] : ids.filter(id => id !== user.id))} /> <strong>{user.username || t("旧账户", "Legacy user")}</strong><div className="text-xs text-muted-foreground">{user.email}</div><div className="text-xs text-muted-foreground">ID {user.id}{user.is_test_account ? t(" · 测试账户", " · Test account") : ""}{user.archived_at ? t(" · 已归档", " · Archived") : ""}</div></TableCell><TableCell><Badge variant={user.status === "active" ? "secondary" : "destructive"}>{statusText(user.status, language)}</Badge></TableCell><TableCell>{user.free_balance}</TableCell><TableCell>{user.paid_balance}</TableCell><TableCell>{user.generations == null ? <span className="text-xs text-muted-foreground">{t("详情内按需查询准确次数", "Load exact count in details")}</span> : user.generations}<div className="mt-1 text-xs text-muted-foreground">{t("注册日期", "Registered")}: {user.created_at?date(user.created_at,language):"—"}</div><div className="text-xs text-muted-foreground">{t("最近活动", "Last active")}: {user.last_active_at?date(user.last_active_at,language):t("详情查看", "View details")}</div></TableCell><TableCell><Button size="sm" variant="outline" disabled={busy} onClick={() => void run(async () => setDetail(await read<UserDetail>(`/v1/admin/users/${encodeURIComponent(user.id)}?view=light`)))}>{t("详情", "Details")}</Button> <Button size="sm" variant="outline" disabled={busy} onClick={() => freeze(user)}>{user.status === "frozen" ? t("解冻", "Unfreeze") : t("冻结", "Freeze")}</Button></TableCell></TableRow>)}</TableBody></Table></div>{!data.users.length && <Empty text={t("没有匹配账户。", "No matching users.")} />}</CardContent></Card><Card><CardHeader><CardTitle>{t("额度调整", "Adjust credits")}</CardTitle></CardHeader><CardContent><form className="grid grid-cols-2 gap-4 lg:grid-cols-4" onSubmit={adjust}><Field label={t("用户 ID", "User ID")}><Input required value={adjustUser} onChange={event => setAdjustUser(event.target.value)} /></Field><Field label={t("额度类型", "Credit type")}><select className="h-9 rounded-md border border-input bg-white px-3 text-sm" value={adjustKind} onChange={event => setAdjustKind(event.target.value)}><option value="free">{t("免费", "Free")}</option><option value="paid">{t("付费", "Paid")}</option></select></Field><Field label={t("调整次数，可填负数", "Amount, negative allowed")}><Input type="number" required min={-10000} max={10000} value={adjustDelta} onChange={event => setAdjustDelta(event.target.value)} /></Field><Field label={t("原因，至少 8 字", "Reason, at least 8 characters")}><Input required minLength={8} maxLength={500} value={adjustReason} onChange={event => setAdjustReason(event.target.value)} /></Field><Button className="col-span-2 lg:col-span-4 w-fit" disabled={busy}>{t("预览并确认调整", "Review adjustment")}</Button></form></CardContent></Card></TabsContent>
       <TabsContent value="ledger"><AdminUsageLedger active={tab==="ledger"} language={language}/></TabsContent>
       <TabsContent value="boltutil"><AdminBoltUtilPanel active={tab==="boltutil"} language={language} write={securityWrite}/></TabsContent>
       <TabsContent value="orders" className="space-y-4"><AdminCommercePanel active={tab==="orders"} language={language} focusOrderId={orderQuickSearch}/><details className="rounded-lg border bg-card p-3"><summary className="cursor-pointer text-sm font-semibold">{t("历史额度包订单高级操作（原有详情与导出）","Legacy credit-pack advanced operations and export")}</summary><div className="pt-3"><Card><CardHeader><CardTitle>{t("充值订单", "Top-up orders")}</CardTitle></CardHeader><CardContent><form className="mb-4 flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void run(async()=>{const result=await read<{orders:Order[]}>(`/v1/admin/orders?${new URLSearchParams({q:orderSearch,status:orderStatus})}`);setData(previous=>previous&&({...previous,orders:result.orders}));});}}><Input aria-label="搜索订单号或邮箱" placeholder="搜索订单号或邮箱" value={orderSearch} onChange={e=>setOrderSearch(e.target.value)}/><select aria-label="订单状态" className="h-9 rounded border px-2" value={orderStatus} onChange={e=>setOrderStatus(e.target.value)}>{[["","全部状态"],["paid","支付成功"],["pending","待支付"],["failed","失败"],["unknown","待确认"]].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select><Button variant="outline" disabled={busy}>查询订单</Button><Button type="button" variant="outline" disabled={busy||!selectedOrders.length} onClick={()=>void run(()=>exportCsv("orders",selectedOrders))}>导出所选订单 CSV</Button></form><p className="mb-4 text-sm text-muted-foreground">{t("订单状态来自服务端支付记录；只有验证通过的支付结果才会发放额度。", "Order state comes from server-verified payment records; only verified payments grant credits.")}</p><div className="data-table-wrap admin-list-scroll"><Table><TableHeader><TableRow>{[t("订单号", "Order ID"), t("用户", "User"), t("套餐", "Package"), t("美元参考价", "USD reference"), t("实际人民币", "CNY amount"), t("渠道", "Provider"), t("支付状态", "Payment status"), t("额度", "Credits")].map(label => <TableHead key={label}>{label}</TableHead>)}</TableRow></TableHeader><TableBody>{data.orders.map(order => <TableRow key={order.id}><TableCell className="max-w-44 break-all text-xs"><input aria-label={`选择订单 ${order.id}`} type="checkbox" checked={selectedOrders.includes(order.id)} onChange={e=>setSelectedOrders(ids=>e.target.checked?[...ids,order.id]:ids.filter(id=>id!==order.id))}/><Button variant="link" size="sm" className="h-auto break-all whitespace-normal text-left" disabled={busy} onClick={()=>void run(async()=>setOrderDetail(await read(`/v1/admin/orders/${encodeURIComponent(order.id)}`)))}>{order.id}</Button></TableCell><TableCell>{order.email}</TableCell><TableCell>{order.package_name} · {order.credits}</TableCell><TableCell>{dollars(order.amount_cents)}</TableCell><TableCell>{order.amount_fen == null ? "—" : `¥${(order.amount_fen / 100).toFixed(2)} ${order.payment_currency||"CNY"}`}</TableCell><TableCell>{order.provider === "local_mock" ? t("本地模拟", "Local mock") : order.provider === "xiaodou" ? t("小豆", "Xiaodou") : "—"}</TableCell><TableCell><Badge variant="secondary">{statusText(order.payment_status || order.status, language)}</Badge></TableCell><TableCell>{order.credited_at ? t("已发放", "Granted") : t("未发放", "Not granted")}</TableCell></TableRow>)}</TableBody></Table></div>{!data.orders.length && <Empty text={t("暂无订单。", "No orders yet.")} />}</CardContent></Card></div></details></TabsContent>
@@ -467,7 +497,7 @@ export default function AdminDashboard() {
                 },
               })}>{t("保存备注", "Save note")}</Button>
             </section>
-            <UserDetailHistory detail={detail} language={language} />
+            <UserDetailHistory key={detail.user.id} detail={detail} language={language} />
           </div>
         )}
       </DialogContent>
@@ -477,6 +507,24 @@ export default function AdminDashboard() {
 
 function UserDetailHistory({ detail, language }: { detail: UserDetail; language: Language }) {
   const t = (zh: string, en: string) => phrase(language, zh, en);
+  const [generations,setGenerations]=useState<number|null>(detail.user.generations);
+  const [countLoading,setCountLoading]=useState(false);
+  const [countFailed,setCountFailed]=useState(false);
+  const countRequest=useRef(0);
+  useEffect(()=>()=>{countRequest.current++;},[]);
+  async function loadUserGenerationCount(){
+    if(countLoading)return;
+    const id=++countRequest.current;
+    setCountLoading(true);setCountFailed(false);
+    try{
+      const exact=await api<{generations:number}>("/v1/admin/users/"+encodeURIComponent(detail.user.id)+"?view=generations");
+      if(id===countRequest.current)setGenerations(exact.generations);
+    }catch{
+      if(id===countRequest.current)setCountFailed(true);
+    }finally{
+      if(id===countRequest.current)setCountLoading(false);
+    }
+  }
   const quota = detail.quota && typeof detail.quota === "object" && !Array.isArray(detail.quota) ? detail.quota as Record<string, unknown> : {};
   const usage = Array.isArray(detail.usage) ? detail.usage.filter((row): row is Record<string, unknown> => Boolean(row) && typeof row === "object" && !Array.isArray(row)) : [];
   const usageLabels: Record<string, [string, string]> = { succeeded: ["生成成功", "Succeeded"], completed: ["已完成", "Completed"], reserved: ["已预留额度", "Credits reserved"], processing: ["生成中", "Processing"], upstream_failed: ["生成失败", "Generation failed"], failed: ["失败", "Failed"], uncertain: ["结果待确认", "Awaiting confirmation"], refunded: ["已退还额度", "Credits refunded"] };
@@ -484,7 +532,12 @@ function UserDetailHistory({ detail, language }: { detail: UserDetail; language:
     <div className="grid grid-cols-1 gap-1 text-sm text-muted-foreground sm:grid-cols-2">
       <p className="min-w-0 break-words">{t("注册日期", "Registered")}: {detail.user.created_at ? date(detail.user.created_at, language) : "—"}</p>
       <p className="min-w-0 break-words">{t("最近活动", "Last active")}: {detail.user.last_active_at ? date(detail.user.last_active_at, language) : "—"}</p>
-       <p className="min-w-0 break-words">{t("已确认生成总数", "Confirmed generations · lifetime")}: {detail.user.generations ?? "—"}</p>
+       <p className="min-w-0 break-words">{t("已确认生成总数", "Confirmed generations · lifetime")}: {generations ?? "—"}{" "}
+        <button type="button" className="text-blue-700 underline disabled:opacity-50" disabled={countLoading} onClick={()=>void loadUserGenerationCount()}>
+          {countLoading?t("统计中…","Counting…"):generations===null?t("查询精确次数","Load exact count"):t("刷新精确次数","Refresh exact count")}
+        </button>
+        {countFailed&&<span role="status" className="block text-rose-700">{t("精确次数读取失败，请重试。","Exact count failed; retry.")}</span>}
+       </p>
     </div>
     <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3">
       {[
