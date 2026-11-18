@@ -430,7 +430,7 @@ export async function refreshOrder(request:Request,env:Env,orderId:string):Promi
     throw error;
   }
   if(transaction.merchant_provider==='xiaodou'&&transaction.merchant_account&&transaction.merchant_account!==env.XIAODOU_APP_ID)
-    throw new ApiFailure(409,'PAYMENT_MERCHANT_MISMATCH','原订单的小豆商户配置已变化，请联系客服核对。');
+    throw new ApiFailure(409,'PAYMENT_MERCHANT_MISMATCH','原订单的收款配置已变化，请联系客服核对。');
   let result:Awaited<ReturnType<typeof client.queryPayment>>;
   try { result=await client.queryPayment(transaction.provider_trade_id!,{requestId}); }
   catch(error) { throw refreshProviderFailure(error,requestId); }
@@ -572,11 +572,11 @@ export async function xiaodouWebhook(request:Request,env:Env):Promise<Response>{
       if(subscription.merchant_account!==env.XIAODOU_APP_ID||subscription.payment_channel!=='ALIPAY_H5'||
         event.grossAmountFen!==subscription.amount_fen||(type==='PAYMENT_SUCCEEDED'&&event.eventAmountFen!==subscription.amount_fen)||
         (type!=='PAYMENT_SUCCEEDED'&&event.eventAmountFen!==0))
-        throw new ApiFailure(409,"PAYMENT_MISMATCH","小豆订阅通知金额或身份不一致。");
+        throw new ApiFailure(409,"PAYMENT_MISMATCH","订阅付款通知金额或订单身份不一致。");
       const order=await orderById(env,subscription.order_id);
       if(!order||order.merchant_provider!=='xiaodou')throw new ApiFailure(404,"ORDER_NOT_FOUND","订阅订单不存在。");
       const confirmed=await querySubscriptionPayment(env,order);
-      if(type==='PAYMENT_SUCCEEDED'&&!confirmed.paymentConfirmed)throw new ApiFailure(502,"SUBSCRIPTION_PAYMENT_UNCONFIRMED","小豆付款仍待签名查单确认。");
+      if(type==='PAYMENT_SUCCEEDED'&&!confirmed.paymentConfirmed)throw new ApiFailure(502,"SUBSCRIPTION_PAYMENT_UNCONFIRMED","订阅付款仍待可信查单确认。");
       return new Response("success",{status:200,headers:{"Content-Type":"text/plain; charset=utf-8","Cache-Control":"no-store"}});
     }
     if(transaction.merchant_provider==="mk99"||transaction.payment_protocol==="epay")throw new ApiFailure(404,"ORDER_NOT_FOUND","订单不存在。");

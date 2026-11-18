@@ -134,8 +134,8 @@ export default function SubscriptionCheckout(){
      :t('平台暂未确认支付结果，请保留原订单，不要重复付款。','Payment is not confirmed. Keep the original order and avoid paying twice.'));
    }else if(action==='local-cancel'){
     if(!window.confirm(t(
-      '仅在未付款时取消。这里只关闭本站订单，无法撤销已提交给小豆或 MK99 的付款。如果已支付，请先查验付款状态。确定取消并重新选择支付方式吗？',
-      'Cancel only if you have not paid. This closes our local invoice but cannot reverse a Xiaodou or MK99 transfer. If paid, verify first. Cancel and choose another method?'
+      '仅在未付款时取消。这里只关闭本站订单，之前打开的支付页面仍可能收款，无法撤回已发起的付款。若已经付款，请先点击「查验付款状态」，不要取消。确认关闭当前订单，以便重新选择套餐或支付方式吗？',
+      'Cancel only if you have not paid. This closes the order on our site, but an earlier checkout page may still accept payment. If you have paid, select "Verify payment status" instead. Close this order to choose another plan or payment method?'
     )))return;
     await api('/v1/subscriptions/orders/'+encodeURIComponent(id)+'/local-cancel',{
       method:'POST',body:JSON.stringify({confirm:true})
@@ -143,8 +143,8 @@ export default function SubscriptionCheckout(){
     const current=(await api<{order:SubscriptionOrder}>('/v1/subscriptions/orders/'+encodeURIComponent(id))).order;
     if(current.status!=='closed')throw new Error('ORDER_LOCAL_CANCEL_UNCONFIRMED');
     setOrder(current);setPayUrl(null);
-    setPaymentNote(t('本站订单已关闭，可以返回套餐页重新选择支付宝或 USDT。若之前确实付款，请联系支持核对。',
-      'Local invoice closed. Return to plans to choose Alipay or USDT. Contact support if you already paid.'));
+    setPaymentNote(t('本站订单已关闭，可以返回套餐页选择其他套餐或支付方式。若之前确实付款，请联系支持核对。',
+      'Order closed on this site. Return to plans to choose another plan or payment method. Contact support if you already paid.'));
 
    }
   }catch(cause){
@@ -220,7 +220,7 @@ export default function SubscriptionCheckout(){
    {['mk99','xiaodou'].includes(order.merchantProvider??'')&&['pending','unknown'].includes(order.status)&&
        order.riskState==='clear'&&!order.checkout.paymentConfirmed?
      <button className="button secondary" disabled={busy} type="button" onClick={()=>void act('local-cancel')}>
-       {t('未付款？取消本站订单','Not paid? Cancel local invoice')}
+       {t('想重新购买其他套餐？','Want to choose another plan?')}
      </button>:null}
    {['closed','failed'].includes(order.status)?
     <a className="button secondary" href="/pricing/">{t('返回套餐页重新购买','Return to plans and buy again')}</a>:null}
@@ -265,7 +265,7 @@ export function subscriptionStatus(order:SubscriptionOrder,language:'zh'|'en'){
  if(order.status==='unknown'&&order.retryAvailable)return t('原单未生成收银台，可重新购买；原单仍保留等待可信核验。','No cashier was issued. You may buy again; the original remains available for verification.');
  switch(order.status){
   case 'paid': return order.checkout.paymentConfirmed?(order.periodStatus==='queued'?t('付款已核验，下一期订阅已排队，将在当前订阅期满后生效。','Payment verified. Your next period is queued and starts after the current subscription ends.'):t('付款已核验，权益已处理。','Payment verified and entitlement processed.')):t('权益待核验。','Entitlement verification pending.');
-  case 'pending': return t('待付款。付款后请查验原单。','Awaiting payment. Verify the original order after paying.');
+  case 'pending': return t('待付款。若已付款请先点击「查验付款状态」；如需更换套餐或支付方式，可取消未付款订单后重新购买。','Awaiting payment. If you already paid, select "Verify payment status" first. To change plans or payment methods, cancel the unpaid order before buying again.');
   case 'unknown': return t('付款结果未确认，请勿重复付款。','Payment is unconfirmed. Do not pay again.');
   case 'refund_pending': return t('退款或风控审核中。','Refund or risk review in progress.');
   case 'manual_review': return t('订单待人工核对，请勿重复付款。','Order requires review. Do not pay again.');

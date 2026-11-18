@@ -47,7 +47,7 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
          if (path==="/v1/admin/payment-platform-check" && typeof body?.errorCode==="string" && /^[A-Z0-9_]{1,80}$/.test(body.errorCode)) {
            const stage=typeof body?.stage==="string"?body.stage:"unknown";
            const upstream=Number.isInteger(body?.upstreamHttpStatus)?body.upstreamHttpStatus:null;
-           throw new ApiError("小豆 RSA2 只读检测未通过。",body.errorCode,response.status,safeRequestId(body?.requestId),safeDiagnostic({stage,upstreamHttpStatus:upstream}));
+           throw new ApiError("支付通道只读检测未通过。",body.errorCode,response.status,safeRequestId(body?.requestId),safeDiagnostic({stage,upstreamHttpStatus:upstream}));
          }
          throw new ApiError(body?.message || "服务暂时不可用。", body?.code || "SERVER_UNAVAILABLE", response.status, safeRequestId(body?.requestId), safeDiagnostic(body?.diagnostic), ["/v1/orders","/v1/subscriptions/orders"].includes(path) ? body?.order : undefined);
        }
