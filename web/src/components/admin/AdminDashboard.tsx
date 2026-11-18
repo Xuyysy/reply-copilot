@@ -140,10 +140,14 @@ export default function AdminDashboard() {
     setGenerationStatsLoading(false);setGenerationStatsLoaded(false);setGenerationStatsFailed(false);
     setBusy(true); setAccess("loading"); setData(null); setNotice(""); setAuditsLoaded(false); setContentLoaded(false); setCostLoaded(false); setHistoryLoaded(false); setHistoryLoadFailed(false);
     try {
-      const metrics = await read<Metrics>("/v1/admin/dashboard?view=overview");
+      const metrics = await read<Metrics>("/v1/admin/dashboard?view=overview&generation_counts=lazy");
       const [users, packages, orders, settings] = await Promise.all([
         read<{ users: User[] }>("/v1/admin/users"), read<{ packages: Package[] }>("/v1/admin/packages"), read<{ orders: Order[] }>("/v1/admin/orders"), read<{ settings: Setting[] }>("/v1/admin/settings"),
       ]);
+      // Old Workers ignore the new opt-in and return exact counters; mark them
+      // loaded so a Pages-first or rollback window never mislabels valid data.
+      setGenerationStatsLoaded(typeof metrics.todayGenerations==='number'&&Number.isSafeInteger(metrics.todayGenerations)&&
+        typeof metrics.monthGenerations==='number'&&Number.isSafeInteger(metrics.monthGenerations));
       // Audit and CMS details load only if an operator opens those workspaces.
       setData({ metrics, users: users.users, packages: packages.packages, orders: orders.orders, settings: settings.settings });
       setAccess("ready");

@@ -1,17 +1,21 @@
-# CF Free exact ACK count rolling-release compatibility
+# CF Free exact ACK count Worker-first release compatibility
 
-Follow-up to PR #194. Worker and Pages are deployed independently, so both
-deployment orders may temporarily leave the old API and new UI together.
+Follow-up to PRs #194 and #195. Production's guarded deployment workflow
+explicitly prescribes **Worker first, verify, then Pages**.
 
-- New Pages + old Worker: dashboard `view=generations` falls through to the
-  original full dashboard shape, so only exact today/month values are
-  admitted to the client. User detail `view=generations` falls through to
-  full `user.generations`, which is validated before display.
-- New Worker + old Pages: legacy overview does not know the new opt-in button,
-  so **prefer Pages first** and perform Worker rollout shortly afterward.
-- Both new: focused explicit count calls only, dashboard overview and light
-  user details skip exact count scans.
-- Missing/malformed response is an error, never a fabricated zero.
+- New Worker + old Pages: old Pages call `?view=overview` without the new
+  `generation_counts=lazy` marker; the Worker preserves legacy exact
+  today/month numbers (at the old read cost) until Pages is upgraded.
+- New Pages + old Worker: the old Worker ignores the marker and returns
+  existing exact overview counts. New Pages detects these and treats them
+  as loaded. A click on focused user count accepts the legacy full
+  `user.generations` form and validates it before display.
+- Both new: Pages sends `view=overview&generation_counts=lazy`; exact history
+  scans are skipped on routine visits, and count controls explicitly fetch
+  unchanged ACK-only data.
+- Missing or malformed responses are errors, never fabricated zeros.
 
-No remote D1 SQL, migration, payment, password, auth, or Production rollout.
-Full exact-source CI, staged release verification and owner approval required.
+The release must follow the trusted Worker-first protected Production
+workflow, with separately verified Staging and owner approval. No remotely
+executed D1 SQL, schema migrations, payment actions, password-flag changes
+or Cloudflare Free plan changes.

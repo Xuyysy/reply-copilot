@@ -11,7 +11,7 @@ These are historical observation windows, not current-release per-request causal
 The existing 0021 partial delivery timestamp index is already suitable for month scans, but exact COUNT still walks historical ACK entries. Adding a similar index is not enough. Do not modify or backfill financial/event records.
 
 ## Implementation
-- Admin overview and AI cost view omit the two exact generation keys and skip the historical count altogether. Omitted means **not loaded**, never zero.
+- **New Pages opt in** to deferred generation stats using `view=overview&generation_counts=lazy`; the Worker then omits both keys and skips the historical count. Old Pages still requesting only `view=overview` receive the legacy exact numbers during Worker-first rollout. AI cost view also defers the count. Omitted means **not loaded**, never zero.
 - Operator-initiated /v1/admin/dashboard?view=generations returns exact today/month ACK-only statistics using unchanged GENERATION_TOTALS_SQL.
 - Operator user dialog requests /v1/admin/users/:uuid?view=light, preserving recent orders, credit ledger, usage and quota, with generations null.
 - An explicit /v1/admin/users/:uuid?view=generations returns the same exact historical ACK-only lifetime count after admin auth and existence check.

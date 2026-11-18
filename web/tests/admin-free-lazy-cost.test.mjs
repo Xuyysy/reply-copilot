@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../src/components/admin/AdminDashboard.tsx',import.meta.url),'utf8');
 
 test('regular admin overview does not invoke expensive monthly AI history',()=>{
- assert.match(source,/read<Metrics>\("\/v1\/admin\/dashboard\?view=overview"\)/);
+ assert.match(source,/read<Metrics>\("\/v1\/admin\/dashboard\?view=overview&generation_counts=lazy"\)/);
  assert.match(source,/const \[costLoaded, setCostLoaded\] = useState\(false\)/);
  assert.match(source,/setContentLoaded\(false\); setCostLoaded\(false\)/);
 });
