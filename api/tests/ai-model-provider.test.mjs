@@ -104,6 +104,9 @@ test("CF Free CPU: validated provider JSON is parsed once, without relaxing the 
    validateEndpoint:async()=>{},fetchImpl:async()=>new Response(payload,{status:200})
   });
   assert.equal(providerParses,1,"model validation must not re-parse already-validated provider JSON");
-  assert.deepEqual(JSON.parse(result.raw),validateModelOutput(canonical));
+  const {score,...expectedWire}=validateModelOutput(canonical);
+  assert.equal(score,null);
+  assert.deepEqual(JSON.parse(result.raw),expectedWire,"wire protocol omits absent optional score");
+  assert.equal(Object.hasOwn(JSON.parse(result.raw),"score"),false);
  }finally{JSON.parse=parse;}
 });
