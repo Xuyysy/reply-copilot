@@ -10,7 +10,7 @@ test('collapsed legacy KPI panel is opt-in and never displays unloaded historica
  assert.match(src,/!historyLoaded\?<p role="status"/);
  assert.match(src,/Could not load historical metrics/);
  assert.match(src,/Close and reopen to retry/);
- assert.match(src,/\}:<div className="mt-3 grid grid-cols-2/);
+ assert.match(src,/<\/p>:<div className="mt-3 grid grid-cols-2/);
 });
 
 test('history loads only on overview expansion and restores on refresh without duplicate accounting',()=>{
