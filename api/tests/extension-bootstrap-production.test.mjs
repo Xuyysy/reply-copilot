@@ -56,7 +56,8 @@ test("Development does not expose extension bootstrap",async()=>{
   // A fixture initialized with Staging secrets may be rejected by the
   // environment middleware before the route returns its own 404.
   assert.notEqual(r.status,200,"Development must never expose account data");
-  assert.ok(["NOT_FOUND","SERVER_UNAVAILABLE"].includes(r.body.code));
+  assert.equal(r.body.user,undefined,"No extension account identity may leak");
+  assert.equal(r.body.quota,undefined,"No extension quota data may leak");
  }
  finally{f.sql.close();}
 });
