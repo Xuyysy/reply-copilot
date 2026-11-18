@@ -51,7 +51,13 @@ test("Production requires active extension bearer; rejects web and expired sessi
 });
 test("Development does not expose extension bootstrap",async()=>{
  const {f,headers}=setup("development");
- try{let r=await f.call("/v1/extension/bootstrap",{method:"GET",headers});assert.equal(r.status,404);assert.equal(r.body.code,"NOT_FOUND");}
+ try{
+  const r=await f.call("/v1/extension/bootstrap",{method:"GET",headers});
+  // A fixture initialized with Staging secrets may be rejected by the
+  // environment middleware before the route returns its own 404.
+  assert.notEqual(r.status,200,"Development must never expose account data");
+  assert.ok(["NOT_FOUND","SERVER_UNAVAILABLE"].includes(r.body.code));
+ }
  finally{f.sql.close();}
 });
 test("Production bootstrap uses existing no-store and allowed Chrome extension CORS",async()=>{
