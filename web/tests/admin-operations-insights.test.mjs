@@ -4,6 +4,8 @@ import {readFileSync} from 'node:fs';
 const root=readFileSync(new URL('../src/components/admin/AdminDashboard.tsx',import.meta.url),'utf8');
 const panel=readFileSync(new URL('../src/components/admin/AdminOperationsInsights.tsx',import.meta.url),'utf8');
 const api=readFileSync(new URL('../../api/src/admin-operations-insights.ts',import.meta.url),'utf8');
+const commerce=readFileSync(new URL('../src/components/admin/AdminCommercePanel.tsx',import.meta.url),'utf8');
+const commercial=readFileSync(new URL('../../api/src/commercial.ts',import.meta.url),'utf8');
 
 test('Admin V2 mounts operations inbox and AI economics only in relevant workspaces',()=>{
  assert.match(root,/AdminOperationsInsights active=\{tab==="overview"\} mode="alerts"/);
@@ -15,11 +17,23 @@ test('Admin V2 mounts operations inbox and AI economics only in relevant workspa
  assert.match(panel,/credit_entitlement_gap/);
  assert.match(panel,/subscription_entitlement_gap/);
  assert.match(panel,/moreThanSample/);
+ assert.match(panel,/\?view='/);
+ assert.match(panel,/核对订单/);
+ assert.match(commerce,/admin-order-triage/);
+ assert.match(commerce,/data\.items\.find\(row=>row\.id===id\)/);
+ assert.match(commerce,/nextStep\(selected\)/);
+ assert.match(commerce,/支付事件已核验但未发额度/);
+ assert.doesNotMatch(panel,/AI 失败请求/);
  assert.match(panel,/NOT full seven-day totals/);
  assert.match(panel,/not provider billing, net settlement, or profit/);
 });
 test('AI insights are bounded and mark uncertain cost and upgraded plan attribution',()=>{
  assert.match(api,/DELIVERIES_LIMIT=1000/);
+ assert.match(api,/needPlans\?env\.DB\.prepare/);
+ assert.match(api,/needAlerts\?env\.DB\.prepare/);
+ assert.doesNotMatch(api,/aiFailures24h|ai_failures|COUNT\(\*\) n FROM ai_requests/);
+ assert.doesNotMatch(commercial,/SELECT count\(\*\) n FROM ai_requests WHERE status IN/);
+ assert.doesNotMatch(root,/abnormalRequests|今日失败请求/);
  assert.match(api,/LIMIT \?/);
  assert.match(api,/moreThanSample/);
  assert.match(api,/plan_attribution|Plan is current period snapshot/);

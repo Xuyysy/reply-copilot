@@ -139,3 +139,31 @@ test('Provider-confirmed but unfulfilled payments become review alerts without a
   assert.equal(f.sql.prepare("SELECT credited_at FROM recharge_orders WHERE id='credit-unfulfilled'").get().credited_at,null);
  }finally{f.sql.close();}
 });
+
+test('Alert-only view skips AI request reads and preserves payment review items',async()=>{
+ const f=admin();
+ try{
+  const original=f.env.DB.prepare.bind(f.env.DB);
+  const queries=[];
+  f.env.DB.prepare=sql=>{queries.push(String(sql));return original(sql);};
+  const r=await f.call('/v1/admin/ops-insights?view=alerts',{method:'GET'});
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.aiFailures24h,undefined);
+  assert.ok(r.body.alerts.every(item=>item.type!=='ai_failures'));
+  assert.equal(r.body.aiUsage.rowsSampled,0);
+  assert.equal(queries.some(q=>q.includes('FROM ai_requests')),false,'Overview risk panel must never read AI requests');
+ }finally{f.sql.close();}
+});
+test('Cost-only view skips payment risk queries',async()=>{
+ const f=admin();
+ try{
+  const original=f.env.DB.prepare.bind(f.env.DB);
+  const queries=[];
+  f.env.DB.prepare=sql=>{queries.push(String(sql));return original(sql);};
+  const r=await f.call('/v1/admin/ops-insights?view=plans',{method:'GET'});
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.deepEqual(r.body.alerts,[]);
+  assert.equal(queries.some(q=>q.includes('FROM payment_transactions t JOIN recharge_orders')),false);
+  assert.equal(queries.some(q=>q.includes('FROM subscription_orders o JOIN subscription_payment_transactions')),false);
+ }finally{f.sql.close();}
+});

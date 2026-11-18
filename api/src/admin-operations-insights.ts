@@ -10,7 +10,7 @@ type Delivery={
  source:string|null;model:string|null;estimated_cost_micro_usd:number|null;
 };
 type Alert={
- key:string;type:'subscription_review'|'credit_payment_unknown'|'credit_entitlement_gap'|'subscription_entitlement_gap'|'ai_budget'|'ai_failures';
+ key:string;type:'subscription_review'|'credit_payment_unknown'|'credit_entitlement_gap'|'subscription_entitlement_gap'|'ai_budget';
  severity:'attention'|'warning';title:string;detail:string;
  order_id?:string;user_id?:string;created_at?:number;count?:number;target:'orders'|'subscriptions'|'cost'
 };
@@ -22,10 +22,12 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
  await requireAdminSession(request,env);
  const now=Date.now(),from=now-7*DAY;
  const day=new Date(now).toISOString().slice(0,10);
+ const view=new URL(request.url).searchParams.get('view');
+ const needAlerts=view!=='plans',needPlans=view!=='alerts';
  // Index: ai_requests_delivered_at_idx. Rows are capped and explicitly labelled
  // as sampled if more than 1000; never claim incomplete cohorts are exact.
- const [deliveries,subscriptionReview,creditUnknown,aiFailures,budget,setting,creditUnfulfilled,subscriptionUnfulfilled]=await Promise.all([
-  env.DB.prepare(`SELECT r.request_id,r.user_id,r.delivery_confirmed_at created_at,
+ const [deliveries,subscriptionReview,creditUnknown,budget,setting,creditUnfulfilled,subscriptionUnfulfilled]=await Promise.all([
+  needPlans?env.DB.prepare(`SELECT r.request_id,r.user_id,r.delivery_confirmed_at created_at,
      sa.period_id,v.plan_code,
      CASE WHEN ca.state='consumed' AND cb.bucket IN ('free','paid') THEN cb.bucket
        WHEN ca.id IS NULL AND sa.id IS NULL AND r.credit_source IN ('free','paid') THEN r.credit_source
@@ -42,29 +44,26 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
       AND r.delivery_confirmation_id IS NOT NULL AND r.delivery_confirmation_id<>''
       AND r.delivery_confirmed_at>=? AND r.delivery_confirmed_at<?
     ORDER BY r.delivery_confirmed_at DESC LIMIT ?`)
-   .bind(from,now+1,DELIVERIES_LIMIT+1).all<Delivery>(),
+   .bind(from,now+1,DELIVERIES_LIMIT+1).all<Delivery>():Promise.resolve({results:[] as Delivery[]}),
   // The existing pending-status partial index makes this list cheap.
-  env.DB.prepare(`SELECT id,user_id,status,created_at FROM subscription_orders
+  needAlerts?env.DB.prepare(`SELECT id,user_id,status,created_at FROM subscription_orders
      WHERE status IN ('pending','unknown','manual_review') AND status<>'pending' AND created_at>=?
      ORDER BY created_at DESC,id DESC LIMIT 8`).bind(now-30*DAY)
-   .all<{id:string;user_id:string;status:string;created_at:number}>(),
+   .all<{id:string;user_id:string;status:string;created_at:number}>():Promise.resolve({results:[] as {id:string;user_id:string;status:string;created_at:number}[]}),
   // Existing (provider,status,updated_at) index; legacy protocol provider
   // remains 'xiaodou' even when merchant_provider is MK99.
-  env.DB.prepare(`SELECT t.order_id,t.merchant_provider,t.updated_at,o.user_id
+  needAlerts?env.DB.prepare(`SELECT t.order_id,t.merchant_provider,t.updated_at,o.user_id
     FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id
     WHERE t.provider='xiaodou' AND t.status='unknown'
       AND t.merchant_provider IN ('mk99','xiaodou') AND t.updated_at>=?
     ORDER BY t.updated_at DESC LIMIT 8`).bind(now-30*DAY)
-    .all<{order_id:string;merchant_provider:string;updated_at:number;user_id:string}>(),
-  env.DB.prepare(`SELECT COUNT(*) n FROM ai_requests
-    WHERE status IN ('upstream_failed','uncertain') AND created_at>=?`).bind(now-DAY)
-    .first<{n:number}>(),
+    .all<{order_id:string;merchant_provider:string;updated_at:number;user_id:string}>():Promise.resolve({results:[] as {order_id:string;merchant_provider:string;updated_at:number;user_id:string}[]}),
   env.DB.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?')
     .bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
   env.DB.prepare(`SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'`).first<{value:string}>(),
   // Paid funds must not disappear when the separate entitlement transaction did
   // not complete. A five-minute grace window avoids transient checkout alarms.
-  env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
+  needAlerts?env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
     FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id
     WHERE t.provider='xiaodou' AND t.status='paid' AND t.paid_at IS NOT NULL
       AND t.updated_at>=? AND t.paid_at<=? AND o.credited_at IS NULL
@@ -74,8 +73,8 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
         AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
         AND e.amount_fen=t.amount_fen AND e.currency='CNY' AND e.body_sha256 IS NOT NULL)
     ORDER BY t.updated_at DESC LIMIT 8`).bind(now-30*DAY,now-5*60_000)
-    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>(),
-  env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
+    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>():Promise.resolve({results:[] as {order_id:string;user_id:string;paid_at:number;merchant_provider:string}[]}),
+  needAlerts?env.DB.prepare(`SELECT o.id order_id,o.user_id,t.paid_at,t.merchant_provider
     FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id
     WHERE o.created_at>=? AND t.status='paid' AND t.paid_at IS NOT NULL AND t.paid_at<=?
       AND o.applied_at IS NULL AND t.merchant_provider IN ('mk99','xiaodou')
@@ -84,7 +83,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
         AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED'
         AND e.amount_fen=t.amount_fen AND e.body_sha256 IS NOT NULL)
     ORDER BY o.created_at DESC LIMIT 8`).bind(now-30*DAY,now-5*60_000)
-    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>()
+    .all<{order_id:string;user_id:string;paid_at:number;merchant_provider:string}>():Promise.resolve({results:[] as {order_id:string;user_id:string;paid_at:number;merchant_provider:string}[]})
  ]);
  const list=(deliveries.results||[]),sampled=list.slice(0,DELIVERIES_LIMIT);
  const byPlan=new Map<string,PlanRow>();
@@ -127,15 +126,10 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
     detail:o.merchant_provider,order_id:o.order_id,user_id:o.user_id,created_at:o.paid_at,target:'subscriptions'});
  }
  const limit=Number(setting?.value||0),committed=Number(budget?.reserved_micro_usd||0)+Number(budget?.settled_micro_usd||0);
- if(limit>0&&committed>=limit*.8){
+ if(needAlerts&&limit>0&&committed>=limit*.8){
   alerts.push({key:'budget:'+day,type:'ai_budget',severity:committed>=limit?'attention':'warning',
     title:committed>=limit?'AI daily budget reached':'AI daily budget above 80%',
     detail:day+' UTC',target:'cost'});
- }
- if((aiFailures?.n||0)>0){
-  alerts.push({key:'ai-failures:'+day,type:'ai_failures',severity:'warning',
-    title:'Failed or uncertain AI requests in the last 24h',
-    detail:'UTC rolling 24h',count:Number(aiFailures!.n),target:'cost'});
  }
  alerts.sort((a,b)=>Number(b.severity==='attention')-Number(a.severity==='attention')||
    Number(b.created_at||0)-Number(a.created_at||0));
@@ -153,7 +147,6 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
    attributionNote:'Allocation ledger is authoritative for subscription/free/permanent source; a legacy request source is fallback only when neither allocation exists. Plan is current period snapshot and upgrades may change historical grouping. Cost covers successful ACK deliveries only; excludes upstream failures and is not profit.'
   },
   aiBudget:{dayUtc:day,limitMicroUsd:limit,committedMicroUsd:committed,
-   percent:limit>0?Math.min(100,Math.round(100*committed/limit)):null},
-  aiFailures24h:Number(aiFailures?.n||0)
+   percent:limit>0?Math.min(100,Math.round(100*committed/limit)):null}
  },200,env,request);
 }

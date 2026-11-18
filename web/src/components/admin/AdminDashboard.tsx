@@ -395,7 +395,6 @@ export default function AdminDashboard() {
               ["verifiedUsers",t("已验证用户","Verified users")],
               ["todayUsers",t("今日新增","New today")],
               ["totalFreeGranted",t("累计免费赠额","Free credits granted")],
-              ["abnormalRequests",t("异常请求","Abnormal requests")],
               ["monthRevenueFen",t("额度包本月登记金额","Credit booked amount · month")]
             ] as Array<[string,string]>).map(([key,label])=>
               <div key={key} className="min-w-0 rounded-lg border border-slate-100 bg-slate-50/70 p-3">
@@ -428,7 +427,6 @@ export default function AdminDashboard() {
         <Metric label={t("每日预算上限（UTC）", "Daily budget (UTC)")} value={microDollars(data.metrics.budgetLimitMicroUsd)} />
         <Metric label={t("剩余可用成本预算", "Remaining cost budget")} value={microDollars(data.metrics.remainingBudgetMicroUsd)} />
         <Metric label={t("预算已占用", "Budget committed")} value={data.metrics.budgetUsedPercent == null ? "—" : `${data.metrics.budgetUsedPercent}%`} />
-        <Metric label={t("今日失败请求", "Failed requests today")} value={String(data.metrics.abnormalRequests ?? "—")} />
       </div><Alert className="mt-4"><AlertDescription>{data.metrics.circuitOpen ? t("预算熔断已触发。", "Budget circuit breaker is active.") : data.metrics.costWarning ? t("已接近预算上限。", "Approaching the budget limit.") : t("预算状态正常。", "Budget is healthy.")}</AlertDescription></Alert><p className="mt-3 text-sm text-muted-foreground">{t("预算由系统设置即时生效，按 UTC 日统计，已扣除生成中的预留；成本为保守估算值。", "Budget settings apply immediately on UTC days, including in-flight reservations. Costs are conservative estimates.")}</p><p className="mt-2 text-sm text-muted-foreground">{t("Token 与成本汇总包含所有模型；管理员模型测试也计入每日预算，预留费用尚未计入模型已结算明细。", "Token and cost totals cover all models. Admin model tests also count toward the daily budget; reservations are not yet included in settled model details.")}</p><AiCostBreakdown rows={data.metrics.costByModel || []} language={language} /></>}</TabsContent>
       <TabsContent value="subscriptions"><SubscriptionAdminPanel language={language} active={tab==="subscriptions"} busy={busy} write={write} confirm={(title,description,action)=>setConfirm({title,description,action})}/></TabsContent>
        <TabsContent value="creator"><CreatorFeaturesPanel language={language} active={tab==="creator"} busy={busy} read={read} write={write} confirm={(title,description,action)=>setConfirm({title,description,action})}/></TabsContent>
