@@ -15,10 +15,23 @@
     void safeSend({type:"REPLY_COPILOT_PERFORMANCE_SAMPLE",sample});
   }
   let contextAlive = true;
-  let nativeInputHealthy = true;
+  // Active-X-tab MV3 warmup. A heartbeat is an extension-local message only,
+  // never a Cloudflare/AI/account API request. Chrome can still suspend the
+  // worker under memory pressure, so correctness never depends on this timer.
+  const LOCAL_WARM_INTERVAL_MS = 20_000;
+  let localWarmTimer = null;
+  let localWarmPending = false;
+  const localWarmStats={attempts:0,successes:0,failures:0,lastLatencyMs:null,lastWorkerUptimeMs:null};
+  globalThis.replyCopilotWakeReport=()=>({...localWarmStats,foreground:Boolean(contextAlive&&document.visibilityState==='visible'&&document.hasFocus?.()),scheduled:localWarmTimer!==null});
   let bindingTimer = null;
   let settingsRevision = 0;
+  let replyPreferenceRevision = 0;
   let pendingActivation = null;
+  // Staging quote fast path requires an unchanged editor across two reads.
+  // The proven 800ms path remains as a conservative fallback.
+  const QUOTE_EARLY_CHECK_MS = 360;
+  const QUOTE_STABILITY_MS = 120;
+  const QUOTE_LEGACY_FALLBACK_MS = 800;
   // After a completed draft's native editor closes, keep only the floating UI
   // available for review. The old editor, request and association are retired
   // immediately; this copy-only surface cannot generate or insert again.
@@ -61,6 +74,10 @@
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    if(localWarmTimer!==null){clearTimeout(localWarmTimer);localWarmTimer=null;}
+    try {document.removeEventListener('visibilitychange',reconcileLocalWarm);} catch {}
+    try {window.removeEventListener('focus',reconcileLocalWarm);} catch {}
+    try {window.removeEventListener('blur',reconcileLocalWarm);} catch {}
     clearLingeringHost();
     momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
@@ -68,6 +85,8 @@
     try { active?.assistant?.host?.remove(); } catch {}
     if (bindingTimer) clearInterval(bindingTimer);
     clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
+    clearTimeout(active?.copyOnlyTimer);clearTimeout(active?.copyOnlyFastTimer);
+    active?.copyOnlyEditor?.removeEventListener?.("input",active.onCopyOnlyInput,true);
     active = null;
     try {
       document.removeEventListener("click",onDocumentClick,true);
@@ -98,6 +117,43 @@
       return Promise.resolve({ ok: false, error: "插件后台连接已中断，请重新加载扩展并刷新 X 页面。" });
     }
   }
+  function localWarmEligible(){
+    return contextAlive && document.visibilityState==='visible' &&
+      document.hasFocus?.()!==false && hasRuntimeContext();
+  }
+  async function localWarmPing(){
+    if(localWarmPending||!localWarmEligible())return;
+    localWarmPending=true;
+    localWarmStats.attempts++;
+    const started=performance.now();
+    try{
+      const res=await safeSend({type:'REPLY_COPILOT_WARM_LOCAL'});
+      if(res?.ok===true){
+        localWarmStats.successes++;
+        localWarmStats.lastLatencyMs=Math.round(Math.max(0,performance.now()-started));
+        if(Number.isFinite(res.workerUptimeMs))
+          localWarmStats.lastWorkerUptimeMs=res.workerUptimeMs;
+      }else localWarmStats.failures++;
+    }catch{localWarmStats.failures++;}
+    finally{localWarmPending=false;}
+  }
+  function scheduleLocalWarm(){
+    if(localWarmTimer!==null){clearTimeout(localWarmTimer);localWarmTimer=null;}
+    if(!localWarmEligible())return;
+    localWarmTimer=setTimeout(()=>{
+      localWarmTimer=null;
+      if(!localWarmEligible())return;
+      void localWarmPing();
+      scheduleLocalWarm();
+    },LOCAL_WARM_INTERVAL_MS);
+  }
+  function reconcileLocalWarm(){
+    const wasScheduled=localWarmTimer!==null;
+    scheduleLocalWarm();
+    // Returning from a hidden/unfocused tab should wake immediately. At
+    // initial page load, the existing PERFORMANCE_STATE message already wakes.
+    if(!wasScheduled&&localWarmEligible())void localWarmPing();
+  }
   function record(eventName, data = {}) {
     if (!active) return;
     void safeSend({ type: "REPLY_COPILOT_HISTORY", requestId: active.requestId, sourceText: active.post.sourceText, sourceUrl: active.post.sourceUrl, event: eventName, ...data });
@@ -117,10 +173,11 @@
     completeTrace(current,"cancelled");
     current.cancelled=true;
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);clearTimeout(current.copyOnlyFastTimer);
     traceAssociation('closed',reason);
     if(bindingTimer){clearInterval(bindingTimer);bindingTimer=null;}
     current.editor?.removeEventListener("input",current.onComposerInput,true);
+    current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
     clearLingeringHost();
     const host = current.assistant?.host;
     if (reason === 'reply_closed' && current.appliedText && host?.isConnected) {
@@ -175,8 +232,9 @@
     current.cancelled=true;current.initializing=false;
     current.association?.interrupt(reason);
     current.observer?.disconnect();
-    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);
+    clearTimeout(current.acquireTimer);clearTimeout(current.expiryTimer);clearTimeout(current.closeCheckTimer);clearTimeout(current.copyOnlyTimer);clearTimeout(current.copyOnlyFastTimer);
     current.editor?.removeEventListener("input",current.onComposerInput,true);
+    current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
     void safeSend({type:"REPLY_COPILOT_CANCEL",requestId:current.requestId});
     // Lifecycle codes belong in diagnostics only. Never replace a successful
     // applied state with an internal teardown message.
@@ -196,11 +254,110 @@
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
+    if (result.state==='waiting' && result.reason==='awaiting_reply_context') {
+      // Record only transitions between structural wait reasons, not each
+      // MutationObserver tick; never include content, URLs, IDs or handles.
+      const detail=facts.editors[0]?.contextDetail||'unclassified';
+      if(active.lastContextWait!==detail){
+        active.lastContextWait=detail;
+        traceAssociation('context_wait',detail);
+      }
+    }
     if (result.state==='rejected') {
+      // Structural error codes only: never record IDs, URLs, text or handles.
+      if(result.reason==='reply_context_unconfirmed')
+        traceAssociation('context_detail',facts.editors[0]?.contextDetail||'unclassified');
       if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0 && facts.visibleDialogCount===0) endSession('reply_closed');
       else rejectAssociation(result.reason);
     }
     return {editor:result.editor,matchedPost:result.state==='bound',reason:result.reason};
+  }
+  // If the trusted Reply gesture captured a quote but X omitted the modal's
+  // parent identity, expose a MANUAL, COPY-ONLY surface. Never auto-insert
+  // without the original strict composer association.
+  async function offerQuoteCopyOnly(session,stabilityMs=0) {
+    if(session.offeringQuoteCopyOnly){
+      // The legacy 800ms timer must get one final attempt if a fast,
+      // in-flight check lost a React remount race.
+      session.retryQuoteAfterInFlight=true;
+      return;
+    }
+    if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
+       !session.post.hasCapturedQuote||session.copyOnly)return;
+    session.offeringQuoteCopyOnly=true;
+    try {
+    const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
+    if(!facts.routeAllowed||!facts.sourceUnchanged||facts.editors.length!==1||
+       session.activationBaseline?.baselineModalCount!==0)return;
+    const candidate=facts.editors[0];
+    if(!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
+       session.activationBaseline?.baselineEditors?.includes(candidate.node)||
+       candidate.quarantinedContextMatch||candidate.contextStatusId||
+       candidate.contextMatches!==null)return;
+    // No generation, credit charge, or automatic typing during acquisition.
+    const shared=session.replyPreflight;
+    const prefetched=shared?.revision===replyPreferenceRevision;
+    const behaviorPending=prefetched?shared.behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
+    // The early path requires a stable editor after the UI has had time
+    // to hydrate, without delaying the original fallback at 800ms.
+    let [response]=await Promise.all([behaviorPending,
+      stabilityMs>0?new Promise(resolve=>setTimeout(resolve,stabilityMs)):Promise.resolve()]);
+    if(prefetched&&shared.revision!==replyPreferenceRevision)
+      response=await safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"});
+    if(active!==session||session.cancelled||session.editor||session.copyOnly)return;
+    if(!response?.ok||response.preferences?.showFloatingWindow!==true){
+      traceAssociation("copy_only_skipped","floating_disabled_or_settings_error");
+      return;
+    }
+    const currentFacts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
+    const still=currentFacts.editors.length===1?currentFacts.editors[0]:null;
+    if(!currentFacts.routeAllowed||!currentFacts.sourceUnchanged||
+       !still||still.node!==candidate.node||!still.node?.isConnected||
+       !still.modal||!still.focused||!still.empty||
+       still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
+    session.copyOnly=true;
+    session.trace?.mark("editor_bound");
+    session.copyOnlyEditor=still.node;
+    session.copyOnlyDialog=still.dialog||null;
+    session.copyOnlyInputTouched=false;
+    session.onCopyOnlyInput=()=>{if(!session.applyingReply)session.copyOnlyInputTouched=true;};
+    still.node.addEventListener?.("input",session.onCopyOnlyInput,true);
+    session.preferences=response.preferences;
+    session.anchor=still.node.parentElement||still.node;
+    session.initializing=false;
+    session.assistant=api.inlineAssistant.mount(session.anchor,handleAction,{preferences:response.preferences});
+    session.assistant?.setStatus("原帖已捕获，但 X 回复框身份尚未确认。可手动生成并复制；不会自动填入。");
+    traceAssociation("copy_only","new_editor_unverified_parent");
+    const precheckStart=performance.now();
+    const account=await refreshAccount(session,session.replyPreflight?.account);
+    if(active!==session||session.cancelled||!session.copyOnly)return;
+    session.trace?.addDurations({precheck:performance.now()-precheckStart});
+    session.trace?.mark("precheck_complete");
+    if(account?.status==="credits_available") {
+      // A real, trusted Reply click established the newly opened, unique,
+      // focused, empty editor. When the user enabled auto-generate, continue
+      // the standard full loop using that causal editor, not guessed tweet text.
+      // Preserve manual copy for disabled auto or any pending safety gate.
+      const autoEnabled=session.preferences.autoGenerateOnReply===true &&
+        !stagingGateNext && account.momentumGatePending!==true && !session.momentumGate;
+      if(autoEnabled) {
+        session.causalQuoteAuto=true;
+        traceAssociation("causal_quote_auto","trusted_new_editor");
+        session.assistant?.setStatus("已定位新打开的回复框，正在自动生成；仅在复核安全后填入，不自动发布。");
+        void generateActive(session.requestId);
+      } else {
+        session.assistant?.showReady(false);
+        session.assistant?.setStatus("未开启自动生成或有待处理权益提示：可手动生成、复制或确认填入。");
+      }
+    }
+    } finally {
+      session.offeringQuoteCopyOnly=false;
+      if(session.retryQuoteAfterInFlight){
+        session.retryQuoteAfterInFlight=false;
+        if(active===session&&!session.cancelled&&!session.editor&&!session.copyOnly)
+          void offerQuoteCopyOnly(session);
+      }
+    }
   }
   function begin(control, post, activation) {
     if (active?.post?.statusId === post.statusId && active.editor?.isConnected && !active.cancelled && (active.initializing || active.generating || active.assistant?.host?.isConnected)) return;
@@ -211,19 +368,39 @@
     try { active?.editor?.removeEventListener("input", active.onComposerInput, true); } catch {}
     if (active?.observer) active.observer.disconnect();
     if (active?.assistant?.host?.isConnected) active.assistant.host.remove();
-    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);
+    clearTimeout(active?.acquireTimer);clearTimeout(active?.expiryTimer);clearTimeout(active?.closeCheckTimer);clearTimeout(active?.copyOnlyTimer);clearTimeout(active?.copyOnlyFastTimer);
     const requestId = crypto.randomUUID();
-    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl };
+    active = { requestId, post, control, editor: null, assistant: null, generated: false, cancelled: false, initializing: true, attemptedInput: new Set(), initialUrl:activation.initialUrl, activationBaseline:activation.baseline };
     traceAssociation('activated','trusted_reply_click');
+    traceAssociation('capture_kind',post.quoteOnly?'quote_only':'own_text');
     // The request ID changes on regeneration; the editor session does not.
     const session = active;
     active.trace = activation.trace;
+    // Start only read-only checks on the verified Reply click, before X
+    // hydrates the new editor. Both results are still required before the
+    // first AI request; every click keeps its own revision-fenced promises.
+    // This now helps ordinary replies too, without adding any extra reads.
+    session.replyPreflight={
+      revision:replyPreferenceRevision,
+      behavior:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})
+        .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_GET_BEHAVIOR"})),
+      account:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"})
+        .then(r=>r?.ok?r:safeSend({type:"REPLY_COPILOT_ACCOUNT_STATE"}))
+    };
     active.association=api.composerAssociation.create({trusted:true,statusId:post.statusId,requestId,now:activation.at,...activation.baseline});
     active.acquireTimer=setTimeout(()=>{
-      if (active===session && !session.editor) { rejectAssociation('association_expired'); }
+      if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
+    if(post.hasCapturedQuote){
+      session.copyOnlyFastTimer=setTimeout(()=>{
+        void offerQuoteCopyOnly(session,QUOTE_STABILITY_MS);
+      },QUOTE_EARLY_CHECK_MS);
+      session.copyOnlyTimer=setTimeout(()=>{
+        void offerQuoteCopyOnly(session);
+      },QUOTE_LEGACY_FALLBACK_MS);
+    }
     const locate=()=>{
-      if (!hasRuntimeContext() || active!==session || session.cancelled) return;
+      if (!hasRuntimeContext() || active!==session || session.cancelled || session.copyOnly) return;
       const found=matchedComposer(post);
       if (!found.editor) return;
       if (active.editor) {
@@ -246,7 +423,7 @@
         }
         return;
       }
-      clearTimeout(active.acquireTimer);
+      clearTimeout(active.acquireTimer);clearTimeout(active.copyOnlyTimer);clearTimeout(active.copyOnlyFastTimer);
       active.editor=found.editor;active.matchedPost=true;
       active.trace?.mark("editor_bound");
       const current=active;
@@ -259,8 +436,52 @@
       void prepareCurrent(requestId);
     };
     active.refreshAssociation=locate;
+    // Coalesce DOM mutation bursts into one microtask scan. Focus and click
+    // listeners remain immediate; no 200ms DOM debounce on reply activation.
+    const scheduleLocate=()=>{
+      if(session.locateScheduled)return;
+      session.locateScheduled=true;
+      Promise.resolve().then(()=>{
+        session.locateScheduled=false;
+        if(active===session&&!session.cancelled&&!session.copyOnly)locate();
+      });
+    };
+    // Once associated, ignore ordinary feed mutations that cannot affect
+    // this source article, its dialog, the bound editor, or a newly created
+    // competing dialog. Never filter unbound sessions: they must reject a
+    // wrong target immediately, before a second human Reply gesture.
+    const mutationTouchesReply=records=>{
+      if(!records?.length)return true; // conservative on unknown records
+      const editor=session.editor,article=session.post?.article;
+      const dialog=editor?.closest?.('[role="dialog"]');
+      const inside=(node,root)=>Boolean(root&&(node===root||root.contains?.(node)));
+      return records.some(record=>{
+        const raw=record?.target;
+        if(!raw||!record?.type)return true;
+        const node=raw.nodeType===3?raw.parentElement:raw;
+        if(!node)return true;
+        if(inside(node,article)||inside(node,dialog)||node===editor)return true;
+        if(record.type==='attributes')
+          return Boolean(node.contains?.(article)||node.contains?.(dialog)||
+            node.contains?.(editor));
+        if(record.type==='characterData')return false;
+        if(record.type!=='childList')return true;
+        const changed=[...(record.addedNodes||[]),...(record.removedNodes||[])];
+        if(!changed.length)return true;
+        return changed.some(n=>
+          n===editor||n===dialog||n===article||
+          n?.contains?.(editor)||n?.contains?.(dialog)||n?.contains?.(article)||
+          n?.matches?.('[role="dialog"]')||n?.querySelector?.('[role="dialog"]')
+        );
+      });
+    };
     active.observer=new MutationObserver(records=>{
       if(active!==session)return;
+      if(session.copyOnly){
+        if(!session.copyOnlyEditor?.isConnected)
+          session.assistant?.setStatus("X 回复框已变化；本次只能复制已经生成的建议。");
+        return;
+      }
       if(active.assistant?.host && !active.assistant.host.isConnected && !active.assistantDetachedReported) {
         active.assistantDetachedReported=true;
       }
@@ -277,7 +498,11 @@
           else locate();
         },350);
       }
-      locate();
+      // Never debounce unbound identity checks. For a bound editor, ignore
+      // clearly unrelated changes and batch relevant mutation bursts.
+      if(session.editor){
+        if(mutationTouchesReply(records))scheduleLocate();
+      }else locate();
     });
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
     locate();
@@ -287,8 +512,11 @@
     try {
       // Independent reads start together; both remain mandatory before AI.
       const precheckStart = performance.now();
-      const accountPending = safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
-      const response = await safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" });
+      const accountPending = current.replyPreflight?.account ||
+        safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
+      const response = await (current.replyPreflight?.revision===replyPreferenceRevision
+        ? current.replyPreflight.behavior
+        : safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" }));
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
@@ -364,7 +592,6 @@
       current.assistant?.setStatus("AI 建议本身含有重复文字，请换一种表达；这条未填入回复框。");
       return;
     }
-    if (!nativeInputHealthy) { current.assistant?.setStatus("本页面的自动填入已停止，可复制建议后粘贴。"); return; }
     if (current.initialComposerText || current.userTouchedComposer || api.composerAdapter.hasContent(current.editor)) {
       current.assistant?.setStatus("回复框已有内容，已保留原文；可以复制建议后自行调整。");
       return;
@@ -387,8 +614,9 @@
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
     if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
-      nativeInputHealthy = false;
-      current.assistant?.setStatus("X 回复框显示与候选不一致。请关闭这个草稿并刷新 X 后再试；当前建议可复制。");
+      // A translator can mutate one editor. Fence THIS request, not all future posts.
+      // insertOnce prevents duplicate insertion for the same requestId.
+      current.assistant?.setStatus("本条回复框与建议文字不一致，可复制建议；下一条帖子可继续尝试。");
       return;
     }
     current.trace?.mark("editor_verified");
@@ -396,6 +624,66 @@
     current.appliedText = candidate.trim(); current.appliedStyle = style;
     current.assistant?.showApplied();
     record("applied", { style, reply: candidate });
+  }
+  async function confirmQuoteCopyOnlyFill(current,data,{causalAuto=false}={}) {
+    const requestId=current?.requestId;
+    const editor=current?.copyOnlyEditor;
+    const reply=typeof data?.reply==="string"?data.reply:"";
+    const style=data?.style;
+    const expected=current?.result?.replies?.[style];
+    if(!(data?.userGesture === true || (causalAuto && current?.causalQuoteAuto===true)) ||
+       !current || active!==current || current.cancelled ||
+       !current.copyOnly || current.editor || !editor || !current.post?.hasCapturedQuote ||
+       !current.result || current.generating || current.appliedText ||
+       typeof expected!=="string" || expected!==reply || !reply.trim() ||
+       current.result.recommendation==="skip" || current.copyOnlyInputTouched ||
+       current.attemptedInput.has(requestId))return;
+    const valid=()=>{
+      if(!contextAlive || active!==current || current.cancelled || !current.copyOnly ||
+         current.editor || current.requestId!==requestId || !editor.isConnected ||
+         current.copyOnlyInputTouched || api.composerAdapter.hasContent(editor) ||
+         !document.hasFocus() || document.visibilityState!=="visible")return false;
+      const f=api.composerAssociation.snapshot(document,current.post,current.initialUrl,location.href,performance.now(),quarantinedPosts);
+      if(!f.routeAllowed || !f.sourceUnchanged || f.editors.length!==1)return false;
+      const e=f.editors[0];
+      return e.node===editor && e.modal && e.empty &&
+        (e.dialog||null)===current.copyOnlyDialog &&
+        !e.quarantinedContextMatch && !e.contextStatusId &&
+        e.contextMatches===null;
+    };
+    if(!valid()){
+      current.assistant?.setStatus("无法确认回复框仍是刚才的空白编辑框，未填入；可复制建议。");
+      return;
+    }
+    current.attemptedInput.add(requestId);
+    if(!api.composerAdapter.focusEmpty(editor)||!valid()){
+      current.assistant?.setStatus("无法安全聚焦原回复框，未填入；可复制建议。");
+      return;
+    }
+    current.applyingReply=true;
+    current.trace?.mark("insert_started");
+    const inserted=api.composerAdapter.insertOnce(editor,requestId,reply,
+      ()=>valid()&&document.activeElement===editor);
+    current.applyingReply=false;
+    if(active!==current||current.cancelled)return;
+    if(!inserted){
+      current.assistant?.setStatus("X 未接受此次单次填入，请复制建议，不要反复尝试。");
+      return;
+    }
+    await new Promise(resolve=>setTimeout(resolve,80));
+    if(active!==current||current.cancelled)return;
+    if(!editor.isConnected||api.composerAdapter.readText(editor)!==reply.trim()){
+      current.assistant?.setStatus("回复框已变化，请核对草稿，避免重复填入。");
+      return;
+    }
+    current.trace?.mark("editor_verified");
+    if(causalAuto)completeTrace(current,"success");
+    current.appliedText=reply.trim();current.appliedStyle=style;
+    current.assistant?.showApplied();
+    record("applied",{style,reply});
+    traceAssociation(causalAuto?"auto_filled":"confirmed_fill",
+      causalAuto?"trusted_new_editor":"explicit_user_action");
+    return true;
   }
   function refreshMomentum(current, options = {}) {
     if (current.momentumRequestPending) {
@@ -429,7 +717,16 @@
     const current = active;
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated || current.momentumGate) return;
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
-    if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
+    const copyOnly=Boolean(current.copyOnly&&!current.editor&&current.post.hasCapturedQuote);
+    if(copyOnly){
+      if(!current.copyOnlyEditor?.isConnected||!current.assistant?.host?.isConnected){
+        current.assistant?.setStatus("回复框已关闭，请重新点击 Reply。");
+        return;
+      }
+    }else if(!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) {
+      current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。");
+      return;
+    }
     current.generating = true; current.assistant?.showLoading();
     try {
       current.trace?.mark("background_dispatch");
@@ -437,7 +734,9 @@
       current.trace?.mark("background_return");
       current.trace?.addDurations(response?.performance?.durations);
       if (!contextAlive) return;
-      if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
+      if (!active || active.requestId !== requestId || active.cancelled ||
+         (copyOnly ? !current.copyOnly||!current.copyOnlyEditor?.isConnected
+                    : !active.editor?.isConnected)) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
       current.generated = true; current.generating = false; current.result = response.result;
       current.retrySameRequestId = false;
@@ -447,6 +746,22 @@
       current.trace?.mark("candidates_shown");
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
       if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
+      else if(copyOnly) {
+        if(current.causalQuoteAuto) {
+          const applied=await confirmQuoteCopyOnlyFill(current,{
+            style:selectedStyle,
+            reply:response.result.replies?.[selectedStyle]
+          },{causalAuto:true});
+          if(active!==current||current.cancelled)return;
+          if(applied!==true) {
+            current.assistant?.showExperimentalFill?.(true);
+            current.assistant?.setStatus("自动填入未能通过安全检查，建议仍可复制；可检查回复框后手动确认填入。");
+          }
+        } else {
+          current.assistant?.showExperimentalFill?.(true);
+          current.assistant?.setStatus("可复制，或点击“确认并填入”对当前回复框执行一次实验性填入；绝不自动发送。");
+        }
+      }
       else await autoFillCurrent(current, requestId, selectedStyle);
       // A protected draft, skip recommendation or unsafe focus is not a
       // successful automatic insertion. Count it separately, without text.
@@ -512,6 +827,7 @@
       current.cancelled = true; current.dismissed = true;
       current.observer?.disconnect();
       try { current.editor?.removeEventListener("input", current.onComposerInput, true); } catch {}
+      current.copyOnlyEditor?.removeEventListener?.("input",current.onCopyOnlyInput,true);
       void safeSend({ type: "REPLY_COPILOT_CANCEL", requestId: current.requestId });
       current.assistant = null;
       if (bindingTimer) { clearInterval(bindingTimer); bindingTimer = null; }
@@ -569,6 +885,10 @@
     if (action === "pricing") { void safeSend({ type: "REPLY_COPILOT_OPEN_PRICING" }); return; }
     if (action === "check-account") { void refreshAccount(current); return; }
     if (action === "position_changed") { void safeSend({ type: "REPLY_COPILOT_SET_FLOATING_POSITION", left: data.left, top: data.top }); return; }
+    if (action === "confirm-fill") {
+      void confirmQuoteCopyOnlyFill(current,data);
+      return;
+    }
     if (action === "generate") { void generateActive(current.requestId); return; }
     if(action==='recover-generation'||action==='abandon-generation'){
       if(current.recovering)return;
@@ -633,7 +953,7 @@
       if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
-    const control=api.replyDetector.findReplyControl(event.target);
+    const control=api.replyDetector.findReplyControl(event.target,event);
     if (recoveryRequired) recoverAfterQuiescence();
     // X's composer has its own Reply/submit controls, but a media viewer
     // may ALSO be a dialog containing a genuine post Reply button.
@@ -642,6 +962,10 @@
     // X can remove/hide its modal before our MutationObserver callback runs.
     // Reconcile the already-bound node synchronously before classifying a new
     // trusted gesture as competition. Never reset an ambiguous unbound session.
+    if (active?.copyOnly && !active.cancelled && control) {
+      const prior=api.composerAssociation.snapshot(document,active.post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+      if(prior.editors.length===0&&prior.visibleDialogCount===0)endSession("reply_closed");
+    }
     if (active?.editor && !active.cancelled) {
       // A new trusted Reply click is an explicit switch. If the old dialog
       // has actually disappeared, release it synchronously instead of
@@ -656,7 +980,11 @@
     if (recoveryRequired && control) {pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
-      if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
+      // Translation overlays and unrelated page clicks must not poison the
+      // pending reply. A second real composer action still cancels safely.
+      if(active&&!active.cancelled&&!active.editor&&
+         event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]'))
+        rejectAssociation('competing_activation');
       return;
     }
     if (active&&!active.cancelled) {
@@ -667,21 +995,27 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;return;}
+    if (!post.ok) {
+      // Only on a failed verified Reply gesture; never log text or URLs.
+      traceAssociation("capture_failed",post.reason||"unknown_post");
+      pendingActivation=null;return;
+    }
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
-    const control=api.replyDetector.findReplyControl(event.target);
+    const control=api.replyDetector.findReplyControl(event.target,event);
     if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.blocked || performance.now()-activation.at>1500) {
+      traceAssociation("click_failed",!activation?"no_pointer_activation":activation.blocked?"blocked_activation":"activation_expired");
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId) {
+      traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
@@ -690,7 +1024,18 @@
   }
   function refreshAssociation(){active?.refreshAssociation?.();}
   function onBeforeInput(event) {
-    if(event.isTrusted && active && !active.cancelled && !active.editor) rejectAssociation('user_input_before_binding');
+    // Do not let translator/search-field input cancel an awaiting reply.
+    // Real DOM events identify a reply dialog editor; synthetic/custom editor
+    // nodes without .closest still use the original baseline identity fence.
+    if(!event.isTrusted||!active||active.cancelled||active.editor)return;
+    const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    if(active.copyOnly && editor===active.copyOnlyEditor){
+      active.copyOnlyInputTouched=true;
+      return;
+    }
+    const genuine=Boolean(editor?.closest?.('[role="dialog"]')) ||
+      (!event.target?.closest && api.composerAssociation.baseline(document).baselineEditors.includes(event.target));
+    if(genuine)rejectAssociation('user_input_before_binding');
   }
   function setMomentumEntry(show) {
     if (!contextAlive) return;
@@ -704,6 +1049,7 @@
   let momentumPreferenceRevision = 0;
   function onMomentumPreference(changes, area) {
     if (area !== 'local' || !changes.behaviorPreferences) return;
+    replyPreferenceRevision++;
     const {oldValue, newValue} = changes.behaviorPreferences;
     if ((oldValue?.showMomentumEntry !== false) === (newValue?.showMomentumEntry !== false)) return;
     momentumPreferenceRevision++;
@@ -716,6 +1062,12 @@
       if (initialRevision === momentumPreferenceRevision) setMomentumEntry(behaviorPreferences?.showMomentumEntry !== false);
     }).catch(() => {});
   } catch {}
+  // Run only while the foreground X tab is in use. No alarms, offscreen
+  // documents, extra manifest permissions, remote keepalive or paid request.
+  document.addEventListener('visibilitychange',reconcileLocalWarm);
+  window.addEventListener('focus',reconcileLocalWarm);
+  window.addEventListener('blur',reconcileLocalWarm);
+  scheduleLocalWarm();
   void safeSend({type:"REPLY_COPILOT_PERFORMANCE_STATE"}).then(response=>{performanceEnabled=response?.enabled===true;});
   document.addEventListener('pointerdown',captureActivation,true);
   document.addEventListener('keydown',captureActivation,true);

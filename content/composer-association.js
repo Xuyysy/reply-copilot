@@ -108,13 +108,27 @@
     return ids.size>1?'conflicting_status_links':null;
   }
   const normalized=text=>(text||'').replace(/\s+/g,' ').trim();
+  // Exclude embedded quote nodes consistently from modal parent candidates.
+  // Read-only DOM inspection, never a guessed reply-target ID.
+  function inQuotedCard(node) {
+    if(node?.closest?.('[data-testid="quoteTweet"], [data-testid="card.wrapper"]'))return true;
+    const card=node?.closest?.('div[role="link"]');
+    return Boolean(card?.querySelector?.('[data-testid="User-Name"]') &&
+      card?.querySelector?.('[data-testid="tweetText"]'));
+  }
   function capturePost(post) {
+    // Captioned quotes require extra hydration patience, ordinary posts do not.
+    // Discover the quote only on the trusted capture, not on every modal scan.
+    const markedQuote=Boolean(post.article?.querySelector?.('[data-testid="quoteTweet"]'));
+    const roleLinkQuote=!markedQuote&&[...(post.article?.querySelectorAll?.('div[role="link"]')||[])]
+      .some(card=>card.querySelector?.('[data-testid="User-Name"]')&&card.querySelector?.('[data-testid="tweetText"]'));
+    const hasCapturedQuote=markedQuote||roleLinkQuote;
     const hasCapturedMedia=Boolean(post.article?.querySelector?.('[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]'));
     const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
       if(a.closest('article')!==post.article)return false;
       try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
     });
-    return {...post,hasCapturedPhoto,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
+    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
   }
   function sameContext(post,text) {
     const source=normalized(post.sourceText),copy=normalized(text);
@@ -140,7 +154,7 @@
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
       const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node)
-        && !a.closest?.('[data-testid="quoteTweet"], [data-testid="card.wrapper"]'));
+        && !inQuotedCard(a));
       // Quoted posts/media can add extra article nodes in the modal.
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
@@ -153,16 +167,28 @@
       // the feed behind it. A quoted preview cannot masquerade as the root.
       const bareTexts=[...dialog.querySelectorAll('[data-testid="tweetText"]')]
         .filter(textNode=>visible(textNode)&&!textNode.closest('article')&&
-          !textNode.closest('[data-testid="quoteTweet"], [data-testid="card.wrapper"]')&&
-          !textNode.closest('[contenteditable="true"]'));
+          !inQuotedCard(textNode)&&!textNode.closest('[contenteditable="true"]'));
       for(const textNode of bareTexts){
-        const card=textNode.closest('[role="link"]');
-        if(card?.querySelector?.('[data-testid="User-Name"]') &&
-           bareTexts.some(other=>other!==textNode && !card.contains(other)))continue;
-        const text=normalized(textNode.innerText||textNode.textContent);
+        const text=normalized(api.postExtractor.readOriginalText?.(textNode)||textNode.innerText||textNode.textContent);
         if(text)candidates.push({article:null,id:null,text});
       }
       const matching=candidates.filter(item=>item.id===post.statusId);
+      // Only quote-only posts need this extra DOM check. X can show the
+      // outer author/timestamp without an outer tweetText in the modal.
+      // Require BOTH the verified outer ID and the same quoted preview.
+      const quotePreview=post.quoteOnly && post.quotedText ? (()=>{
+        // The modal can mount the parent timestamp before the embedded quote.
+        // A missing preview is not a contradiction of an EXACT parent ID;
+        // a visible, different preview remains a hard conflict.
+        const marked=[...dialog.querySelectorAll('[data-testid="quoteTweet"] [data-testid="tweetText"]')];
+        const roleCards=[...dialog.querySelectorAll('div[role="link"]')]
+          .filter(card=>card.querySelector?.('[data-testid="User-Name"]'))
+          .map(card=>card.querySelector?.('[data-testid="tweetText"]')).filter(Boolean);
+        const nodes=[...new Set([...marked,...roleCards])];
+        return {seen:nodes.length>0,matches:nodes.some(node=>
+          normalized(api.postExtractor.readOriginalText?.(node)||node.innerText||node.textContent)===normalized(post.quotedText))};
+      })() : {seen:false,matches:false};
+      const quotedPreviewMatches=quotePreview.matches;
       const exactText=candidates.filter(item=>sameContext(post,item.text));
       // X sometimes omits the parent permalink in a quote/video reply modal,
       // while leaving a separate quoted article. A UNIQUE source-text match
@@ -179,18 +205,41 @@
       // If the post ID is present it wins, even if X changed the display
       // text for translation. Otherwise demand a unique original-text match;
       // missing modal context should WAIT for React, not be rejected.
-      const contextMatches=!candidates.length?null
-        :matching.length>1?false
-        :matching.length===1?Boolean(normalized(text))
-        :uniqueText&&!uniqueText.id&&exactText.length===1?true
-        :candidates.length===1&&!normalized(text)&&!statusId?null
-        :false;
+      const contextMatches=post.quoteOnly
+        ? !candidates.length?null
+          :matching.length>1?false
+          :matching.length===1?(!quotePreview.seen || quotedPreviewMatches)
+          // Quote text alone cannot identify the reply target. Wait for
+          // X's outer parent to hydrate instead of rejecting prematurely.
+          :candidates.some(item=>Boolean(item.id))?false:null
+        :!candidates.length?null
+          :matching.length>1?false
+          // A uniquely verified parent status ID is the strongest evidence.
+        // X may hydrate its caption text later, especially around quotes.
+        :matching.length===1?true
+          // An explicit other parent/status identity must still fail closed.
+          :candidates.some(item=>Boolean(item.id))?false
+          // Preserve the original, unique exact-text fallback only when
+          // no conflicting status IDs appear in the opened reply dialog.
+          :uniqueText&&!uniqueText.id&&exactText.length===1?true
+          // Only captioned quote layouts get a hydration grace; unrelated
+          // non-quote or media text mismatches stay strict/fail-closed.
+          :post.hasCapturedQuote?null
+          :candidates.length===1&&!normalized(text)&&!statusId?null
+          :false;
+      const contextDetail=contextMatches===true?"verified_context"
+        :matching.length>1?"duplicate_parent_identity"
+        :matching.length===1&&post.quoteOnly&&quotePreview.seen&&!quotedPreviewMatches?"quote_preview_mismatch"
+        :!candidates.length?"awaiting_parent_article"
+        :matching.length===0&&candidates.some(item=>Boolean(item.id))?"different_parent_identity"
+        :post.quoteOnly?"awaiting_verified_parent"
+        :post.hasCapturedQuote?"awaiting_captioned_quote_parent":"unconfirmed_context";
       return {node,dialog,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)),
         contextTextMatches:Boolean(primary&&sameContext(post,text)),
-        contextMatches};
+        contextMatches,contextDetail};
     });
     const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(editorSelector)].some(visible));
     return {now,editors,visibleDialogCount:composerDialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),

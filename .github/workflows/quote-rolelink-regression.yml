@@ -1,0 +1,26 @@
+name: Quote Role-Link DOM regression
+on:
+  push:
+    branches:
+      - fix/staging-quote-rolelink-research-20261114
+permissions:
+  contents: read
+jobs:
+  quote-dom:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Focused DOM + full reply flow legacy tests
+        run: |
+          node --test --test-concurrency=1 \
+            tests/quote-rolelink-real-layout.test.js \
+            tests/quote-post-reply.test.js \
+            tests/content-scripts.test.js \
+            tests/production-dom-flow.test.js \
+            tests/translator-interop.test.js

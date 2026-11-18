@@ -155,6 +155,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if ((!fromXPage || sender.frameId !== 0) && !fromExtensionPage) return false;
     void performanceReady.then(()=>sendResponse({enabled:performanceEnabled}));return true;
   }
+  // A foreground X page may keep this MV3 worker warm with a local-only
+  // message. Do not read storage, poll accounts, call fetch, or change quotas.
+  if (message?.type === "REPLY_COPILOT_WARM_LOCAL") {
+    if (!fromXPage || sender.frameId !== 0) {
+      sendResponse({ok:false}); return false;
+    }
+    sendResponse({ok:true, workerUptimeMs:Math.max(0,Math.round(performance.now()))});
+    return false;
+  }
   if (message?.type === "REPLY_COPILOT_PERFORMANCE_SAMPLE") {
     if (fromXPage && sender.frameId === 0 && performanceEnabled) performanceSamples.record(message.sample);
     sendResponse({ok:true});return false;
