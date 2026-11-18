@@ -7,7 +7,11 @@ import { subscriptionDayWindow } from '../../domain/subscription-policy.js';
 type Allocation = { id: string; period_id: string; day_index: number };
 type RequestCost = { model: string; inputTokens: number; outputTokens: number; costMicroUsd: number; usageQuality?: 'verified' | 'estimated' };
 const MAX_CLEANUP_PER_CALL=20;
-const PROOF_SQL = "EXISTS (SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=p.source_order_id AND o.user_id=p.user_id AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear' AND t.amount_fen=o.amount_fen AND t.currency='CNY' AND (?<>'production' OR t.merchant_provider IN ('mk99','xiaodou')) AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)))";
+const FIAT_PROOF_SQL = "EXISTS (SELECT 1 FROM subscription_orders o JOIN subscription_payment_transactions t ON t.order_id=o.id WHERE o.id=p.source_order_id AND o.user_id=p.user_id AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL AND t.status='paid' AND t.paid_at IS NOT NULL AND t.risk_state='clear' AND t.amount_fen=o.amount_fen AND t.currency='CNY' AND (?<>'production' OR t.merchant_provider IN ('mk99','xiaodou')) AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider AND e.event_type='PAYMENT_SUCCEEDED' AND e.amount_fen=t.amount_fen AND (t.merchant_provider='local_mock' OR e.body_sha256 IS NOT NULL)))";
+// Align the atomic spend predicate with subscriptionAccount's BoltUtil proof.
+// This is a separate money domain; never query these tables without the
+// environment-specific schema-ready flag. Paid alone is NOT a payment proof.
+const CRYPTO_PROOF_SQL = "EXISTS (SELECT 1 FROM subscription_orders o JOIN boltutil_orders b ON b.subscription_order_id=o.id AND b.user_id=p.user_id WHERE o.id=p.source_order_id AND o.user_id=p.user_id AND o.status='paid' AND o.paid_at IS NOT NULL AND o.applied_at IS NOT NULL AND b.status='paid' AND b.paid_at IS NOT NULL AND b.applied_at IS NOT NULL AND b.product_type='subscription' AND b.tx_hash IS NOT NULL AND b.receiving_address IS NOT NULL AND b.payable_usdt_micros>=1000000 AND b.paid_usdt_micros>=b.payable_usdt_micros AND EXISTS (SELECT 1 FROM boltutil_payment_events e WHERE e.external_order_id=b.external_order_id AND e.network=b.network AND e.tx_hash=b.tx_hash AND e.body_sha256 IS NOT NULL))";
 
 async function pendingSubscriptionAllocation(env:Env,userId:string,requestId:string):Promise<Allocation|null> {
   return await env.DB.prepare("SELECT id,period_id,day_index FROM subscription_ai_allocations WHERE user_id=? AND request_id=? AND state='reserved'")
@@ -45,10 +49,14 @@ export async function reserveSubscribedGeneration(
   const setting=await env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>();
   const budgetLimit=Number(setting?.value);
   if(!Number.isSafeInteger(budgetLimit)||budgetLimit<1)throw new ApiFailure(503,'BUDGET_NOT_CONFIGURED','AI 成本预算尚未配置。');
+  // The fiat proof stays available everywhere. BoltUtil proof is allowed only
+  // where its independent D1 schema has been approved and installed.
+  const cryptoReady=['staging','production'].includes(env.ENVIRONMENT)&&env.BOLTUTIL_SCHEMA_READY==='1';
+  const proofSql=cryptoReady?'('+FIAT_PROOF_SQL+' OR '+CRYPTO_PROOF_SQL+')':FIAT_PROOF_SQL;
   const nonce=uuid(),allocationId=uuid(),eventId=uuid();
   const requestInsert="INSERT INTO ai_requests(request_id,user_id,quota_date,reservation_nonce,status,consumed,request_hash,created_at,credit_source,budget_day,budget_reserved_micro_usd,generation_phase,provider_config_id,provider_config_version) "+
     "SELECT ?,?,?,?,'reserved',0,?,?,NULL,?,?,'generating',?,? FROM subscription_periods p WHERE p.id=? AND p.user_id=? AND p.status='active' AND p.start_at<=? AND p.end_at>? "+
-    "AND "+PROOF_SQL+" AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.user_id AND u.status='active' AND u.archived_at IS NULL) "+
+    "AND "+proofSql+" AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.user_id AND u.status='active' AND u.archived_at IS NULL) "+
     "AND EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=? AND d.reserved_micro_usd+d.settled_micro_usd+?<=?) "+
     "AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?)) "+
     "AND NOT EXISTS(SELECT 1 FROM ai_requests r WHERE r.user_id=? AND r.status='reserved' AND (COALESCE(r.generation_phase,'unknown')<>'awaiting_delivery' OR r.raw_response IS NULL OR r.response_expires_at IS NULL)) "+

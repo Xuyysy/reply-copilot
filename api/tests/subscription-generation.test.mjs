@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {buildSync} from 'esbuild';
 import {createRequire} from 'node:module';
 import {fixture,temp} from './helpers/payment-v2.mjs';
@@ -208,5 +209,63 @@ test('0.3.5 wire path receives three candidates and never recaches exhausted per
   assert.equal((await f.call('/v1/ai/generate',{headers,body})).body.raw,first.body.raw);
   assert.equal((await ack(f,800)).body.alreadyConfirmed,true);
   assert.equal(daily(f).used,1);
+ }finally{f.sql.close();}
+});
+
+
+test('Production: verified BEP20 subscription is spendable via atomic reservation, never converted into free/paid credits',async()=>{
+ const f=fixture();try{
+  setup(f);
+  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
+  f.env.ENVIRONMENT='production';
+  f.env.BOLTUTIL_SCHEMA_READY='1';
+  f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE user_id='test-user' AND bucket='free'");
+  f.sql.exec("UPDATE credit_accounts SET free_balance=0 WHERE user_id='test-user'");
+  f.sql.prepare("INSERT INTO boltutil_orders(id,external_order_id,user_id,operation_id,product_type,subscription_order_id,network,token_contract,token_decimals,base_amount_fen,cny_per_usdt_micros,quoted_usdt_micros,payable_usdt_micros,paid_usdt_micros,receiving_address,tx_hash,status,paid_at,applied_at,created_at,updated_at) VALUES('crypto1','bolt-ext-1','test-user','crypto-op-1','subscription','sub-order','BEP20','0xabc',18,6990,6670000,10479761,10479761,10479761,? ,?,'paid',?,?,1,1)")
+   .run('0x'+'1'.repeat(40),'0x'+'a'.repeat(64),Date.now(),Date.now());
+  // A mere paid flag without independent signed provider evidence is NEVER spendable.
+  await assert.rejects(reserve(f,901),err=>err.code==='INSUFFICIENT_CREDITS');
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,0);
+  f.sql.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) VALUES('crypto-event','bolt-ext-1','CONFIRMED','BEP20',?, 'sha256-proof',?)")
+   .run('0x'+'a'.repeat(64),Date.now());
+  assert.equal((await reserve(f,902)).kind,'new');
+  assert.equal(f.sql.prepare("SELECT state FROM subscription_ai_allocations WHERE request_id=?").get(id(902)).state,'reserved');
+  assert.deepEqual({...daily(f)},{used:0,reserved:1});
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM ai_credit_allocations WHERE request_id=?").get(id(902)).n,0);
+  await finishGeneration(f.env,'test-user',id(902),'subscription response',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+  const receipt=await ack(f,902);
+  assert.equal(receipt.status,200,JSON.stringify(receipt));
+  assert.equal(receipt.body.subscription.remainingToday,499);
+  assert.deepEqual({...daily(f)},{used:1,reserved:0});
+  assert.equal(f.sql.prepare("SELECT free_balance,paid_balance FROM credit_accounts").get().free_balance,0);
+  // Revoked payment evidence cannot authorize a NEW generation, even if the period remains active.
+  f.sql.exec("DELETE FROM boltutil_payment_events");
+  await assert.rejects(reserve(f,903),err=>err.code==='INSUFFICIENT_CREDITS');
+  assert.deepEqual({...daily(f)},{used:1,reserved:0});
+ }finally{f.sql.close();}
+});
+
+test('Production: missing crypto schema readiness, held payment and insufficient settlement all deny spend even with active period',async()=>{
+ const f=fixture();try{
+  setup(f);
+  f.sql.exec(readFileSync(new URL('../sql-proposals/0028_boltutil_usdt.sql',import.meta.url),'utf8'));
+  f.env.ENVIRONMENT='production';f.env.BOLTUTIL_SCHEMA_READY='1';
+  f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+  const now=Date.now();
+  f.sql.prepare("INSERT INTO boltutil_orders(id,external_order_id,user_id,operation_id,product_type,subscription_order_id,network,token_contract,token_decimals,base_amount_fen,cny_per_usdt_micros,quoted_usdt_micros,payable_usdt_micros,paid_usdt_micros,receiving_address,tx_hash,status,paid_at,applied_at,created_at,updated_at) VALUES('crypto2','bolt-ext-2','test-user','crypto-op-2','subscription','sub-order','BEP20','0xabc',18,6990,6670000,10479761,10479761,10479761,?,?,'paid',?,?,1,1)")
+    .run('0x'+'1'.repeat(40),'0x'+'b'.repeat(64),now,now);
+  f.sql.prepare("INSERT INTO boltutil_payment_events(event_id,external_order_id,status,network,tx_hash,body_sha256,received_at) VALUES('crypto-event2','bolt-ext-2','CONFIRMED','BEP20',?, 'sha256-proof',?)")
+    .run('0x'+'b'.repeat(64),now);
+  f.env.BOLTUTIL_SCHEMA_READY='0';
+  await assert.rejects(reserve(f,904),err=>err.code==='INSUFFICIENT_CREDITS');
+  f.env.BOLTUTIL_SCHEMA_READY='1';
+  f.sql.exec("UPDATE boltutil_orders SET status='manual_review'");
+  await assert.rejects(reserve(f,905),err=>err.code==='INSUFFICIENT_CREDITS');
+  f.sql.exec("UPDATE boltutil_orders SET status='paid',paid_usdt_micros=0");
+  await assert.rejects(reserve(f,906),err=>err.code==='INSUFFICIENT_CREDITS');
+  f.sql.exec("UPDATE boltutil_orders SET paid_usdt_micros=payable_usdt_micros");
+  f.sql.exec("UPDATE users SET status='frozen' WHERE id='test-user'");
+  await assert.rejects(reserve(f,907),err=>err.code==='INSUFFICIENT_CREDITS');
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,0);
  }finally{f.sql.close();}
 });
