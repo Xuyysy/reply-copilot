@@ -13,6 +13,15 @@ function parse(raw?:string){try{return validateMomentumConfig(JSON.parse(raw??''
 async function current(env:Env){const row=await env.DB.prepare('SELECT value FROM system_settings WHERE key=?').bind(KEY).first<Row>();return {row,config:parse(row?.value)};}
 // Read-only purchase proof. No balance field is a purchase entitlement.
 export async function creatorFeature(env:Env,userId:string){
+ // Verify the strongest paid proof first. For an active subscription the
+ // subscriptionAccount() proof already verifies the provider event and risk
+ // state; there is no reason to scan older credit purchases on every poll.
+ // For an account with no active/queued period, subscriptionAccount() returns
+ // after an index-covered user/status probe rather than three proof lookups.
+ if((await subscriptionAccount(env,userId)).status==='active'){
+   const {config:policy}=await current(env);
+   return {eligible:true,policy};
+ }
  const row=await env.DB.prepare(`SELECT (SELECT value FROM system_settings WHERE key=?) config,
  EXISTS(SELECT 1 FROM users u JOIN recharge_orders o ON o.user_id=u.id JOIN payment_transactions t ON t.order_id=o.id
  WHERE u.id=? AND u.status='active' AND u.archived_at IS NULL AND o.status='paid' AND o.paid_at IS NOT NULL AND o.credited_at IS NOT NULL
@@ -49,9 +58,9 @@ export async function creatorFeature(env:Env,userId:string){
    ) eligible`).bind(userId).first<{eligible:number}>();
    cryptoEligible=crypto?.eligible===1;
  }
- // Existing fiat and active subscription proofs remain authoritative.
- const eligible=fiatEligible||cryptoEligible||(await subscriptionAccount(env,userId)).status==='active';
- return {eligible,policy:parse(row?.config??undefined)};
+ // Subscription proof (if any) was independently checked above; neither
+ // available credit balance nor unsigned payment intent can grant access.
+ return {eligible:fiatEligible||cryptoEligible,policy:parse(row?.config??undefined)};
 }
 async function history(env:Env){
  const rows=await env.DB.prepare("SELECT id,before_json,after_json,created_at FROM admin_audit_logs WHERE action IN ('creator_momentum_update','creator_momentum_restore') AND target_id=? ORDER BY created_at DESC,id DESC LIMIT 20").bind(KEY).all<{id:string;before_json:string;after_json:string;created_at:number}>();
