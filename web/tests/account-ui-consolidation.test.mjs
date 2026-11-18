@@ -16,7 +16,7 @@ test("account orders are one accessible, collapsed-on-load order center", () => 
     assert.equal(tags.length, 1, id + " should only be rendered once");
     assert.doesNotMatch(tags[0], /\bopen(?:=|\s|>)/, "orders must be closed by default");
   }
-  assert.match(account, /t\("订阅订单", "Subscription orders"\)/);
+  assert.match(account, /t\("订阅订单",\s*"Subscription orders"\)/);
   assert.match(account, /t\("充值订单", "Top-up orders"\)/);
   assert.doesNotMatch(account, /最近额度流水|data-activity-scroll|data-activity-retry/);
   assert.equal((account.match(/<Card data-orders-card/g) || []).length, 1);
@@ -24,7 +24,7 @@ test("account orders are one accessible, collapsed-on-load order center", () => 
 
 test("hidden order detail preserves payment recovery and entitlement actions", () => {
   for (const token of [
-    "subscriptionStatus(order,language)", "查看原订单", "orderPriceSummary(order,language)",
+    "subscriptionStatus(order,language)", "核验原订单", "orderPriceSummary(order,language)",
     "continuePayment(order.id)", "refreshPaymentStatus(order.id)",
     "watchPayment", "data-testid=\"account-subscription-quota\"",
     "account-subscription-overage-upgrade"

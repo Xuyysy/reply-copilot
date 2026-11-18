@@ -44,7 +44,7 @@ test('account shows subscription bucket independently with used, reserved, reset
  assert.match(account,/usage.subscription\?\.status==="active"/);
  assert.match(account,/原有免费及永久次数/);
  assert.match(account,/购买下一期/);
- assert.match(account,/查看原订单/);
+ assert.match(account,/核验原订单/);
 });
 
 const home=readFileSync(new URL('../src/pages/index.astro',import.meta.url),'utf8');
