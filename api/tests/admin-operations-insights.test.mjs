@@ -167,3 +167,57 @@ test('Cost-only view skips payment risk queries',async()=>{
   assert.equal(queries.some(q=>q.includes('FROM subscription_orders o JOIN subscription_payment_transactions')),false);
  }finally{f.sql.close();}
 });
+
+test('admin may acknowledge only an expired unknown-credit alert, without changing accounting',async()=>{
+ const f=admin();
+ try{
+  const at=Date.now()-60000,orderId='11111111-1111-4111-8111-111111111111';
+  f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('test-session',?)").run(Date.now()+900000);
+  const pkg=f.sql.prepare('SELECT id FROM recharge_packages LIMIT 1').get().id;
+  f.sql.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,created_at) VALUES (?,'test-user',?,'Starter',400,149,'USD','expired',?)").run(orderId,pkg,at);
+  f.sql.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,status,created_at,updated_at,merchant_provider) VALUES ('txn-expired',?,'xiaodou','CNY',1043,'unknown',?,?,'mk99')").run(orderId,at,at);
+  let r=await f.call('/v1/admin/ops-insights?view=alerts',{method:'GET'});
+  assert.ok(r.body.alerts.some(a=>a.order_id===orderId&&a.order_status==='expired'));
+  const body={orderId,confirm:true,reason:'已核对原支付收银单，确认关闭运营待办提醒',operationId:'22222222-2222-4222-8222-222222222222'};
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body});
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(r.body.paymentStatusUnchanged,true);
+  assert.equal(f.sql.prepare('SELECT status FROM recharge_orders WHERE id=?').get(orderId).status,'expired');
+  assert.equal(f.sql.prepare('SELECT status FROM payment_transactions WHERE id=?').get('txn-expired').status,'unknown');
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM credit_ledger').get().n,0);
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM admin_audit_logs WHERE action='credit_unknown_alert_ack' AND target_id=?").get(orderId).n,1);
+  r=await f.call('/v1/admin/ops-insights?view=alerts',{method:'GET'});
+  assert.ok(!r.body.alerts.some(a=>a.order_id===orderId),'acknowledged unchanged alert is hidden');
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body});
+  assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM admin_audit_logs WHERE action='credit_unknown_alert_ack'").get().n,1,'idempotent ack');
+  f.sql.prepare("UPDATE payment_transactions SET updated_at=? WHERE id='txn-expired'").run(at+12345);
+  r=await f.call('/v1/admin/ops-insights?view=alerts',{method:'GET'});
+  assert.ok(r.body.alerts.some(a=>a.order_id===orderId),'new transaction activity re-opens alert');
+ }finally{f.sql.close();}
+});
+
+test('acknowledge requires reauth, confirmation, eligible unpaid evidence, and an admin role',async()=>{
+ const f=admin();
+ try{
+  const at=Date.now(),orderId='33333333-3333-4333-8333-333333333333';
+  const pkg=f.sql.prepare('SELECT id FROM recharge_packages LIMIT 1').get().id;
+  f.sql.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,created_at) VALUES (?,'test-user',?,'Starter',400,149,'USD','expired',?)").run(orderId,pkg,at);
+  f.sql.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,status,created_at,updated_at,merchant_provider) VALUES ('txn-reject',?,'xiaodou','CNY',1043,'unknown',?,?,'mk99')").run(orderId,at,at);
+  const body={orderId,confirm:true,reason:'已核对订单但不变更付款状态',operationId:'44444444-4444-4444-8444-444444444444'};
+  let r=await f.call('/v1/admin/ops-insights/acknowledge',{body});
+  assert.equal(r.status,403,'must have recent password proof');
+  f.sql.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('test-session',?)").run(at+900000);
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body:{...body,confirm:false}});
+  assert.equal(r.status,400);
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body,headers:{'X-CSRF-Token':''}});
+  assert.equal(r.status,403);
+  f.sql.prepare("UPDATE payment_transactions SET paid_at=? WHERE id='txn-reject'").run(at);
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body});
+  assert.equal(r.status,409,'paid transaction must not be dismissed');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM admin_audit_logs WHERE action='credit_unknown_alert_ack'").get().n,0);
+  f.sql.prepare("UPDATE users SET role='user' WHERE id='test-user'").run();
+  r=await f.call('/v1/admin/ops-insights/acknowledge',{body});
+  assert.equal(r.status,403);
+ }finally{f.sql.close();}
+});

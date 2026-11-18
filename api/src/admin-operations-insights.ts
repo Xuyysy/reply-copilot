@@ -1,6 +1,9 @@
 import type {Env} from './types';
 import {requireAdminSession} from './admin-auth';
 import {response} from './http';
+import {ApiFailure} from './types';
+import {jsonBody,nowMs} from './security';
+import {operation,commitOperation} from './admin-operations';
 
 const DAY=86_400_000;
 const DELIVERIES_LIMIT=1000;
@@ -12,7 +15,7 @@ type Delivery={
 type Alert={
  key:string;type:'subscription_review'|'credit_payment_unknown'|'credit_entitlement_gap'|'subscription_entitlement_gap'|'ai_budget';
  severity:'attention'|'warning';title:string;detail:string;
- order_id?:string;user_id?:string;created_at?:number;count?:number;target:'orders'|'subscriptions'|'cost'
+ order_id?:string;user_id?:string;created_at?:number;count?:number;order_status?:string;target:'orders'|'subscriptions'|'cost'
 };
 type PlanRow={
  plan:string;deliveries:number;costMicroUsd:number;
@@ -52,12 +55,14 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
    .all<{id:string;user_id:string;status:string;created_at:number}>():Promise.resolve({results:[] as {id:string;user_id:string;status:string;created_at:number}[]}),
   // Existing (provider,status,updated_at) index; legacy protocol provider
   // remains 'xiaodou' even when merchant_provider is MK99.
-  needAlerts?env.DB.prepare(`SELECT t.order_id,t.merchant_provider,t.updated_at,o.user_id
+  needAlerts?env.DB.prepare(`SELECT t.order_id,t.merchant_provider,t.updated_at,o.user_id,o.status order_status
     FROM payment_transactions t JOIN recharge_orders o ON o.id=t.order_id
+    LEFT JOIN system_settings ack ON ack.key='admin_credit_unknown_ack:'||t.order_id
     WHERE t.provider='xiaodou' AND t.status='unknown'
       AND t.merchant_provider IN ('mk99','xiaodou') AND t.updated_at>=?
+      AND (ack.value IS NULL OR ack.value<>t.id||':'||t.updated_at)
     ORDER BY t.updated_at DESC LIMIT 8`).bind(now-30*DAY)
-    .all<{order_id:string;merchant_provider:string;updated_at:number;user_id:string}>():Promise.resolve({results:[] as {order_id:string;merchant_provider:string;updated_at:number;user_id:string}[]}),
+    .all<{order_id:string;merchant_provider:string;updated_at:number;user_id:string;order_status:string}>():Promise.resolve({results:[] as {order_id:string;merchant_provider:string;updated_at:number;user_id:string;order_status:string}[]}),
   env.DB.prepare('SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?')
     .bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
   env.DB.prepare(`SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'`).first<{value:string}>(),
@@ -113,7 +118,7 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
  for(const o of creditUnknown.results||[]){
   alerts.push({key:'c:'+o.order_id,type:'credit_payment_unknown',severity:'attention',
     title:'Credit-pack payment state unknown',detail:o.merchant_provider,
-    order_id:o.order_id,user_id:o.user_id,created_at:o.updated_at,target:'orders'});
+    order_id:o.order_id,user_id:o.user_id,created_at:o.updated_at,order_status:o.order_status,target:'orders'});
  }
  for(const o of creditUnfulfilled.results||[]){
   alerts.push({key:'ungranted:'+o.order_id,type:'credit_entitlement_gap',severity:'attention',
@@ -149,4 +154,48 @@ export async function adminOperationsInsights(request:Request,env:Env):Promise<R
   aiBudget:{dayUtc:day,limitMicroUsd:limit,committedMicroUsd:committed,
    percent:limit>0?Math.min(100,Math.round(100*committed/limit)):null}
  },200,env,request);
+}
+
+/**
+ * Acknowledge an already-expired, UNCONFIRMED credit checkout as an operator
+ * task. This NEVER declares a merchant payment closed, changes a transaction,
+ * grants credits, or alters financial evidence. The marker is scoped to the
+ * transaction ID plus its last update so later payment activity re-alerts.
+ * Reuse the existing PK-indexed settings store; no schema migration is needed.
+ */
+export async function acknowledgeExpiredCreditAlert(request:Request,env:Env):Promise<Response>{
+ const actor=await requireAdminSession(request,env,true);
+ const body=await jsonBody(request,4096);
+ const id=body.orderId;
+ if(typeof id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+  throw new ApiFailure(400,'INVALID_ORDER_ID','订单编号无效。');
+ if(body.confirm!==true)
+  throw new ApiFailure(400,'ADMIN_CONFIRM_REQUIRED','请确认仅结束异常提醒，不代表商户已经关闭收款。');
+ const op=await operation(env,actor,body,'credit_unknown_alert_ack',id);
+ const row=await env.DB.prepare(`SELECT t.id transaction_id,t.updated_at
+   FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id
+   WHERE o.id=? AND o.status='expired' AND o.paid_at IS NULL AND o.credited_at IS NULL
+     AND t.provider='xiaodou' AND t.status='unknown' AND t.risk_state='clear'
+     AND t.merchant_provider IN ('mk99','xiaodou') AND t.paid_at IS NULL
+     AND COALESCE(t.actual_paid_fen,0)=0
+     AND NOT EXISTS(SELECT 1 FROM provider_payment_events e
+       WHERE e.transaction_id=t.id AND e.event_type='PAYMENT_SUCCEEDED')
+     AND NOT EXISTS(SELECT 1 FROM payment_refunds r WHERE r.transaction_id=t.id)
+   ORDER BY t.updated_at DESC LIMIT 1`).bind(id)
+   .first<{transaction_id:string;updated_at:number}>();
+ if(!row)throw new ApiFailure(409,'ORDER_REVIEW_NOT_ELIGIBLE','该订单已变动或存在付款风险，不能结束提醒，请先核验原单。');
+ const key='admin_credit_unknown_ack:'+id;
+ const marker=row.transaction_id+':'+row.updated_at;
+ const old=await env.DB.prepare('SELECT value FROM system_settings WHERE key=?').bind(key).first<{value:string}>();
+ if(old?.value===marker)return response({ok:true,alertAcknowledged:true,alreadyAcknowledged:true,paymentStatusUnchanged:true},200,env,request);
+ // A subsequent transaction update invalidates this old marker automatically.
+ // This is an operator acknowledgment only, not a merchant close or a refund.
+ await commitOperation(env,op,[
+  env.DB.prepare(`INSERT INTO system_settings(key,value,updated_at,updated_by)
+   VALUES(?,?,?,?) ON CONFLICT(key) DO UPDATE
+   SET value=excluded.value,updated_at=excluded.updated_at,updated_by=excluded.updated_by`)
+   .bind(key,marker,nowMs(),actor.user_id)
+ ],{marker:old?.value??null,financialStatus:'unchanged'},
+   {marker,financialStatus:'unchanged',latePaymentReviewRequired:true});
+ return response({ok:true,alertAcknowledged:true,paymentStatusUnchanged:true},200,env,request);
 }
