@@ -41,14 +41,14 @@ test("account prewarm safely handles errors without extra attempts during cooldo
 });
 
 const script=readFileSync(new URL("../content/coldstart-prewarm.js",import.meta.url),"utf8");
-function fakePage({staging=true,focused=true}={}) {
+function fakePage({staging=true,focused=true,officialProduction=false}={}) {
   const docEvents={},windowEvents={},sent=[],state={now:1000,focused,visible:true};
   const window={addEventListener:(name,fn)=>{windowEvents[name]=fn}};
   window.top=window;
   const doc={get visibilityState(){return state.visible?"visible":"hidden";},
     hasFocus:()=>state.focused,
     addEventListener:(name,fn)=>{docEvents[name]=fn}};
-  const chrome={runtime:{id:"mock-extension",getManifest:()=>({background:{service_worker:staging?"staging/service-worker.js":"background/service-worker.js"}}),
+  const chrome={runtime:{id:officialProduction?"fgfjajofkapebgphfidblngcjomkbdaj":"mock-extension",getManifest:()=>({background:{service_worker:staging?"staging/service-worker.js":"background/service-worker.js"}}),
     sendMessage:async msg=>{sent.push(msg);return {ok:true,kind:"prepared",elapsedMs:6,workerUptimeMs:25}}}};
   const sandbox={window,document:doc,chrome,location:{href:"https://x.com/home"},Date:{now:()=>state.now},
     performance:{now:()=>state.now},queueMicrotask:fn=>Promise.resolve().then(fn),
@@ -84,7 +84,15 @@ test("staging hidden/unfocused tabs do not prewarm, foreground return does",asyn
   f.state.visible=true;f.docEvents.visibilitychange();await f.flush();
   assert.equal(f.sent.length,2);
 });
-test("production Chrome build opts out of prewarm entirely",async()=>{
+test("verified Production store identity enables only foreground read-only prewarm",async()=>{
+  const f=fakePage({staging:false,officialProduction:true});await f.flush();
+  assert.equal(f.sent.length,1);
+  assert.equal(f.sent[0].type,"REPLY_COPILOT_PREWARM_ACCOUNT");
+  f.state.now+=31_000;f.intent("pointerdown",false);await f.flush();
+  assert.equal(f.sent.length,1,"untrusted clicks cannot trigger prewarm");
+  f.intent("pointerdown");await f.flush();assert.equal(f.sent.length,2);
+});
+test("unknown unpacked/developer identities must never enable Production prewarm",async()=>{
   const f=fakePage({staging:false});await f.flush();
   assert.equal(f.sent.length,0);
   assert.equal(f.docEvents.pointerover,undefined);

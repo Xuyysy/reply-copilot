@@ -1,9 +1,14 @@
 (() => {
-  // A read-only Staging experiment. The 0.3.11 Production extension remains
-  // completely unchanged until explicit Chrome-release approval.
+  // Read-only account + local context warmup in verified packaged builds.
+  // Production requires the exact store extension ID; dev/test installs never
+  // activate this optional network prewarm.
   if (window.top !== window) return;
   try {
-    if (chrome.runtime.getManifest()?.background?.service_worker !== "staging/service-worker.js") return;
+    const sw = chrome.runtime.getManifest()?.background?.service_worker;
+    const packagedStaging = sw === "staging/service-worker.js";
+    const storeId = "fgfjajofkapebgphfidblngcjomkbdaj";
+    const packagedProduction = sw === "background/service-worker.js" && chrome.runtime.id === storeId;
+    if (!packagedStaging && !packagedProduction) return;
   } catch { return; }
   if (!/^https:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//.test(location.href)) return;
   const api = globalThis.ZaneReplyCopilotContent;

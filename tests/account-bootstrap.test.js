@@ -41,13 +41,23 @@ test("Auth/network/malformed bootstrap never silently falls back",async()=>{
  assert.equal((await s.getState()).status,expected);
  }assert.equal(old,0);
 });
-test("Production remains on the original three-request path",async()=>{
- let old=0;
- const client={token:async()=> "a".repeat(64),fetchBootstrap:async()=>{throw Error("must not run staging path");},
+test("Production now uses the single authenticated bootstrap and not legacy GETs",async()=>{
+ let old=0,boot=0;
+ const client={token:async()=> "a".repeat(64),fetchBootstrap:async()=>{boot++;return sample;},
  fetchCurrentUser:async()=>{old++;return {user:sample.user};},fetchEntitlement:async()=>{old++;return {status:sample.status,entitlement:sample.entitlement};},
  fetchUsage:async()=>{old++;return {quota:sample.quota,subscription:sample.subscription};}};
  assert.equal((await new AccountStateService({config:{...stage,channel:"production"},client}).getState()).status,"credits_available");
- assert.equal(old,3);
+ assert.equal(boot,1);assert.equal(old,0);
+});
+test("Production legacy API 404 fails over once without repeated extra requests",async()=>{
+ let boot=0,old=0;
+ const client={token:async()=> "a".repeat(64),fetchBootstrap:async()=>{boot++;throw Object.assign(Error("legacy"),{status:404,code:"NOT_FOUND"});},
+ fetchCurrentUser:async()=>{old++;return {user:sample.user};},fetchEntitlement:async()=>{old++;return {status:sample.status,entitlement:sample.entitlement};},
+ fetchUsage:async()=>{old++;return {quota:sample.quota,subscription:sample.subscription};}};
+ const store=new AccountStateService({config:{...stage,channel:"production"},client});
+ assert.equal((await store.getState()).status,"credits_available");store.invalidate();
+ assert.equal((await store.getState()).status,"credits_available");
+ assert.equal(boot,1);assert.equal(old,6);
 });
 test("bootstrap client uses only fixed origin and bearer header, never URL token",async()=>{
  const calls=[],storage={get:async k=>({[k]:"a".repeat(64)})};
