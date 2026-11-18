@@ -8,12 +8,14 @@ test('owner cancellation is offered for old MK99/Xiaodou subscription and credit
  const account=read('../src/components/account/AccountDashboard.tsx');
  const checkout=read('../src/components/account/SubscriptionCheckout.tsx');
  const credits=read('../src/pages/checkout.astro');
- assert.match(checkout,/未付款？取消本站订单/);
+ assert.match(checkout,/想重新购买其他套餐？/);
  assert.match(checkout,/\/local-cancel/);
- assert.match(account,/取消未付款订单/);
+ assert.match(account,/想重新购买其他套餐？/);
+ assert.match(account,/想更换额度包或支付方式？/);
  assert.match(account,/cancelFiatOrder\(order\.id,"subscription"\)/);
  assert.match(account,/cancelFiatOrder\(order\.id,"credits"\)/);
  assert.match(credits,/cancel-unpaid-order/);
+ assert.match(credits,/想更换额度包或支付方式？/);
  assert.match(credits,/\/local-cancel/);
  assert.match(credits,/confirm:true/);
 });

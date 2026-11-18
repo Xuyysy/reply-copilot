@@ -470,17 +470,17 @@ async function holdLateMk99Payment(env:Env,row:Order,event:VerifiedSubscriptionE
 async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
  if(row.merchant_account!==env.XIAODOU_APP_ID||row.payment_channel!=='ALIPAY_H5'||
     !/^mkid_[0-9a-f]{16}$/.test(row.notification_sign_type??''))
-   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','原订单与小豆商户身份不匹配。');
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','原订单与收款账户不匹配。');
  let client:ReturnType<typeof configuredXiaodouMerchant>;
- try{client=configuredXiaodouMerchant(env);}catch{throw new ApiFailure(503,'XIAODOU_CONFIG_ERROR','小豆原订单暂无法查询，请稍后重试。');}
+ try{client=configuredXiaodouMerchant(env);}catch{throw new ApiFailure(503,'XIAODOU_CONFIG_ERROR','原订单暂无法查询，请稍后重试。');}
  let result:Record<string,unknown>;
  try{result=await client.queryPayment(row.provider_trade_id,{requestId:'xrh-sub-q-'+uuid()});}
- catch(error){throw new ApiFailure(502,error instanceof XiaodouProviderError?error.code:'XIAODOU_QUERY_UNAVAILABLE','小豆暂时无法可信确认付款，请保留原订单。');}
+ catch(error){throw new ApiFailure(502,error instanceof XiaodouProviderError?error.code:'XIAODOU_QUERY_UNAVAILABLE','暂时无法确认原订单付款，请保留订单并稍后查验。');}
  if(result.outTradeNo!==row.provider_trade_id||result.currency!=='CNY'||result.amountFen!==row.amount_fen||result.channel!==row.payment_channel)
-   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆查单与原始订阅金额或渠道不一致。');
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付查询与原订阅金额或支付方式不一致。');
  const status=result.status;
  if(!['CREATED','PAYING','SUCCEEDED','FAILED','CLOSED','UNKNOWN'].includes(String(status)))
-   throw new ApiFailure(502,'XIAODOU_QUERY_INVALID','小豆返回了无法识别的支付状态。');
+   throw new ApiFailure(502,'XIAODOU_QUERY_INVALID','支付平台返回了无法识别的订单状态。');
  if(status!=='SUCCEEDED'){
    if((status==='CLOSED'||status==='FAILED')&&['pending','unknown'].includes(row.status)&&
      ['pending','unknown'].includes(row.payment_status)&&row.risk_state==='clear')
@@ -491,7 +491,7 @@ async function queryXiaodouSubscriptionPayment(env:Env,row:Order){
  }
  const tradeNo=result.openOrderId;
  if(typeof tradeNo!=='string'||!/^[A-Za-z0-9_-]{1,128}$/.test(tradeNo))
-   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','小豆平台订单标识不符合约定。');
+   throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','支付平台返回的订单标识无法核验。');
  const verified:VerifiedSubscriptionEvent={provider:'xiaodou',verification:'authenticated_query',
    outTradeNo:row.provider_trade_id,tradeNo,amountFen:row.amount_fen,tradeStatus:'TRADE_SUCCESS',
    merchantId:env.XIAODOU_APP_ID,paytypeCode:'alipay',currency:'CNY'};

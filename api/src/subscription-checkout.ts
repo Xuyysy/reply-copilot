@@ -184,7 +184,7 @@ export async function createSubscriptionCheckout(request:Request,env:Env):Promis
  if(!['mk99','xiaodou'].includes(control.activeMerchant)||!control.methods.some(m=>m.provider===control.activeMerchant&&m.channel===channel))
    throw new ApiFailure(503,'SUBSCRIPTION_PAYMENT_UNAVAILABLE','此支付渠道尚未开放。');
  const isXiaodou=control.activeMerchant==='xiaodou';
- if(isXiaodou&&channel!=='ALIPAY_H5')throw new ApiFailure(503,'XIAODOU_WECHAT_NOT_APPROVED','小豆微信尚未开通。');
+ if(isXiaodou&&channel!=='ALIPAY_H5')throw new ApiFailure(503,'XIAODOU_WECHAT_NOT_APPROVED','当前微信支付方式暂未开放。');
  const config=isXiaodou?null:mk99Config(env);
  const merchantAccount=isXiaodou?(env.XIAODOU_APP_ID??''):config!.pid;
  const signType=isXiaodou?(env.XIAODOU_KEY_ID??''):config!.notifySignType;
