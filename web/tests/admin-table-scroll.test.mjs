@@ -186,7 +186,7 @@ test('real admin tables scroll independently with sticky headers; controls, dial
   assert.deepEqual(await evaluate(`window.__calls.find(c=>c.path==='/v1/admin/users/bulk-status').body.userIds`),['u1','u2']);
    await tab('orders');
    await click(`${panel}.querySelector('[data-testid="admin-unified-orders"] tbody button')`);
-   await until(`${panel}.textContent.includes('Order review summary')`);
+   await until(`${panel}.querySelector('[data-testid="admin-order-triage"]')!==null`);
    await click(`${panel}.querySelector('details > summary')`);
    await click(`${panel}.querySelector('details tbody button')`);
    await until('!!document.querySelector(\'[role="dialog"]\')');
