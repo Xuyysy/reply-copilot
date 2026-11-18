@@ -53,11 +53,6 @@ test('Admin V2: real subscription receipts use paid_at index instead of scanning
   GROUP BY o.kind`,
  [Date.now()-90*86400000,Date.now()]),'admin_subscription_receipts_paid_idx');
 });
-test('Admin V2: 24h AI failures use status-time partial index, not all-user scan',()=>{
- uses(plan(`SELECT COUNT(*) n FROM ai_requests
-  WHERE status IN ('upstream_failed','uncertain') AND created_at>=?`,
- [Date.now()-86400000]),'admin_failed_ai_recent_idx');
-});
 test('Admin V2: paid but unfulfilled subscription alert uses recent subscription order index',()=>{
  const rows=plan(`SELECT o.id order_id,o.user_id,t.paid_at FROM subscription_orders o
    JOIN subscription_payment_transactions t ON t.order_id=o.id

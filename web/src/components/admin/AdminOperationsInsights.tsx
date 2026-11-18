@@ -9,7 +9,7 @@ type Alert={key:string;type:string;severity:'attention'|'warning';title:string;d
 type Plan={plan:string;deliveries:number;observedPeriods:number;deliveryCostMicroUsd:number;costedDeliveries:number;avgCostMicroUsd:number|null};
 type Insights={
  time:{from:number;to:number;timezone:string;generatedAt:number};
- alerts:Alert[];alertCoverage:string;aiFailures24h:number;
+ alerts:Alert[];alertCoverage:string;
  aiUsage:{rowsSampled:number;moreThanSample:boolean;limit:number;subscription:number;free:number;paid:number;unattributed:number;plans:Plan[];attributionNote:string};
  aiBudget:{dayUtc:string;limitMicroUsd:number;committedMicroUsd:number;percent:number|null};
 };
@@ -24,7 +24,7 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
  useEffect(()=>{
   if(!active)return;
   let live=true;setInsights(null);setError('');
-  void api<Insights>('/v1/admin/ops-insights').then(data=>{if(live)setInsights(data);})
+  void api<Insights>('/v1/admin/ops-insights?view='+mode).then(data=>{if(live)setInsights(data);})
    .catch((cause:unknown)=>{if(live)setError(cause instanceof Error?cause.message:t('读取运营分析失败','Unable to load insights'));});
   return()=>{live=false;};
  },[active,mode,refresh]);
@@ -35,18 +35,18 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
   if(a.type==='credit_entitlement_gap')return t('额度包已付款但未发放额度','Credit paid, credits not granted');
   if(a.type==='subscription_entitlement_gap')return t('订阅已付款但权益未生效','Subscription paid, entitlement not applied');
   if(a.type==='ai_budget')return t('AI 预算预警','AI budget warning');
-  return t('AI 失败请求','AI failure requests');
+  return t('需关注事件','Attention needed');
  };
  return <Card data-testid={'admin-ops-'+mode} className={compact?"min-w-0 !gap-0":"mb-4"}>
   <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
-   <CardTitle>{mode==='alerts'?t('运营异常待办','Operator attention queue'):t('订阅套餐 AI 使用与成本','Subscription AI usage and cost')}</CardTitle>
+   <CardTitle>{mode==='alerts'?t('订单核验与预算提醒','Payment checks & budget alerts'):t('订阅套餐 AI 使用与成本','Subscription AI usage and cost')}</CardTitle>
    <Button type="button" size="sm" variant="outline" onClick={()=>setRefresh(x=>x+1)}>{t('刷新','Refresh')}</Button>
   </CardHeader>
   <CardContent className={compact?"min-w-0 space-y-3 pt-0":"space-y-3"}>
    {error&&<p role="alert" className="text-sm text-destructive">{error}</p>}
    {!insights&&!error&&<p role="status" className="text-sm text-muted-foreground">{t('正在加载运营数据…','Loading operations data…')}</p>}
    {insights&&mode==='alerts'&&<>
-     {!compact&&<p className="text-xs leading-5 text-muted-foreground">{t('只展示最近30天待核验订单及支付已确认超过5分钟但权益仍未发放的订单，以及预算/AI请求异常。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget and AI anomalies. Up to eight orders per kind; not the full historical backlog.')}</p>}
+     {!compact&&<p className="text-xs leading-5 text-muted-foreground">{t('只展示最近30天待核验订单及支付已确认超过5分钟但权益仍未发放的订单，以及预算预警。每类最多8条，非完整历史待办。','Recent unresolved subscription and credit-pack orders, budget warnings. Up to eight orders per kind; not the full historical backlog.')}</p>}
     {!insights.alerts.length&&<p role="status" className="text-sm">{t('当前筛选范围没有需关注的事件。','No flagged events in the inspected ranges.')}</p>}
     <div className={compact?"admin-ops-feed space-y-2":"space-y-2"}>
      {insights.alerts.map(a=><div key={a.key} className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-slate-200/80 bg-slate-50/50 px-3 py-2.5" data-testid="admin-ops-alert">
@@ -54,15 +54,16 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
       <div className="min-w-0 flex-1">
        <p className="break-words text-[13px] font-semibold leading-5 text-slate-800">{statusLabel(a)}{a.count!=null?' · '+a.count:''}</p>
        <p className="break-all font-mono text-[10px] leading-4 text-slate-500">{a.order_id||a.detail}</p>
+       <p className="mt-1 text-[11px] leading-4 text-slate-600">{a.type==='credit_payment_unknown'?t('先核对付款凭证和原收银订单，未核验前不要补发额度。','Verify the original payment and evidence; do not grant credits without proof.'):a.type==='subscription_review'?t('核对商户付款状态与订阅订单；不要凭待确认状态发放权益。','Check the merchant payment and subscription order; do not grant entitlements from an uncertain status.'):a.type==='credit_entitlement_gap'?t('已发现可信支付事件但额度未发放，请人工复核发额流水。','Verified payment evidence exists, but credits are missing. Review the credit ledger.'):a.type==='subscription_entitlement_gap'?t('已发现可信支付事件但订阅未生效，请人工复核权益应用记录。','Verified payment evidence exists, but the subscription is inactive. Review entitlement records.'):t('检查预算与成本设置。','Check the budget and cost settings.')}</p>
       </div>
       <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2.5 text-xs" onClick={()=>navigate(a.order_id?'orders':a.target,a.order_id)}>
-       {compact?t('查看','View'):t('打开相关管理','Open management')}
+       {a.order_id?t('核对订单','Review order'):t('查看预算','View budget')}
       </Button>
      </div>)}
     </div>
      {compact?<details className="text-[11px] leading-5 text-slate-500">
        <summary className="cursor-pointer font-medium">{t('关于异常提醒与统计范围','About alert coverage')}</summary>
-       <p className="mt-1">{t('近30天、每类最多8条，只读提示。不会自动退款、补发或更改订单状态。','Recent 30 days, up to eight per type. Read-only; no refunds, credit grants or order status changes.')}</p>
+       <p className="mt-1">{t('近30天、每类最多8条，只读核验线索。不会自动退款、补发或更改订单状态。','Recent 30 days, up to eight per type. Read-only; no refunds, credit grants or order status changes.')}</p>
       </details>:<p className="text-xs text-muted-foreground">{t('提醒是来源数据库的只读线索，并不自动进行查单、退款、放款或更改订单状态。','Read-only indicators only. No payment verification calls, refunds, credit grants or status mutations occur here.')}</p>}
    </>}
    {insights&&mode==='plans'&&<>

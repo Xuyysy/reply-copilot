@@ -35,14 +35,13 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   // this marker and must continue receiving their legacy exact count keys.
   const deferGenerationTotals=(summaryOnly&&params.get('generation_counts')==='lazy')||view==='cost';
   const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
-  const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
+  const [history,generations,revenue,legacyRevenue,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
     deferHistory
       ? env.DB.prepare("SELECT COUNT(*) newUsers7d FROM users WHERE created_at>=?").bind(now-7*86400000).first<{newUsers7d:number}>()
       : adminHistoricalStats(env,now,day),
     deferGenerationTotals?Promise.resolve(null):env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart,now).first<{monthGenerations:number;todayGenerations:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(t.amount_fen-COALESCE((SELECT sum(r.amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0)),0) n FROM payment_transactions t WHERE t.provider='xiaodou' AND t.status IN ('paid','refunded') AND t.paid_at>=?").bind(monthStart).first<{n:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(amount_cents),0) n FROM recharge_orders WHERE status='paid' AND paid_at>=? AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.order_id=recharge_orders.id)").bind(monthStart).first<{n:number}>(),
-    env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status IN ('upstream_failed','uncertain') AND created_at>=?").bind(dayStart).first<{n:number}>(),
     env.DB.prepare("SELECT key,value FROM system_settings WHERE key IN ('daily_cost_limit_micro_usd','ai_enabled')").all<{key:string;value:string}>(),
     env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(day).first<{reserved_micro_usd:number;settled_micro_usd:number}>(),
     env.DB.prepare("SELECT count(DISTINCT s.user_id) n FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.expires_at>? AND s.revoked_at IS NULL AND u.status='active'").bind(now).first<{n:number}>(),
@@ -61,7 +60,7 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
     dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,remainingBudgetMicroUsd:Math.max(0,budgetLimitMicroUsd-committed),budgetDay:day,
     budgetUsedPercent:budgetLimitMicroUsd>0?Math.min(100,Math.round(committed/budgetLimitMicroUsd*100)):null,
     costWarning:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd*0.8,circuitOpen:budgetLimitMicroUsd>0&&committed>=budgetLimitMicroUsd,
-    abnormalRequests:errors?.n||0,detailScope:summaryOnly?'overview':'full',
+    detailScope:summaryOnly?'overview':'full',
     ...(modelCosts?{costByModel:modelCosts.costByModel,aiService:{enabled:aiEnabled?.value==="1",...modelCosts.service}}:{})},200,env,request);
 }
 export async function adminUsers(request:Request,env:Env):Promise<Response>{
