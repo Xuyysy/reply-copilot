@@ -45,7 +45,7 @@ test('ordinary checkout: current package selection, no recovery UI, explicit cre
   assert.match(await evaluate('document.querySelector("#package-cny").textContent'),/10\.43/);
   assert.equal(await evaluate('!document.querySelector("#cashier-link").hidden'),['pending','rsa2-ready'].includes(mode));
   if(mode==='pending'){
-    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),true,'MK99 normal checkout needs no advanced actions');
+    assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").hidden'),false,'pending MK99 invoice exposes optional local cancellation');assert.equal(await evaluate('document.querySelector("#checkout-extra-actions").open'),false,'MK99 checkout remains minimal: cancellation is collapsed until requested');assert.equal(await evaluate('document.querySelector("#cancel-unpaid-order").hidden'),false,'MK99 unpaid invoice can be canceled locally by explicit user action');assert.equal(await evaluate('document.querySelector("#cancel-unpaid-order").getClientRects().length'),0,'cancel is not in the normal cashier action row');
     assert.equal(await evaluate('document.querySelector("#checkout-back-link")===null'),true,'no duplicate large back button');
   }
   if(mode==='rsa2-ready'){

@@ -5,7 +5,7 @@ import { Mk99Client, Mk99Error, mk99Config, parseMk99Form,
   verifyAndParseMk99Notification, type Mk99PaymentEvent } from './mk99';
 import { notifyContentTypeClass, readMk99Body, parseMk99MultipartForm } from './mk99-payments';
 import { recordSubscriptionRisk } from './subscription-risk';
-import { orderById, reconcileVerifiedSubscriptionPurchase } from './subscription-settlement';
+import { orderById, querySubscriptionPayment, reconcileVerifiedSubscriptionPurchase } from './subscription-settlement';
 
 /** Signed notification uses the original MK99 contract, but settles only in
  * the isolated subscription ledger. No permanent-credit grant or manual paid
@@ -74,7 +74,11 @@ export async function subscriptionMk99Notify(request:Request,env:Env):Promise<Re
       (verified.merchantId!==undefined&&verified.merchantId!==cfg.pid)||
       (verified.paytypeCode!==undefined&&verified.paytypeCode!==expectedChannel))
      throw new ApiFailure(409,'SUBSCRIPTION_PAYMENT_MISMATCH','签名通知与可信商户查单结果不一致。');
-   await reconcileVerifiedSubscriptionPurchase(env,order,verified);
+   // Previously cancelled orders can still receive real money.
+   // Preserve verified evidence and hold the old entitlement for review.
+   if(['closed','failed'].includes(order.status)||['closed','failed'].includes(order.payment_status))
+     await querySubscriptionPayment(env,order);
+   else await reconcileVerifiedSubscriptionPurchase(env,order,verified);
    return new Response('success',{status:200,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}});
  }
 

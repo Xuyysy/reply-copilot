@@ -41,6 +41,29 @@ export default function AccountDashboard() {
   const [subscriptionOrders,setSubscriptionOrders]=useState<SubscriptionOrder[]>([]);
   const [boltOrders,setBoltOrders]=useState<BoltOrder[]>([]);
   const [closingBoltOrderId,setClosingBoltOrderId]=useState<string|null>(null);
+  const [closingFiatOrderId,setClosingFiatOrderId]=useState<string|null>(null);
+  async function cancelFiatOrder(id:string,type:"subscription"|"credits"){
+    if(closingFiatOrderId)return;
+    if(!window.confirm(t(
+      "仅在尚未付款时取消。只关闭本站订单，无法撤销小豆或 MK99 已经发出的收款指令。已付款请先核验；取消后如果又到账，需要人工核对。确定关闭吗？",
+      "Cancel only if you have not paid. This closes our local invoice, not the merchant's payment instruction. If you paid, verify first; later funds require manual review. Close it?"
+    )))return;
+    const owner=accountOwner.current;
+    setClosingFiatOrderId(id);
+    setBoltOrderNotice("");
+    try{
+      const path=type==="subscription"?"/v1/subscriptions/orders/":"/v1/orders/";
+      await api(path+encodeURIComponent(id)+"/local-cancel",{
+        method:"POST",body:JSON.stringify({confirm:true})
+      });
+      if(accountOwner.current!==owner)return;
+      if(type==="subscription")setSubscriptionOrders(rows=>rows.map(row=>row.id===id?{...row,status:"closed"}:row));
+      else await load();
+      setBoltOrderNotice(t("旧订单已在本站关闭，可以重新购买。","The local invoice is closed; you can order again."));
+    }catch(error){
+      if(accountOwner.current===owner)setBoltOrderNotice(readableError(error,languageRef.current));
+    }finally{setClosingFiatOrderId(null);}
+  }
   const [boltOrderNotice,setBoltOrderNotice]=useState("");
   async function cancelBoltOrder(order:BoltOrder){
     if(!['pending','unknown'].includes(order.status)||closingBoltOrderId)return;
@@ -522,7 +545,12 @@ export default function AccountDashboard() {
                     <p className="text-xs text-muted-foreground">{subscriptionStatus(order,language)}</p>
                     {order.status==='paid'&&order.periodStatus==='queued'&&<p className="text-xs text-primary">{t('下一期已续购 · 到期后生效','Renewal queued · starts after current period')}</p>}
                   </div>
-                  {['pending','unknown','manual_review','refund_pending'].includes(order.status)&&<a className="button secondary shrink-0" data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{order.status==="pending"&&order.riskState==="clear"?t("继续支付","Continue payment"):t("核验原订单","Verify original order")}</a>}
+                  <div className="flex flex-wrap gap-2">
+                    {['pending','unknown','manual_review','refund_pending'].includes(order.status)&&<a className="button secondary shrink-0" data-subscription-continue href={"/subscription-checkout/?order="+encodeURIComponent(order.id)}>{order.status==="pending"&&order.riskState==="clear"?t("继续支付","Continue payment"):t("核验原订单","Verify original order")}</a>}
+                    {['pending','unknown'].includes(order.status)&&order.riskState==='clear'&&['mk99','xiaodou'].includes(order.merchantProvider??'')&&
+                      <Button size="sm" variant="outline" type="button" disabled={closingFiatOrderId===order.id}
+                        onClick={()=>void cancelFiatOrder(order.id,"subscription")}>{closingFiatOrderId===order.id?t("关闭中…","Closing…"):t("取消未付款订单","Cancel unpaid invoice")}</Button>}
+                  </div>
                 </li>)}
                 {boltOrders.filter(o=>o.productType==="subscription").map(order=>
                   <BoltStandaloneOrderRow key={order.id} order={order} closing={closingBoltOrderId===order.id} onCancel={cancelBoltOrder}/>)}
@@ -549,8 +577,13 @@ export default function AccountDashboard() {
       {!bolt&&order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&order.payment_status==="pending"&&order.status==="awaiting_payment"&&order.risk_state==="clear"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.paid_at==null&&order.credited_at==null&&<Button size="sm" asChild><a data-credit-continue href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续支付","Continue payment")}</a></Button>}
               {order.payment_protocol==="rsa2"&&order.provider==="xiaodou"&&["pending","unknown"].includes(order.payment_status||"")&&!(order.payment_status==="pending"&&order.amount_contract==="CNY_EXACT_BUYER_TOTAL"&&order.risk_state==="clear")&&<Button size="sm" variant="outline" asChild><a data-credit-review href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("查验／处理旧订单","Verify / resolve old order")}</a></Button>}
               {order.payment_protocol==="epay"&&order.payment_status==="pending"&&<Button size="sm" variant="outline" asChild><a href={"/checkout/?order="+encodeURIComponent(order.id)}>{t("继续原订单付款","Continue original payment")}</a></Button>}
+              {!bolt&&['xiaodou','mk99'].includes(order.provider??'')&&order.payment_protocol!=='epay'&&
+                order.status==='awaiting_payment'&&['pending','unknown'].includes(order.payment_status??'')&&
+                order.risk_state==='clear'&&order.paid_at==null&&order.credited_at==null&&
+                <Button size="sm" variant="outline" type="button" disabled={closingFiatOrderId===order.id}
+                  onClick={()=>void cancelFiatOrder(order.id,"credits")}>{closingFiatOrderId===order.id?t("关闭中…","Closing…"):t("取消未付款订单","Cancel unpaid invoice")}</Button>}
               {canResumeMk99Order(order)&&<Button type="button" data-order-continue size="sm" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void continuePayment(order.id)}>{continuingOrderId===order.id&&<Loader2 className="animate-spin" size={15}/>} {continuingOrderId===order.id?t("正在确认订单…","Checking order…"):t("继续支付","Continue payment")}</Button>}{canRefresh&&<Button data-order-refresh size="sm" variant="outline" disabled={busy||refreshingOrderId===order.id||continuingOrderId===order.id} onClick={()=>void refreshPaymentStatus(order.id)}>{refreshingOrderId===order.id?<Loader2 className="animate-spin" size={15}/>:<RefreshCw size={15}/>} {refreshingOrderId===order.id?t("正在刷新支付状态…","Checking payment status…"):(order.payment_protocol==="epay"?t("刷新到账记录（本地）","Refresh local credit record"):t("刷新支付状态","Refresh payment status"))}</Button>}</div>{feedback&&<div className="mt-2 space-y-1 rounded-md border border-border bg-muted/40 p-3" role={feedback.code?"alert":"status"}><p>{feedback.message}</p>{feedback.code&&<p className="text-xs text-muted-foreground">{t("错误代码","Error code")}: {feedback.code}</p>}{feedback.diagnostic&&<p className="text-xs text-muted-foreground">{t("诊断阶段","Stage")}: {feedback.diagnostic.stage} · {t("上游 HTTP","Upstream HTTP")}: {feedback.diagnostic.upstreamHttpStatus??t("无","none")}</p>}{feedback.requestId&&<p className="break-all font-mono text-xs text-muted-foreground">requestId: {feedback.requestId}</p>}</div>}</div><Badge className="shrink-0" variant="secondary">{bolt?boltPaymentStatus(bolt,language)
-      :phrase(language,...(paymentLabels[order.payment_status||""]||paymentLabels[order.status]||[order.status,order.status]))}</Badge></li>;})}
+      :order.risk_state==="manual_review"?t("付款待人工核对","Payment requires manual review"):phrase(language,...(paymentLabels[order.payment_status||""]||paymentLabels[order.status]||[order.status,order.status]))}</Badge></li>;})}
           {creditBoltExtras.map(order=><BoltStandaloneOrderRow key={order.id} order={order}
             closing={closingBoltOrderId===order.id} onCancel={cancelBoltOrder}/>)}
           </ul> : <p className="py-8 text-center text-sm text-muted-foreground">{t("暂无订单。", "No orders yet.")}</p>}

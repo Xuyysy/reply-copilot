@@ -46,7 +46,7 @@ import Base from "../layouts/Base.astro";
         <div class="button-row">
           <button id="restart-payment" class="button secondary" type="button" hidden data-zh="重新发起支付">Restart payment with a new order</button>
           <button id="relaunch-rsa2" class="button secondary" type="button" hidden data-zh="重新生成原订单二维码">Generate a fresh QR code for this order</button>
-          <button id="cancel-unpaid-order" class="button secondary" type="button" hidden data-zh="关闭未支付旧订单">Close unpaid order</button>
+          <button id="cancel-unpaid-order" class="button secondary" type="button" hidden data-zh="取消本站订单 · 更换支付方式">Cancel local invoice · Switch payment</button>
         </div>
       </details>
       <p class="checkout-back-link"><a href="/pricing" data-zh="返回套餐">Back to plans</a></p>
@@ -191,9 +191,12 @@ import Base from "../layouts/Base.astro";
       const canRestart=paymentAvailable&&paymentMethods.some(method=>method.provider==="xiaodou_epay")&&(restartableOrder||rejectedUnresolvedOrder);
       show("restart-payment",canRestart);show("restart-notice",canRestart);byId<HTMLButtonElement>("restart-payment").disabled=busy;
       const rsa2Recovery=order?.paymentProtocol==="rsa2"&&["pending","unknown"].includes(order.status);
+      const localFiatCancel=Boolean(order&&["rsa2","mk99"].includes(order.paymentProtocol??"")&&
+        ["pending","unknown"].includes(order.status)&&order.paidAt==null&&order.creditedAt==null&&
+        order.riskState!=="manual_review");
       const extraActions=byId<HTMLDetailsElement>("checkout-extra-actions");
-      show("checkout-extra-actions",Boolean(canRestart||rsa2Recovery));
-      if(!canRestart&&!rsa2Recovery)extraActions.open=false;
+      show("checkout-extra-actions",Boolean(canRestart||rsa2Recovery||localFiatCancel));
+      if(!canRestart&&!rsa2Recovery&&!localFiatCancel)extraActions.open=false;
       if(!selected){byId("package-name").textContent=label("套餐不存在或已下架。","Package not found or unavailable.");return;}
       byId("package-name").textContent=document.documentElement.lang==="en"?selected.name_en:selected.name_zh;
       byId("package-credits").textContent=label("AI 生成次数："+selected.credits.toLocaleString()+" 次","AI generations: "+selected.credits.toLocaleString());
@@ -216,7 +219,9 @@ import Base from "../layouts/Base.astro";
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
       void renderWechatQr(next);
-      byId("checkout-status").textContent=checkoutOrderMessage(next,document.documentElement.lang);
+      byId("checkout-status").textContent=next.riskState==="manual_review"&&next.status==="paid"&&!next.creditedAt
+        ?label("商户已确认付款，但原订单已经关闭；款项正在人工核对，未自动发放额度。请联系客服。","Merchant payment was confirmed after local closure. Funds require manual review; no credits were automatically granted. Contact support.")
+        :checkoutOrderMessage(next,document.documentElement.lang);
       byId("package-fee").textContent=packageSummary({fee_rate_bps:next.feeRateBps,merchant_pricing:next.merchantPricing},document.documentElement.lang==="en"?"en":"zh").fee;
       byId("package-cny").textContent=label("人民币实付：¥"+(next.amountFen/100).toFixed(2)+" CNY","CNY payment due: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
       byId("payment-method-note").textContent=next.paymentChannel==="WECHAT_H5"?label("微信支付订单；请按收银台支持的终端方式完成付款。","WeChat Pay order. Follow the cashier's supported device flow."):label("支付宝订单；请在收银台核对金额后付款。","Alipay order. Confirm the amount in the cashier before paying.");
@@ -236,7 +241,9 @@ import Base from "../layouts/Base.astro";
       show("refresh-order",next.status==="unknown"||(next.status==="pending"&&(next.paymentProtocol==="rsa2"||next.paymentProtocol==="epay"||next.paymentProtocol==="mk99")));
       show("relaunch-rsa2",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
       byId<HTMLButtonElement>("relaunch-rsa2").disabled=busy;
-      show("cancel-unpaid-order",next.paymentProtocol==="rsa2"&&["pending","unknown"].includes(next.status));
+      show("cancel-unpaid-order",["rsa2","mk99"].includes(next.paymentProtocol??"")&&
+        ["pending","unknown"].includes(next.status)&&next.paidAt==null&&next.creditedAt==null&&
+        next.riskState!=="manual_review");
       byId<HTMLButtonElement>("cancel-unpaid-order").disabled=busy;
       show("create-order",false);
     }
@@ -417,23 +424,24 @@ import Base from "../layouts/Base.astro";
       }finally{busy=false;byId<HTMLButtonElement>("relaunch-rsa2").disabled=false;}
     });
     byId("cancel-unpaid-order").addEventListener("click",async()=>{
-      if(busy||!order||order.paymentProtocol!=="rsa2"||!["pending","unknown"].includes(order.status))return;
-      if(!window.confirm(label("确定放弃原订单付款并向小豆申请安全关单？只有平台确认未支付才会关闭。","Request provider-confirmed cancellation of this original order? Paid orders cannot be closed.")))return;
+      if(busy||!order||!["rsa2","mk99"].includes(order.paymentProtocol??"")||!["pending","unknown"].includes(order.status))return;
+      if(!window.confirm(label(
+        "仅在尚未付款时取消。本站关闭不等于小豆或 MK99 商户关单，之前打开的收银台仍可能收款。如果已经付款，请先核验。确定取消旧订单吗？",
+        "Cancel only if unpaid. This closes our local invoice, not the Xiaodou or MK99 merchant payment. An earlier cashier may still accept money. If paid, verify first. Cancel?"
+      )))return;
       const orderId=order.id;busy=true;show("cashier-link",false);
       byId<HTMLButtonElement>("cancel-unpaid-order").disabled=true;
-      setStatus("正在向小豆确认并关闭原订单…","Requesting provider-confirmed closure of the original order…");
+      setStatus("正在关闭本站未付款订单…","Closing the local unpaid invoice…");
       try{
-        const result=await api<{ok:boolean;orderStatus:string}>("/v1/orders/"+encodeURIComponent(orderId)+"/close",{method:"POST",body:"{}"});
-        if(!result.ok||result.orderStatus!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        const result=await api<{ok:boolean;orderStatus:string}>("/v1/orders/"+encodeURIComponent(orderId)+"/local-cancel",{method:"POST",body:JSON.stringify({confirm:true})});
+        if(!result.ok||result.orderStatus!=="closed")throw new Error("ORDER_LOCAL_CANCEL_UNCONFIRMED");
         const detail=await api<{order:Order}>("/v1/orders/"+encodeURIComponent(orderId));
-        if(detail.order.id!==orderId||detail.order.status!=="closed")throw new Error("PAYMENT_CLOSE_UNCONFIRMED");
+        if(detail.order.id!==orderId||detail.order.status!=="closed")throw new Error("ORDER_LOCAL_CANCEL_UNCONFIRMED");
         showOrder(detail.order);
-        setStatus("原订单已安全关闭，可以返回套餐重新购买。","Original order safely closed. Return to plans to buy again.");
+        setStatus("本站订单已关闭，可以返回套餐重新购买。若已经付款，请联系支持核对。","Local invoice closed. You may reorder; contact support if you had already paid.");
       }catch(error){
-        setStatus(error instanceof ApiError&&error.code==="PROVIDER_HTTP_ERROR"
-          ?"小豆关单暂时不可用，原订单仍保留，请勿重复付款。"
-          :"平台尚未确认安全关单，原订单保留，请查验或联系客服。",
-          "Provider closure is not confirmed. The original order is preserved; verify its status before purchasing.");
+        setStatus(error instanceof Error?error.message:label("本站订单未能安全关闭，请查验原单。","Could not safely close the invoice. Verify the original order."),
+          "Unable to safely close the invoice. Verify the original order.");
       }finally{busy=false;if(order)render();}
     });
     byId("simulate-payment").addEventListener("click",async()=>{
