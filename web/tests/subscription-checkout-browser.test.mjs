@@ -57,7 +57,7 @@ test('subscription checkout restores a recoverable cashier on first order read a
 });
 
 
-test('Xiaodou pending statuses remain visible and relaunch the same original subscription in Chrome', {timeout:30000},async()=>{
+test('Xiaodou pending subscription keeps cashier and verification without unused extra actions', {timeout:30000},async()=>{
  const bundle=await build({
   stdin:{resolveDir:web,loader:'tsx',contents:`
    import React from 'react';
@@ -66,15 +66,14 @@ test('Xiaodou pending statuses remain visible and relaunch the same original sub
    const id='22222222-2222-4222-8222-222222222222';
    const Search=window.URLSearchParams;
    window.URLSearchParams=class extends Search {constructor(v){super(v===''?'order='+id:v);}};
-   window.__calls=[];window.__fresh=false;window.__providerStatus='CREATED';
+   window.__calls=[];window.__providerStatus='CREATED';
    function makeOrder(){return {id,merchantProvider:'xiaodou',planCode:'basic',kind:'renewal',amountFen:6990,
      status:'pending',riskState:'clear',checkout:{outcome:'ready',paymentConfirmed:false,
-     paymentUrl:window.__fresh?'https://cashier.fixture.invalid/new':'https://cashier.fixture.invalid/original'}};}
+     paymentUrl:'https://cashier.fixture.invalid/original'}};}
    window.fetch=async(url,options={})=>{
     const path=new URL(url).pathname;
     window.__calls.push([options.method??'GET',path]);
     if(path==='/v1/auth/csrf')return Response.json({csrfToken:'synthetic'});
-    if(path.endsWith('/attempts')){window.__fresh=true;return Response.json({order:makeOrder()});}
     if(path.endsWith('/refresh'))return Response.json({paymentConfirmed:false,orderStatus:'pending',providerStatus:window.__providerStatus});
     if(path.endsWith(id))return Response.json({order:makeOrder()});
     throw Error('unexpected '+path);
@@ -92,9 +91,12 @@ test('Xiaodou pending statuses remain visible and relaunch the same original sub
   await evaluate('window.__providerStatus="PAYING";document.querySelector("button").click()');
   await until('document.body.textContent.includes("仍待付款")');
   assert.equal(await evaluate('document.querySelector("a[target]").href'),'https://cashier.fixture.invalid/original');
-  await evaluate('Array.from(document.querySelectorAll("button")).find(b=>b.textContent.includes("重新生成")).click()');
-  await until('document.querySelector("a[target]").href.endsWith("/new")');
-  assert.equal(await evaluate('window.__calls.filter(([method,p])=>method==="POST"&&p.endsWith("/attempts")).length'),1);
+  const buttons=await evaluate('[...document.querySelectorAll("button")].map(b=>b.textContent.trim())');
+  assert.deepEqual(buttons,['查验付款状态']);
+  assert.equal(await evaluate('document.body.textContent.includes("重新生成原订单二维码")'),false);
+  assert.equal(await evaluate('document.body.textContent.includes("申请关闭本笔人民币原订单")'),false);
+  assert.equal(await evaluate('window.__calls.filter(([method,p])=>method==="POST"&&p.endsWith("/attempts")).length'),0);
+  assert.equal(await evaluate('window.__calls.filter(([method,p])=>method==="POST"&&p.endsWith("/cancel")).length'),0);
   assert.equal(await evaluate('window.__calls.some(([method,p])=>method==="POST"&&p==="/v1/subscriptions/orders")'),false);
  });
 });
