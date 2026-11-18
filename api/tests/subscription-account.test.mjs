@@ -123,3 +123,62 @@ test('invalid overdrawn subscription usage fails closed instead of reporting ext
    assert.equal(r.body.code,'SUBSCRIPTION_USAGE_INVALID');
  }finally{f.sql.close();}
 });
+
+function captureSubscriptionSql(f){
+ const seen=[];const real=f.DB.prepare.bind(f.DB);
+ f.DB.prepare=query=>{seen.push(String(query));return real(query);};
+ return seen;
+}
+
+test('CF Free: users without an active or queued subscription skip both provider proof joins and renewal probes',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';
+  const statements=captureSubscriptionSql(f);
+  const result=await usage(f);
+  assert.equal(result.status,200);
+  assert.equal(result.body.subscription.status,'none');
+  assert.ok(statements.some(q=>q.includes("status IN ('active','queued')")&&q.includes('FROM subscription_periods')));
+  assert.equal(statements.some(q=>q.includes('FROM subscription_periods p')&&q.includes('JOIN subscription_orders')),false);
+  assert.equal(statements.some(q=>q.includes('SELECT q.id,q.user_id FROM subscription_periods q')),false);
+  assert.equal(statements.some(q=>q.includes('JOIN boltutil_orders b')),false);
+ }finally{f.sql.close();}
+});
+
+test('CF Free: historical expired-only subscriptions also fast-exit without reviving entitlement',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';
+  seedPeriod(f);
+  f.sql.exec("UPDATE subscription_periods SET status='expired' WHERE id='period-sub'");
+  const statements=captureSubscriptionSql(f);
+  const result=await usage(f);
+  assert.equal(result.status,200);
+  assert.equal(result.body.subscription.status,'none');
+  assert.equal(statements.some(q=>q.includes('FROM subscription_periods p')&&q.includes('JOIN subscription_orders')),false);
+  assert.equal(statements.some(q=>q.includes('SELECT q.id,q.user_id FROM subscription_periods q')),false);
+ }finally{f.sql.close();}
+});
+
+test('CF Free: verified subscription Creator Momentum skips unrelated credit-purchase proof scans',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';
+  seedPeriod(f);
+  const statements=captureSubscriptionSql(f);
+  const r=await momentum(f);
+  assert.equal(r.status,200);
+  assert.equal(r.body.features.interactionMomentum.eligible,true);
+  assert.ok(statements.some(q=>q.includes('FROM subscription_periods p')&&q.includes('subscription_payment_events')),'settled subscription evidence must still be verified');
+  assert.equal(statements.some(q=>q.includes('JOIN recharge_orders o')),false,'no unnecessary historic credit-purchase proof');
+  assert.equal(statements.some(q=>q.includes('JOIN boltutil_orders b')),false,'no unrelated BoltUtil credit proof');
+  assert.equal(statements.some(q=>q.includes('FROM credit_ledger l')),false,'subscription should not need a credit grant');
+ }finally{f.sql.close();}
+});
+
+test('CF Free: subscription proof failure cannot unlock paid Creator Momentum',async()=>{
+ const f=fixture();try{
+  f.env.SUBSCRIPTIONS_ENABLED='1';
+  seedPeriod(f,{validEvent:false});
+  const r=await momentum(f);
+  assert.equal(r.status,200);
+  assert.equal(r.body.features.interactionMomentum.eligible,false);
+ }finally{f.sql.close();}
+});
