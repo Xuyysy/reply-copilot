@@ -34,13 +34,18 @@ export function validateModelOutput(raw) {
 /** Keep the optional score absent on the wire for released 0.3.1 clients.
  * Internally the parser still normalizes absence to null. Never strip any
  * required field or an invalid score to make an invalid response pass. */
-export function serializeModelOutput(raw) {
-  const parsed = validateModelOutput(raw);
+function serializeValidatedModelOutput(parsed) {
   if (parsed.score === null) {
     const { score, ...compatible } = parsed;
     return JSON.stringify(compatible);
   }
   return JSON.stringify(parsed);
+}
+
+// Public entrypoint stays independently validating when given arbitrary raw
+// text (replay, legacy provider and other callers).
+export function serializeModelOutput(raw) {
+  return serializeValidatedModelOutput(validateModelOutput(raw));
 }
 
 export function buildChatCompletionRequest(config, system, user, { testMode = false } = {}) {
@@ -228,7 +233,9 @@ export async function requestConfiguredModel({ config, apiKey, system, user, inp
       try { parsed = validateModelOutput(choice.message.content); }
       catch { throw new ModelProviderError("invalid_output", upstream.status, reservedCostMicroUsd, usage); }
     }
-    return { raw: parsed ? serializeModelOutput(choice.message.content) : "", content: choice.message.content, finishReason: choice.finish_reason, httpStatus: upstream.status, usage };
+    // The parsed value above is already validated. Serializing that exact value
+    // avoids parsing and NFKC-normalizing the same provider text a second time.
+    return { raw: parsed ? serializeValidatedModelOutput(parsed) : "", content: choice.message.content, finishReason: choice.finish_reason, httpStatus: upstream.status, usage };
   } finally {
     if (modelStarted !== null) performanceTrace.addDurations({model:performance.now()-modelStarted});
     clearTimeout(timer);

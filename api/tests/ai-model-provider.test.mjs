@@ -92,3 +92,18 @@ test("successful usage is costed in integer micro-USD without trusting provider 
   assert.equal(JSON.parse(result.raw).replies.natural, "谢谢分享这个细节。");
   assert.equal(JSON.parse(result.raw).defaultStyle, "natural");
 });
+
+test("CF Free CPU: validated provider JSON is parsed once, without relaxing the reply contract",async()=>{
+ const payload=JSON.stringify({choices:[{finish_reason:"stop",message:{content:canonical}}],usage:{prompt_tokens:9,completion_tokens:3}});
+ const parse=JSON.parse;let providerParses=0;
+ JSON.parse=function(value,...args){if(value===canonical)providerParses++;return parse.call(this,value,...args);};
+ try{
+  const result=await requestConfiguredModel({
+   config:{...base,provider:"openai_compatible",baseUrl:"https://api.example.com/v1",modelId:"m"},
+   apiKey:"test-key",system:"s",user:"u",inputRateMicroUsdPerMillion:300000,outputRateMicroUsdPerMillion:1000000,reservedCostMicroUsd:100,
+   validateEndpoint:async()=>{},fetchImpl:async()=>new Response(payload,{status:200})
+  });
+  assert.equal(providerParses,1,"model validation must not re-parse already-validated provider JSON");
+  assert.deepEqual(JSON.parse(result.raw),validateModelOutput(canonical));
+ }finally{JSON.parse=parse;}
+});
