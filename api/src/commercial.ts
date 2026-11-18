@@ -20,14 +20,22 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
   // full credit ledger, grants and lifetime orders until an admin expands it.
   // Keep the original full response for legacy callers without a view.
   if(view==='history')return response(await adminHistoricalStats(env,now,day),200,env,request);
+  // Exact month/today ACK counts still scan delivered rows even with 0021's
+  // partial index. Keep legacy full API; defer only known UI overview/cost.
+  if(view==='generations'){
+    const dayStart=Date.parse(day+'T00:00:00Z'),monthStart=Date.parse(month+'-01T00:00:00Z');
+    const exact=await env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart,now).first<{monthGenerations:number;todayGenerations:number}>();
+    return response({todayGenerations:Number(exact?.todayGenerations||0),monthGenerations:Number(exact?.monthGenerations||0)},200,env,request);
+  }
   const summaryOnly=view==='overview';
   const deferHistory=summaryOnly||view==='cost';
+  const deferGenerationTotals=summaryOnly||view==='cost';
   const dayStart=Date.parse(`${day}T00:00:00Z`),monthStart=Date.parse(`${month}-01T00:00:00Z`);
   const [history,generations,revenue,legacyRevenue,errors,settings,budget,activeUsers,recentAudits,modelCosts]=await Promise.all([
     deferHistory
       ? env.DB.prepare("SELECT COUNT(*) newUsers7d FROM users WHERE created_at>=?").bind(now-7*86400000).first<{newUsers7d:number}>()
       : adminHistoricalStats(env,now,day),
-    env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart,now).first<{monthGenerations:number;todayGenerations:number}>(),
+    deferGenerationTotals?Promise.resolve(null):env.DB.prepare(GENERATION_TOTALS_SQL).bind(dayStart,monthStart,now).first<{monthGenerations:number;todayGenerations:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(t.amount_fen-COALESCE((SELECT sum(r.amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0)),0) n FROM payment_transactions t WHERE t.provider='xiaodou' AND t.status IN ('paid','refunded') AND t.paid_at>=?").bind(monthStart).first<{n:number}>(),
     env.DB.prepare("SELECT COALESCE(sum(amount_cents),0) n FROM recharge_orders WHERE status='paid' AND paid_at>=? AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.order_id=recharge_orders.id)").bind(monthStart).first<{n:number}>(),
     env.DB.prepare("SELECT count(*) n FROM ai_requests WHERE status IN ('upstream_failed','uncertain') AND created_at>=?").bind(dayStart).first<{n:number}>(),
@@ -43,7 +51,7 @@ export async function adminDashboard(request:Request,env:Env):Promise<Response>{
     dailyCostMicroUsd=budget?.settled_micro_usd??modelCosts?.todayCost.costMicroUsd??0,
     reservedCostMicroUsd=budget?.reserved_micro_usd||0,committed=dailyCostMicroUsd+reservedCostMicroUsd;
   return response({...history,activeUsers:activeUsers?.n||0,recentAudits:recentAudits.results,
-    todayGenerations:generations?.todayGenerations||0,monthGenerations:generations?.monthGenerations||0,
+    ...(generations?{todayGenerations:Number(generations.todayGenerations||0),monthGenerations:Number(generations.monthGenerations||0)}:{}),
     monthRevenueCents:legacyRevenue?.n||0,monthRevenueFen:revenue?.n||0,
     ...(modelCosts?{cost:modelCosts.cost,todayCost:modelCosts.todayCost}:{}),
     dailyCostMicroUsd,reservedCostMicroUsd,budgetLimitMicroUsd,remainingBudgetMicroUsd:Math.max(0,budgetLimitMicroUsd-committed),budgetDay:day,
@@ -137,9 +145,19 @@ export async function adminLedger(request:Request,env:Env):Promise<Response>{awa
 
 export async function adminAudits(request:Request,env:Env):Promise<Response>{await admin(request,env);return response({audits:(await env.DB.prepare("SELECT id,actor_user_id,action,target_id,reason,created_at FROM admin_audit_logs ORDER BY created_at DESC LIMIT 100").all()).results},200,env,request);}
 export async function adminUserDetail(request:Request,env:Env,userId:string):Promise<Response>{
- await admin(request,env);const user=await env.DB.prepare("SELECT id,email,username,status,role,created_at,is_test_account,archived_at,admin_note,(SELECT max(ts) FROM (SELECT max(s.created_at) ts FROM sessions s WHERE s.user_id=users.id UNION ALL SELECT max(r.created_at) FROM ai_requests r WHERE r.user_id=users.id UNION ALL SELECT max(o.paid_at) FROM recharge_orders o WHERE o.user_id=users.id)) last_active_at FROM users WHERE id=?").bind(userId).first();if(!user)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
- const [orders,ledger,usage,exact]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare(USER_USAGE_SQL).bind(userId).all(),env.DB.prepare(ADMIN_EXACT_GENERATIONS_SQL).bind(userId).first<{generations:number}>()]);
- return response({user:{...user,generations:Number(exact?.generations||0)},quota:await balance(env,userId),orders:orders.results,ledger:ledger.results,usage:usage.results},200,env,request);
+ await admin(request,env);
+ const view=new URL(request.url).searchParams.get('view');
+ // For existing callers, no view still returns the original exact count.
+ if(view==='generations'){
+   const exists=await env.DB.prepare('SELECT id FROM users WHERE id=?').bind(userId).first();
+   if(!exists)throw new ApiFailure(404,'USER_NOT_FOUND','账户不存在。');
+   const exact=await env.DB.prepare(ADMIN_EXACT_GENERATIONS_SQL).bind(userId).first<{generations:number}>();
+   return response({generations:Number(exact?.generations||0)},200,env,request);
+ }
+ const light=view==='light';
+ const user=await env.DB.prepare("SELECT id,email,username,status,role,created_at,is_test_account,archived_at,admin_note,(SELECT max(ts) FROM (SELECT max(s.created_at) ts FROM sessions s WHERE s.user_id=users.id UNION ALL SELECT max(r.created_at) FROM ai_requests r WHERE r.user_id=users.id UNION ALL SELECT max(o.paid_at) FROM recharge_orders o WHERE o.user_id=users.id)) last_active_at FROM users WHERE id=?").bind(userId).first();if(!user)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
+ const [orders,ledger,usage,exact]=await Promise.all([env.DB.prepare("SELECT id,package_name,credits,amount_cents,status,created_at FROM recharge_orders WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare("SELECT id,kind,free_delta,paid_delta,reference_id,reason,created_at FROM credit_ledger WHERE user_id=? ORDER BY created_at DESC LIMIT 100").bind(userId).all(),env.DB.prepare(USER_USAGE_SQL).bind(userId).all(),light?Promise.resolve(null):env.DB.prepare(ADMIN_EXACT_GENERATIONS_SQL).bind(userId).first<{generations:number}>()]);
+ return response({user:{...user,generations:light?null:Number(exact?.generations||0)},quota:await balance(env,userId),orders:orders.results,ledger:ledger.results,usage:usage.results},200,env,request);
 }
 export async function adminTestAccount(request:Request,env:Env,userId:string,archive=false):Promise<Response>{
  const actor=await admin(request,env,true),body=await jsonBody(request,2048);if(userId===actor.user_id)throw new ApiFailure(400,"SELF_MODIFICATION_DENIED","不能将管理员归档为测试账户。");
