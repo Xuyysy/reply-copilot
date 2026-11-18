@@ -148,7 +148,7 @@ export default function AdminCommercePanel({active,language,focusOrderId}:{activ
      <p className="font-medium text-amber-900">{nextStep(selected)}</p>
      <p className="text-xs text-slate-600">{t('这里只能查看订单审计摘要和刷新记录，不能自动查商户、补发权益、退款或将异常标为已解决。','Read-only order evidence and refresh. This view cannot query the merchant, grant entitlements, refund or mark the alert resolved.')}</p>
      <Button type="button" size="sm" variant="outline" disabled={loading} onClick={()=>setRefresh(x=>x+1)}>{t('刷新当前订单核验','Refresh order evidence')}</Button>
-    </section>
+    </section>}
     <form className="flex flex-wrap items-end gap-2" onSubmit={(event:FormEvent)=>{event.preventDefault();setQuery(search.trim());}}>
      <label className="space-y-1 text-xs">{t('商品','Product')}<select value={product} aria-label={t('商品类型','Product type')} className="block h-9 rounded border bg-background px-2" onChange={e=>setProduct(e.target.value)}>
        <option value="all">{t('全部','All')}</option><option value="subscription">{t('订阅','Subscriptions')}</option><option value="credit">{t('永久额度','Permanent credits')}</option>
