@@ -6,6 +6,7 @@ import { balance } from "./quota";
 import { subscriptionAccount, availableNow } from './subscription-account';
 import { signupBenefit } from "./signup-benefits";
 import { response } from "./http";
+import { ApiFailure } from "./types";
 
 export async function accountState(env: Env, session: Session) {
   const [quota,subscription] = await Promise.all([balance(env,session.user_id),subscriptionAccount(env,session.user_id)]);
@@ -31,6 +32,29 @@ export async function usage(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
   const [quota,benefit,subscription]=await Promise.all([balance(env,session.user_id),signupBenefit(env,session.user_id),subscriptionAccount(env,session.user_id)]);
   return response({quota,signupBenefit:benefit,subscription,availableNow:availableNow(quota,subscription)},200,env,request);
+}
+/**
+ * Read-only extension bootstrap for Staging and Production.
+ * This is not authoritative authorization for AI generation: the existing
+ * quota reservation and durable delivery/ACK are always checked downstream.
+ */
+export async function extensionBootstrap(request: Request, env: Env): Promise<Response> {
+  if (env.ENVIRONMENT !== "production" && env.ENVIRONMENT !== "staging")
+    throw new ApiFailure(404, "NOT_FOUND", "接口不存在。");
+  const {session}=await sessionFor(request,env);
+  if(session.kind!=="extension")throw new ApiFailure(403,"FORBIDDEN","仅限插件账户使用。");
+  const [state,user]=await Promise.all([
+    accountState(env,session),
+    env.DB.prepare("SELECT username,email,role,status,email_verified_at FROM users WHERE id=?")
+      .bind(session.user_id).first<{username:string|null;email:string;role:string;status:string;email_verified_at:number}>()
+  ]);
+  if(!user||user.status!=="active")throw new ApiFailure(401,"AUTH_REQUIRED","登录已失效，请重新登录。");
+  return response({
+    user:{userId:session.user_id,username:user.username,email:user.email,role:user.role,status:user.status,emailVerified:Boolean(user.email_verified_at)},
+    status:state.status,
+    entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},
+    quota:state.quota,subscription:state.subscription
+  },200,env,request);
 }
 export async function licenseDevices(request: Request, env: Env): Promise<Response> {
   const {session}=await sessionFor(request,env);
