@@ -100,6 +100,8 @@ jobs:
           assert st['name']=='reply-copilot-api-staging'
           assert st['vars']['ENVIRONMENT']=='staging'
           assert st['vars']['API_ORIGIN']=='https://api-staging.x-reply-helper.top'
+          assert st['vars']['WEB_ORIGIN']=='https://staging.x-reply-helper.top'
+          assert st['vars']['PAYMENTS_ENABLED']=='1'
           assert st['d1_databases'][0]['binding']=='DB'
           assert st['d1_databases'][0]['database_id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
           assert cfg['env']['production']['d1_databases'][0]['database_id']!='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
