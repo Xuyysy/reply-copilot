@@ -219,7 +219,9 @@ import Base from "../layouts/Base.astro";
     function showOrder(next:Order){
       order=next;render();monitorPayment(next);
       void renderWechatQr(next);
-      byId("checkout-status").textContent=checkoutOrderMessage(next,document.documentElement.lang);
+      byId("checkout-status").textContent=next.riskState==="manual_review"&&next.status==="paid"&&!next.creditedAt
+        ?label("商户已确认付款，但原订单已经关闭；款项正在人工核对，未自动发放额度。请联系客服。","Merchant payment was confirmed after local closure. Funds require manual review; no credits were automatically granted. Contact support.")
+        :checkoutOrderMessage(next,document.documentElement.lang);
       byId("package-fee").textContent=packageSummary({fee_rate_bps:next.feeRateBps,merchant_pricing:next.merchantPricing},document.documentElement.lang==="en"?"en":"zh").fee;
       byId("package-cny").textContent=label("人民币实付：¥"+(next.amountFen/100).toFixed(2)+" CNY","CNY payment due: ¥"+(next.amountFen/100).toFixed(2)+" CNY");
       byId("payment-method-note").textContent=next.paymentChannel==="WECHAT_H5"?label("微信支付订单；请按收银台支持的终端方式完成付款。","WeChat Pay order. Follow the cashier's supported device flow."):label("支付宝订单；请在收银台核对金额后付款。","Alipay order. Confirm the amount in the cashier before paying.");
