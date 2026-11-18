@@ -313,7 +313,7 @@ export default function AdminDashboard() {
         <AdminCommerceSummary active={tab==="overview"} language={language} variant="overview"/>
         <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(300px,1fr)] xl:items-start">
           <aside className="order-first min-w-0 xl:order-last">
-            <AdminOperationsInsights active={tab==="overview"} mode="alerts" language={language} navigate={navigateFromRisk} compact/>
+            <AdminOperationsInsights active={tab==="overview"} mode="alerts" language={language} navigate={navigateFromRisk} write={securityWrite} compact/>
           </aside>
           <div className="order-last min-w-0 space-y-4 xl:order-first">
             <Card>

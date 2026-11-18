@@ -5,7 +5,7 @@ import {Card,CardHeader,CardTitle,CardContent} from '../ui/card';
 import {Button} from '../ui/button';
 import {Table,TableHeader,TableRow,TableHead,TableBody,TableCell} from '../ui/table';
 
-type Alert={key:string;type:string;severity:'attention'|'warning';title:string;detail:string;order_id?:string;user_id?:string;created_at?:number;count?:number;target:'orders'|'subscriptions'|'cost'};
+type Alert={key:string;type:string;severity:'attention'|'warning';title:string;detail:string;order_id?:string;user_id?:string;created_at?:number;count?:number;order_status?:string;target:'orders'|'subscriptions'|'cost'};
 type Plan={plan:string;deliveries:number;observedPeriods:number;deliveryCostMicroUsd:number;costedDeliveries:number;avgCostMicroUsd:number|null};
 type Insights={
  time:{from:number;to:number;timezone:string;generatedAt:number};
@@ -14,13 +14,27 @@ type Insights={
  aiBudget:{dayUtc:string;limitMicroUsd:number;committedMicroUsd:number;percent:number|null};
 };
 const usd=(micro:number|null)=>micro==null?'—':'$'+(micro/1_000_000).toFixed(6);
-export default function AdminOperationsInsights({language,active,mode,navigate,compact=false}:{
- language:Language;active:boolean;mode:'alerts'|'plans';navigate:(tab:string,orderId?:string)=>void;compact?:boolean
+export default function AdminOperationsInsights({language,active,mode,navigate,write,compact=false}:{
+ language:Language;active:boolean;mode:'alerts'|'plans';navigate:(tab:string,orderId?:string)=>void;write?:(path:string,body:Record<string,unknown>)=>Promise<unknown>;compact?:boolean
 }){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [insights,setInsights]=useState<Insights|null>(null);
  const [error,setError]=useState('');
  const [refresh,setRefresh]=useState(0);
+ const [ackOrder,setAckOrder]=useState<string|null>(null);
+ const [ackReason,setAckReason]=useState('');
+ const [ackBusy,setAckBusy]=useState(false);
+ const acknowledge=async(orderId:string)=>{
+  if(!write||ackBusy||ackReason.trim().length<8)return;
+  if(!window.confirm(t('只结束这条过期订单的运营提醒；原订单和商户交易状态保持不变。如果后续有新的付款结果将再次提醒。确定继续吗？',
+   'End this expired order alert only. Order and merchant payment states remain unchanged. New payment activity will raise a new alert. Continue?')))return;
+  setAckBusy(true);setError('');
+  try{
+   await write('/v1/admin/ops-insights/acknowledge',{orderId,reason:ackReason.trim(),confirm:true});
+   setAckOrder(null);setAckReason('');setRefresh(v=>v+1);
+  }catch(e){setError(e instanceof Error?e.message:t('结束提醒失败，请刷新后再检查原订单。','Could not acknowledge alert. Refresh and verify the order.'));}
+  finally{setAckBusy(false);}
+ };
  useEffect(()=>{
   if(!active)return;
   let live=true;setInsights(null);setError('');
@@ -59,11 +73,22 @@ export default function AdminOperationsInsights({language,active,mode,navigate,c
       <Button type="button" size="sm" variant="outline" className="h-8 shrink-0 px-2.5 text-xs" onClick={()=>navigate(a.order_id?'orders':a.target,a.order_id)}>
        {a.order_id?t('核对订单','Review order'):t('查看预算','View budget')}
       </Button>
+      {write&&a.type==='credit_payment_unknown'&&a.order_status==='expired'&&a.order_id&&<Button type="button" size="sm" variant="outline" disabled={ackBusy} onClick={()=>{setAckOrder(a.order_id||null);setAckReason('');setError('');}}>
+       {t('已核实，结束提醒','Reviewed · Dismiss alert')}
+      </Button>}
+      {ackOrder===a.order_id&&a.order_id&&<div className="w-full space-y-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm" data-testid="admin-ack-expired-order">
+       <p>{t('仅处理过期订单的待办提醒，不会更改订单、商户收款、退款或额度记录。请填写至少8字的实际核对原因。','Acknowledge the expired-order alert without changing payment, refund or credit records. Enter a review reason (at least 8 characters).')}</p>
+       <textarea rows={2} maxLength={500} value={ackReason} onChange={e=>setAckReason(e.target.value)} aria-label={t('核验原因','Review reason')} className="w-full rounded-md border bg-background p-2" placeholder={t('例如：已核对原商户交易，确认无需继续跟进','Example: Merchant transaction reviewed; no further operator action required')}/>
+       <div className="flex flex-wrap gap-2">
+        <Button type="button" size="sm" disabled={ackBusy||ackReason.trim().length<8} onClick={()=>void acknowledge(a.order_id!)}>{ackBusy?t('处理中…','Processing…'):t('确认结束提醒','Confirm dismissal')}</Button>
+        <Button type="button" size="sm" variant="outline" disabled={ackBusy} onClick={()=>setAckOrder(null)}>{t('返回','Back')}</Button>
+       </div>
+      </div>}
      </div>)}
     </div>
      {compact?<details className="text-[11px] leading-5 text-slate-500">
        <summary className="cursor-pointer font-medium">{t('关于异常提醒与统计范围','About alert coverage')}</summary>
-       <p className="mt-1">{t('近30天、每类最多8条，只读核验线索。不会自动退款、补发或更改订单状态。','Recent 30 days, up to eight per type. Read-only; no refunds, credit grants or order status changes.')}</p>
+       <p className="mt-1">{t('近30天、每类最多8条，只读核验线索；已过期且未核验的订单可由管理员经二次验证结束提醒，不会自动退款、补发或更改订单状态。','Recent 30 days, up to eight per type. Read-only except audited alert acknowledgment for expired unverified orders; no refunds, grants or order status changes.')}</p>
       </details>:<p className="text-xs text-muted-foreground">{t('提醒是来源数据库的只读线索，并不自动进行查单、退款、放款或更改订单状态。','Read-only indicators only. No payment verification calls, refunds, credit grants or status mutations occur here.')}</p>}
    </>}
    {insights&&mode==='plans'&&<>

@@ -13,7 +13,7 @@ import {adminUnifiedUsage} from "./admin-unified-usage";
 import {createAdminEntitlementActivity} from "./admin-entitlement-activity.mjs";
 import {requireAdminSession} from "./admin-auth";
 import {adminCommerceOrders,adminCommerceSummary,adminCommerceUser} from "./admin-commerce-v2";
-import {adminOperationsInsights} from "./admin-operations-insights";
+import {adminOperationsInsights,acknowledgeExpiredCreditAlert} from "./admin-operations-insights";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
@@ -185,6 +185,7 @@ export default {
       if (request.method === "GET" && path === "/v1/admin/commerce/orders") return await adminCommerceOrders(request,env);
       if (request.method === "GET" && path === "/v1/admin/commerce/summary") return await adminCommerceSummary(request,env);
       if (request.method === "GET" && path === "/v1/admin/ops-insights") return await adminOperationsInsights(request,env);
+       if (request.method === "POST" && path === "/v1/admin/ops-insights/acknowledge") return await acknowledgeExpiredCreditAlert(request,env);
       const commerceUser=path.match(/^\/v1\/admin\/commerce\/users\/([0-9a-f-]{36})$/i);
       if (request.method === "GET" && commerceUser) return await adminCommerceUser(request,env,commerceUser[1]);
       if(request.method==="POST"&&path==="/v1/admin/users/bulk-status")return await adminBulkStatus(request,env);

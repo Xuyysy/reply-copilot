@@ -15,6 +15,15 @@ test('Admin V2 mounts operations inbox and AI economics only in relevant workspa
  assert.ok(panel.includes("navigate(a.order_id?'orders':a.target,a.order_id)"));
  assert.ok(root.includes('navigate={navigateFromRisk}'));
  assert.match(panel,/credit_entitlement_gap/);
+ assert.match(panel,/admin-ack-expired-order/);
+ assert.match(panel,/已核实，结束提醒/);
+ assert.match(panel,/ops-insights\/acknowledge/);
+ assert.match(panel,/ackReason\.trim\(\)\.length<8/);
+ assert.match(root,/write=\{securityWrite\} compact/);
+ assert.match(api,/ack\.value<>t\.id/);
+ assert.match(api,/acknowledgeExpiredCreditAlert/);
+ assert.match(api,/paymentStatusUnchanged:true/);
+
  assert.match(panel,/subscription_entitlement_gap/);
  assert.match(panel,/moreThanSample/);
  assert.match(panel,/\?view='/);
