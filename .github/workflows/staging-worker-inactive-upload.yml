@@ -1,4 +1,4 @@
-name: Check or upload inactive Staging Worker version
+name: Guarded Staging Worker check, inactive upload or active deploy
 on:
   workflow_dispatch:
     inputs:
@@ -14,13 +14,17 @@ on:
         description: Exact current Staging Worker active version UUID
         type: string
         required: true
+      expected_active_deployment:
+        description: Exact current Staging Worker deployment ID (required for active deploy)
+        type: string
+        required: false
       mode:
         type: choice
-        options: ["check", "upload"]
+        options: ["check", "upload", "deploy"]
         default: "check"
         required: true
       confirmation:
-        description: CHECK_ONLY or UPLOAD_STAGING_VERSION_ONLY
+        description: CHECK_ONLY, UPLOAD_STAGING_VERSION_ONLY, or DEPLOY_STAGING_WORKER
         type: string
         required: true
 permissions:
@@ -43,6 +47,7 @@ jobs:
       SOURCE_SHA: ${{ inputs.source_sha }}
       CI_RUN_ID: ${{ inputs.ci_run_id }}
       EXPECTED: ${{ inputs.expected_active_version }}
+      EXPECTED_DEPLOYMENT: ${{ inputs.expected_active_deployment }}
       MODE: ${{ inputs.mode }}
       CONFIRMATION: ${{ inputs.confirmation }}
       GH_TOKEN: ${{ github.token }}
@@ -56,7 +61,15 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
           [[ "$EXPECTED" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
-          [[ "$MODE:$CONFIRMATION" == "check:CHECK_ONLY" || "$MODE:$CONFIRMATION" == "upload:UPLOAD_STAGING_VERSION_ONLY" ]] || exit 1
+          case "$MODE:$CONFIRMATION" in
+            check:CHECK_ONLY|upload:UPLOAD_STAGING_VERSION_ONLY|deploy:DEPLOY_STAGING_WORKER) ;;
+            *) echo 'Missing exact release confirmation'; exit 1 ;;
+          esac
+          if [[ "$MODE" == "deploy" ]]; then
+            [[ "$EXPECTED_DEPLOYMENT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
+          else
+            test -z "$EXPECTED_DEPLOYMENT" || exit 1
+          fi
           test "$CLOUDFLARE_ACCOUNT_ID" = "cb5fc919a9f05dcf39b3ca29c9538a1f"
           test -n "$CLOUDFLARE_API_TOKEN"
           gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
@@ -66,6 +79,10 @@ jobs:
             and .status == "completed" and .conclusion == "success"
             and .path == ".github/workflows/ci.yml"
           ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+          if [[ "$MODE" == "deploy" ]]; then
+            current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/release/production" --jq '.object.sha')
+            test "$current" = "$SOURCE_SHA" || { echo 'Release branch SHA changed; stop'; exit 1; }
+          fi
       - name: Checkout exact CI-approved source, no persisted credentials
         uses: actions/checkout@v4
         with:
@@ -109,6 +126,8 @@ jobs:
           versions=d['result']['deployments'][0]['versions']
           assert len(versions)==1 and versions[0]['percentage']==100
           assert versions[0]['version_id']==os.environ['EXPECTED']
+          if os.environ['MODE']=='deploy':
+            assert d['result']['deployments'][0]['id']==os.environ['EXPECTED_DEPLOYMENT'], 'Staging deployment drift'
           bindings={b['name']:b for b in s['result']['bindings']}
           assert set(b['type'] for b in bindings.values()) <= {'plain_text','secret_text','d1'}
           assert bindings['DB']['type']=='d1' and bindings['DB']['id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
@@ -153,6 +172,54 @@ jobs:
             }
           test "$(live)" = "$EXPECTED"
           echo 'PASS: Inactive Staging Worker version uploaded; live traffic unchanged' >> "$GITHUB_STEP_SUMMARY"
+      - name: Guard and deploy only the approved active Staging Worker
+        if: inputs.mode == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$auth" "$base/deployments" > "$RUNNER_TEMP/staging-immediate.json"
+          curl -fsS -H "$auth" "$base/settings" > "$RUNNER_TEMP/staging-settings-immediate.json"
+          jq -e --arg version "$EXPECTED" --arg deployment "$EXPECTED_DEPLOYMENT" '
+            .success and .result.deployments[0].id==$deployment
+            and (.result.deployments[0].versions|length)==1
+            and (.result.deployments[0].versions[0].version_id==$version)
+            and (.result.deployments[0].versions[0].percentage==100)
+          ' "$RUNNER_TEMP/staging-immediate.json" >/dev/null
+          # Compare all variable values, secret NAMES, D1 IDs, runtime flags.
+          # Never expose passwords or other variable values in logs.
+          fingerprint() {
+            jq -S '{plain:([.result.bindings[]|select(.type=="plain_text")|{name,text}]|sort_by(.name)),
+              secrets:([.result.bindings[]|select(.type=="secret_text")|.name]|sort),
+              d1:([.result.bindings[]|select(.type=="d1")|{name,id}]|sort_by(.name)),
+              compatibility_date:.result.compatibility_date,
+              compatibility_flags:(.result.compatibility_flags//[]|sort)}' "$1" > "$2"
+          }
+          fingerprint "$RUNNER_TEMP/bindings.json" "$RUNNER_TEMP/staging-bindings-before.fingerprint"
+          fingerprint "$RUNNER_TEMP/staging-settings-immediate.json" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint"
+          cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint" ||
+            { echo 'Staging Worker settings changed since preflight; stop'; exit 1; }
+          # Strict mode refuses unexpected Script-API ownership transfer.
+          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging --keep-vars --strict
+          curl -fsS -H "$auth" "$base/deployments" > "$RUNNER_TEMP/staging-new.json"
+          curl -fsS -H "$auth" "$base/settings" > "$RUNNER_TEMP/staging-new-settings.json"
+          jq -e --arg version "$EXPECTED" --arg deployment "$EXPECTED_DEPLOYMENT" '
+            .success and .result.deployments[0].id!=$deployment
+            and (.result.deployments[0].versions|length)==1
+            and (.result.deployments[0].versions[0].version_id!=$version)
+            and (.result.deployments[0].versions[0].percentage==100)
+          ' "$RUNNER_TEMP/staging-new.json" >/dev/null
+          fingerprint "$RUNNER_TEMP/staging-new-settings.json" "$RUNNER_TEMP/staging-bindings-after.fingerprint"
+          cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-after.fingerprint" ||
+            { echo 'Staging Worker settings/secrets/D1 changed after deploy; STOP'; exit 1; }
+          curl -fsS --retry 4 --retry-all-errors --max-time 15 \
+            https://api-staging.x-reply-helper.top/health | jq -e '.ok==true' >/dev/null
+          code=$(curl -sS --max-time 15 -o "$RUNNER_TEMP/staging-auth.json" -w '%{http_code}' \
+            https://api-staging.x-reply-helper.top/v1/admin/dashboard)
+          [[ "$code" == "401" || "$code" == "403" ]] ||
+            { echo "Staging admin auth guard changed: HTTP $code"; exit 1; }
+          echo 'PASS: New Worker at 100%; existing vars/secrets/D1 and admin auth preserved'
       - name: Final verified summary
         if: success()
         shell: bash
@@ -161,6 +228,10 @@ jobs:
             echo "### Staging Worker validation: $MODE"
             echo "- Release source: $SOURCE_SHA"
             echo "- Successful release CI run: $CI_RUN_ID"
-            echo "- Active Staging version preserved: $EXPECTED"
+            if [[ "$MODE" == "deploy" ]]; then
+              echo "- Previous Staging version: $EXPECTED; strict deploy and postflight succeeded"
+            else
+              echo "- Active Staging version preserved: $EXPECTED"
+            fi
             echo "- No Production deployment, no remote D1 SQL, no 10k activation"
           } >> "$GITHUB_STEP_SUMMARY"

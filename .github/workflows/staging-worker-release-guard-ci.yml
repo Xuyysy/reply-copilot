@@ -1,0 +1,20 @@
+name: Staging Worker release guard offline tests
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/staging-worker-inactive-upload.yml'
+      - '.github/workflows/staging-worker-release-guard-ci.yml'
+      - 'tests/test_staging_worker_release_policy.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Offline approval + fail-closed regression
+        run: python3 -m unittest discover -s tests -p 'test_staging_worker_release_policy.py' -v
