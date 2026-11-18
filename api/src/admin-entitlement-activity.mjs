@@ -83,7 +83,7 @@ export function createAdminEntitlementActivity({requireAdminSession,response,Api
        where.push('('+CREDIT_SOURCE+')=?');args.push(source);
      }
      if(cursorAt!==null){
-       where.push('('+b.at+'<? OR ('+b.at+'=? AND '+JSON.stringify(b.prefix)+'||'+b.alias+'.id<?))');
+       where.push('('+b.at+'<? OR ('+b.at+'=? AND '+"'" +b.prefix+ "'"+'||'+b.alias+'.id<?))');
        args.push(cursorAt,cursorAt,cursorId);
      }
      // The prefix is constant within one branch, so the raw row ID preserves
