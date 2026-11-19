@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "xrh-password-verifier-local-prototype",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-11-19",
+  "durable_objects": {
+    "bindings": [
+      {"name": "PASSWORD_VERIFY_DO", "class_name": "PasswordVerifierDO"}
+    ]
+  },
+  "migrations": [
+    {"tag": "prototype-v1", "new_sqlite_classes": ["PasswordVerifierDO"]}
+  ]
+}

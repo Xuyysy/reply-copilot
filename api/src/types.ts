@@ -1,3 +1,5 @@
+import type { PasswordVerifierDO } from "../prototypes/cf-free-password-do/src/index";
+
 export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
@@ -17,6 +19,10 @@ export interface Env {
   MAIL_FROM?: string;
   TURNSTILE_SECRET_KEY?: string;
   PASSWORD_PEPPER?: string;
+  /** Disabled by default. CPU-heavy login verification in an isolated Durable Object. */
+  PASSWORD_VERIFY_DO_ENABLED?: string;
+  /** Optional internal Durable Object RPC namespace, never a public verification endpoint. */
+  PASSWORD_VERIFY_DO?: DurableObjectNamespace<PasswordVerifierDO>;
   /** Optional CPU-limited password derivation for NEW hashes; default safe 100k. */
   PASSWORD_FREE_CPU_ENABLED?: string;
   /** Paid-only transitional rehash of verified legacy passwords. Never implicit. */

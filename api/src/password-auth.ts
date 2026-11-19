@@ -52,7 +52,7 @@ function codeFrom(value: unknown): string {
 }
 function hex(bytes: Uint8Array): string { return Array.from(bytes, b => b.toString(16).padStart(2,"0")).join(""); }
 function fromHex(value: string): Uint8Array { return Uint8Array.from(value.match(/../g) || [], value => parseInt(value,16)); }
-async function derive(env: Env, password: string, salt: Uint8Array, iterations: number): Promise<string> {
+async function derive(env: Pick<Env, "PASSWORD_PEPPER">, password: string, salt: Uint8Array, iterations: number): Promise<string> {
   if (!env.PASSWORD_PEPPER || env.PASSWORD_PEPPER.length < 24) throw new ApiFailure(503,"AUTH_NOT_CONFIGURED","账户服务尚未配置。");
   const key = await crypto.subtle.importKey("raw",encoder.encode(`${password}\u0000${env.PASSWORD_PEPPER}`),"PBKDF2",false,["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations},key,256);
@@ -63,7 +63,7 @@ export async function hashPassword(env: Env, password: string): Promise<string> 
   const iterations = creationIterations(env);
   return `pbkdf2-sha256:${iterations}:${hex(salt)}:${await derive(env,password,salt,iterations)}`;
 }
-export async function verifyPassword(env: Env, password: string, stored: string | null): Promise<boolean> {
+export async function verifyPassword(env: Pick<Env, "PASSWORD_PEPPER">, password: string, stored: string | null): Promise<boolean> {
   const parts = stored?.split(":") || [];
   const iterations = Number(parts[1]);
   if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || !SUPPORTED_ITERATIONS.has(iterations) || String(iterations) !== parts[1] || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
@@ -175,6 +175,25 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
   ]); } catch { throw new ApiFailure(409,"REGISTRATION_CONFLICT","注册信息已被使用，请重新注册或登录。"); }
   return response({ok:true},200,env,request,{"Set-Cookie":sessionCookie(session.token,SESSION_MS/1000)});
 }
+
+/**
+ * Optional Cloudflare-only CPU offload. The Durable Object must be deployed
+ * separately, use the SAME password pepper and expose an internal RPC method.
+ * A missing/broken binding fails closed; never fall back to 100k/210k PBKDF2
+ * on the Free-constrained HTTP entrypoint after the flag is turned on.
+ */
+async function verifyLoginPassword(env: Env, userId: string, password: string, stored: string): Promise<boolean> {
+  if (env.PASSWORD_VERIFY_DO_ENABLED !== "1") return verifyPassword(env,password,stored);
+  if (!env.PASSWORD_VERIFY_DO) throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户登录暂时不可用，请稍后重试。");
+  try {
+    const result = await env.PASSWORD_VERIFY_DO.getByName(userId).verify(password,stored);
+    if (typeof result === "boolean") return result;
+  } catch {
+    // Do not disclose DO errors, stored hashes, raw passwords or pepper.
+  }
+  throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户登录暂时不可用，请稍后重试。");
+}
+
 export async function passwordLogin(request: Request,env: Env): Promise<Response> {
   requireWebOrigin(request,env); const body=await jsonBody(request,2048);
   const identity=typeof body.identity==="string"?body.identity.trim().toLowerCase():"";
@@ -182,7 +201,7 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   if (!identity || password.length>256) throw new ApiFailure(400,"INVALID_CREDENTIALS","账号或密码错误。");
   const now=nowMs(); await rate(request,env,"login",identity,now);
   const user=await env.DB.prepare(LOGIN_USER_SQL).bind(identity,identity).first<{id:string;password_hash:string|null;status:string}>();
-  if (!user?.password_hash || !await verifyPassword(env,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
+  if (!user?.password_hash || !await verifyLoginPassword(env,user.id,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();
   // Paid-only staged rehash to the currently selected lower-cost verifier,
@@ -194,7 +213,8 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   //
   // This is best-effort housekeeping, not a reason to deny a valid login:
   // do not disclose the stored work factor, password, hash or failure reason.
-  if (env.PASSWORD_FREE_CPU_ENABLED==="1" &&
+  if (env.PASSWORD_VERIFY_DO_ENABLED!=="1" &&
+      env.PASSWORD_FREE_CPU_ENABLED==="1" &&
       env.PASSWORD_LEGACY_MIGRATION_ENABLED==="1" &&
       user.status==="active" && !user.password_hash.startsWith(`pbkdf2-sha256:${creationIterations(env)}:`)) {
     try {
