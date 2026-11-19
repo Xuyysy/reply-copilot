@@ -23,6 +23,10 @@ export interface Env {
   PASSWORD_LEGACY_MIGRATION_ENABLED?: string;
   /** Explicit additional opt-in: PBKDF2 10k, significantly weaker than OWASP recommendations. */
   PASSWORD_FREE_TINY_CPU_ENABLED?: string;
+  /** Optional email-only user login; requires separately approved SQL table; disabled by default. */
+  EMAIL_OTP_LOGIN_ENABLED?: string;
+  /** Optional cutover gate to disable PBKDF2 password login; default remains enabled. */
+  PASSWORD_LOGIN_ENABLED?: string;
   DISPOSABLE_EMAIL_DOMAINS?: string;
   DEEPSEEK_INPUT_USD_PER_MILLION?: string;
   DEEPSEEK_OUTPUT_USD_PER_MILLION?: string;
