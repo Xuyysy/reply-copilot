@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { pbkdf2Sync } from "node:crypto";
+import { pbkdf2Sync, createHmac } from "node:crypto";
 import { build } from "esbuild";
 import { createRequire } from "node:module";
 import { fixture, temp } from "./helpers/payment-v2.mjs";
@@ -40,6 +40,97 @@ test("Durable Object accepts every legacy password hash at original work factors
   assert.equal(await doObj.verify(password,"x".repeat(181)),false);
   assert.equal((await publicEntry.fetch()).status,404);
 });
+test("DO creates salted compatible hashes at the original opt-in work factors",async()=>{
+  const verifier=fixtureDO({PASSWORD_PEPPER:pepper});
+  for(const n of [100_000,60_000,10_000]){
+    const hash=await verifier.hash(password,n);
+    assert.match(hash,new RegExp(`^pbkdf2-sha256:${n}:[0-9a-f]{32}:[0-9a-f]{64}$`));
+    assert.equal(await verifier.verify(password,hash),true);
+    assert.equal(await verifier.verify("wrong",hash),false);
+    assert.notEqual(hash,await verifier.hash(password,n),"new salt each time");
+  }
+  for(const n of [0,1000,210_000,500_000]){
+    await assert.rejects(verifier.hash(password,n),/INVALID_HASH_PROFILE/);
+  }
+  await assert.rejects(verifier.hash("short",100_000),/INVALID_HASH_PROFILE/);
+  await assert.rejects(verifier.hash("x".repeat(257),100_000),/INVALID_HASH_PROFILE/);
+});
+
+test("offloaded register creates pending registration with the original password semantics",async()=>{
+  const f=fixture();const oldLog=console.log;
+  try{
+    f.env.PASSWORD_PEPPER=pepper; f.env.PASSWORD_VERIFY_DO_ENABLED="1";
+    f.env.ENVIRONMENT="development";
+    f.env.WEB_ORIGIN="http://127.0.0.1:4321";
+    f.env.API_ORIGIN="http://127.0.0.1:8787";
+    f.env.TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA";
+    f.sql.exec("UPDATE system_settings SET value='1' WHERE key='registration_enabled'");
+    const names=[];
+    const verifier=fixtureDO(f.env);
+    f.env.PASSWORD_VERIFY_DO={getByName(name){
+      names.push(name);
+      return {hash:(pass,iterations)=>verifier.hash(pass,iterations)};
+    }};
+    console.log=()=>{}; // Suppress the *local synthetic* registration email log.
+    const registration=await f.call("/v1/auth/register",{body:{
+      username:"do_register_user",email:"do-register@example.test",password,
+      turnstileToken:"local-test-token"
+    },headers:{Origin:f.env.WEB_ORIGIN}});
+    assert.equal(registration.status,200,JSON.stringify(registration.body));
+    const row=f.sql.prepare("SELECT password_hash FROM pending_registrations WHERE email='do-register@example.test'").get();
+    assert.match(row?.password_hash||"",/^pbkdf2-sha256:100000:/);
+    assert.equal(await verifier.verify(password,row.password_hash),true);
+    assert.equal(names.length,1);
+    assert.match(names[0],/^signup:[a-f0-9]{64}$/);
+    assert.doesNotMatch(names[0],/@|do-register/);
+  } finally {console.log=oldLog;f.sql.close();}
+});
+
+test("offloaded password reset preserves revocation, profile gates and one-time challenge",async()=>{
+  for(const mode of ["default","tiny"]){
+    const f=fixture();
+    try{
+      f.env.PASSWORD_PEPPER=pepper;f.env.PASSWORD_VERIFY_DO_ENABLED="1";
+      if(mode==="tiny"){
+        f.env.PASSWORD_FREE_CPU_ENABLED="1";f.env.PASSWORD_FREE_TINY_CPU_ENABLED="1";
+      }
+      const verifier=fixtureDO(f.env),names=[];
+      f.env.PASSWORD_VERIFY_DO={getByName(name){
+        names.push(name);
+        return {hash:(pass,rounds)=>verifier.hash(pass,rounds)};
+      }};
+      const code="123456",now=Date.now();
+      const digest=createHmac("sha256",f.env.AUTH_HASH_SECRET).update("reset:test-user:"+code).digest("hex");
+      f.sql.prepare("INSERT INTO password_resets(user_id,code_hash,expires_at,sent_at,attempts) VALUES(?,?,?,?,0)")
+        .run("test-user",digest,now+600_000,now);
+      const res=await f.call("/v1/auth/reset-password",{body:{email:"v2@example.test",code,password}});
+      assert.equal(res.status,200,JSON.stringify(res.body));
+      const row=f.sql.prepare("SELECT password_hash FROM users WHERE id='test-user'").get();
+      assert.match(row.password_hash,new RegExp(`^pbkdf2-sha256:${mode==="tiny"?"10000":"100000"}:`));
+      assert.equal(await verifier.verify(password,row.password_hash),true);
+      assert.deepEqual(names,["test-user"]);
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM sessions WHERE user_id='test-user' AND revoked_at IS NULL").get().n,0);
+      assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM password_resets WHERE user_id='test-user'").get().n,0);
+    }finally{f.sql.close();}
+  }
+});
+
+test("offloaded register/reset fail closed with no mutation if DO unavailable",async()=>{
+  const f=fixture();try{
+    f.env.PASSWORD_PEPPER=pepper;f.env.PASSWORD_VERIFY_DO_ENABLED="1";
+    const code="123456",now=Date.now();
+    const digest=createHmac("sha256",f.env.AUTH_HASH_SECRET).update("reset:test-user:"+code).digest("hex");
+    f.sql.prepare("INSERT INTO password_resets(user_id,code_hash,expires_at,sent_at,attempts) VALUES(?,?,?,?,0)")
+      .run("test-user",digest,now+600_000,now);
+    const before=f.sql.prepare("SELECT password_hash FROM users WHERE id='test-user'").get().password_hash;
+    const res=await f.call("/v1/auth/reset-password",{body:{email:"v2@example.test",code,password}});
+    assert.equal(res.status,503);
+    assert.equal(res.body.code,"PASSWORD_VERIFIER_UNAVAILABLE");
+    assert.equal(f.sql.prepare("SELECT password_hash FROM users WHERE id='test-user'").get().password_hash,before);
+    assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM password_resets WHERE user_id='test-user'").get().n,1);
+  } finally {f.sql.close();}
+});
+
 test("OFF by default: original password login remains available with no DO binding",async()=>{
   const f=fixture();try{
     f.env.PASSWORD_PEPPER=pepper;

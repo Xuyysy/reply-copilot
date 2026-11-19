@@ -58,10 +58,19 @@ async function derive(env: Pick<Env, "PASSWORD_PEPPER">, password: string, salt:
   const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations},key,256);
   return hex(new Uint8Array(bits));
 }
-export async function hashPassword(env: Env, password: string): Promise<string> {
+/**
+ * Shared by the original local handler and the isolated Durable Object.
+ * The caller chooses the original creation profile; never derive an
+ * arbitrary/unbounded attacker-controlled work factor inside the DO.
+ */
+export async function hashPasswordWithIterations(env: Pick<Env,"PASSWORD_PEPPER">, password: string, iterations: number): Promise<string> {
+  if (iterations!==DEFAULT_ITERATIONS && iterations!==FREE_ITERATIONS && iterations!==TINY_ITERATIONS)
+    throw new ApiFailure(400,"INVALID_HASH_PROFILE","不支持的密码哈希参数。");
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  const iterations = creationIterations(env);
   return `pbkdf2-sha256:${iterations}:${hex(salt)}:${await derive(env,password,salt,iterations)}`;
+}
+export async function hashPassword(env: Env, password: string): Promise<string> {
+  return hashPasswordWithIterations(env,password,creationIterations(env));
 }
 export async function verifyPassword(env: Pick<Env, "PASSWORD_PEPPER">, password: string, stored: string | null): Promise<boolean> {
   const parts = stored?.split(":") || [];
@@ -124,7 +133,7 @@ export async function register(request: Request,env: Env,diagnostics?: Registrat
   if (diagnostics) diagnostics.stage = "registration_code_hash";
   const code = freshCode(); const codeHash = await hmac(env,`register:${email}:${code}`);
   if (diagnostics) diagnostics.stage = "password_hash";
-  const passwordHash = await hashPassword(env,password);
+  const passwordHash = await createPasswordHash(env,password,email,"register");
   if (diagnostics) diagnostics.stage = "pending_registration_write";
   let inserted;
   const referralColumn=referralEnabled?",referral_code":"";
@@ -182,6 +191,28 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
  * A missing/broken binding fails closed; never fall back to 100k/210k PBKDF2
  * on the Free-constrained HTTP entrypoint after the flag is turned on.
  */
+/**
+ * Registration/reset use the same DO as password login when opted in.
+ * Only a keyed, pseudonymous registration identifier becomes a DO name;
+ * ordinary reset uses the existing internal user ID. No PII in object names.
+ * A missing or invalid DO response fails closed without local PBKDF2 fallback.
+ */
+async function createPasswordHash(env: Env, password: string, identity: string, purpose: "register"|"reset"): Promise<string> {
+  if (env.PASSWORD_VERIFY_DO_ENABLED !== "1") return hashPassword(env,password);
+  if (!env.PASSWORD_VERIFY_DO) throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户服务暂时不可用，请稍后重试。");
+  const workFactor=creationIterations(env);
+  try {
+    const objectName=purpose==="register" ? "signup:"+await hmac(env,"do-signup:"+identity) : identity;
+    const result=await env.PASSWORD_VERIFY_DO.getByName(objectName).hash(password,workFactor);
+    if (typeof result==="string" &&
+        new RegExp(`^pbkdf2-sha256:${workFactor}:[0-9a-f]{32}:[0-9a-f]{64}$`).test(result))
+      return result;
+  } catch {
+    // Do not expose raw credentials, hashes, secrets, or DO exception text.
+  }
+  throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户服务暂时不可用，请稍后重试。");
+}
+
 async function verifyLoginPassword(env: Env, userId: string, password: string, stored: string): Promise<boolean> {
   if (env.PASSWORD_VERIFY_DO_ENABLED !== "1") return verifyPassword(env,password,stored);
   if (!env.PASSWORD_VERIFY_DO) throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户登录暂时不可用，请稍后重试。");
@@ -247,7 +278,7 @@ export async function resetPassword(request: Request,env: Env): Promise<Response
     if(row) await env.DB.prepare("UPDATE password_resets SET attempts=attempts+1 WHERE user_id=? AND attempts<5").bind(row.id).run();
     throw new ApiFailure(400,"INVALID_CODE","验证码无效或已过期。");
   }
-  const hash=await hashPassword(env,password);
+  const hash=await createPasswordHash(env,password,row.id,"reset");
   const result=await env.DB.batch([
     env.DB.prepare("UPDATE users SET password_hash=? WHERE id=? AND EXISTS(SELECT 1 FROM password_resets WHERE user_id=? AND code_hash=? AND expires_at>? AND attempts<5)").bind(hash,row.id,row.id,row.code_hash,now),
     env.DB.prepare("UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL AND EXISTS(SELECT 1 FROM users WHERE id=? AND password_hash=?)").bind(now,row.id,row.id,hash),

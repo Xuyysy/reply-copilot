@@ -16,3 +16,11 @@ The active Production Worker sampled 2026-11-18 UTC HTTP 200 CPU P95 around 21.7
 
 ## Operational gate
 Do not merge or deploy if Worker/typecheck/test/bundle validation fails. Do not touch external provider or payment records. Do not add DO to Production or change plan without separate explicit approval.
+
+## 2026-11-19 Stage B — include password creation (PR follow-up)
+- Existing registered/verified users still log in with their original username + password. No email OTP is introduced. This stage also moves **new registration's hash creation** and **password reset's hash creation** to the same internal DO when `PASSWORD_VERIFY_DO_ENABLED=1`.
+- Parent Worker chooses its existing configured `creationIterations` profile (default 100k; separately gated 60k or 10k). The DO accepts only these three new-hash values and returns a fresh random-salted PBKDF2-SHA256 hash, with the same pepper and legacy verifier. Unsupported 210k new-hash creation is rejected; existing 210k verification remains supported.
+- Registration only passes a secret-keyed HMAC of the normalized email to the DO namespace name, never an address or raw user identifier. Reset uses the existing internal user ID. No DO persistent storage or public password verification endpoint.
+- Missing DO, exception or malformed/incorrect-work-factor hash **returns a generic 503 without writing registration/password-reset state**; parent never falls back to PBKDF2 on the Free-constrained entrypoint.
+- Independent offline local-fixture tests cover 100k/60k/10k creation, fresh salt, verification, real registration path, real password-reset path and session revocation, and missing-DO failure. These are not real Cloudflare CPU measurements.
+- The feature remains default OFF; Staging validation and Production config/secret/DO provisioning still require separate approval, and no user email is sent by this change.
