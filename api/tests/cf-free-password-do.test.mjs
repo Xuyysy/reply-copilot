@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { pbkdf2Sync } from "node:crypto";
-import { buildSync } from "esbuild";
+import { build } from "esbuild";
 import { createRequire } from "node:module";
 import { fixture, temp } from "./helpers/payment-v2.mjs";
 
@@ -15,7 +15,7 @@ const legacy=iterations=>{
 const dest=temp+"/cf-free-password-do-prototype.cjs";
 // Replace only Cloudflare runtime class in an offline Node build. No remote
 // namespace, D1, payments, credentials, provider or network is accessed.
-buildSync({
+await build({
   entryPoints:[new URL("../prototypes/cf-free-password-do/src/index.ts",import.meta.url).pathname],
   bundle:true, platform:"node", format:"cjs", target:"node22", outfile:dest,
   plugins:[{name:"cloudflare-do-offline-mock",setup(build){
