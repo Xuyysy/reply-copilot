@@ -56,7 +56,7 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  for(const row of prodWorkers){
   if(expectedVersion && row.dimensions?.scriptVersion!==expectedVersion)continue;
   const raw=row.dimensions?.httpResponseStatus;
-  const numeric=typeof raw==='number'?raw:typeof raw==='string'&&/^\\d{3}$/.test(raw)?Number(raw):null;
+  const numeric=typeof raw==='number'?raw:typeof raw==='string'&&/^\d{3}$/.test(raw)?Number(raw):null;
   const status=numeric!==null&&Number.isInteger(numeric)&&numeric>=100&&numeric<=599?String(numeric):'unknown';
   let metric=httpCpu.get(status);
   if(!metric){metric={httpStatus:status,requests:0,maxCpuMs:0,maxSegmentP95Ms:0,maxSegmentP99Ms:0};httpCpu.set(status,metric);}
