@@ -156,7 +156,7 @@ export default function AccountDashboard() {
   },{fresh}), []);
   useEffect(()=>{const clean=cleanPaymentReturn(location.href);if(clean!==location.href)history.replaceState(history.state,"",clean);},[]);
   useEffect(() => { void load(); }, [load]);
-  useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?30000:0}), [load,state]);
+  useEffect(() => watchAccountRefresh(()=>load(true),globalThis,{intervalMs:state==="ready"?60000:0}), [load,state]);
   const pendingPaymentId=paymentHint||pendingPaymentOrder(data?.activity?.orders)||null;
   const paymentOwner=data?.account.user.userId??null;
   useEffect(()=>{
