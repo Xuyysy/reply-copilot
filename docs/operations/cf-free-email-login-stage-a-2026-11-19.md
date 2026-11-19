@@ -8,7 +8,7 @@ Source base: `2557f25eeda29e01b3ed00a773e53056a6828b87`. Worker Free allows only
 - `EMAIL_OTP_LOGIN_ENABLED` must be exactly `1` before either route can execute; missing/disabled returns 404. Off by default in all current Cloudflare bindings.
 - `PASSWORD_LOGIN_ENABLED=0` is an independent **future cutover**, only after users have OTP access; it disables password entry before PBKDF2. Default remains enabled, so existing users are unaffected.
 - The new table is **only** in `api/sql-proposals/0032_email_otp_login.sql`, not auto-executed migrations. No remote D1 SQL was performed. Schema must be independently approved and verified before the feature switch.
-- Frontend changes are intentionally NOT included until separate staging sign-in and account-recovery QA; this is an API candidate, not a released user feature.
+- The React login panel includes an email OTP flow behind compile-time `PUBLIC_EMAIL_OTP_LOGIN_ENABLED=1`, OFF by default; the API is also independently gated by `EMAIL_OTP_LOGIN_ENABLED=1`. Both gates must be enabled through separately approved releases after schema approval and Staging QA. This is a candidate, not a released user feature.
 
 ## Explicit tradeoffs and remaining blockers
 - Email inbox possession becomes a login factor; email compromise, mailbox availability and Resend quota (Free 100/day) become risks. Password reset already relies on email possession, but admin accounts are intentionally ineligible.
