@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { verifyPassword } from "../../../src/password-auth";
+import { hashPasswordWithIterations, verifyPassword } from "../../../src/password-auth";
 
 /**
  * Stateless and secret-bearing by design: no user, password, hash, result or
@@ -13,6 +13,14 @@ interface VerifierEnv {
   PASSWORD_PEPPER?: string;
 }
 export class PasswordVerifierDO extends DurableObject<VerifierEnv> {
+  /** Creation has the same salt/pepper and work factors as the original API. */
+  async hash(password: string, iterations: number): Promise<string> {
+    if (typeof password!=="string" || password.length<12 ||
+        new TextEncoder().encode(password).length>256 ||
+        (iterations!==100_000 && iterations!==60_000 && iterations!==10_000))
+      throw new Error("INVALID_HASH_PROFILE");
+    return hashPasswordWithIterations(this.env,password,iterations);
+  }
   async verify(password: string, stored: string): Promise<boolean> {
     if (typeof password !== "string" || password.length > 256 ||
         typeof stored !== "string" || stored.length > 180) return false;
