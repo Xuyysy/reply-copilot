@@ -6,7 +6,7 @@ const compact=readFileSync(new URL("../src/components/admin/AdminBoltMerchantAcc
 test("Production dashboard prioritizes real payment and hides verbose admin areas by default",()=>{
  assert.match(panel,/USDT 真实付款验证/);
  assert.match(panel,/boltutil-advanced-controls/);
- assert.match(panel,/<details className="rounded-xl border p-3" data-testid="boltutil-history-details">/);
+ assert.match(panel,/<details className="rounded-xl border p-3" data-testid="boltutil-history-details" onToggle=\{event=>setHistoryOpen\(event\.currentTarget\.open\)\}>/);
  assert.match(panel,/AdminBoltMerchantAcceptancePanel active=\{active\}/);
  assert.doesNotMatch(panel,/data-testid="boltutil-production-readiness"/);
  assert.match(compact,/Production 单链实付测试/);
