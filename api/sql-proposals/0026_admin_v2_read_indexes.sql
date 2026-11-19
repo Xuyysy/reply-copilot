@@ -1,6 +1,11 @@
 -- Pending separate D1 approval. Not in api/migrations on purpose.
 -- Only a proposal used by isolated SQLite tests. Manual review must decide
 -- whether to promote this file to the numbered production migration chain.
+-- Current release/production baseline has 0001..0024 migrations.
+-- 0025 is reserved for the separately reviewed subscription RSA2 work:
+-- do not promote 0026 until the predecessor migration and live D1 state have
+-- been separately approved and reconciled. Never infer remote migration state
+-- from local filenames.
 -- Admin V2 read-performance indexes (source-only migration).
 -- Do not execute on Staging/Production/backup D1 without distinct explicit
 -- authorization, preflight, backup, migration review and rollback plan.

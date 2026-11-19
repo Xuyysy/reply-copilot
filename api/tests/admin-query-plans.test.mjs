@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync, readdirSync} from 'node:fs';
 import {fixture} from './helpers/payment-v2.mjs';
 
 const proposedIndexes=readFileSync(new URL('../sql-proposals/0026_admin_v2_read_indexes.sql',import.meta.url),'utf8');
@@ -62,4 +62,50 @@ test('Admin V2: paid but unfulfilled subscription alert uses recent subscription
    ORDER BY o.created_at DESC LIMIT 8`,
   [Date.now()-30*86400000,Date.now()-5*60000]);
  uses(rows,'admin_subscription_orders_recent_idx');
+});
+
+
+test('Admin V2 indexes remain approval-gated and outside executable migrations',()=>{
+ const migrations=readdirSync(new URL('../migrations/',import.meta.url))
+   .filter(name=>name.endsWith('.sql')).sort();
+ assert.ok(migrations.includes('0024_subscription_upgrade_quotes.sql'),
+   'Expected the 24-migration known production baseline');
+ assert.ok(!migrations.some(name=>/^0026_admin_v2_read_indexes\.sql$/.test(name)),
+   'Do not silently execute proposed indexes through normal D1 migrations');
+ assert.match(proposedIndexes,/Pending separate D1 approval/);
+});
+
+test('Admin V2 index proposal is additive and preserves local ledger rows',()=>{
+ const statements=proposedIndexes.replace(/^--.*$/gm,'').split(';')
+   .map(statement=>statement.trim()).filter(Boolean);
+ const expected=new Map([
+  ['admin_subscription_orders_recent_idx','subscription_orders'],
+  ['admin_credit_receipts_paid_idx','payment_transactions'],
+  ['admin_subscription_receipts_paid_idx','subscription_payment_transactions'],
+  ['admin_failed_ai_recent_idx','ai_requests'],
+ ]);
+ assert.equal(statements.length,expected.size,'Proposal must contain exactly four indexes');
+ for(const statement of statements){
+  const match=/^CREATE INDEX\s+(admin_[a-z0-9_]+)\s+ON\s+([a-z0-9_]+)\s*\(/i.exec(statement);
+  assert.ok(match,'Only additive CREATE INDEX statements are permitted');
+  assert.equal(expected.get(match[1]),match[2],
+    'Unexpected index name or target table: '+match[1]);
+ }
+ const f=fixture();
+ try{
+  const beforeUsers=f.sql.prepare('SELECT COUNT(*) n FROM users').get().n;
+  const beforeCredits=f.sql.prepare('SELECT free_balance,paid_balance FROM credit_accounts WHERE user_id=?').get('test-user');
+  f.sql.exec(proposedIndexes);
+  const present=f.sql.prepare(
+    "SELECT name,tbl_name FROM sqlite_master WHERE type='index' AND name IN ("+
+    "'admin_subscription_orders_recent_idx','admin_credit_receipts_paid_idx',"+
+    "'admin_subscription_receipts_paid_idx','admin_failed_ai_recent_idx')"
+  ).all();
+  assert.deepEqual(new Map(present.map(row=>[row.name,row.tbl_name])),expected);
+  assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM users').get().n,beforeUsers);
+  assert.deepEqual(
+   f.sql.prepare('SELECT free_balance,paid_balance FROM credit_accounts WHERE user_id=?').get('test-user'),
+   beforeCredits,
+  );
+ }finally{f.sql.close();}
 });
