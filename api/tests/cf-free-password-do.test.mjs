@@ -9,7 +9,7 @@ const pepper="synthetic-cf-do-local-pepper-12345678";
 const password="offline-DO-password-2026!";
 const salt="ab".repeat(16);
 const legacy=iterations=>{
-  const digest=pbkdf2Sync(password+"\\0"+pepper,Buffer.from(salt,"hex"),iterations,32,"sha256").toString("hex");
+  const digest=pbkdf2Sync(password+"\0"+pepper,Buffer.from(salt,"hex"),iterations,32,"sha256").toString("hex");
   return `pbkdf2-sha256:${iterations}:${salt}:${digest}`;
 };
 const dest=temp+"/cf-free-password-do-prototype.cjs";
