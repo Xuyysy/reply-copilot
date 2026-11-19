@@ -72,7 +72,7 @@ test("offloaded register creates pending registration with the original password
     }};
     console.log=()=>{}; // Suppress the *local synthetic* registration email log.
     const registration=await f.call("/v1/auth/register",{body:{
-      username:"do-register-user",email:"do-register@example.test",password,
+      username:"do_register_user",email:"do-register@example.test",password,
       turnstileToken:"local-test-token"
     }});
     assert.equal(registration.status,200,JSON.stringify(registration.body));
