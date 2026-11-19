@@ -6,7 +6,7 @@ const src=readFileSync(new URL('../src/components/auth/AuthPanel.tsx',import.met
 const api=readFileSync(new URL('../../api/src/index.ts',import.meta.url),'utf8');
 const handler=readFileSync(new URL('../../api/src/email-login.ts',import.meta.url),'utf8');
 test('email OTP interface is build-gated and default password login stays intact',()=>{
- assert.match(src,/import\.meta\.env\.PUBLIC_EMAIL_OTP_LOGIN_ENABLED === "1"/);
+ assert.match(src,/import\.meta\.env\?\.PUBLIC_EMAIL_OTP_LOGIN_ENABLED === "1"/);
  assert.match(src,/emailOtpAvailable && <Button/);
  assert.match(src,/\/v1\/auth\/login/);
  assert.match(src,/emailOtpAvailable && <form/);
