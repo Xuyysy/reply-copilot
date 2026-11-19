@@ -25,7 +25,7 @@ async function mailbox(run){
  try{return await run(sent);}finally{globalThis.fetch=prior;}
 }
 function codeFrom(mail){
- const m=mail?.text.match(/验证码：(\\d{8})/);
+ const m=mail?.text.match(/验证码：(\d{8})/);
  assert.ok(m,'8-digit login code only in intercepted email');return m[1];
 }
 test('email OTP is OFF by default and does not change password login',async()=>{
@@ -73,7 +73,7 @@ test('wrong codes are limited, expired codes rejected, and send throttling preve
   assert.equal(mails.length,1);
   for(let i=0;i<5;i++)assert.equal((await f.call('/v1/auth/email-login/verify',{body:{email:'v2@example.test',code:'00000000'}})).status,400);
   const correct=codeFrom(mails[0]);
-  assert.equal((await f.call('/v1/auth/email-login/verify',{body:{email:'v2@example.test',code:correct}})).status,400);
+  assert.equal((await f.call('/v1/auth/email-login/verify',{body:{email:'v2@example.test',code:correct}})).status,429,'hourly verification throttle also protects exhausted code');
  });}finally{f.sql.close();}
 });
 test('optional password-login block is disabled by default and fails before derivation',async()=>{
