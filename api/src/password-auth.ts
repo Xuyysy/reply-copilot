@@ -176,8 +176,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
   return response({ok:true},200,env,request,{"Set-Cookie":sessionCookie(session.token,SESSION_MS/1000)});
 }
 export async function passwordLogin(request: Request,env: Env): Promise<Response> {
-  requireWebOrigin(request,env);
-  if (env.PASSWORD_LOGIN_ENABLED==="0") throw new ApiFailure(503,"PASSWORD_LOGIN_DISABLED","当前已启用邮箱验证码登录，请使用邮箱验证码。"); const body=await jsonBody(request,2048);
+  requireWebOrigin(request,env); const body=await jsonBody(request,2048);
   const identity=typeof body.identity==="string"?body.identity.trim().toLowerCase():"";
   const password=typeof body.password==="string"?body.password:"";
   if (!identity || password.length>256) throw new ApiFailure(400,"INVALID_CREDENTIALS","账号或密码错误。");

@@ -76,10 +76,3 @@ test('wrong codes are limited, expired codes rejected, and send throttling preve
   assert.equal((await f.call('/v1/auth/email-login/verify',{body:{email:'v2@example.test',code:correct}})).status,429,'hourly verification throttle also protects exhausted code');
  });}finally{f.sql.close();}
 });
-test('optional password-login block is disabled by default and fails before derivation',async()=>{
- const f=setup();try{
-  f.env.PASSWORD_LOGIN_ENABLED='0';
-  const r=await f.call('/v1/auth/login',{body:{identity:'v2@example.test',password:'anything'}});
-  assert.equal(r.status,503);assert.equal(r.body.code,'PASSWORD_LOGIN_DISABLED');
- }finally{f.sql.close();}
-});
