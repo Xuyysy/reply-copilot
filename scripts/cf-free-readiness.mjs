@@ -23,7 +23,7 @@ export function analyticsQuery(accountId,day){
  // If either dataset reaches its limit, we refuse to certify completeness.
  return 'query { viewer { accounts(filter:{accountTag:'+JSON.stringify(accountId)+'}) { '+
   'workers:workersInvocationsAdaptive(limit:5000,filter:{date:'+JSON.stringify(day)+'}) {'+
-    'dimensions{date scriptName scriptVersion eventType status} sum{requests errors} '+
+    'dimensions{date scriptName scriptVersion eventType status httpResponseStatus} sum{requests errors} '+
     'quantiles{cpuTimeP50 cpuTimeP95 cpuTimeP99} max{cpuTime} } '+
   'd1:d1AnalyticsAdaptiveGroups(limit:2000,filter:{date:'+JSON.stringify(day)+'}) {'+
     'dimensions{date databaseId} sum{rowsRead rowsWritten readQueries writeQueries} } '+
@@ -48,6 +48,24 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  const maxCpuMicros=Math.max(0,...fetchWorkers.map(x=>safeNumber(x.max?.cpuTime)??0));
  const prodCpuMicros=Math.max(0,...prodWorkers.map(x=>safeNumber(x.max?.cpuTime)??0));
  const versions=[...new Set(prodWorkers.map(x=>x.dimensions?.scriptVersion).filter(Boolean))].sort();
+ // Diagnostic only: expose CPU by HTTP response class without request paths,
+ // user identifiers, secrets or payloads. Group quantiles cannot be recombined
+ // exactly; keep the maximum observed per-segment P95/P99, never invent an
+ // account-wide or per-route percentile from Cloudflare adaptive samples.
+ const httpCpu=new Map();
+ for(const row of prodWorkers){
+  if(expectedVersion && row.dimensions?.scriptVersion!==expectedVersion)continue;
+  const raw=row.dimensions?.httpResponseStatus;
+  const numeric=typeof raw==='number'?raw:typeof raw==='string'&&/^\\d{3}$/.test(raw)?Number(raw):null;
+  const status=numeric!==null&&Number.isInteger(numeric)&&numeric>=100&&numeric<=599?String(numeric):'unknown';
+  let metric=httpCpu.get(status);
+  if(!metric){metric={httpStatus:status,requests:0,maxCpuMs:0,maxSegmentP95Ms:0,maxSegmentP99Ms:0};httpCpu.set(status,metric);}
+  metric.requests+=safeNumber(row.sum?.requests)??0;
+  metric.maxCpuMs=Math.max(metric.maxCpuMs,(safeNumber(row.max?.cpuTime)??0)/1000);
+  metric.maxSegmentP95Ms=Math.max(metric.maxSegmentP95Ms,(safeNumber(row.quantiles?.cpuTimeP95)??0)/1000);
+  metric.maxSegmentP99Ms=Math.max(metric.maxSegmentP99Ms,(safeNumber(row.quantiles?.cpuTimeP99)??0)/1000);
+ }
+ const cpuByHttpStatus=[...httpCpu.values()].sort((a,b)=>b.requests-a.requests).slice(0,12);
  const causes=[];
  if(read>=LIMITS.rowsRead)causes.push('account D1 reads exceed 5,000,000/day');
  if(written>=LIMITS.rowsWritten)causes.push('account D1 writes exceed 100,000/day');
@@ -70,7 +88,7 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  const verdict=causes.length?'NO_GO':uncertainties.length?'INSUFFICIENT':'REVIEW_REQUIRED';
  return {day,verdict,limits:LIMITS,metrics:{
   account:{requests:totalRequests,errors:allErrors,d1RowsRead:read,d1RowsWritten:written,maxCpuMs:maxCpuMicros/1000},
-  production:{requests:prodRequests,errors:prodErrors,d1RowsRead:prodReads,maxCpuMs:prodCpuMicros/1000,versions}
+  production:{requests:prodRequests,errors:prodErrors,d1RowsRead:prodReads,maxCpuMs:prodCpuMicros/1000,versions,cpuByHttpStatus}
  },causes,uncertainties,certifiedForFree:false,sampledMetricsOnly:true};
 }
 export async function loadDay({accountId,token,day,fetchImpl=fetch}){
@@ -96,6 +114,14 @@ export function markdownReport(results){
  for(const r of results)lines.push('| '+r.day+' | '+r.verdict+' | '+fmt(r.metrics.account.d1RowsRead)+' | '+fmt(r.metrics.account.d1RowsWritten)+' | '+fmt(r.metrics.account.requests)+' | '+r.metrics.account.maxCpuMs.toFixed(3)+'ms |');
  for(const r of results){
   lines.push('','## '+r.day+' — '+r.verdict,'','Production Worker versions: '+(r.metrics.production.versions.join(', ')||'none observed'));
+  if(r.metrics.production.cpuByHttpStatus?.length){
+   lines.push('','### Production HTTP status CPU diagnostic (sampled)','',
+    '> Not route-level evidence. P95/P99 columns are maxima of individual GraphQL groups, not exact combined quantiles. If an expected Worker version is specified, only that version is included.',
+    '','| HTTP status | Requests | Max CPU | Max group P95 | Max group P99 |',
+    '|---|---:|---:|---:|---:|');
+   for(const s of r.metrics.production.cpuByHttpStatus)
+    lines.push('| '+s.httpStatus+' | '+fmt(s.requests)+' | '+s.maxCpuMs.toFixed(3)+'ms | '+s.maxSegmentP95Ms.toFixed(3)+'ms | '+s.maxSegmentP99Ms.toFixed(3)+'ms |');
+  }
   for(const cause of r.causes)lines.push('- **BLOCKER:** '+cause);
   for(const concern of r.uncertainties)lines.push('- Unverified: '+concern);
  }

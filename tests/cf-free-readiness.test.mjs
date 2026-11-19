@@ -6,7 +6,7 @@ const prod='reply-copilot-api-production';
 const db='d9df7d23-9b9c-44ac-a33a-c24474c15691';
 const version='b10bdc5b-c9db-4d93-b0c8-b11e120376fb';
 const makeWorker=(name,requests,cpu=4000,errors=0)=>({
- dimensions:{scriptName:name,scriptVersion:version,date:'2026-11-16',eventType:'fetch',status:'success'},
+ dimensions:{scriptName:name,scriptVersion:version,date:'2026-11-16',eventType:'fetch',status:'success',httpResponseStatus:200},
  sum:{requests,errors},max:{cpuTime:cpu},quantiles:{cpuTimeP50:1000,cpuTimeP95:3000,cpuTimeP99:cpu}
 });
 const makeDb=(databaseId,read,write)=>({dimensions:{databaseId,date:'2026-11-16'},sum:{rowsRead:read,rowsWritten:write,readQueries:22,writeQueries:3}});
@@ -79,6 +79,7 @@ test('safe GraphQL query uses validated account/date; only aggregate fields',()=
  assert.match(q,/workersInvocationsAdaptive/);
  assert.match(q,/d1AnalyticsAdaptiveGroups/);
  assert.match(q,/scriptName scriptVersion/);
+ assert.match(q,/httpResponseStatus/);
  assert.match(q,/rowsRead rowsWritten/);
  assert.doesNotMatch(q,/password_hash|SELECT |users |queryText|email/);
  assert.throws(()=>analyticsQuery('bad','2026-11-16'),/account ID/);
@@ -113,4 +114,28 @@ test('CLI input limits and invalid release timestamp fail closed',()=>{
 test('incomplete Cloudflare response fails rather than reporting false Free clearance',()=>{
  assert.throws(()=>evaluateDay({workers:null,d1:[]},opts),/Missing/);
  assert.throws(()=>evaluateDay({workers:[makeWorker(prod,2,1200)],d1:[{sum:{rowsWritten:1}}]},opts),/Invalid aggregate/);
+});
+
+test('HTTP status CPU diagnostics isolate the pinned version and do not infer route identity',()=>{
+ const ok=makeWorker(prod,120,24_000);
+ ok.quantiles={cpuTimeP50:4500,cpuTimeP95:16_000,cpuTimeP99:21_000};
+ const notFound={...makeWorker(prod,40,2100),
+  dimensions:{...makeWorker(prod,40,2100).dimensions,httpResponseStatus:404}};
+ notFound.quantiles={cpuTimeP50:350,cpuTimeP95:1200,cpuTimeP99:2000};
+ const old={...makeWorker(prod,700,51_000),
+  dimensions:{...makeWorker(prod,700,51_000).dimensions,scriptVersion:'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'}};
+ const raw={workers:[ok,notFound,old],d1:[makeDb(db,5000,2)]};
+ const result=evaluateDay(raw,opts);
+ assert.equal(result.verdict,'NO_GO','account-wide CPU retains conservative old-version block');
+ assert.equal(result.metrics.production.cpuByHttpStatus.length,2);
+ assert.deepEqual(result.metrics.production.cpuByHttpStatus[0],{
+  httpStatus:'200',requests:120,maxCpuMs:24,maxSegmentP95Ms:16,maxSegmentP99Ms:21
+ });
+ assert.equal(result.metrics.production.cpuByHttpStatus[1].httpStatus,'404');
+ assert.equal(result.metrics.production.cpuByHttpStatus[1].maxCpuMs,2.1);
+ const markdown=markdownReport([result]);
+ assert.match(markdown,/Production HTTP status CPU diagnostic/);
+ assert.match(markdown,/Not route-level evidence/);
+ assert.match(markdown,/\| 200 \| 120 \| 24\.000ms/);
+ assert.doesNotMatch(markdown,/request URL|user email|password_hash|test-token-SECRET/);
 });
