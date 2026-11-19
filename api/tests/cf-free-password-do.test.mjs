@@ -62,6 +62,7 @@ test("offloaded register creates pending registration with the original password
     f.env.PASSWORD_PEPPER=pepper; f.env.PASSWORD_VERIFY_DO_ENABLED="1";
     f.env.ENVIRONMENT="development";
     f.env.WEB_ORIGIN="http://127.0.0.1:4321";
+    f.env.API_ORIGIN="http://127.0.0.1:8787";
     f.env.TURNSTILE_SECRET_KEY="1x0000000000000000000000000000000AA";
     f.sql.exec("UPDATE system_settings SET value='1' WHERE key='registration_enabled'");
     const names=[];
@@ -74,7 +75,7 @@ test("offloaded register creates pending registration with the original password
     const registration=await f.call("/v1/auth/register",{body:{
       username:"do_register_user",email:"do-register@example.test",password,
       turnstileToken:"local-test-token"
-    }});
+    },headers:{Origin:f.env.WEB_ORIGIN}});
     assert.equal(registration.status,200,JSON.stringify(registration.body));
     const row=f.sql.prepare("SELECT password_hash FROM pending_registrations WHERE email='do-register@example.test'").get();
     assert.match(row?.password_hash||"",/^pbkdf2-sha256:100000:/);
