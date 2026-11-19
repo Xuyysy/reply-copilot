@@ -6,7 +6,7 @@ const panel=readFileSync(new URL('../src/components/admin/AdminBoltReconciliatio
 const router=readFileSync(new URL('../../api/src/index.ts',import.meta.url),'utf8');
 const service=readFileSync(new URL('../../api/src/boltutil/reconciliation.ts',import.meta.url),'utf8');
 test('admin USDT view includes independent read-only exception queue and evidence inspector',()=>{
- assert.ok(root.includes('AdminBoltReconciliationPanel active={active}'));
+ assert.ok(root.includes('AdminBoltReconciliationPanel active={active&&historyOpen}'));
  assert.ok(panel.includes('data-testid="boltutil-reconciliation"'));
  assert.ok(panel.includes('/v1/admin/boltutil/reconciliation'));
  assert.ok(panel.includes('/v1/admin/boltutil/orders/'));
@@ -27,4 +27,20 @@ test('reconciliation routes and storage implementation are GET-only and admin gu
   assert.ok(!service.includes(token),token);
  assert.ok(service.includes('LIMIT 25'));
  assert.ok(service.includes('filter.limit+1'));
+});
+
+test('CF Free: closed USDT history never loads order list or cross-ledger reconciliation',()=>{
+ assert.match(root,/data-testid="boltutil-history-details" onToggle=\{event=>setHistoryOpen\(event\.currentTarget\.open\)\}/);
+ assert.match(root,/const \[historyOpen,setHistoryOpen\]=useState\(false\)/);
+ assert.match(root,/if\(!active\|\|!historyOpen\)return;/);
+ const overview=root.slice(root.indexOf('useEffect(()=>{'),root.indexOf('// Historical invoices are intentionally cold'));
+ assert.match(overview,/\/v1\/boltutil\/availability/);
+ assert.match(overview,/\/v1\/admin\/boltutil\/control/);
+ assert.doesNotMatch(overview,/\/v1\/admin\/boltutil\/orders/);
+ assert.match(root,/api<AdminResponse>\("\/v1\/admin\/boltutil\/orders"\)/);
+ assert.match(root,/AdminBoltReconciliationPanel active=\{active&&historyOpen\}/);
+ assert.match(panel,/if\(!active\)return;/);
+ assert.match(root,/historyLoading&&/);
+ assert.match(root,/historyError&&/);
+ assert.doesNotMatch(root,/setHistoryOpen\(true\)/);
 });

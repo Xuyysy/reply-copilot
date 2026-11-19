@@ -60,23 +60,39 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
   const [reload,setReload]=useState(0);
   const [query,setQuery]=useState("");
   const [network,setNetwork]=useState<"all"|Network>("all");
+  const [historyOpen,setHistoryOpen]=useState(false);
+  const [historyLoading,setHistoryLoading]=useState(false);
+  const [historyError,setHistoryError]=useState("");
   useEffect(()=>{
     if(!active)return;
     let live=true;
     setLoading(true);setError("");
     void Promise.all([
-      api<AdminResponse>("/v1/admin/boltutil/orders"),
       api<PublicResponse>("/v1/boltutil/availability"),
       api<AdminControl>("/v1/admin/boltutil/control")
-    ]).then(([orders,status,settings])=>{
+    ]).then(([status,settings])=>{
       if(!live)return;
-      setData(orders);setAvailability(status);setControl(settings);
+      setAvailability(status);setControl(settings);
       setDraft({enabled:settings.operatorEnabled,networks:{...settings.operatorNetworks}});
     }).catch((cause:unknown)=>{
       if(live)setError(cause instanceof Error?cause.message:t("读取 USDT 收款状态失败。","Unable to load USDT payment status."));
     }).finally(()=>{if(live)setLoading(false);});
     return ()=>{live=false;};
   },[active,reload]);
+  // Historical invoices are intentionally cold until the owner opens the
+  // existing disclosure. In particular, never run the expensive reconciliation
+  // query simply by visiting the USDT operator controls tab.
+  useEffect(()=>{
+    if(!active||!historyOpen)return;
+    let live=true;
+    setHistoryLoading(true);setHistoryError("");setData(null);
+    void api<AdminResponse>("/v1/admin/boltutil/orders").then(orders=>{
+      if(live)setData(orders);
+    }).catch((cause:unknown)=>{
+      if(live)setHistoryError(cause instanceof Error?cause.message:t("读取 USDT 历史订单失败。","Unable to load USDT order history."));
+    }).finally(()=>{if(live)setHistoryLoading(false);});
+    return ()=>{live=false;};
+  },[active,historyOpen,reload]);
   const items=useMemo(()=>{
     const word=query.trim().toLowerCase();
     return (data?.orders||[]).filter(o=>(network==="all"||o.network===network)&&
@@ -197,7 +213,7 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
       </CardContent>
     </Card>
-    <details className="rounded-xl border p-3" data-testid="boltutil-history-details">
+    <details className="rounded-xl border p-3" data-testid="boltutil-history-details" onToggle={event=>setHistoryOpen(event.currentTarget.open)}>
       <summary className="cursor-pointer text-sm font-semibold">{t("历史订单与异常对账","Historical orders & reconciliation")}</summary>
     <Card>
       <CardHeader>
@@ -208,6 +224,8 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
         </p>
       </CardHeader>
       <CardContent className="space-y-4">
+        {historyLoading&&<p role="status" className="text-sm text-muted-foreground">{t("正在读取历史订单…","Loading historical orders…")}</p>}
+        {historyError&&<p role="alert" className="text-sm text-red-700">{historyError}</p>}
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("订单数","Orders")}</div><div className="mt-1 font-semibold tabular-nums">{data?.orders.length??"—"}</div></div>
           <div className="rounded-lg border p-3"><div className="text-xs text-muted-foreground">{t("付款并已发权益","Paid and applied")}</div><div className="mt-1 font-semibold tabular-nums">{data?settled:"—"}</div></div>
@@ -246,13 +264,13 @@ export default function AdminBoltUtilPanel({active,language,write}:{active:boole
               </TableRow>)}
             </TableBody>
           </Table>
-          {!loading&&data&&items.length===0&&<p className="px-3 py-5 text-sm text-muted-foreground">
+          {!historyLoading&&data&&items.length===0&&<p className="px-3 py-5 text-sm text-muted-foreground">
             {t("暂无匹配的 USDT 收款订单。请调整网络筛选或刷新订单。","No matching USDT orders. Adjust the network filter or refresh.")}
           </p>}
         </div>
       </CardContent>
     </Card>
-      <AdminBoltReconciliationPanel active={active} language={language}/>
+      <AdminBoltReconciliationPanel active={active&&historyOpen} language={language}/>
     </details>
 
   </div>;
