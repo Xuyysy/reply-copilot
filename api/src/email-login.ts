@@ -15,7 +15,7 @@ function ensureEnabled(env:Env):void {
 }
 function normalizeEmail(body:Record<string,unknown>):string {
   const email=typeof body.email==="string"?body.email.trim().toLowerCase():"";
-  if(email.length>254||!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email))
+  if(email.length>254||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
     throw new ApiFailure(400,"INVALID_EMAIL","邮箱格式无效。");
   return email;
 }
@@ -55,7 +55,7 @@ export async function requestEmailLogin(request:Request,env:Env):Promise<Respons
 export async function verifyEmailLogin(request:Request,env:Env):Promise<Response>{
   ensureEnabled(env);requireWebOrigin(request,env);
   const body=await jsonBody(request,1024),email=normalizeEmail(body);
-  const code=typeof body.code==="string"&&/^\\d{8}$/.test(body.code)?body.code:"";
+  const code=typeof body.code==="string"&&/^\d{8}$/.test(body.code)?body.code:"";
   if(!code)throw new ApiFailure(400,"INVALID_CODE","验证码无效或已过期。");
   const now=nowMs();
   await checkRate(request,env,"otp-verify",email,now);
