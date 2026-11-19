@@ -17,7 +17,7 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
   const language = useLanguage();
   const t = (zh: string, en: string) => phrase(language, zh, en);
   // Feature is compile-time disabled unless the separately approved Pages build enables it.
-  const emailOtpAvailable = import.meta.env.PUBLIC_EMAIL_OTP_LOGIN_ENABLED === "1";
+  const emailOtpAvailable = import.meta.env?.PUBLIC_EMAIL_OTP_LOGIN_ENABLED === "1";
   const [view, setView] = useState<View>(() => typeof location !== "undefined" && new URL(location.href).searchParams.get("mode") === "register" ? "register" : "login");
   // The referral is bound only during the original verified registration.
   // Neither URL changes after signup nor a login can reassign the attribution.
