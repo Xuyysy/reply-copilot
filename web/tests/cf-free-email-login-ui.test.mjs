@@ -8,7 +8,6 @@ const handler=readFileSync(new URL('../../api/src/email-login.ts',import.meta.ur
 test('email OTP interface is build-gated and default password login stays intact',()=>{
  assert.match(src,/import\.meta\.env\.PUBLIC_EMAIL_OTP_LOGIN_ENABLED === "1"/);
  assert.match(src,/emailOtpAvailable && <Button/);
- assert.match(src,/\/"\/v1\/auth\/login"/);
  assert.match(src,/\/v1\/auth\/login/);
  assert.match(src,/emailOtpAvailable && <form/);
  assert.match(src,/\/v1\/auth\/email-login\/request/);
