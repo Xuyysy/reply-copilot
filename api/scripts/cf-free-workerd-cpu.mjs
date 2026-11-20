@@ -32,7 +32,7 @@ export async function setupSyntheticWorkerd({profile = false} = {}) {
   const config = {name:'cf-free-offline-synthetic',compatibilityDate:'2026-10-14',env,
     manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:bundle}}}};
   const mf = new Miniflare({...(profile ? {inspectorPort:0} : {}),workers:[{config,
-    dev:{outboundService:{type:'fetcher',handler:() => {external++;throw Error('External network denied');}}}}]});
+    dev:{...(profile ? {unsafeInspectorProxy:true} : {}),outboundService:{type:'fetcher',handler:() => {external++;throw Error('External network denied');}}}}]});
   try {
     const db = await mf.getD1Database('DB');
     const migrations = new URL('../migrations/',import.meta.url);
@@ -140,7 +140,14 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false}
   let inspector;
   const rows=[],ids=[];
   try {
-    if(profile)inspector=await InspectorClient.connect(setup.mf);
+    if(profile){
+      // The per-worker Inspector Proxy can attach only after a real user
+      // isolate has started; the /health warmup is side-effect free.
+      const ready=await setup.mf.dispatchFetch(API+'/health');
+      if(ready.status!==200)throw Error('Local profiling isolate warmup failed');
+      await ready.text();
+      inspector=await InspectorClient.connect(setup.mf);
+    }
     for(const name of ROUTES) {
       for(let i=0;i<warmup;i++)await invoke(setup.mf,name,i,ids);
       if(profile)await inspector.call('Profiler.start');
