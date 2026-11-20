@@ -7,7 +7,7 @@ import {Miniflare} from 'miniflare';
 import {isAllowedCloudUrl,parseCloudArgs,probeCloudPilot,ROUNDS} from '../scripts/cf-free-cloud-pilot-probe.mjs';
 
 const NAME='xrh-cf-free-cpu-pilot-20261120';
-const URL='https://'+NAME+'.dedicated-synthetic.workers.dev/';
+const PILOT_URL='https://'+NAME+'.dedicated-synthetic.workers.dev/';
 const PASSWORD='xrh-cf-free-synthetic-password-2026!';
 const PEPPER='xrh-isolated-free-pilot-pepper-2026-synthetic-only';
 const TOKEN='locally-generated-synthetic-pilot-token-2026-unique-000001';
@@ -31,7 +31,7 @@ async function fixture(vars=BINDINGS){
     dev:{outboundService:{type:'fetcher',handler:()=>{external++;throw Error('Offline only');}}}
   }]});
   try {
-    const r=await mf.dispatchFetch(URL+'__pilot',{method:'GET',headers:{Authorization:'Bearer '+TOKEN}});
+    const r=await mf.dispatchFetch(PILOT_URL+'__pilot',{method:'GET',headers:{Authorization:'Bearer '+TOKEN}});
     await r.text(); // Prove the isolated Worker is reachable before returning.
     return {mf,external:()=>external};
   }catch(error){await mf.dispose();throw error;}
@@ -61,7 +61,7 @@ test('dedicated Worker config has no production route, D1, triggers or real secr
   }
 });
 test('cloud CLI refuses Production domain, arbitrary hosts, missing consent and weak tokens',()=>{
-  assert.equal(isAllowedCloudUrl(URL),true);
+  assert.equal(isAllowedCloudUrl(PILOT_URL),true);
   for(const u of ['https://api.x-reply-helper.top/','http://'+NAME+'.dedicated-synthetic.workers.dev/',
     'https://'+NAME+'.evil.workers.dev.attacker.test/',
     'https://'+NAME+'.dedicated-synthetic.workers.dev/probe',
@@ -70,12 +70,12 @@ test('cloud CLI refuses Production domain, arbitrary hosts, missing consent and 
     assert.equal(isAllowedCloudUrl(u),false,u);
   for(const args of [[],['--execute-cloud'],['--confirm-dedicated-free-account'],
     ['--execute-cloud','--confirm-dedicated-free-account','--url','https://api.x-reply-helper.top/'],
-    ['--execute-cloud','--confirm-dedicated-free-account','--url',URL,'--repeats','3']])
+    ['--execute-cloud','--confirm-dedicated-free-account','--url',PILOT_URL,'--repeats','3']])
     assert.throws(()=>parseCloudArgs(args,{CF_FREE_PILOT_ACCESS_TOKEN:TOKEN}));
-  assert.throws(()=>parseCloudArgs(['--execute-cloud','--confirm-dedicated-free-account','--url',URL],{
+  assert.throws(()=>parseCloudArgs(['--execute-cloud','--confirm-dedicated-free-account','--url',PILOT_URL],{
     CF_FREE_PILOT_ACCESS_TOKEN:'not-long-enough'
   }));
-  assert.equal(parseCloudArgs(['--execute-cloud','--confirm-dedicated-free-account','--url',URL],{
+  assert.equal(parseCloudArgs(['--execute-cloud','--confirm-dedicated-free-account','--url',PILOT_URL],{
     CF_FREE_PILOT_ACCESS_TOKEN:TOKEN
   }).repeats,1);
 });
@@ -83,25 +83,25 @@ test('cloud CLI refuses Production domain, arbitrary hosts, missing consent and 
 test('synthetic Worker+SQLite DO run in real local workerd, with private auth and no network',{timeout:120000},async()=>{
   const {mf,external}=await fixture();
   try{
-    const unauth=await mf.dispatchFetch(URL+'__pilot',{method:'GET'});
+    const unauth=await mf.dispatchFetch(PILOT_URL+'__pilot',{method:'GET'});
     assert.equal(unauth.status,401);
     assert.equal(unauth.headers.get('Cache-Control'),'no-store');
-    const unknown=await mf.dispatchFetch(URL+'v1/auth/login',{method:'POST',headers:signed()});
+    const unknown=await mf.dispatchFetch(PILOT_URL+'v1/auth/login',{method:'POST',headers:signed()});
     assert.equal(unknown.status,404);
-    const wrong=await mf.dispatchFetch(URL+'probe',{method:'POST',
+    const wrong=await mf.dispatchFetch(PILOT_URL+'probe',{method:'POST',
       headers:{...signed(),'Content-Type':'application/json'},
       body:JSON.stringify({mode:'do',rounds:500000,wrong:false})});
     assert.equal(wrong.status,400);
     const body=(await wrong.json());
     assert.equal(body.code,'BAD_INPUT');
     assert.equal(Object.hasOwn(body,'password'),false);
-    const invalid=await mf.dispatchFetch(URL+'probe',{method:'POST',
+    const invalid=await mf.dispatchFetch(PILOT_URL+'probe',{method:'POST',
       headers:{...signed(),'Content-Type':'application/json'},
       body:JSON.stringify({mode:'do',rounds:100000,wrong:false,stored:'secret-data'})});
     assert.equal(invalid.status,400);
 
     const report=await probeCloudPilot({
-      url:URL,token:TOKEN,repeats:1,
+      url:PILOT_URL,token:TOKEN,repeats:1,
       fetchImpl:(url,init)=>mf.dispatchFetch(url,init)
     });
     assert.equal(report.target,'SYNTHETIC_ONLY_TARGET_CONFIRMED');
@@ -125,7 +125,7 @@ test('pilot fails closed when access secret, dedicated flag or synthetic pepper 
     PASSWORD_PEPPER:{type:'text',value:'real-pepper-must-not-be-used'}};
   const {mf}=await fixture(malformed);
   try{
-    const res=await mf.dispatchFetch(URL+'__pilot',{method:'GET',headers:signed()});
+    const res=await mf.dispatchFetch(PILOT_URL+'__pilot',{method:'GET',headers:signed()});
     assert.equal(res.status,503);
     assert.equal((await res.json()).code,'NOT_CONFIGURED');
   }finally{await mf.dispose();}
@@ -140,7 +140,7 @@ test('cloud response classifier rejects wrong results and non-JSON Cloudflare CP
     if(count===2)return new Response('<html>Error 1102</html>',{status:500});
     return new Response(JSON.stringify({ok:false}),{status:200});
   };
-  const r=await probeCloudPilot({url:URL,token:TOKEN,repeats:1,fetchImpl:stub});
+  const r=await probeCloudPilot({url:PILOT_URL,token:TOKEN,repeats:1,fetchImpl:stub});
   assert.equal(r.outcome,'SYNTHETIC_SMOKE_FAIL');
   assert.ok(r.cases.every(x=>x.behavior==='FAILED_OR_RESOURCE_LIMIT'));
   assert.equal(r.freeCertified,false);
