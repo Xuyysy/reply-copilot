@@ -74,3 +74,23 @@ The preflight executes exactly `wrangler deploy --dry-run --outdir <temporary-fo
 **Correct current size limit:** Cloudflare raised Workers Free **and Paid** to **64 MiB uncompressed** on 2026-09-04. The previous 3 MB Free **compressed** limit no longer applies; gzip is informational. Source: https://developers.cloudflare.com/changelog/post/2026-09-04-increased-worker-size-limit/ and https://developers.cloudflare.com/workers/platform/limits/.
 
 Passing the dry run is only local packaging evidence. It does **not** establish the cloud Worker startup time, live CPU, DO execution limits, daily quotas, independently verified Free account plan, or permission to deploy. The existing explicit Free-account deployment authorization remains mandatory.
+
+## Mandatory read-only account isolation check (2026-11-20)
+
+Cloudflare read-only discovery from the currently connected account returned **exactly one accessible account**, and that account **contains the existing Reply Helper Production and Staging Workers**. Subscription lookup returned HTTP **403 Billing Read unavailable**. Therefore **this existing connection is NOT an isolated Free-test target** and must not be used for the pilot. This check did not change any resource, subscription or plan.
+
+The next operator must use a **separate account-scoped read-only API token**, with only the target pilot account visible and no existing Worker scripts, to run:
+
+```sh
+# Obtain this ID from a different, separately created account; it must NOT be
+# the Production account ID. Load the token from a secret manager, not a shell
+# argument, source file or CI log.
+CF_FREE_PILOT_READ_TOKEN=*** node api/scripts/cf-free-cloud-account-audit.mjs \
+  --audit-read-only --expected-account-id <separate-account-id>
+```
+
+The tool calls only **GET** on Cloudflare's account list, Workers script inventory and account subscriptions. It fails closed if the token can see multiple accounts, the expected account ID does not match, Workers already exist, a Reply Helper Worker is present, or Billing Read is inaccessible. It prints only fixed reason codes—not account IDs, subscription IDs, emails, token values, Worker inventories or URLs. The tool **always returns NO_GO and exit code 2**, because even a successful read of an empty subscriptions list cannot independently prove that Workers Free is enabled.
+
+**A manual Cloudflare dashboard inspection of the actual Workers Free plan, distinct account identity and a separately authorized rollout is mandatory after this audit.** The existing `--confirm-dedicated-free-account` switch on the optional remote smoke tester is only an operator acknowledgment, not plan verification; never interpret it as deployment approval. All direct deployment commands in this runbook remain forbidden until those additional checks and explicit approval are complete.
+
+Do not add a CI token or an existing account ID to the repository. Do not upgrade/downgrade accounts, enable logs, delete Workers or create DO namespaces as part of this read-only audit.
