@@ -11,7 +11,7 @@ const KNOWN_PASSWORD = "xrh-cf-free-synthetic-password-2026!";
 const BAD_PASSWORD = "xrh-cf-free-synthetic-incorrect-2026!";
 const HASHES: Record<number, string> = Object.freeze({
   10000: "pbkdf2-sha256:10000:2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a:ba222757ea94c990bfc38dccbc0cb8f9287c8b71dd66dea5b606f4177f56eab9",
-  60000: "pbkdf2-sha256:60000:2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a:b4b2120f08b6a6503cf9e1527eddd58204a01bd6e8633b6501487f3235330fb2",
+  60000: "pbkdf2-sha256:60000:2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a:b4b2120f08b6a6503cf9e1527eddd58204a01bd6e8633b6501487f3235330fb2",
   100000: "pbkdf2-sha256:100000:2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a:ebbc4afb93674092a8dde207896b0e827fa1a030c74cded57ec4f90d77b038d2",
   210000: "pbkdf2-sha256:210000:2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a:b728f1fbcb81dd8d25b4d37ce8a3dd2ab131c3313e32c597e66b6ce0658e51af",
 });
