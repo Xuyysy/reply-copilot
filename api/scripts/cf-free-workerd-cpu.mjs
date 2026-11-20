@@ -61,7 +61,7 @@ export async function setupSyntheticWorkerd({profile = false} = {}) {
   } catch (error) {await mf.dispose();throw error;}
 }
 
-class InspectorClient {
+export class InspectorClient {
   constructor(ws) {
     this.ws=ws;this.next=0;this.pending=new Map();
     ws.addEventListener('message',event=>{
@@ -73,7 +73,8 @@ class InspectorClient {
     });
     ws.addEventListener('close',()=>{for(const req of this.pending.values()){clearTimeout(req.timer);req.reject(Error('Inspector closed'));}this.pending.clear();});
   }
-  static async connect(mf) {
+  static async connect(mf, workerName='cf-free-offline-synthetic') {
+    if(!['cf-free-offline-synthetic','cf-free-offline-verifier'].includes(workerName))throw Error('Inspector target not allowed');
     const base = new URL(await mf.getInspectorURL());
     if(base.protocol!=='ws:' || !['localhost','127.0.0.1','[::1]'].includes(base.hostname))
       throw Error('Non-local inspector refused');
@@ -87,13 +88,13 @@ class InspectorClient {
     const targets=await found.json();
     const named=Array.isArray(targets)?targets.filter(x=>{
       if(typeof x?.webSocketDebuggerUrl!=='string')return false;
-      try {return new URL(x.webSocketDebuggerUrl).pathname==='/cf-free-offline-synthetic';}
+      try {return new URL(x.webSocketDebuggerUrl).pathname==='/'+workerName;}
       catch{return false;}
     }):[];
     if(named.length!==1)throw Error('Expected one local synthetic worker inspector target');
     const inspectorUrl=new URL(named[0].webSocketDebuggerUrl);
     if(inspectorUrl.protocol!=='ws:' || inspectorUrl.hostname!==base.hostname ||
-       inspectorUrl.port!==base.port || inspectorUrl.pathname!=='/cf-free-offline-synthetic' ||
+       inspectorUrl.port!==base.port || inspectorUrl.pathname!=='/'+workerName ||
        inspectorUrl.username || inspectorUrl.password || inspectorUrl.search || inspectorUrl.hash)
       throw Error('Inspector discovery target mismatch');
     // Miniflare's inspector proxy rejects User-Agent-bearing WebSocket clients
