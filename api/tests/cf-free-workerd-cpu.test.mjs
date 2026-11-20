@@ -58,3 +58,29 @@ test('full business routes run in isolated workerd with local D1, mock AI and ex
   assert.ok(!serialized.includes('rc_session='));
   assert.ok(!serialized.includes('/v1/ai/requests/'));
 });
+
+test('opt-in V8 inspector produces real isolated workerd samples for each route',{timeout:120000},async()=>{
+  const report=await runWorkerdCpuExperiment({samples:3,warmup:1,profile:true});
+  assert.equal(report.freeCertified,false);
+  assert.equal(report.productionHotspotsConfirmed,false);
+  assert.equal(report.assertions.realNetworkCalls,0);
+  assert.deepEqual(report.cases.map(row=>row.category),ROUTES);
+  assert.equal(report.assertions.creditDebits,4);
+  const withSamples=report.cases.filter(row=>row.cpuProfile.status==='SAMPLED');
+  // Fail rather than claiming a valid CPU ranking when the inspector only
+  // returns empty or unrelated profiles.
+  assert.ok(withSamples.length>0,'No V8 samples captured; inspector connection/target must be corrected');
+  const summary=report.cases.map(row=>({
+    category:row.category,
+    wallP50Ms:row.wall.p50Ms,
+    wallP95Ms:row.wall.p95Ms,
+    sampleCount:row.cpuProfile.sampleCount||0,
+    cpuProfileStatus:row.cpuProfile.status,
+    topFunctions:row.cpuProfile.topFunctions||[]
+  }));
+  const output=JSON.stringify({event:'isolated_workerd_v8_cpu_evidence',freeCertified:false,cases:summary});
+  assert.ok(!output.includes('rc_session='));
+  assert.ok(!output.includes('benchmark-main-user'));
+  assert.ok(!output.includes('isolated-benchmark-pepper'));
+  console.log(output);
+});
