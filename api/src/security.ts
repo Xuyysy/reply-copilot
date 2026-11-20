@@ -1,10 +1,11 @@
 import type { Env } from "./types";
 import { ApiFailure } from "./types";
+import { bytesToHex } from "./crypto-hex.js";
 
 export const nowMs = () => Date.now();
 export const uuid = () => crypto.randomUUID();
-export function randomToken(bytes = 32): string { const data = crypto.getRandomValues(new Uint8Array(bytes)); return Array.from(data, (n) => n.toString(16).padStart(2, "0")).join(""); }
-export async function sha256(value: string): Promise<string> { const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)); return Array.from(new Uint8Array(hash), (n) => n.toString(16).padStart(2, "0")).join(""); }
+export function randomToken(bytes = 32): string { const data = crypto.getRandomValues(new Uint8Array(bytes)); return bytesToHex(data); }
+export async function sha256(value: string): Promise<string> { const hash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)); return bytesToHex(new Uint8Array(hash)); }
 // Importing an HMAC CryptoKey on every session and login request adds CPU
 // work without improving secrecy. Cache per Env *identity* inside an isolate,
 // never globally across different environment objects or rotated secrets.
@@ -30,7 +31,7 @@ async function authHmacKey(env: Env): Promise<CryptoKey> {
 export async function hmac(env: Env, value: string): Promise<string> {
   const key=await authHmacKey(env);
   const hash=await crypto.subtle.sign("HMAC",key,hmacEncoder.encode(value));
-  return Array.from(new Uint8Array(hash),n=>n.toString(16).padStart(2,"0")).join("");
+  return bytesToHex(new Uint8Array(hash));
 }
 export function utcIso(ms: number): string { return new Date(ms).toISOString(); }
 export function shanghaiDay(ms: number): string { return new Date(ms + 8 * 3600_000).toISOString().slice(0, 10); }
