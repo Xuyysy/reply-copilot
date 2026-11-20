@@ -64,11 +64,12 @@ async function setup(offload){
 }
 
 async function login(mf,rounds,password=PASSWORD){
-  const request=new Request(API+'/v1/auth/login',{method:'POST',
+  const requestUrl=API+'/v1/auth/login';
+  const requestInit={method:'POST',
     headers:{Origin:WEB,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.'+(10+ROUNDS.indexOf(rounds))},
-    body:JSON.stringify({identity:'test-'+rounds+'@example.test',password})});
+    body:JSON.stringify({identity:'test-'+rounds+'@example.test',password})};
   const t=performance.now();
-  const response=await mf.dispatchFetch(request);
+  const response=await mf.dispatchFetch(requestUrl,requestInit);
   const ms=performance.now()-t;
   const json=await response.json();
   return {status:response.status,code:typeof json?.code==='string'?json.code:null,ms};
