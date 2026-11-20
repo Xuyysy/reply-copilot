@@ -94,3 +94,26 @@ The tool calls only **GET** on Cloudflare's account list, Workers script invento
 **A manual Cloudflare dashboard inspection of the actual Workers Free plan, distinct account identity and a separately authorized rollout is mandatory after this audit.** The existing `--confirm-dedicated-free-account` switch on the optional remote smoke tester is only an operator acknowledgment, not plan verification; never interpret it as deployment approval. All direct deployment commands in this runbook remain forbidden until those additional checks and explicit approval are complete.
 
 Do not add a CI token or an existing account ID to the repository. Do not upgrade/downgrade accounts, enable logs, delete Workers or create DO namespaces as part of this read-only audit.
+
+
+## Offline-CI-tested real-network Free pilot runner (2026-11-20)
+
+The Cloudflare connector cannot directly issue arbitrary authenticated outbound HTTP requests; Browser Run was rate-limited with a 50,092-second retry delay. The API surface did not expose a supported direct Worker invocation endpoint. Therefore the real cloud CPU behavior is still **UNKNOWN**; do not treat the connector's synthetic 403/404 as real Worker failures.
+
+A one-shot executable runner now exists: `api/scripts/cf-free-cloud-live-run.mjs`. Run it ONLY from a normal **network-connected developer machine** after reviewing its code and confirming the isolated Workers Free plan in the dashboard. It is NOT executed by CI and does not modify the production account. It requires a short-lived Cloudflare API token restricted to this isolated account with Account Read and Workers Scripts edit/read (including DO inventory and Worker deletion). Never paste tokens into ChatGPT or commit them; use a private secret manager to load `CF_FREE_PILOT_API_TOKEN` without putting it in the command line.
+
+From an unchanged checkout of the exact PR #216 head commit (confirm with `git rev-parse HEAD`), run `npm --prefix api ci` and then:
+
+~~~sh
+node api/scripts/cf-free-cloud-live-run.mjs \
+  --execute-isolated-free-pilot \
+  --confirm-workers-free \
+  --confirm-delete-test-resources \
+  --expected-account-id '<the separately created Free account ID>' \
+  --expected-commit '<exact git rev-parse HEAD SHA>' \
+  --repeats 1
+~~~
+
+The script requires `CF_FREE_PILOT_API_TOKEN` in the process environment. It pins the sole permitted account using its SHA-256 digest rather than publishing the ID, verifies an empty Worker and DO inventory, the exact account name and subdomain, and the clean source SHA. It uses the repo-locked Wrangler's credential-free dry run, deploys only `xrh-cf-free-cpu-pilot-20261120`, sets a randomly generated isolated Bearer token, invokes the existing synthetic fixed 16-case HTTP/DO probe using Node's normal internet-capable `fetch`, deletes **only** that test Worker with `force=false` even after partial failure, and verifies the account is again empty. It never echoes credentials in reports or CI logs.
+
+**Important:** If `TEST_RESOURCES_NOT_CONFIRMED_REMOVED` occurs, immediately inspect the isolated account and manually clean up only the named experiment resources. A `SYNTHETIC_SMOKE_PASS` does not certify per-invocation CPU milliseconds, daily quotas, end-to-end app behavior or Production Free readiness. No downgrade, merge, payment change, or Production deploy is authorized.
