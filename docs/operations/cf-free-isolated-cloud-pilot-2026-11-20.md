@@ -57,3 +57,20 @@ These are Miniflare/workerd local tests, so **CPU quotas are not enforced locall
 - Previous PRs #213, #214 and #215 provide isolated local CPU profiles and aggregate readiness gates. They are not a replacement for a separately authorized Free account pilot. Production remains Paid.
 
 **Documentation verified:** [Workers limits](https://developers.cloudflare.com/workers/platform/limits/), [DO limits](https://developers.cloudflare.com/durable-objects/platform/limits/), [DO pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+
+## Mandatory local Wrangler preflight (no Cloudflare account access)
+
+The checked-in `api/package-lock.json` pins Wrangler `4.151.0`. Before any isolated Free-account deployment, run the following **locally** (it is also mandatory in the normal full CI):
+
+```sh
+npm --prefix api ci
+node api/scripts/cf-free-cloud-pilot-dry-run.mjs
+node --test api/tests/cf-free-cloud-pilot-dry-run.test.mjs
+```
+
+The preflight executes exactly `wrangler deploy --dry-run --outdir <temporary-folder> --config prototypes/cf-free-cloud-pilot/wrangler.jsonc` via the **locally installed** Wrangler binary. It strips Cloudflare account credentials and other ambient environment variables; it never deploys. It verifies the dedicated Worker config has only an allowlisted SQLite DO binding, no D1, routes or cron, and a fixed synthetic pepper. It checks actual bundled JS includes `PasswordVerifierDO` and the test marker. It records the uncompressed `Total Upload` size and removes the temporary bundle.
+
+**Correct current size limit:** Cloudflare raised Workers Free **and Paid** to **64 MiB uncompressed** on 2026-09-04. The previous 3 MB Free **compressed** limit no longer applies; gzip is informational. Source: https://developers.cloudflare.com/changelog/post/2026-09-04-increased-worker-size-limit/ and https://developers.cloudflare.com/workers/platform/limits/.
+
+Passing the dry run is only local packaging evidence. It does **not** establish the cloud Worker startup time, live CPU, DO execution limits, daily quotas, independently verified Free account plan, or permission to deploy. The existing explicit Free-account deployment authorization remains mandatory.
