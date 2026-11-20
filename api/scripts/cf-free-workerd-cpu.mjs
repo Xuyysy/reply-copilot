@@ -2,6 +2,7 @@
 // Offline, synthetic workerd route runner. No real Cloudflare resources or users.
 import {buildSync} from 'esbuild';
 import {Miniflare} from 'miniflare';
+import WebSocket from 'ws';
 import {createHash, pbkdf2Sync, randomUUID} from 'node:crypto';
 import {readFileSync, readdirSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
@@ -73,12 +74,31 @@ class InspectorClient {
     ws.addEventListener('close',()=>{for(const req of this.pending.values()){clearTimeout(req.timer);req.reject(Error('Inspector closed'));}this.pending.clear();});
   }
   static async connect(mf) {
-    const inspectorUrl = new URL(await mf.getInspectorURL());
-    if(inspectorUrl.protocol==='http:')inspectorUrl.protocol='ws:';
-    if(inspectorUrl.protocol==='https:')inspectorUrl.protocol='wss:';
-    if(!['ws:','wss:'].includes(inspectorUrl.protocol) || !['localhost','127.0.0.1','[::1]'].includes(inspectorUrl.hostname))
+    const base = new URL(await mf.getInspectorURL());
+    if(base.protocol!=='ws:' || !['localhost','127.0.0.1','[::1]'].includes(base.hostname))
       throw Error('Non-local inspector refused');
-    const ws=new WebSocket(String(inspectorUrl));
+    // Miniflare 5 returns the inspector server root. Its proxy only accepts
+    // the exact worker-name WebSocket path advertised by /json/list.
+    const discovery=new URL(base);
+    discovery.protocol='http:';
+    discovery.pathname='/json/list';
+    const found=await fetch(discovery);
+    if(!found.ok)throw Error('Local inspector target discovery failed');
+    const targets=await found.json();
+    const named=Array.isArray(targets)?targets.filter(x=>{
+      if(typeof x?.webSocketDebuggerUrl!=='string')return false;
+      try {return new URL(x.webSocketDebuggerUrl).pathname==='/cf-free-offline-synthetic';}
+      catch{return false;}
+    }):[];
+    if(named.length!==1)throw Error('Expected one local synthetic worker inspector target');
+    const inspectorUrl=new URL(named[0].webSocketDebuggerUrl);
+    if(inspectorUrl.protocol!=='ws:' || inspectorUrl.hostname!==base.hostname ||
+       inspectorUrl.port!==base.port || inspectorUrl.pathname!=='/cf-free-offline-synthetic' ||
+       inspectorUrl.username || inspectorUrl.password || inspectorUrl.search || inspectorUrl.hash)
+      throw Error('Inspector discovery target mismatch');
+    // Miniflare's inspector proxy rejects User-Agent-bearing WebSocket clients
+    // without an Origin. The ws client supplies an explicit approved local Origin.
+    const ws=new WebSocket(String(inspectorUrl),{origin:'http://localhost'});
     await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>reject(Error('Local inspector connect timeout')),10000);
       ws.addEventListener('open',()=>{clearTimeout(timer);resolve();},{once:true});
