@@ -16,7 +16,7 @@ function fake({workers=[],objects=[],scope=true,subdomain='x-reply-helper-isolat
     actions.push({method,path});
     if(path==='/accounts?page=1&per_page=50')return [{id:scope?ID:PROD,name:'X Reply Helper - Isolated Workers Free CPU Pilot'}];
     if(path==='/accounts/'+ID+'/workers/scripts'&&method==='GET')return w.map(id=>({id}));
-    if(path==='/accounts/'+ID+'/workers/durable_objects/namespaces'&&method==='GET')return d.map(name=>({name}));
+    if(path==='/accounts/'+ID+'/workers/durable_objects/namespaces'&&method==='GET')return d.map(name=>({name,id:'c'.repeat(32)}));
     if(path==='/accounts/'+ID+'/workers/subdomain')return {subdomain};
     if(method==='DELETE'&&path==='/accounts/'+ID+'/workers/scripts/'+NAME+'?force=false'){
       if(deleteFails)throw Error('CLOUD_API_HTTP_500');
@@ -39,6 +39,8 @@ async function run(f,options={}){
   return runIsolatedFreePilot({accountId:ID,commit:COMMIT,repeats:1,token:TOKEN},{
     cloud:f.cloud,wrangler:f.wrangler,probe:options.probe||smoke,source:()=>{},
     dryRun:()=>({status:'ISOLATED_WRANGLER_DRY_RUN_PASS',deployed:false}),
+    cpu:async()=>({kind:'XRH_CLOUDFLARE_CPU_EVIDENCE',status:'BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED',freeCertified:false}),
+    clock:()=>Date.parse('2026-11-20T09:02:00.000Z'),
     secret:()=>('s'.repeat(96))
   });
 }
@@ -73,6 +75,9 @@ test('one-shot experiment runs fixed smoke and deletes named Worker plus DO',asy
   assert.deepEqual(r.errors,[]);
   assert.equal(r.safeToDowngradeProduction,false);
   assert.equal(r.cloudCpuMs,null);
+  assert.equal(r.cpuAnalytics.status,'BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED');
+  assert.equal(r.cpuNamespaceId,'c'.repeat(32));
+  assert.equal(r.cpuAnalytics.freeCertified,false);
   assert.equal(f.actions.filter(x=>x.method==='DELETE').length,1);
   assert.equal(f.actions.filter(x=>x.method==='WRANGLER_deploy').length,1);
   assert.equal(f.actions.filter(x=>x.method==='WRANGLER_secret').length,1);
@@ -114,4 +119,44 @@ test('Cloudflare read API refuses writes except scoped delete and never redirect
   await assert.rejects(()=>client('PUT','/accounts/test'));
   await assert.rejects(()=>client('GET','/evil'));
   await assert.rejects(()=>client('GET','/accounts/../../bad'));
+});
+
+test('missing analytics permission after successful synthetic smoke is clearly not Free-certified',async()=>{
+  const f=fake();
+  const r=await runIsolatedFreePilot({accountId:ID,commit:COMMIT,repeats:1,token:TOKEN},{
+    cloud:f.cloud,wrangler:f.wrangler,probe:smoke,source:()=>{},
+    dryRun:()=>({status:'ISOLATED_WRANGLER_DRY_RUN_PASS',deployed:false}),
+    cpu:async()=>{throw Error('GRAPHQL_HTTP_UNAVAILABLE')},
+    clock:()=>Date.parse('2026-11-20T09:02:00.000Z'),
+    secret:()=>('s'.repeat(96))
+  });
+  assert.equal(r.smoke.outcome,'SYNTHETIC_SMOKE_PASS');
+  assert.ok(r.errors.includes('CLOUD_CPU_ANALYTICS_UNAVAILABLE'));
+  assert.equal(r.cpuAnalytics,null);
+  assert.equal(r.freeCertified,false);
+  assert.equal(r.cleanup.workerAbsent,true);
+  assert.equal(r.cleanup.doNamespaceAbsent,true);
+});
+test('invalid namespace inventory fails closed and still deletes isolated Worker',async()=>{
+  const f=fake();
+  const cloud=async(method,path)=>{
+    const v=await f.cloud(method,path);
+    if(method==='GET'&&path===('/accounts/'+ID+'/workers/durable_objects/namespaces')&&
+       f.actions.some(a=>a.method==='WRANGLER_deploy')&&
+       !f.actions.some(a=>a.method==='DELETE')){
+      return [{name:'unexpected_DurableObject',id:'f'.repeat(32)}];
+    }
+    return v;
+  };
+  const r=await runIsolatedFreePilot({accountId:ID,commit:COMMIT,repeats:1,token:TOKEN},{
+    cloud,wrangler:f.wrangler,probe:smoke,source:()=>{},
+    dryRun:()=>({status:'ISOLATED_WRANGLER_DRY_RUN_PASS',deployed:false}),
+    cpu:async()=>{throw Error('SHOULD_NOT_QUERY')},
+    clock:()=>Date.parse('2026-11-20T09:02:00.000Z'),
+    secret:()=>('s'.repeat(96))
+  });
+  assert.ok(r.errors.includes('ISOLATED_SQLITE_NAMESPACE_NOT_VERIFIED'));
+  assert.equal(r.cpuAnalytics,null);
+  assert.equal(r.cleanup.workerAbsent,true);
+  assert.equal(r.cleanup.doNamespaceAbsent,true);
 });

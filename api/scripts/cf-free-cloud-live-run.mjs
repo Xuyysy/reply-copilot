@@ -8,6 +8,7 @@ import {resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {probeCloudPilot} from './cf-free-cloud-pilot-probe.mjs';
 import {runPilotDryRun,validatePilotConfig} from './cf-free-cloud-pilot-dry-run.mjs';
+import {collectCpuEvidence,validWindow} from './cf-free-cloud-cpu-evidence.mjs';
 
 const ROOT=fileURLToPath(new URL('../',import.meta.url));
 const REPO=resolve(ROOT,'..');
@@ -86,7 +87,7 @@ export function makeWranglerExecutor(accountId,token){
 }
 function result(){
   return {kind:'ISOLATED_FREE_HTTP_DO_PILOT',decision:'NO_GO',
-    uploaded:false,smoke:null,cloudCpuMs:null,doCpuMs:null,
+    uploaded:false,smoke:null,cpuAnalytics:null,cpuEvidenceWindow:null,cpuNamespaceId:null,cloudCpuMs:null,doCpuMs:null,
     freeCertified:false,safeToDowngradeProduction:false,
     errors:[],cleanup:{attempted:false,workerAbsent:false,doNamespaceAbsent:false},
     productionUntouched:true};
@@ -98,12 +99,12 @@ function codeOf(error){
 export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
   cloud=makeCloudClient(token),wrangler=makeWranglerExecutor(accountId,token),
   probe=probeCloudPilot,source=verifySource,dryRun=runPilotDryRun,
-  secret=()=>randomBytes(48).toString('hex')
+  cpu=collectCpuEvidence,clock=()=>Date.now(),secret=()=>randomBytes(48).toString('hex')
 }={}){
   if(!approvedAccount(accountId)||!HEX40.test(commit||'')||
     !Number.isInteger(repeats)||repeats<1||repeats>2)throw Error('TEST_TARGET_REJECTED');
   const o=result(),base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
-  let isolated=false,deployStarted=false;
+  let isolated=false,deployStarted=false,namespaceId=null,startedAt=null,completedAt=null;
   try{
     source(commit);
     const accounts=await cloud('GET','/accounts?page=1&per_page=50');
@@ -128,8 +129,16 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
     await wrangler('deploy');
     o.uploaded=true;
     await wrangler('secret',password);
+    const after=await cloud('GET',base+'/durable_objects/namespaces');
+    const ns=Array.isArray(after)?after:[];
+    const named=ns.filter(v=>v?.name===NAME+'_PasswordVerifierDO');
+    if(ns.length!==1||named.length!==1||!/^[a-f0-9]{32}$/i.test(named[0].id||''))
+      throw Error('ISOLATED_SQLITE_NAMESPACE_NOT_VERIFIED');
+    namespaceId=named[0].id;
+    startedAt=new Date(clock()-1000).toISOString();
     const url='https://'+NAME+'.'+SUBDOMAIN+'.workers.dev/';
     o.smoke=await probe({url,token:password,repeats});
+    completedAt=new Date(Math.max(clock(),Date.parse(startedAt)+1)).toISOString();
     if(o.smoke?.kind!=='SYNTHETIC_CF_FREE_ACCOUNT_PILOT'||o.smoke.syntheticRequests!==repeats*16||
       !['SYNTHETIC_SMOKE_PASS','SYNTHETIC_SMOKE_FAIL'].includes(o.smoke.outcome))
       throw Error('INVALID_PILOT_HTTP_REPORT');
@@ -150,6 +159,16 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
       if(!o.cleanup.workerAbsent||!o.cleanup.doNamespaceAbsent)
         o.errors.push('TEST_RESOURCES_NOT_CONFIRMED_REMOVED');
     }
+    // Do not keep the Worker running to wait for delayed analytics. A separate
+    // read-only GraphQL call follows only after cleanup is verified.
+    if(isolated&&namespaceId&&startedAt&&completedAt){
+      o.cpuNamespaceId=namespaceId;
+      o.cpuEvidenceWindow={from:startedAt,to:completedAt};
+      if(validWindow(startedAt,completedAt)&&o.cleanup.workerAbsent&&o.cleanup.doNamespaceAbsent){
+        try{o.cpuAnalytics=await cpu({accountId,namespaceId,from:startedAt,to:completedAt,token});}
+        catch{o.errors.push('CLOUD_CPU_ANALYTICS_UNAVAILABLE');}
+      }else o.errors.push('CLOUD_CPU_ANALYTICS_WINDOW_OR_CLEANUP_UNAVAILABLE');
+    }
   }
   return o;
 }
@@ -162,6 +181,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
       repeats:args.repeats,token:args.token});
     process.stdout.write(JSON.stringify(r,null,2)+'\n');
     if(r.smoke?.outcome!=='SYNTHETIC_SMOKE_PASS'||
+       r.cpuAnalytics?.status!=='BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED'||
        !r.cleanup.workerAbsent||!r.cleanup.doNamespaceAbsent||r.errors.length)process.exitCode=1;
   }
 }

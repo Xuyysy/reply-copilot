@@ -117,3 +117,28 @@ node api/scripts/cf-free-cloud-live-run.mjs \
 The script requires `CF_FREE_PILOT_API_TOKEN` in the process environment. It pins the sole permitted account using its SHA-256 digest rather than publishing the ID, verifies an empty Worker and DO inventory, the exact account name and subdomain, and the clean source SHA. It uses the repo-locked Wrangler's credential-free dry run, deploys only `xrh-cf-free-cpu-pilot-20261120`, sets a randomly generated isolated Bearer token, invokes the existing synthetic fixed 16-case HTTP/DO probe using Node's normal internet-capable `fetch`, deletes **only** that test Worker with `force=false` even after partial failure, and verifies the account is again empty. It never echoes credentials in reports or CI logs.
 
 **Important:** If `TEST_RESOURCES_NOT_CONFIRMED_REMOVED` occurs, immediately inspect the isolated account and manually clean up only the named experiment resources. A `SYNTHETIC_SMOKE_PASS` does not certify per-invocation CPU milliseconds, daily quotas, end-to-end app behavior or Production Free readiness. No downgrade, merge, payment change, or Production deploy is authorized.
+
+## Read-only cloud CPU evidence after synthetic smoke (2026-11-20)
+
+The one-shot network-connected runner now records a UTC test window and verifies the exact new SQLite Durable Object namespace ID. It deletes the experimental Worker and namespace first; only after successful cleanup does it query the official Cloudflare GraphQL Analytics API twice. Requests are GraphQL query operations, not configuration writes. The scoped test-account API token additionally needs **Account Analytics: Read**. Never grant access to Production.
+
+- Worker query: workersInvocationsAdaptive filtered by the exact synthetic Worker name and UTC test window, obtaining request/error counts and grouped cpuTimeP50/cpuTimeP99 values.
+- DO query: durableObjectsInvocationsAdaptiveGroups and durableObjectsPeriodicGroups, restricted during parsing to the exact test DO namespace ID, obtaining grouped request counts and aggregate periodic cpuTime. DO queries use a full UTC date and can include historical same-day events in that namespace.
+- Validations: account identifier pinned to this test account, isolated namespace ID, <=15 minute same-day interval, results under 1000 rows, nonnegative finite metrics, no ambiguous or incomplete GraphQL results. No user data, cloud tokens or application secrets appear in the report.
+
+**Important:** Cloudflare GraphQL CPU values are kept as raw, unit-unconfirmed numbers. The highest P99 across individual aggregation rows is not a true all-requests P99. DO periodic CPU total is not per-RPC CPU, and no raw GraphQL output certifies the 10ms HTTP Worker Free ceiling. Missing Analytics Read permission, delayed ingestion, absent namespaces or incompatible schema all fail closed. Status BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED is evidence of two component datasets, NOT a Free GO decision.
+
+The runner now emits cpuNamespaceId and cpuEvidenceWindow (test-only infrastructure metadata, not secret), plus cpuAnalytics or an explicit analytics-unavailable error. If analytics take time to ingest, use the same normal network-connected workstation to requery without any deployment:
+
+~~~sh
+node api/scripts/cf-free-cloud-cpu-evidence.mjs \
+  --read-only \
+  --expected-account-id "<isolated Free account ID>" \
+  --expected-namespace-id "<cpuNamespaceId from the report>" \
+  --from "<cpuEvidenceWindow.from in UTC>" \
+  --to "<cpuEvidenceWindow.to in UTC>"
+~~~
+
+Keep CF_FREE_PILOT_API_TOKEN private in environment variables, and revoke after collecting evidence. See Cloudflare official Workers GraphQL Analytics docs (https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) and Durable Object GraphQL metrics docs (https://developers.cloudflare.com/durable-objects/observability/metrics-and-analytics/).
+
+No new cloud deployment has occurred for this code change. Production remains Paid and Free readiness remains NO-GO.
