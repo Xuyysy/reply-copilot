@@ -38,7 +38,7 @@ async function setup(offload){
   const options=[{config:{name:WORKER,compatibilityDate:'2026-10-14',
       env,manifest:manifest(esm('../src/index.ts'))},
     dev:{unsafeInspectorProxy:true,outboundService:{type:'fetcher',handler:deny}}}];
-  if(offload)options.push({config:{name:VERIFIER,compatibilityDate:'2026-11-19',
+  if(offload)options.push({config:{name:VERIFIER,compatibilityDate:'2026-10-14',
     env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},
     manifest:manifest(esm('../prototypes/cf-free-password-do/src/index.ts',
       {external:['cloudflare:workers']})),
