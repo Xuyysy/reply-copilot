@@ -98,7 +98,7 @@ export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generati
   )) needs_cleanup
   FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean} = {}): Promise<Reservation> {
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
   if(!options.prechecked){
     await releaseExpiredDeliveryReservations(env, now, session.user_id);
@@ -136,7 +136,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
       const concurrent=await existing(env,session.user_id,requestId);
       if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs());
-      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{prechecked:true,cleanupRetried:true});
+      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{...options,prechecked:true,cleanupRetried:true});
     }
     throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
   }
@@ -178,6 +178,12 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
     const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
     if ((budget?.reserved_micro_usd||0)+(budget?.settled_micro_usd||0)+budgetReserve>budgetLimit) throw new ApiFailure(503,"AI_BUDGET_EXHAUSTED","AI 成本安全预算已用完，请稍后再试。");
+    // A different request may have reserved the last FREE lot after our
+    // initial selection. Re-evaluate once so this request can atomically
+    // choose the remaining PAID lot; never repeat an upstream AI call.
+    if(!options.creditLotRetried)
+      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,
+        {...options,prechecked:true,creditLotRetried:true});
     throw new ApiFailure(409,"GENERATION_RESERVATION_CONFLICT","额度状态刚刚变化，请重新生成。");
   }
   return { kind: "new", quota: await balance(env, session.user_id) };

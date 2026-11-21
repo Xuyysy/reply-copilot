@@ -228,6 +228,7 @@ test('STAGING QA five-subscription-use walkthrough falls back to one free, one p
      assert.equal(settled.body.subscription.remainingToday,5-i);
      assert.deepEqual({...daily(f)},{used:495+i,reserved:0});
    }
+   f.sql.exec("UPDATE sessions SET kind='web'");
    let status=await f.call('/v1/usage',{method:'GET'});
    assert.equal(status.status,200);
    assert.equal(status.body.subscription.remainingToday,0);
@@ -241,6 +242,7 @@ test('STAGING QA five-subscription-use walkthrough falls back to one free, one p
      assert.equal((await ack(f,n)).status,200);
      assert.equal((await ack(f,n)).body.alreadyConfirmed,true,'duplicate ACK must not consume again');
    }
+   f.sql.exec("UPDATE sessions SET kind='web'");
    status=await f.call('/v1/usage',{method:'GET'});
    assert.equal(status.status,200);
    assert.equal(status.body.availableNow,0);
