@@ -52,7 +52,10 @@ export class DeliveryCoordinator {
       this.lastQuota=same.quota;this.lastSubscription=null;return same.raw;
     }
     if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
-    if(pending){
+    // A fresh, different Reply must not await the old provider or recovery.
+    // The old request retains its independent server quota and ACK contract.
+    // Same-ID retries still use the original immutable payload/recovery path.
+    if(pending && !(this.fastPostSwitch && pending.input.requestId!==input.requestId)){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
         // On a different post, do NOT regenerate a missing old request and do
