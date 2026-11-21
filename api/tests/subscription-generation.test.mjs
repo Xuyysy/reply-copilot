@@ -162,13 +162,27 @@ test('exhausted subscription with no free or permanent credits denies a new gene
  }finally{f.sql.close();}
 });
 
-test('concurrent reservation calls can start at most one active model generation',async()=>{
+test('two independent subscription requests reserve concurrently and settle separately',async()=>{
  const f=fixture();try{
    setup(f);
    const result=await Promise.allSettled([reserve(f,41),reserve(f,42)]);
-   assert.equal(result.filter(r=>r.status==='fulfilled').length,1,JSON.stringify(result.map(r=>r.status)));
-   assert.equal(daily(f).reserved,1);
-   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,1);
+   assert.equal(result.filter(r=>r.status==='fulfilled').length,2,JSON.stringify(result.map(r=>r.status)));
+   assert.deepEqual({...daily(f)},{used:0,reserved:2});
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations WHERE state='reserved'").get().n,2);
+   await finishGeneration(f.env,'test-user',id(42),'second complete',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   assert.equal((await ack(f,42)).status,200);
+   assert.deepEqual({...daily(f)},{used:1,reserved:1});
+   await finishGeneration(f.env,'test-user',id(41),null,{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:8});
+   assert.deepEqual({...daily(f)},{used:1,reserved:0});
+ }finally{f.sql.close();}
+});
+test('daily subscription quota still prevents parallel over-allocation',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499});
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   assert.equal((await reserve(f,71)).kind,'new');
+   await assert.rejects(reserve(f,72),e=>e.code==='INSUFFICIENT_CREDITS');
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
  }finally{f.sql.close();}
 });
 
