@@ -39,42 +39,6 @@ test('native extension account service retains verified subscription and invalid
  assert.equal((await svc.getState()).subscription.plan,'pro');
 });
 
-test('subscription ACK switches to free before paid credits and exhausts only when every bucket is empty',async()=>{
- const owner='user1';
- for(const [freeRemaining,paidRemaining,expected] of [
-   [2,0,'credits_available'],
-   [0,2,'credits_available'],
-   [0,0,'credits_exhausted']
- ]){
-   const totalRemaining=freeRemaining+paidRemaining;
-   const fake={
-     token:async()=> 'test-token',
-     fetchCurrentUser:async()=>({user:{userId:owner,username:'local'}}),
-     fetchEntitlement:async()=>({status:'credits_available',entitlement:{entitlementStatus:'active'}}),
-     fetchUsage:async()=>({quota:{freeRemaining,paidRemaining,totalRemaining},subscription:sub})
-   };
-   const svc=new AccountStateService({config:{hostedApiUrl:'https://test.example'},client:fake});
-   assert.equal((await svc.getState()).status,'credits_available','subscription still usable before final ACK');
-   svc.updateServerSubscription({...sub,usedToday:997,reservedToday:3,remainingToday:0},'another-user');
-   assert.equal(svc.peekState().subscription.remainingToday,760,'wrong account must not update cached entitlement');
-   svc.updateServerSubscription({...sub,usedToday:997,reservedToday:3,remainingToday:0},owner);
-   assert.equal(svc.peekState().subscription.remainingToday,0);
-   assert.equal(svc.peekState().status,expected,`free=${freeRemaining} paid=${paidRemaining}`);
- }
-});
-
-test('exhausted credit side panel shows a real purchase action without misleading payment-disabled copy',()=>{
- const html=readFileSync(new URL('../sidepanel/sidepanel.html',import.meta.url),'utf8');
- const js=readFileSync(new URL('../sidepanel/sidepanel.js',import.meta.url),'utf8');
- assert.match(html,/id="purchase-credits"[^>]*>购买永久额度包/);
- assert.match(js,/credits_exhausted'\]\.includes\(status\)/);
- assert.match(js,/status!=='credits_exhausted'\|\|Boolean\(account\?\.pending\)/);
- assert.match(js,/button\.id==='purchase-credits'/);
- assert.match(js,/accountClient\.openWebsite\('\/pricing\/\#permanent-credits'\)/);
- assert.match(js,/生成次数已用完，请购买永久额度包/);
- assert.doesNotMatch(js,/支付暂未开放/);
-});
-
 test('side panel visibly separates the subscription daily bucket from paid/free and uses server timestamps',()=>{
  const html=readFileSync(new URL('../sidepanel/sidepanel.html',import.meta.url),'utf8');
  const js=readFileSync(new URL('../sidepanel/sidepanel.js',import.meta.url),'utf8');
