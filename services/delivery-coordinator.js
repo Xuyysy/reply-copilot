@@ -52,7 +52,11 @@ export class DeliveryCoordinator {
       this.lastQuota=same.quota;this.lastSubscription=null;return same.raw;
     }
     if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
-    if(pending){
+    // Different human-initiated Reply requests in the hosted fast-switch path
+    // NEVER wait for an old request's recovery, abandonment or delivery ACK.
+    // The prior in-flight request still owns its old server reservation and
+    // can independently complete or expire. Same-ID retries retain recovery.
+    if(pending && !(this.fastPostSwitch && pending.input.requestId!==input.requestId)){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{
         // On a different post, do NOT regenerate a missing old request and do
