@@ -188,6 +188,28 @@ test('atomic daily subscription cap remains binding despite another request stil
  }finally{f.sql.close();}
 });
 
+test('concurrent final subscription slot falls through to free credits before paid, ACK out of order',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499,paid:1});
+   const results=await Promise.allSettled([reserve(f,91),reserve(f,92)]);
+   assert.equal(results.filter(r=>r.status==='fulfilled').length,2,JSON.stringify(results.map(r=>r.status)));
+   const sources=[91,92].map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.equal(sources.filter(x=>x.source===null).length,1);
+   assert.equal(sources.filter(x=>x.source==='free').length,1);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.equal(f.sql.prepare('SELECT free_generation_reserved FROM credit_accounts').get().free_generation_reserved,1);
+   for(const {n} of sources)await finishGeneration(f.env,'test-user',id(n),'valid result',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   const free=sources.find(x=>x.source==='free').n,sub=sources.find(x=>x.source===null).n;
+   assert.equal((await ack(f,free)).status,200);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.equal((await ack(f,sub)).status,200);
+   assert.deepEqual({...daily(f)},{used:500,reserved:0});
+   assert.deepEqual({...f.sql.prepare('SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts').get()},{free_balance:199,paid_balance:1,free_generation_reserved:0,paid_generation_reserved:0});
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,1);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,1);
+ }finally{f.sql.close();}
+});
+
 test('inconsistent subscription day counters force full transaction rollback',async()=>{
  const f=fixture();try{
    setup(f,{used:500});
