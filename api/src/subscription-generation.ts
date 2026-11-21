@@ -53,7 +53,8 @@ export async function reserveSubscribedGeneration(
     "AND "+proof+" AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.user_id AND u.status='active' AND u.archived_at IS NULL) "+
     "AND EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=? AND d.reserved_micro_usd+d.settled_micro_usd+?<=?) "+
     "AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?)) "+
-    "AND NOT EXISTS(SELECT 1 FROM ai_requests r WHERE r.user_id=? AND r.status='reserved' AND (COALESCE(r.generation_phase,'unknown')<>'awaiting_delivery' OR r.raw_response IS NULL OR r.response_expires_at IS NULL)) "+
+    // Different requests may independently reserve; daily quota and AI cost
+    // budget remain guarded within the atomic D1 batch.
     "ON CONFLICT(user_id,request_id) DO NOTHING";
   const statements=[
     env.DB.prepare("INSERT INTO subscription_daily_usage(period_id,day_index,updated_at) VALUES(?,?,?) ON CONFLICT(period_id,day_index) DO NOTHING").bind(period.id,day.dayIndex,now),
@@ -61,7 +62,7 @@ export async function reserveSubscribedGeneration(
     env.DB.prepare("INSERT INTO ai_budget_days(budget_day) VALUES(?) ON CONFLICT(budget_day) DO NOTHING").bind(budgetDay),
     env.DB.prepare(requestInsert).bind(requestId,userId,date,nonce,requestHash,now,budgetDay,budgetReserve,
       providerSnapshot?.id??null,providerSnapshot?.version??null,period.id,userId,now,now,env.ENVIRONMENT,
-      budgetDay,budgetReserve,budgetLimit,providerSnapshot?.id??null,providerSnapshot?.id??null,providerSnapshot?.version??null,userId),
+      budgetDay,budgetReserve,budgetLimit,providerSnapshot?.id??null,providerSnapshot?.id??null,providerSnapshot?.version??null),
     env.DB.prepare("UPDATE subscription_daily_usage SET reserved=reserved+1,version=version+1,last_reservation_ref=?,updated_at=? WHERE period_id=? AND day_index=? AND used+reserved<(SELECT daily_limit FROM subscription_periods WHERE id=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=? AND status='reserved')")
       .bind(nonce,now,period.id,day.dayIndex,period.id,userId,requestId,nonce),
     env.DB.prepare("INSERT INTO subscription_ai_allocations(id,user_id,request_id,period_id,day_index,state,created_at) SELECT ?,?,?,?,?,'reserved',? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?) AND EXISTS(SELECT 1 FROM subscription_daily_usage WHERE period_id=? AND day_index=? AND last_reservation_ref=?) AND NOT EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=?)")
@@ -84,8 +85,6 @@ export async function reserveSubscribedGeneration(
     if(current)throw new ApiFailure(409,'GENERATION_RESERVATION_CONFLICT','原请求已存在，请恢复该次生成。');
     const after=await subscriptionAccount(env,userId,now);
     if(after.status!=='active'||after.remainingToday===0)return false;
-    const inFlight=await env.DB.prepare("SELECT 1 pending FROM ai_requests WHERE user_id=? AND status='reserved' AND (COALESCE(generation_phase,'unknown')<>'awaiting_delivery' OR raw_response IS NULL OR response_expires_at IS NULL) LIMIT 1").bind(userId).first();
-    if(inFlight)throw new ApiFailure(409,'GENERATION_IN_PROGRESS','上一条回复仍在生成，请稍后重试。',3);
     const budget=await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
     if((budget?.reserved_micro_usd??0)+(budget?.settled_micro_usd??0)+budgetReserve>budgetLimit)
       throw new ApiFailure(503,'AI_BUDGET_EXHAUSTED','AI 成本安全预算已用完，请稍后再试。');
