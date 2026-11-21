@@ -152,6 +152,52 @@ test('fast switch A -> B -> A serializes same-ID retry without blocking B or sta
  assert.equal(await retry,'raw-old');
  assert.deepEqual(calls,['old','new'],'only two distinct request IDs reach the provider');
 });
+test('hosted fast-switch interleaves two provider responses and ACKs independently without duplicate debit',async()=>{
+ const {HostedAIClient}=await import('../services/hosted-ai-client.js');
+ const raw=JSON.stringify({recommendation:'reply',defaultStyle:'natural',language:'en',reason:'Relevant.',quoteCandidate:null,replies:{natural:'One.',light_humor:'Two.',thoughtful:'Three.'}});
+ const firstId='11111111-1111-4111-8111-111111111111',secondId='22222222-2222-4222-8222-222222222222';
+ const inputs=[firstId,secondId].map(requestId=>({...makeInput(requestId),requestId}));
+ const data={},paths=[],debited=new Set();
+ let releaseFirst,signalFirst;
+ const firstGate=new Promise(resolve=>releaseFirst=resolve);
+ const firstStarted=new Promise(resolve=>signalFirst=resolve);
+ const request=async(path,options={})=>{
+   const requestId=options.body?.requestId;
+   if(path==='/v1/ai/generate'){
+     paths.push('generate:'+requestId);
+     if(requestId===firstId){signalFirst();await firstGate;}
+     return {raw};
+   }
+   if(path.endsWith('/delivered')){
+     paths.push('ack:'+requestId);
+     debited.add(requestId);
+     return {ok:true,quota:{totalRemaining:200-debited.size}};
+   }
+   throw new Error('Unexpected recovery call: '+path);
+ };
+ const options={fastPostSwitch:true,waitTimeoutMs:10000,
+   storage:{get:async()=>structuredClone(data),set:async patch=>Object.assign(data,structuredClone(patch))},
+   getAccountId:async()=> 'account-a',
+   createClient:()=>new HostedAIClient({config:{hostedApiUrl:'https://isolated.invalid',requestTimeoutMs:10000},accountClient:{request}})
+ };
+ const coordinator=new DeliveryCoordinator(options);
+ const original=coordinator.generateReplies(inputs[0]);
+ try{
+   await firstStarted;
+   assert.equal(await coordinator.generateReplies(inputs[1]),raw);
+   assert.equal(debited.has(firstId),false,'the old request has not been ACKed');
+   assert.equal(debited.has(secondId),true,'the new request ACKs without waiting for old provider');
+ }finally{releaseFirst();}
+ assert.equal(await original,raw);
+ assert.equal(debited.size,2,'both independent requests consume exactly once');
+ assert.deepEqual(paths,['generate:'+firstId,'generate:'+secondId,'ack:'+secondId,'ack:'+firstId]);
+ const restarted=new DeliveryCoordinator(options);
+ assert.equal(await restarted.generateReplies(inputs[0]),raw);
+ assert.equal(await restarted.generateReplies(inputs[1]),raw);
+ assert.equal(paths.length,4,'finished requests replay locally without extra generate or ACK');
+ assert.deepEqual(new Set(data.completedAiDeliveries.map(row=>row.input.requestId)),new Set([firstId,secondId]));
+});
+
 test('new post starts while the old server-running orphan remains independent',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let abandon=0,generate=0;
