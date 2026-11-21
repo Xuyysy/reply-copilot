@@ -163,13 +163,50 @@ test('exhausted subscription with no free or permanent credits denies a new gene
  }finally{f.sql.close();}
 });
 
-test('concurrent reservation calls can start at most one active model generation',async()=>{
+test('independent subscription requests reserve concurrently, ACK out of order, and failures release only their own slot',async()=>{
  const f=fixture();try{
    setup(f);
    const result=await Promise.allSettled([reserve(f,41),reserve(f,42)]);
-   assert.equal(result.filter(r=>r.status==='fulfilled').length,1,JSON.stringify(result.map(r=>r.status)));
-   assert.equal(daily(f).reserved,1);
+   assert.equal(result.filter(r=>r.status==='fulfilled').length,2,JSON.stringify(result.map(r=>r.status==='rejected'?r.reason?.message:'ok')));
+   assert.equal(daily(f).reserved,2);
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations WHERE state='reserved'").get().n,2);
+   await finishGeneration(f.env,'test-user',id(42),'second complete',{model:'mock',inputTokens:1,outputTokens:2,costMicroUsd:10});
+   assert.equal((await ack(f,42)).status,200);
+   assert.deepEqual({...daily(f)},{used:1,reserved:1});
+   await finishGeneration(f.env,'test-user',id(41),null,{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:8});
+   assert.deepEqual({...daily(f)},{used:1,reserved:0});
+ }finally{f.sql.close();}
+});
+test('atomic daily subscription cap remains binding despite another request still generating',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499});
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   assert.equal((await reserve(f,71)).kind,'new');
+   await assert.rejects(reserve(f,72),e=>e.code==='INSUFFICIENT_CREDITS');
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
    assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,1);
+ }finally{f.sql.close();}
+});
+
+test('concurrent final subscription slot falls through to free credits before paid, ACK out of order',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499,paid:1});
+   const results=await Promise.allSettled([reserve(f,91),reserve(f,92)]);
+   assert.equal(results.filter(r=>r.status==='fulfilled').length,2,JSON.stringify(results.map(r=>r.status)));
+   const sources=[91,92].map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.equal(sources.filter(x=>x.source===null).length,1);
+   assert.equal(sources.filter(x=>x.source==='free').length,1);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.equal(f.sql.prepare('SELECT free_generation_reserved FROM credit_accounts').get().free_generation_reserved,1);
+   for(const {n} of sources)await finishGeneration(f.env,'test-user',id(n),'valid result',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   const free=sources.find(x=>x.source==='free').n,sub=sources.find(x=>x.source===null).n;
+   assert.equal((await ack(f,free)).status,200);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.equal((await ack(f,sub)).status,200);
+   assert.deepEqual({...daily(f)},{used:500,reserved:0});
+   assert.deepEqual({...f.sql.prepare('SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts').get()},{free_balance:199,paid_balance:1,free_generation_reserved:0,paid_generation_reserved:0});
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,1);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,1);
  }finally{f.sql.close();}
 });
 
