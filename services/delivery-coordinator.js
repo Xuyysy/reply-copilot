@@ -17,7 +17,7 @@ function envelope(input){
 }
 export class DeliveryCoordinator {
   constructor({storage,createClient,getAccountId,clock=Date.now,waitTimeoutMs=35000,completion=null,fastPostSwitch=false}){
-    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.mostRecentRequestId=null;this.fastPostSwitch=fastPostSwitch;
+    this.storage=storage;this.createClient=createClient;this.getAccountId=getAccountId;this.clock=clock;this.tail=Promise.resolve();this.lastQuota=null;this.lastSubscription=null;this.waitTimeoutMs=waitTimeoutMs;this.fenced=new Set();this.memory=[];this.storageTail=Promise.resolve();this.recovery=null;this.pendingMemory=null;this.completion=completion;this.fastPostSwitch=fastPostSwitch;this.requestTails=new Map();
   }
   generateReplies(input){
     // Snapshot before awaiting: mutable settings/history must not change a replay.
@@ -28,13 +28,20 @@ export class DeliveryCoordinator {
     // authoritative for quotas, idempotency and any uncertain provider work.
     // Opt in only for the real hosted Chrome runtime. Legacy unit fixtures
     // and non-hosted clients preserve their established serialized protocol.
-    const sameRequest=this.mostRecentRequestId===frozen.requestId;
-    const previous=sameRequest||!this.fastPostSwitch?this.tail.catch(()=>{}):Promise.resolve();
-    this.mostRecentRequestId=frozen.requestId;
+    // Preserve per-request ordering even after intervening requests:
+    // A -> B -> A must not start two provider attempts for A.
+    // Different request IDs remain independent in the hosted fast path.
+    const previousForId=this.requestTails.get(frozen.requestId);
+    const previous=previousForId||(!this.fastPostSwitch?this.tail.catch(()=>{}):Promise.resolve());
     const run=previous.then(()=>{if(deadline.expired)throw fail('REQUEST_CANCELLED','等待已结束，请重新操作。');return this.run(frozen,signal,input.performanceTrace,()=>!deadline.expired);});
     let timer;
     const bounded=Promise.race([run,new Promise((_,reject)=>{timer=setTimeout(()=>{deadline.expired=true;reject(fail('GENERATION_RECOVERY_REQUIRED','上一条生成未完成。可以恢复上一条，或放弃并重新生成。'));},this.waitTimeoutMs);})]).finally(()=>clearTimeout(timer));
-    this.tail=bounded.catch(()=>{});return bounded;
+    const settled=bounded.catch(()=>{});
+    this.requestTails.set(frozen.requestId,settled);
+    // Delete only our own entry; later retries may have replaced it.
+    const release=()=>{if(this.requestTails.get(frozen.requestId)===settled)this.requestTails.delete(frozen.requestId);};
+    void bounded.then(release,release);
+    this.tail=settled;return bounded;
   }
   async run(input,signal,performanceTrace,canStart=()=>true){
     if(signal?.aborted)throw fail('REQUEST_CANCELLED','本次回复操作已结束。');
@@ -52,10 +59,9 @@ export class DeliveryCoordinator {
       this.lastQuota=same.quota;this.lastSubscription=null;return same.raw;
     }
     if(pending?.ownerId!==ownerId||this.fenced.has(ownerId+':'+pending?.input?.requestId))pending=null;
-    // Different human-initiated Reply requests in the hosted fast-switch path
-    // NEVER wait for an old request's recovery, abandonment or delivery ACK.
-    // The prior in-flight request still owns its old server reservation and
-    // can independently complete or expire. Same-ID retries retain recovery.
+    // A fresh, different Reply must not await the old provider or recovery.
+    // The old request retains its independent server quota and ACK contract.
+    // Same-ID retries still use the original immutable payload/recovery path.
     if(pending && !(this.fastPostSwitch && pending.input.requestId!==input.requestId)){
       if(pending.input.requestId===input.requestId&&!sameSource(pending.input,input))throw fail('IDEMPOTENCY_CONFLICT','同一生成请求不能用于不同内容。');
       try{

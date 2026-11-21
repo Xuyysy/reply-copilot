@@ -125,11 +125,80 @@ test('new post starts without waiting for an old hung client request',async()=>{
  assert.equal(result,'fresh-result');
  // The old promise is still unresolved when the new post already succeeds;
  // no wall-clock threshold or CI scheduling assumption is required.
- assert.deepEqual(calls,[['generate','old'],['generate','new']],'old provider work must never delay the next post');
+ assert.deepEqual(calls,[['generate','old'],['generate','new']],'different Reply must not wait for old network recovery');
  assert.equal(data.pendingAiDelivery,null,'the new request must settle and clear its own local pending record');
  await assert.rejects(old,e=>e.code==='GENERATION_RECOVERY_REQUIRED');
 });
-test('new post starts without waiting for a server-running orphan to be abandoned',async()=>{
+test('fast switch A -> B -> A serializes same-ID retry without blocking B or starting another A provider call',async()=>{
+ const data={},calls=[];let startOld,releaseOld;
+ const started=new Promise(resolve=>startOld=resolve);
+ const waitOld=new Promise(resolve=>releaseOld=resolve);
+ const c=new DeliveryCoordinator({fastPostSwitch:true,waitTimeoutMs:2000,
+  storage:{get:async()=>structuredClone(data),set:async x=>Object.assign(data,structuredClone(x))},
+  getAccountId:async()=> 'account-a',
+  createClient:()=>({generateReplies:async input=>{
+   calls.push(input.requestId);
+   if(input.requestId==='old'){startOld();await waitOld;}
+   return 'raw-'+input.requestId;
+  }})
+ });
+ const first=c.generateReplies(makeInput('old'));await started;
+ assert.equal(await c.generateReplies(makeInput('new')),'raw-new');
+ const retry=c.generateReplies(makeInput('old'));
+ await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(calls,['old','new'],'same-ID retry must wait for its original provider while unrelated Reply stays non-blocking');
+ releaseOld();
+ assert.equal(await first,'raw-old');
+ assert.equal(await retry,'raw-old');
+ assert.deepEqual(calls,['old','new'],'only two distinct request IDs reach the provider');
+});
+test('hosted fast-switch interleaves two provider responses and ACKs independently without duplicate debit',async()=>{
+ const {HostedAIClient}=await import('../services/hosted-ai-client.js');
+ const raw=JSON.stringify({recommendation:'reply',defaultStyle:'natural',language:'en',reason:'Relevant.',quoteCandidate:null,replies:{natural:'One.',light_humor:'Two.',thoughtful:'Three.'}});
+ const firstId='11111111-1111-4111-8111-111111111111',secondId='22222222-2222-4222-8222-222222222222';
+ const inputs=[firstId,secondId].map(requestId=>({...makeInput(requestId),requestId}));
+ const data={},paths=[],debited=new Set();
+ let releaseFirst,signalFirst;
+ const firstGate=new Promise(resolve=>releaseFirst=resolve);
+ const firstStarted=new Promise(resolve=>signalFirst=resolve);
+ const request=async(path,options={})=>{
+   const requestId=options.body?.requestId;
+   if(path==='/v1/ai/generate'){
+     paths.push('generate:'+requestId);
+     if(requestId===firstId){signalFirst();await firstGate;}
+     return {raw};
+   }
+   if(path.endsWith('/delivered')){
+     paths.push('ack:'+requestId);
+     debited.add(requestId);
+     return {ok:true,quota:{totalRemaining:200-debited.size}};
+   }
+   throw new Error('Unexpected recovery call: '+path);
+ };
+ const options={fastPostSwitch:true,waitTimeoutMs:10000,
+   storage:{get:async()=>structuredClone(data),set:async patch=>Object.assign(data,structuredClone(patch))},
+   getAccountId:async()=> 'account-a',
+   createClient:()=>new HostedAIClient({config:{hostedApiUrl:'https://isolated.invalid',requestTimeoutMs:10000},accountClient:{request}})
+ };
+ const coordinator=new DeliveryCoordinator(options);
+ const original=coordinator.generateReplies(inputs[0]);
+ try{
+   await firstStarted;
+   assert.equal(await coordinator.generateReplies(inputs[1]),raw);
+   assert.equal(debited.has(firstId),false,'the old request has not been ACKed');
+   assert.equal(debited.has(secondId),true,'the new request ACKs without waiting for old provider');
+ }finally{releaseFirst();}
+ assert.equal(await original,raw);
+ assert.equal(debited.size,2,'both independent requests consume exactly once');
+ assert.deepEqual(paths,['generate:'+firstId,'generate:'+secondId,'ack:'+secondId,'ack:'+firstId]);
+ const restarted=new DeliveryCoordinator(options);
+ assert.equal(await restarted.generateReplies(inputs[0]),raw);
+ assert.equal(await restarted.generateReplies(inputs[1]),raw);
+ assert.equal(paths.length,4,'finished requests replay locally without extra generate or ACK');
+ assert.deepEqual(new Set(data.completedAiDeliveries.map(row=>row.input.requestId)),new Set([firstId,secondId]));
+});
+
+test('new post starts while the old server-running orphan remains independent',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let abandon=0,generate=0;
  const c=new DeliveryCoordinator({fastPostSwitch:true,storage:{get:async()=>structuredClone(data),set:async value=>Object.assign(data,structuredClone(value))},
@@ -149,9 +218,9 @@ test('new post does not regenerate an old missing request or repeat an old AI ca
    generateReplies:async input=>{calls.push(['generate',input.requestId]);return 'fresh-result';}
  })});
  assert.equal(await c.generateReplies(fresh),'fresh-result');
- assert.deepEqual(calls,[['generate','new']],'no recovery/abandon network call before new generation');
+ assert.deepEqual(calls,[['generate','new']],'new request never waits on old abandonment');
 });
-test('uncertain old provider response never blocks a distinct new request',async()=>{
+test('an unrelated old provider uncertainty never blocks a newly reserved request',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let generated=0;
  const c=new DeliveryCoordinator({fastPostSwitch:true,storage:{get:async()=>structuredClone(data),set:async v=>Object.assign(data,structuredClone(v))},
@@ -160,6 +229,6 @@ test('uncertain old provider response never blocks a distinct new request',async
    generateReplies:async()=>{generated++;return 'should-not-execute';}
  })});
  assert.equal(await c.generateReplies(fresh),'should-not-execute');
- assert.equal(generated,1);
- assert.equal(data.pendingAiDelivery,null,'new request clears only its own latest local pending record');
+ assert.equal(generated,1,'different Reply must use its own request ID and server quota');
+ assert.equal(data.pendingAiDelivery,null,'new request only clears its own local pending state');
 });
