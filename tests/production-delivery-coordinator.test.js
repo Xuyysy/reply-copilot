@@ -129,6 +129,29 @@ test('new post starts without waiting for an old hung client request',async()=>{
  assert.equal(data.pendingAiDelivery,null,'the new request must settle and clear its own local pending record');
  await assert.rejects(old,e=>e.code==='GENERATION_RECOVERY_REQUIRED');
 });
+test('fast switch A -> B -> A serializes same-ID retry without blocking B or starting another A provider call',async()=>{
+ const data={},calls=[];let startOld,releaseOld;
+ const started=new Promise(resolve=>startOld=resolve);
+ const waitOld=new Promise(resolve=>releaseOld=resolve);
+ const c=new DeliveryCoordinator({fastPostSwitch:true,waitTimeoutMs:2000,
+  storage:{get:async()=>structuredClone(data),set:async x=>Object.assign(data,structuredClone(x))},
+  getAccountId:async()=> 'account-a',
+  createClient:()=>({generateReplies:async input=>{
+   calls.push(input.requestId);
+   if(input.requestId==='old'){startOld();await waitOld;}
+   return 'raw-'+input.requestId;
+  }})
+ });
+ const first=c.generateReplies(makeInput('old'));await started;
+ assert.equal(await c.generateReplies(makeInput('new')),'raw-new');
+ const retry=c.generateReplies(makeInput('old'));
+ await new Promise(resolve=>setTimeout(resolve,0));
+ assert.deepEqual(calls,['old','new'],'same-ID retry must wait for its original provider while unrelated Reply stays non-blocking');
+ releaseOld();
+ assert.equal(await first,'raw-old');
+ assert.equal(await retry,'raw-old');
+ assert.deepEqual(calls,['old','new'],'only two distinct request IDs reach the provider');
+});
 test('new post starts while the old server-running orphan remains independent',async()=>{
  const old=makeInput('old'),fresh=makeInput('new'),data={pendingAiDelivery:{ownerId:'account-a',input:old,createdAt:Date.now()}};
  let abandon=0,generate=0;
