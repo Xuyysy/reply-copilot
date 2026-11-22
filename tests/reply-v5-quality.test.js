@@ -24,7 +24,7 @@ test("V5 preserves default for valid specific replies, uncertain or all-template
  ]){const s=JSON.stringify(p);assert.equal(rerankV5DefaultStyle(s,v5),s);}
 });
 test("V4, Production and invalid payload are untouched",()=>{
- for(const env of [{ENVIRONMENT:"staging"},{ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},{ENVIRONMENT:"production",STAGING_REPLY_PROMPT_VERSION:"v5"},{ENVIRONMENT:"development",STAGING_REPLY_PROMPT_VERSION:"v5"}])assert.equal(rerankV5DefaultStyle(raw,env),raw);
+ for(const env of [{ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},{ENVIRONMENT:"production",STAGING_REPLY_PROMPT_VERSION:"v5"},{ENVIRONMENT:"development",STAGING_REPLY_PROMPT_VERSION:"v5"}])assert.equal(rerankV5DefaultStyle(raw,env),raw);
  for(const s of ["bad json","null","{}",JSON.stringify({...payload,replies:{}})])assert.equal(rerankV5DefaultStyle(s,v5),s);
 });
 test("generation uses exactly one provider orchestration and only fresh validated output is reranked",()=>{
@@ -33,4 +33,10 @@ test("generation uses exactly one provider orchestration and only fresh validate
  assert.equal((src.match(/rerankV5DefaultStyle\(result\.raw, env\)/g)||[]).length,1);
  assert.ok(src.indexOf("result.raw = serializeModelOutput(result.raw);")<src.indexOf("result.raw = rerankV5DefaultStyle(result.raw, env);"));
  assert.ok(src.indexOf("result.raw = rerankV5DefaultStyle(result.raw, env);")<src.indexOf("finish: (raw:"));
+});
+
+test("unset flag on the V5 release candidate only activates the Staging preference",()=>{
+ assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"staging"}),rerankV5DefaultStyle(raw,v5));
+ assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"production"}),raw);
+ for(const flag of ["v3","legacy","typo",""])assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:flag}),raw);
 });

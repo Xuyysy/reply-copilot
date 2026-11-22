@@ -18,7 +18,7 @@ export function replyV5TemplatePenalty(text){
  return generic.some(re=>re.test(s))?3:canned.some(re=>re.test(s))?2:0;
 }
 export function rerankV5DefaultStyle(raw,env){
- if(env?.ENVIRONMENT!=="staging"||env?.STAGING_REPLY_PROMPT_VERSION!=="v5")return raw;
+ if(env?.ENVIRONMENT!=="staging"||(env?.STAGING_REPLY_PROMPT_VERSION!==undefined && env?.STAGING_REPLY_PROMPT_VERSION!=="v5"))return raw;
  // Call only AFTER the shared model-output validator. Fail open without
  // affecting the normal response or charging for an additional generation.
  try {

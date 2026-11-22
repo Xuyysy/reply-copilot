@@ -4,10 +4,11 @@ import { readFileSync } from "node:fs";
 import { buildPrompts } from "../prompts/prompt-builder.js";
 import { buildLiveProductionV3Prompts } from "../prompts/prompt-v3-live-parity.js";
 import { buildFastV4Prompts } from "../prompts/prompt-v4-fast.js";
+import { buildHumanV5Prompts } from "../prompts/prompt-v5-human.js";
 import { selectStagingReplyPrompts } from "../prompts/staging-reply-prompt-selector.js";
 const args={postContext:{text:"今天又加班了",url:"https://x.com/a/status/1"},voiceProfile:{name:"sample",language:"auto",replyLength:"short"},replyStyle:"bold",recentHistory:[{style:"natural",reply:"sample reply"}]};
-test("Staging defaults to V4, v3 is the comparison, legacy preserves the original prompt",()=>{
-  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},args),buildFastV4Prompts({...args,outputSchemaVersion:2}));
+test("V5 candidate Staging defaults to V5; v4/v3 comparison and legacy preserved",()=>{
+  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},args),buildHumanV5Prompts({...args,outputSchemaVersion:2}));
   assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},args),buildFastV4Prompts({...args,outputSchemaVersion:2}));
   const v3=selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v3"},args);
   assert.deepEqual(v3,buildLiveProductionV3Prompts({...args,outputSchemaVersion:2}));
@@ -16,7 +17,7 @@ test("Staging defaults to V4, v3 is the comparison, legacy preserves the origina
 });
 test("Production and explicit legacy clients never select V4",()=>{
   for(const environment of ["production","development","unknown"])
-    for(const version of ["v4","v3",undefined])
+    for(const version of ["v5","v4","v3",undefined])
       assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:environment,STAGING_REPLY_PROMPT_VERSION:version},args),buildPrompts(args));
   const v1={...args,outputSchemaVersion:1};
   assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},v1),buildPrompts(v1));

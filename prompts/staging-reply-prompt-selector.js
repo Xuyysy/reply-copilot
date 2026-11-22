@@ -9,8 +9,8 @@ export function selectStagingReplyPrompts(env, args) {
   if (env?.ENVIRONMENT !== "staging") return buildPrompts(args);
   if (args?.outputSchemaVersion === 1) return buildPrompts(args);
   const version = env.STAGING_REPLY_PROMPT_VERSION;
-  if (version === "v5") return buildHumanV5Prompts({...args,outputSchemaVersion:2});
+  if (version === undefined || version === "v5") return buildHumanV5Prompts({...args,outputSchemaVersion:2});
   if (version === "v3") return buildLiveProductionV3Prompts({...args,outputSchemaVersion:2});
-  if (version === undefined || version === "v4") return buildFastV4Prompts({...args,outputSchemaVersion:2});
+  if (version === "v4") return buildFastV4Prompts({...args,outputSchemaVersion:2});
   return buildPrompts(args); // legacy or unexpected value: exact old prompt
 }

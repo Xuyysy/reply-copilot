@@ -35,9 +35,10 @@ test("external examples can be retrieved and never expose provenance",()=>{
  assert.doesNotMatch(result.user,/owner_reported|csv-record|4303b89c/);
  assert.match(result.system,/Never repeat example text/);
 });
-test("V5 opt-in Staging only, V4 remains default and V1 unchanged",()=>{
+test("V5 candidate default is Staging only, explicit V4 and V1 unchanged",()=>{
  const a=args("我的代码跑不动");
- assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},a),buildFastV4Prompts(a));
+ assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},a),buildHumanV5Prompts(a));
+ assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),buildFastV4Prompts(a));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v5"},a),buildHumanV5Prompts(a));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"production",STAGING_REPLY_PROMPT_VERSION:"v5"},a),buildPrompts(a));
  const legacy={...a,outputSchemaVersion:1};
