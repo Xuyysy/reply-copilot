@@ -12,12 +12,6 @@ const canned = [
  /(?:thanks for sharing (?:your|this)|thank you for sharing (?:your|this)|in today['’]s fast-paced world|a powerful reminder that|a testament to the power of|it['’]s not just about.{1,80}it['’]s about)/iu,
  /(?:感谢分享.{0,20}(?:见解|观点|感悟)|这也提醒我们|这正是.{1,30}的意义所在|每一次坚持.{0,30}(?:更好的自己|成就)|在这个快节奏的时代)/u,
 ];
-// Count only clear, separated agreement prefaces. Do not flag a
-// substantive sentence like "确实需要更多数据" or "Exactly two days".
-const agreementOpening = /^(?:(?:确实|的确|没错|说得对|太真实了|确实如此)(?=[，,。！!：:\s]|$)|(?:exactly|absolutely|so true|agreed|well said)(?=[,.!:\s]*$|[,!.:]))/iu;
-function hasAgreementOpening(text){
- return typeof text==="string"&&agreementOpening.test(text.trim().slice(0,1500));
-}
 export function replyV5TemplatePenalty(text){
  if(typeof text!=="string")return 0;
  const s=text.trim().slice(0,1500);
@@ -31,14 +25,11 @@ export function rerankV5DefaultStyle(raw,env){
   const parsed=JSON.parse(raw);
   if(parsed?.recommendation!=="reply"||!REPLY_STYLES.includes(parsed.defaultStyle))return raw;
   if(!REPLY_STYLES.every(s=>typeof parsed.replies?.[s]==="string"&&parsed.replies[s].trim()))return raw;
-  const current=parsed.replies[parsed.defaultStyle];
-  const penalty=replyV5TemplatePenalty(current);
-  // A substantive reply with one natural agreement marker is not a defect.
-  // Act only when the default and at least one other option share this
-  // generic conversational move, and a clean non-humor alternative exists.
-  const repeated=hasAgreementOpening(current)&&REPLY_STYLES.filter(s=>hasAgreementOpening(parsed.replies[s])).length>=2;
-  if(penalty<2&&!repeated)return raw;
-  const other=REPLY_STYLES.filter(s=>s!==parsed.defaultStyle&&s!=="light_humor").find(s=>replyV5TemplatePenalty(parsed.replies[s])===0&&(!repeated||!hasAgreementOpening(parsed.replies[s])));
+  const penalty=replyV5TemplatePenalty(parsed.replies[parsed.defaultStyle]);
+  if(penalty<2)return raw;
+  // Only promote a clean, nonempty alternative; preserve the original
+  // model choice when there is doubt, including a potentially forced joke.
+  const other=REPLY_STYLES.filter(s=>s!==parsed.defaultStyle&&s!=="light_humor").find(s=>replyV5TemplatePenalty(parsed.replies[s])===0);
   if(!other)return raw;
   // The shared wire serializer emits all three compatibility aliases.
   // Keep existing aliases synchronized without adding or removing fields.

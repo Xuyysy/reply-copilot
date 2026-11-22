@@ -52,29 +52,3 @@ test("V5 preserves canonical output fields, score, legacy aliases and replay ser
  assert.equal(serializeModelOutput(output),output);
  assert.equal(rerankV5DefaultStyle(output,v5),output);
 });
-
-test("V5.3 only promotes a clean non-humor option when agreement prefaces recur",()=>{
- for(const [language,natural,light_humor,thoughtful] of [
-  ["zh","确实，今天的会议太长了","没错，会议都快开到明年了","这次会议有没有定下来谁负责？"],
-  ["en","Exactly, that meeting dragged on","Agreed, the calendar needs a vacation","Did they decide who owns the next step?"]
- ]){
-  const input=serializeModelOutput(JSON.stringify({...payload,language,replies:{natural,light_humor,thoughtful},score:83}));
-  const output=rerankV5DefaultStyle(input,v5);
-  assert.deepEqual(JSON.parse(output),{...JSON.parse(input),defaultStyle:"thoughtful",default_style:"thoughtful",best_reply_style:"thoughtful"});
-  assert.equal(serializeModelOutput(output),output);
-  assert.equal(rerankV5DefaultStyle(output,v5),output);
-  assert.equal(rerankV5DefaultStyle(input,{ENVIRONMENT:"production"}),input);
- }
-});
-test("V5.3 preserves isolated agreement, substantive wording, all-preface sets and humor-only alternatives",()=>{
- for(const [natural,light_humor,thoughtful] of [
-  ["确实，这件事要多考虑一下","会议又续杯了","这次可以先确定负责人"],
-  ["确实需要更多数据","没错，我们可以再试一次","这一点还有待验证"],
-  ["Exactly two days","Agreed, an unexpected result","The timeline is still manageable"],
-  ["确实，值得等等","没错，这要花时间","的确，先别急"],
-  ["确实，怎么又延期了","这日历都要翻烂了","没错，时间又改了"]
- ]){
-  const input=serializeModelOutput(JSON.stringify({...payload,replies:{natural,light_humor,thoughtful}}));
-  assert.equal(rerankV5DefaultStyle(input,v5),input);
- }
-});
