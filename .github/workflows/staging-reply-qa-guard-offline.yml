@@ -1,0 +1,27 @@
+name: Staging Reply QA guarded release offline policy test
+on:
+  push:
+    branches:
+      - ops/staging-reply-qa-owner-guarded-20261122
+  pull_request:
+    paths:
+      - '.github/workflows/staging-reply-qa-worker-guarded.yml'
+      - '.github/workflows/staging-reply-qa-guard-offline.yml'
+      - 'tests/staging-reply-qa-release-policy.test.mjs'
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Offline fail-closed deploy approval and D1 preservation tests
+        run: node --test tests/staging-reply-qa-release-policy.test.mjs
+      - name: Verify no deploy or remote SQL executed
+        run: echo 'PASS offline release-policy checks only; no Worker deploy or remote D1 SQL'
