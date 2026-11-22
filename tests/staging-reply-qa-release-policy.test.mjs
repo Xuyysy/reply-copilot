@@ -40,3 +40,61 @@ test('Staging Reply QA release preserves D1 and all Worker bindings and never ru
  assert.doesNotMatch(policy,/api\.cloudflare\.com\/client\/v4\/.*\/d1\/database\/.*\/query/i);
  assert.doesNotMatch(policy,/reply-copilot-api-production/);
 });
+
+test('strict deployment reconciles known Dashboard vars and exact staging route without relaxing release safety',()=>{
+ for (const needle of [
+  'extra<=allowed',
+  'assert len(domains)==1',
+  'assert domain["hostname"]=="api-staging.x-reply-helper.top"',
+  'assert domain["enabled"] is True and domain["previews_enabled"] is False',
+  'st["preview_urls"]=False',
+  'st["vars"]=plain',
+  'assert subdomain=={"enabled":False,"previews_enabled":False}',
+  'staging-domains-immediate.json',
+  'staging-domains-after.json',
+  'staging-subdomain-after.json',
+  'deploy --config api/.wrangler-staging-strict.json --env staging --keep-vars --strict',
+  'rm -f api/.wrangler-staging-strict.json'
+ ]) assert.ok(policy.includes(needle),'missing parity guard: '+needle);
+ assert.ok(policy.includes("assert 'STAGING_QA_SUBSCRIPTION_FIVE' not in st['vars']"));
+ assert.doesNotMatch(policy,/--strict=false|--no-strict|wrangler deploy[^\n]*--force/);
+});
+
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+test('ephemeral configuration mirrors only known live vars and exact route; unknown or mismatched data fails closed',()=>{
+ const python=policy.split("python3 - <<'PARITY_PY'\n")[1].split('\n          PARITY_PY')[0].split('\n').map(line=>line.slice(10)).join('\n');
+ const dir=mkdtempSync(join(tmpdir(),'qa-config-parity-'));
+ try{
+  mkdirSync(join(dir,'api'));
+  const db='cd44bb44-b525-42c4-b286-2cc84dae7fdb';
+  const cfg={compatibility_date:'2026-10-14',env:{staging:{name:'reply-copilot-api-staging',workers_dev:false,vars:{ENVIRONMENT:'staging',PAYMENTS_ENABLED:'1'},d1_databases:[{binding:'DB',database_name:'reply-copilot-staging',database_id:db,migrations_dir:'migrations'}]},production:{sentinel:'untouched'}}};
+  const bindings=[{name:'ENVIRONMENT',type:'plain_text',text:'staging'},{name:'PAYMENTS_ENABLED',type:'plain_text',text:'1'},{name:'AI_PERFORMANCE_DIAGNOSTICS',type:'plain_text',text:'1'},{name:'STAGING_QA_SUBSCRIPTION_FIVE',type:'plain_text',text:'1'},{name:'DB',type:'d1',id:db},...Array.from({length:27},(_,i)=>({name:'SECRET_'+i,type:'secret_text'}))];
+  const domain={hostname:'api-staging.x-reply-helper.top',service:'reply-copilot-api-staging',environment:'production',zone_name:'x-reply-helper.top',enabled:true,previews_enabled:false};
+  const original=JSON.stringify(cfg);
+  writeFileSync(join(dir,'api/wrangler.jsonc'),original);
+  const json=(file,result)=>writeFileSync(join(dir,file),JSON.stringify({success:true,result}));
+  const run=(b=bindings,d=domain,u={enabled:false,previews_enabled:false})=>{
+    json('bindings.json',{compatibility_date:'2026-10-14',compatibility_flags:[],bindings:b});
+    json('staging-domains-before.json',[d]);
+    json('staging-subdomain-before.json',u);
+    return spawnSync('python3',['-c',python],{cwd:dir,env:{...process.env,RUNNER_TEMP:dir},encoding:'utf8'});
+  };
+  const valid=run(); assert.equal(valid.status,0,valid.stderr);
+  const merged=JSON.parse(readFileSync(join(dir,'api/.wrangler-staging-strict.json'),'utf8'));
+  assert.equal(merged.env.staging.vars.AI_PERFORMANCE_DIAGNOSTICS,'1');
+  assert.equal(merged.env.staging.vars.STAGING_QA_SUBSCRIPTION_FIVE,'1');
+  assert.equal(merged.env.staging.vars.SECRET_0,undefined);
+  assert.equal(merged.env.staging.routes[0].pattern,domain.hostname);
+  assert.equal(merged.env.staging.preview_urls,false);
+  assert.deepEqual(merged.env.production,cfg.env.production);
+  assert.equal(readFileSync(join(dir,'api/wrangler.jsonc'),'utf8'),original);
+  assert.notEqual(run([...bindings,{name:'UNEXPECTED_VAR',type:'plain_text',text:'1'}]).status,0);
+  assert.notEqual(run(bindings,{...domain,hostname:'api.example.invalid'}).status,0);
+  assert.notEqual(run(bindings,domain,{enabled:false,previews_enabled:true}).status,0);
+  assert.notEqual(run(bindings.map(b=>b.name==='PAYMENTS_ENABLED'?{...b,text:'0'}:b)).status,0);
+  assert.notEqual(run(bindings.map(b=>b.name==='DB'?{...b,id:'wrong'}:b)).status,0);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
