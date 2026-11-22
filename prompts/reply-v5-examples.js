@@ -1212,7 +1212,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "lccc-toy-train-80",
@@ -1332,7 +1333,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "lccc-toy-train-237",
@@ -1451,7 +1453,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "uo-record-315",
@@ -1546,7 +1549,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "uo-record-1555",
@@ -1719,7 +1723,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "lccc-toy-train-65-turn-5",
@@ -1868,7 +1873,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "lccc-toy-train-459-turn-2",
@@ -2123,7 +2129,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 34.666666666666664,
       "annotation_confidence": 76.66666666666667
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "uo-record-1500",
@@ -2149,7 +2156,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 35,
       "annotation_confidence": 62
-    }
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
   },
   {
     "id": "uo-record-1974",
@@ -2229,6 +2237,600 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 23.333333333333332,
       "annotation_confidence": 84
+    },
+    "retrievalDisabled": "tone_or_assumed_familiarity"
+  },
+  {
+    "id": "lccc-toy-train-108-turn-1",
+    "language": "zh",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "迟回复",
+      "抱歉",
+      "不好意思",
+      "忙"
+    ],
+    "post": "下午好!不好意思!迟回复友!周末快乐O!",
+    "replies": [
+      "没关系的，大家都在忙"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/108/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-197-turn-1",
+    "language": "zh",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "养猫",
+      "宠物",
+      "猫"
+    ],
+    "post": "别光看到可爱。养猫很累的。",
+    "replies": [
+      "知道呀养个娃嘛"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/197/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-283-turn-1",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "电脑",
+      "设置",
+      "手机"
+    ],
+    "post": "用电脑设置就可以啊。",
+    "replies": [
+      "哦哦我说我用手机整不了呢"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/283/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-306-turn-1",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "question",
+    "keywords": [
+      "健身房",
+      "训练",
+      "练前",
+      "下午茶"
+    ],
+    "post": "哈哈哈，我准备出门去健身房了，你吃东西了吗？这个点应该叫下午茶吧",
+    "replies": [
+      "我正准备难道你们去健身房之前都不吃吗"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/306/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-320-turn-1",
+    "language": "zh",
+    "topic": "food",
+    "scene": "observation",
+    "keywords": [
+      "茄子",
+      "买菜",
+      "蔬菜"
+    ],
+    "post": "后来才发现我买的都是茄子",
+    "replies": [
+      "茄子好吃么"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/320/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-678-turn-2",
+    "language": "zh",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "暴雨",
+      "上班",
+      "下雨"
+    ],
+    "post": "估计失恋了....明天后天暴雨...划船上班...",
+    "replies": [
+      "那你要注意安全了"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/678/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-787-turn-2",
+    "language": "zh",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "鸟类",
+      "猫猫",
+      "狗狗",
+      "宠物"
+    ],
+    "post": "哈哈鸟类不好玩只能放在笼子里还是猫猫狗狗的好玩",
+    "replies": [
+      "好吧..我也比较喜欢猫猫狗狗.."
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/787/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-824-turn-2",
+    "language": "zh",
+    "topic": "life",
+    "scene": "humor",
+    "keywords": [
+      "睡觉",
+      "数羊",
+      "水饺"
+    ],
+    "post": "数着水饺赶紧睡觉吧！",
+    "replies": [
+      "我听歌呢，刚才已经数过羊了"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/824/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-535-turn-2",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "共享自行车",
+      "蓄电",
+      "骑行",
+      "电动车"
+    ],
+    "post": "通过骑行蓄电（共享自行车）蓄电完成就是共享电动车",
+    "replies": [
+      "如果骑行蓄电给钱的话，这模式还是不错。"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/535/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "uo-record-1062",
+    "language": "en",
+    "topic": "food",
+    "scene": "observation",
+    "keywords": [
+      "steak",
+      "dinner",
+      "family",
+      "cook"
+    ],
+    "post": "Love when my family gets together and has \"steak dinners\" =]",
+    "replies": [
+      "Mmmm! Do you and the family cook those steak dinners together? Or go out to eat?"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1062",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-1",
+    "language": "zh",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "offer",
+      "录用",
+      "面试",
+      "入职"
+    ],
+    "post": "等了两个星期，终于收到心仪公司的 offer 了",
+    "replies": [
+      "恭喜啊！这两周总算没白等",
+      "今晚可以不用反复刷新邮箱了",
+      "能选到自己想去的地方挺不容易的"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-2",
+    "language": "zh",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "毕业",
+      "答辩",
+      "论文",
+      "通过"
+    ],
+    "post": "答辩过了，感觉压在心里半年的石头终于落地了",
+    "replies": [
+      "恭喜！今晚终于能睡个踏实觉了",
+      "这下可以把论文文件夹先关上了",
+      "那种一直挂着一件事的感觉终于结束了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-3",
+    "language": "zh",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "面试",
+      "被拒",
+      "求职",
+      "失落"
+    ],
+    "post": "准备了好久的面试还是被拒了，有点难受",
+    "replies": [
+      "准备了这么久，难受也很正常啊",
+      "今天先别复盘了，结果已经够烦的了",
+      "这一家的结果不一定能说明你准备得怎么样"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-4",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "support",
+    "keywords": [
+      "发帖",
+      "创作",
+      "原创",
+      "没人看"
+    ],
+    "post": "连续写了半个月原创，感觉好像没人看到",
+    "replies": [
+      "半个月都在认真写，没回应确实挺磨人的",
+      "能先有一两个会接话的人就好了",
+      "有人看完但没互动也有可能，别只看点赞数"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-5",
+    "language": "en",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "offer",
+      "interview",
+      "hired",
+      "job"
+    ],
+    "post": "After weeks of checking my inbox I finally got the offer!",
+    "replies": [
+      "ah congrats!! the wait is over",
+      "your inbox can finally have a day off",
+      "Especially good when it's a role you actually wanted."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-6",
+    "language": "en",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "graduated",
+      "graduation",
+      "thesis",
+      "defense"
+    ],
+    "post": "Passed my thesis defense today. Can't believe it's done.",
+    "replies": [
+      "congrats, hope you get a proper evening off",
+      "that folder can finally close",
+      "Must feel strange not having it hanging over you anymore."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-7",
+    "language": "en",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "interview",
+      "rejected",
+      "rejection",
+      "job"
+    ],
+    "post": "Didn't get the job I'd spent weeks preparing for. Pretty gutted.",
+    "replies": [
+      "ugh, that wait makes it even harder. sorry",
+      "no need to be productive about it tonight",
+      "One rejection doesn't tell you everything about how the interview went."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-8",
+    "language": "en",
+    "topic": "creator",
+    "scene": "support",
+    "keywords": [
+      "writing",
+      "posts",
+      "readers",
+      "newsletter"
+    ],
+    "post": "Been writing every week and sometimes it feels like nobody's reading.",
+    "replies": [
+      "that part of writing can feel really lonely",
+      "the quiet weeks are tough",
+      "A few people who keep coming back can matter more than the visible count."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-9",
+    "language": "ja",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "内定",
+      "面接",
+      "就職"
+    ],
+    "post": "ずっと行きたかった会社から内定もらえた！",
+    "replies": [
+      "おめでとう！待った甲斐があったね",
+      "今日はメールを何度も確認しなくていいね",
+      "行きたいところに決まったのが何よりうれしいね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-10",
+    "language": "ja",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "卒業",
+      "論文",
+      "発表"
+    ],
+    "post": "卒論の発表終わった、やっと気が抜けた",
+    "replies": [
+      "お疲れさま！今日はゆっくりできるね",
+      "しばらく論文のファイル開かなくていいね",
+      "ずっと気になってたことが終わるとほっとするよね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-11",
+    "language": "ja",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "面接",
+      "不採用",
+      "落ちた",
+      "就活"
+    ],
+    "post": "第一志望の面接落ちた。結構へこんでる",
+    "replies": [
+      "それはへこむよね。準備お疲れさま",
+      "今日はちょっと休んでもいいと思う",
+      "一社の結果だけでは分からないことも多いよ"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-12",
+    "language": "ja",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "投稿",
+      "反応",
+      "フォロワー",
+      "ブログ"
+    ],
+    "post": "時間かけた投稿より何気ない一言の方が伸びる",
+    "replies": [
+      "あるある、読まれるきっかけって難しいね",
+      "気合い入れた方も読んでほしいよね",
+      "一言の方が気軽に反応しやすいのかも"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-13",
+    "language": "ko",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "합격",
+      "면접",
+      "입사"
+    ],
+    "post": "가고 싶었던 회사 최종 합격했다!",
+    "replies": [
+      "축하해요! 기다린 보람이 있네요",
+      "이제 메일 새로고침 안 해도 되겠네요",
+      "원하던 곳이라 더 기쁘겠어요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-14",
+    "language": "ko",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "논문",
+      "발표",
+      "졸업"
+    ],
+    "post": "드디어 논문 발표 끝났다. 마음이 좀 가벼워짐",
+    "replies": [
+      "고생 많았어요! 오늘은 푹 쉬어요",
+      "이제 그 파일 잠깐 닫아도 되겠네요",
+      "계속 마음에 걸리던 일이 끝나면 정말 후련하죠"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-15",
+    "language": "ko",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "면접",
+      "탈락",
+      "불합격",
+      "취업"
+    ],
+    "post": "열심히 준비한 면접에서 떨어졌다. 좀 속상하네",
+    "replies": [
+      "많이 준비한 만큼 속상하겠어요",
+      "오늘은 다른 생각 좀 해도 괜찮죠",
+      "한 번의 결과로 다 판단할 수는 없을 것 같아요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v52-original-16",
+    "language": "ko",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "글쓰기",
+      "게시물",
+      "조회수",
+      "팔로워"
+    ],
+    "post": "열심히 쓴 글보다 아무 생각 없이 올린 글이 조회수 잘 나옴",
+    "replies": [
+      "시간 들인 글도 좀 읽어줬으면 좋겠네요",
+      "참 알다가도 모르겠어요",
+      "짧은 글은 처음 보는 사람도 반응하기 편한가 봐요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
     }
   }
 ];
