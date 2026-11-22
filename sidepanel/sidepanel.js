@@ -8,6 +8,8 @@ const $=id=>document.getElementById(id);
 let accountPoll=null;
 let manualBindingCheck=false;
 let wasPending=false;
+let recoveredReplies=null;
+let pendingListEpoch=0;
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -22,10 +24,50 @@ chrome.runtime.onMessage.addListener((message,sender)=>{
 function openMomentumDetails(){momentumControl.expand();void chrome.storage.session.remove('openMomentumDetails').catch(()=>{});}
 chrome.storage.onChanged.addListener((changes,area)=>{
   if(area==='session'&&changes.openMomentumDetails?.newValue===true)openMomentumDetails();
+  if(area==='local'&&changes.replyCopilotAccountToken){
+    pendingListEpoch++;
+    recoveredReplies=null;$('pending-replies-drafts').replaceChildren();
+    $('pending-replies-status').textContent='';
+  }
   if(area==='local'&&[BEHAVIOR_PREFERENCES_KEY,'voiceProfile','replyCopilotAccountToken','localUsageEvents'].some(key=>key in changes))void refreshDashboard();
 });
 void chrome.storage.session.get('openMomentumDetails').then(state=>{if(state.openMomentumDetails===true)openMomentumDetails();}).catch(()=>{});
 
+async function refreshPendingReplies(){
+  const epoch=++pendingListEpoch;
+  const section=$('pending-replies'),list=$('pending-replies-list');
+  const response=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_LIST_PENDING_GENERATIONS'}).catch(()=>null);
+  if(epoch!==pendingListEpoch)return;
+  list.replaceChildren();
+  if(response?.ok&&Array.isArray(response.requests)){
+    for(const request of response.requests.slice(-8).reverse()){
+      if(typeof request?.requestId!=='string'||!/^[0-9a-f-]{36}$/i.test(request.requestId))continue;
+      const button=document.createElement('button');
+      button.type='button';button.className='button secondary';
+      button.dataset.recoverRequestId=request.requestId;
+      const date=new Date(request.createdAt);
+      button.textContent='恢复旧回复 · '+(Number.isFinite(date.getTime())?date.toLocaleTimeString('zh-CN'):'未完成');
+      list.append(button);
+    }
+  }
+  section.classList.toggle('hidden',list.children.length===0&&!recoveredReplies);
+}
+function showRecoveredReplies(replies){
+  const root=$('pending-replies-drafts');
+  root.replaceChildren();recoveredReplies={};
+  for(const [style,label] of [['natural','自然'],['light_humor','幽默'],['thoughtful','观点']]){
+    const value=replies?.[style];
+    if(typeof value!=='string'||!value.trim())continue;
+    recoveredReplies[style]=value;
+    const paragraph=document.createElement('p');
+    paragraph.textContent=label+'：'+value;
+    const copy=document.createElement('button');
+    copy.type='button';copy.className='button secondary';
+    copy.dataset.copyPendingStyle=style;copy.textContent='复制'+label+'草稿';
+    root.append(paragraph,copy);
+  }
+  root.classList.toggle('hidden',Object.keys(recoveredReplies).length===0);
+}
 async function refreshDashboard(){
   const [account,summary,behavior,profile]=await Promise.all([
     chrome.runtime.sendMessage({type:'REPLY_COPILOT_ACCOUNT_STATE'}).catch(()=>null),usage.getSummary(),storage.getBehaviorPreferences(),profiles.get()
@@ -91,10 +133,35 @@ async function refreshDashboard(){
   wasPending=Boolean(account?.pending);
   if(account?.pending&&!accountPoll)accountPoll=setInterval(()=>void refreshDashboard(),3500);
   if(!account?.pending&&accountPoll){clearInterval(accountPoll);accountPoll=null;}
+  void refreshPendingReplies();
 }
 
 document.addEventListener('click',async event=>{
   const button=event.target.closest('button');if(!button)return;
+  if(button.dataset.copyPendingStyle){
+    const value=recoveredReplies?.[button.dataset.copyPendingStyle];
+    if(!value)return;
+    try{await navigator.clipboard.writeText(value);$('pending-replies-status').textContent='已复制草稿，请自行检查并发布。';}
+    catch{$('pending-replies-status').textContent='复制失败，请手动复制草稿。';}
+    return;
+  }
+  if(button.dataset.recoverRequestId){
+    const requestId=button.dataset.recoverRequestId;
+    button.disabled=true;$('pending-replies-status').textContent='正在查询原请求并确认额度…';
+    const epoch=pendingListEpoch;
+    try{
+      const result=await chrome.runtime.sendMessage({type:'REPLY_COPILOT_RECOVER_GENERATION',abandon:false,requestId});
+      if(epoch!==pendingListEpoch)return;
+      if(!result?.ok)throw new Error(result?.error||'旧请求尚未就绪，请稍后重试。');
+      if(result.state==='ready'&&result.requestId===requestId&&result.result?.replies){
+        showRecoveredReplies(result.result.replies);
+        $('pending-replies-status').textContent='旧草稿已恢复。仅可复制；不会填入当前 X 编辑框。';
+      }else $('pending-replies-status').textContent='原请求已结束，未恢复到可用草稿。';
+      void refreshPendingReplies();
+    }catch(error){$('pending-replies-status').textContent=error?.message||'恢复失败，请稍后再试。';}
+    finally{button.disabled=false;}
+    return;
+  }
   if(button.id==='account-refresh'){void refreshDashboard();return;}
   if(button.id==='check-binding'){
     if(manualBindingCheck)return;
