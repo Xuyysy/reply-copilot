@@ -40,3 +40,22 @@ test('Staging Reply QA release preserves D1 and all Worker bindings and never ru
  assert.doesNotMatch(policy,/api\.cloudflare\.com\/client\/v4\/.*\/d1\/database\/.*\/query/i);
  assert.doesNotMatch(policy,/reply-copilot-api-production/);
 });
+
+test('strict deployment reconciles known Dashboard vars and exact staging route without relaxing release safety',()=>{
+ for (const needle of [
+  'extra<=allowed',
+  'assert len(domains)==1',
+  'assert domain["hostname"]=="api-staging.x-reply-helper.top"',
+  'assert domain["enabled"] is True and domain["previews_enabled"] is False',
+  'st["preview_urls"]=False',
+  'st["vars"]=plain',
+  'assert subdomain=={"enabled":False,"previews_enabled":False}',
+  'staging-domains-immediate.json',
+  'staging-domains-after.json',
+  'staging-subdomain-after.json',
+  'deploy --config api/.wrangler-staging-strict.json --env staging --keep-vars --strict',
+  'rm -f api/.wrangler-staging-strict.json'
+ ]) assert.ok(policy.includes(needle),'missing parity guard: '+needle);
+ assert.ok(policy.includes("assert 'STAGING_QA_SUBSCRIPTION_FIVE' not in st['vars']"));
+ assert.doesNotMatch(policy,/--strict=false|--no-strict|wrangler deploy[^\n]*--force/);
+});

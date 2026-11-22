@@ -151,6 +151,78 @@ jobs:
             assert bindings[k].get('text')==v, 'Binding differs: '+k
           print('PASS current Staging version, 27+ secret bindings preserved and all configured vars match (values redacted)')
           PY
+      - name: Mirror validated live Staging configuration into ephemeral strict-deploy config
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          workers="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$auth" "$workers/domains?service=reply-copilot-api-staging" > "$RUNNER_TEMP/staging-domains-before.json"
+          curl -fsS -H "$auth" "$workers/scripts/reply-copilot-api-staging/subdomain" > "$RUNNER_TEMP/staging-subdomain-before.json"
+          python3 - <<'PARITY_PY'
+          import json, os
+          from pathlib import Path
+          temp=Path(os.environ["RUNNER_TEMP"])
+          def result(name):
+              data=json.loads((temp/name).read_text())
+              assert data["success"], "Cloudflare preflight response failed"
+              return data["result"]
+          cfg=json.loads(Path("api/wrangler.jsonc").read_text())
+          st=cfg["env"]["staging"]
+          assert st["name"]=="reply-copilot-api-staging"
+          assert cfg["compatibility_date"]=="2026-10-14"
+          assert st["workers_dev"] is False
+          assert st["vars"]["ENVIRONMENT"]=="staging"
+          assert not st.get("routes") and not st.get("route")
+          assert st["d1_databases"]==[{"binding":"DB","database_name":"reply-copilot-staging","database_id":"cd44bb44-b525-42c4-b286-2cc84dae7fdb","migrations_dir":"migrations"}]
+          live=result("bindings.json")
+          assert live["compatibility_date"]==cfg["compatibility_date"]
+          assert not live.get("compatibility_flags")
+          bindings=live["bindings"]
+          assert len({b["name"] for b in bindings})==len(bindings)
+          assert all(b["type"] in ("plain_text","secret_text","d1") for b in bindings)
+          assert [b["id"] for b in bindings if b["type"]=="d1"]==["cd44bb44-b525-42c4-b286-2cc84dae7fdb"]
+          assert len([b for b in bindings if b["type"]=="secret_text"])>=27
+          plain={b["name"]:b["text"] for b in bindings if b["type"]=="plain_text"}
+          assert all(isinstance(v,str) for v in plain.values())
+          assert all(plain.get(k)==v for k,v in st["vars"].items()), "Declared vars drifted"
+          # Only known Dashboard-managed non-secret keys may be mirrored.
+          # QA flags may be preserved if present, never created here.
+          allowed={
+              "AI_PERFORMANCE_DIAGNOSTICS","BOLTUTIL_ADMIN_TEST_ENABLED",
+              "BOLTUTIL_ADMIN_TEST_SCHEMA_READY","BOLTUTIL_BEP20_ENABLED",
+              "BOLTUTIL_CNY_PER_USDT_MICROS","BOLTUTIL_ENABLED","BOLTUTIL_ERC20_ENABLED",
+              "BOLTUTIL_POLYGON_ENABLED","BOLTUTIL_SCHEMA_READY","BOLTUTIL_SOLANA_ENABLED",
+              "BOLTUTIL_STAGING_CREATE_ENABLED","BOLTUTIL_TRC20_ENABLED",
+              "STAGING_QA_SUBSCRIPTION_FIVE","STAGING_QA_SUBSCRIPTION_USERNAME",
+              "STAGING_QA_SUBSCRIPTION_USER_ID","STAGING_REPLY_PROMPT_VERSION",
+              "SUBSCRIPTION_CHECKOUT_ENABLED","SUBSCRIPTION_PURCHASES_ENABLED",
+              "SUBSCRIPTIONS_ENABLED","XIAODOU_RSA2_SUBSCRIPTIONS_READY",
+              "XIAODOU_SOURCE_IP_CONFIRMED"
+          }
+          extra=set(plain)-set(st["vars"])
+          assert extra<=allowed, "Unexpected live var names: "+", ".join(sorted(extra-allowed))
+          assert "EMAIL_LOGIN_ENABLED" not in plain and "PASSWORD_FREE_TINY_CPU_ENABLED" not in plain
+          domains=result("staging-domains-before.json")
+          assert len(domains)==1, "Unexpected domain set"
+          domain=domains[0]
+          assert domain["hostname"]=="api-staging.x-reply-helper.top"
+          assert domain["service"]=="reply-copilot-api-staging"
+          assert domain["environment"]=="production" # Workers default service environment, not the app environment
+          assert domain["zone_name"]=="x-reply-helper.top"
+          assert domain["enabled"] is True and domain["previews_enabled"] is False
+          subdomain=result("staging-subdomain-before.json")
+          assert subdomain=={"enabled":False,"previews_enabled":False}, "Unexpected workers.dev or preview state"
+          st["vars"]=plain
+          st["preview_urls"]=False
+          st["routes"]=[{"pattern":domain["hostname"],"zone_name":domain["zone_name"],"custom_domain":True,"enabled":True,"previews_enabled":False}]
+          # Preserve source config and write only an ephemeral file next to it.
+          # No secret values, API credentials or production config are copied
+          # from the remote service, and the file is never uploaded as an artifact.
+          Path("api/.wrangler-staging-strict.json").write_text(json.dumps(cfg,indent=2)+"\n")
+          print("PASS: exact Staging route, disabled previews and existing allowlisted vars mirrored; secret names/D1 unchanged")
+          PARITY_PY
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -163,7 +235,7 @@ jobs:
           npm --prefix api ci
           npm --prefix api run check:staging
           npm --prefix api run typecheck
-          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging \
+          ./api/node_modules/.bin/wrangler deploy --config api/.wrangler-staging-strict.json --env staging \
             --dry-run --outdir "$RUNNER_TEMP/staging-worker-compiled" --keep-vars --strict
       - name: Optional inactive version upload, with active version rechecked twice
         if: inputs.mode == 'upload'
@@ -176,7 +248,7 @@ jobs:
               | jq -er '.result.deployments[0].versions | if length==1 and .[0].percentage==100 then .[0].version_id else error("Unexpected traffic split") end'
           }
           test "$(live)" = "$EXPECTED"
-          ./api/node_modules/.bin/wrangler versions upload --config api/wrangler.jsonc \
+          ./api/node_modules/.bin/wrangler versions upload --config api/.wrangler-staging-strict.json \
             --env staging --keep-vars --strict --message "Staging Reply QA candidate $SOURCE_SHA" \
             > "$RUNNER_TEMP/staging-upload.log" 2>&1 || {
               echo 'Cloudflare refused inactive upload; no traffic changed' >&2
@@ -212,8 +284,16 @@ jobs:
           fingerprint "$RUNNER_TEMP/staging-settings-immediate.json" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint"
           cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint" ||
             { echo 'Staging Worker settings changed since preflight; stop'; exit 1; }
+          workers="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers"
+          routing_fingerprint() {
+            jq -Se '.result | map({hostname,service,environment,zone_name,enabled,previews_enabled}) | sort_by(.hostname)' "$1"
+          }
+          curl -fsS -H "$auth" "$workers/domains?service=reply-copilot-api-staging" > "$RUNNER_TEMP/staging-domains-immediate.json"
+          curl -fsS -H "$auth" "$base/subdomain" > "$RUNNER_TEMP/staging-subdomain-immediate.json"
+          cmp -s <(routing_fingerprint "$RUNNER_TEMP/staging-domains-before.json") <(routing_fingerprint "$RUNNER_TEMP/staging-domains-immediate.json") || { echo 'Staging domain drift; stop'; exit 1; }
+          cmp -s <(jq -Se .result "$RUNNER_TEMP/staging-subdomain-before.json") <(jq -Se .result "$RUNNER_TEMP/staging-subdomain-immediate.json") || { echo 'Staging preview drift; stop'; exit 1; }
           # Strict mode refuses unexpected Script-API ownership transfer.
-          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging --keep-vars --strict
+          ./api/node_modules/.bin/wrangler deploy --config api/.wrangler-staging-strict.json --env staging --keep-vars --strict
           curl -fsS -H "$auth" "$base/deployments" > "$RUNNER_TEMP/staging-new.json"
           curl -fsS -H "$auth" "$base/settings" > "$RUNNER_TEMP/staging-new-settings.json"
           jq -e --arg version "$EXPECTED" --arg deployment "$EXPECTED_DEPLOYMENT" '
@@ -225,6 +305,10 @@ jobs:
           fingerprint "$RUNNER_TEMP/staging-new-settings.json" "$RUNNER_TEMP/staging-bindings-after.fingerprint"
           cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-after.fingerprint" ||
             { echo 'Staging Worker settings/secrets/D1 changed after deploy; STOP'; exit 1; }
+          curl -fsS -H "$auth" "$workers/domains?service=reply-copilot-api-staging" > "$RUNNER_TEMP/staging-domains-after.json"
+          curl -fsS -H "$auth" "$base/subdomain" > "$RUNNER_TEMP/staging-subdomain-after.json"
+          cmp -s <(routing_fingerprint "$RUNNER_TEMP/staging-domains-before.json") <(routing_fingerprint "$RUNNER_TEMP/staging-domains-after.json") || { echo 'Staging domain changed after deploy; STOP'; exit 1; }
+          cmp -s <(jq -Se .result "$RUNNER_TEMP/staging-subdomain-before.json") <(jq -Se .result "$RUNNER_TEMP/staging-subdomain-after.json") || { echo 'Staging preview changed after deploy; STOP'; exit 1; }
           curl -fsS --retry 4 --retry-all-errors --max-time 15 \
             https://api-staging.x-reply-helper.top/health | jq -e '.ok==true' >/dev/null
           code=$(curl -sS --max-time 15 -o "$RUNNER_TEMP/staging-auth.json" -w '%{http_code}' \
@@ -232,6 +316,9 @@ jobs:
           [[ "$code" == "401" || "$code" == "403" ]] ||
             { echo "Staging admin auth guard changed: HTTP $code"; exit 1; }
           echo 'PASS: New Worker at 100%; existing vars/secrets/D1 and admin auth preserved'
+      - name: Delete ephemeral deployment config
+        if: always()
+        run: rm -f api/.wrangler-staging-strict.json
       - name: Final verified summary
         if: success()
         shell: bash
