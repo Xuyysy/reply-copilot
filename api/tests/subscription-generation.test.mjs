@@ -295,6 +295,13 @@ test('Staging five-use selector safely targets unique username yyx13 only with v
    f.env.STAGING_QA_SUBSCRIPTION_FIVE='0';
    assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'disabled flag must leave real plan unchanged');
    f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   // Prove username selection applies to an actual atomic subscription reservation and ACK.
+   assert.equal((await reserve(f,799)).kind,'new');
+   assert.deepEqual({...daily(f)},{used:0,reserved:1});
+   await finishGeneration(f.env,'test-user',id(799),'QA username target',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   assert.equal((await ack(f,799)).status,200);
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,4);
+   assert.deepEqual({...daily(f)},{used:1,reserved:0});
    assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500,'no payment plan mutation');
  }finally{f.sql.close();}
 });
