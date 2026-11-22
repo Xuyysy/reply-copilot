@@ -9,7 +9,7 @@ const args=(text,language="auto")=>({postContext:{text},voiceProfile:{language},
 test("V5 sample provenance, four languages, distinct IDs and bounded records",()=>{
  assert.equal(new Set(REPLY_V5_EXAMPLES.map(x=>x.id)).size,REPLY_V5_EXAMPLES.length);
  assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,53);
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,72);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,179);
  for(const lang of ["zh","en","ja","ko"])assert.ok(REPLY_V5_EXAMPLES.some(x=>x.language===lang));
  for(const x of REPLY_V5_EXAMPLES){assert.ok(x.post&&x.replies.length&&x.replies.every(Boolean)&&x.keywords.length);if(x.source.kind==="external_conversation"){assert.match(x.source.blob,/^[0-9a-f]{40}$/);assert.equal(x.source.permission,"owner_reported");assert.ok(x.source.record);}}
 });
@@ -156,5 +156,17 @@ test("V5.4 freezes external provenance, disables low-value examples and selectiv
   const selected=selectReplyV5Examples(args(text));
   assert.ok(selected.length,text);
   assert.ok(selected.some(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.source.kind==="synthetic")),text);
+ }
+});
+
+test("V5.4 complete curated corpus has 200 enabled records and bounded four-language coverage",()=>{
+ const active=REPLY_V5_EXAMPLES.filter(x=>!x.retrievalDisabled);
+ assert.equal(active.length,200);
+ const expanded=active.filter(x=>x.editorialRevision==="v5.4-expanded");
+ assert.equal(expanded.length,107);
+ for(const row of expanded){assert.equal(row.source.kind,"synthetic");assert.equal(row.replies.length,2);assert.ok(row.replies.every(s=>s.length<=110));}
+ for(const language of ["zh","en","ja","ko"]){assert.ok(active.filter(x=>x.language===language).length>=19);}
+ for(const [text,language] of [["我的依赖包更新后版本冲突了","zh"],["My dependencies are broken again","en"],["ライブラリの依存関係が崩れた","ja"],["라이브러리 업데이트하고 의존성이 꼬였다","ko"]]){
+  const result=selectReplyV5Examples(args(text,language));assert.ok(result.length,text);assert.ok(result.some(s=>expanded.some(x=>x.post===s.post)),text);assert.ok(new TextEncoder().encode(JSON.stringify(result)).length<=V5_EXAMPLE_MAX_BYTES);
  }
 });
