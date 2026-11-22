@@ -2,8 +2,14 @@ name: Guarded Staging Reply QA Worker check, inactive upload or active deploy
 on:
   workflow_dispatch:
     inputs:
+      candidate:
+        description: Select exact Staging V4 or V5 candidate (never Production)
+        type: choice
+        options: ["v4", "v5"]
+        default: "v4"
+        required: true
       source_sha:
-        description: Exact passed Staging Reply QA API PR 223 source SHA
+        description: Exact passed Staging candidate PR source SHA
         type: string
         required: true
       ci_run_id:
@@ -24,7 +30,7 @@ on:
         default: "check"
         required: true
       confirmation:
-        description: CHECK_ONLY, UPLOAD_STAGING_VERSION_ONLY, or DEPLOY_STAGING_WORKER
+        description: Exact V4 or V5 release confirmation
         type: string
         required: true
 permissions:
@@ -45,6 +51,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
+      CANDIDATE: ${{ inputs.candidate }}
       SOURCE_SHA: ${{ inputs.source_sha }}
       CI_RUN_ID: ${{ inputs.ci_run_id }}
       EXPECTED: ${{ inputs.expected_active_version }}
@@ -62,9 +69,22 @@ jobs:
           [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
           [[ "$EXPECTED" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
-          case "$MODE:$CONFIRMATION" in
-            check:CHECK_ONLY|upload:UPLOAD_STAGING_VERSION_ONLY|deploy:DEPLOY_STAGING_WORKER) ;;
-            *) echo 'Missing exact release confirmation'; exit 1 ;;
+          case "$CANDIDATE" in
+            v4)
+              case "$MODE:$CONFIRMATION" in
+                check:CHECK_ONLY|upload:UPLOAD_STAGING_VERSION_ONLY|deploy:DEPLOY_STAGING_WORKER) ;;
+                *) echo 'Missing exact V4 release confirmation'; exit 1 ;;
+              esac ;;
+            v5)
+              case "$MODE:$CONFIRMATION" in
+                check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER) ;;
+                *) echo 'Missing exact V5 release confirmation'; exit 1 ;;
+              esac
+              test "$EXPECTED" = "20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5"
+              if [[ "$MODE" == "deploy" ]]; then
+                test "$EXPECTED_DEPLOYMENT" = "27b23ad7-37f9-4fab-9ce4-587f1f760ed0"
+              fi ;;
+            *) echo 'Unknown candidate'; exit 1 ;;
           esac
           if [[ "$MODE" == "deploy" ]]; then
             [[ "$EXPECTED_DEPLOYMENT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
@@ -73,22 +93,58 @@ jobs:
           fi
           test "$CLOUDFLARE_ACCOUNT_ID" = "cb5fc919a9f05dcf39b3ca29c9538a1f"
           test -n "$CLOUDFLARE_API_TOKEN"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
-          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
-            .head_sha == $sha and .head_repository.full_name == $repo
-            and .head_branch == "qa/staging-five-remaining-verified-20261121" and .event == "push"
-            and .status == "completed" and .conclusion == "success"
-            and .path == ".github/workflows/ci.yml"
-          ' "$RUNNER_TEMP/source-ci.json" > /dev/null
-          gh api "repos/$GITHUB_REPOSITORY/pulls/223" > "$RUNNER_TEMP/staging-qa-pr.json"
-          jq -e --arg sha "$SOURCE_SHA" '
-            .head.sha == $sha and .base.ref == "perf/staging-api-bootstrap-exact-deployed-20261117"
-            and .base.sha == "d7a7a62de0430e9e2c8ea870067f55ed7f0e96c1"
-            and .state == "open" and .draft == true
-          ' "$RUNNER_TEMP/staging-qa-pr.json" > /dev/null
-          if [[ "$MODE" == "deploy" ]]; then
-            current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/qa/staging-five-remaining-verified-20261121" --jq '.object.sha')
-            test "$current" = "$SOURCE_SHA" || { echo 'Staging QA PR branch SHA changed; stop'; exit 1; }
+          if [[ "$CANDIDATE" == "v4" ]]; then
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
+            jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .head_sha == $sha and .head_repository.full_name == $repo
+              and .head_branch == "qa/staging-five-remaining-verified-20261121" and .event == "push"
+              and .status == "completed" and .conclusion == "success"
+              and .path == ".github/workflows/ci.yml"
+            ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/pulls/223" > "$RUNNER_TEMP/staging-qa-pr.json"
+            jq -e --arg sha "$SOURCE_SHA" '
+              .head.sha == $sha and .base.ref == "perf/staging-api-bootstrap-exact-deployed-20261117"
+              and .base.sha == "d7a7a62de0430e9e2c8ea870067f55ed7f0e96c1"
+              and .state == "open" and .draft == true
+            ' "$RUNNER_TEMP/staging-qa-pr.json" > /dev/null
+            if [[ "$MODE" == "deploy" ]]; then
+              current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/qa/staging-five-remaining-verified-20261121" --jq '.object.sha')
+              test "$current" = "$SOURCE_SHA" || { echo 'Staging QA PR branch SHA changed; stop'; exit 1; }
+            fi
+          else
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
+            jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .head_sha == $sha and .head_repository.full_name == $repo
+              and .head_branch == "experiment/staging-reply-v5-examples-20261122" and .event == "push"
+              and .status == "completed" and .conclusion == "success"
+              and .path == ".github/workflows/ci.yml"
+            ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/pulls/228" > "$RUNNER_TEMP/staging-v5-pr.json"
+            jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .head.sha == $sha and .head.repo.full_name == $repo
+              and .head.ref == "experiment/staging-reply-v5-examples-20261122"
+              and .base.ref == "qa/staging-five-remaining-verified-20261121"
+              and .base.sha == "829b8596251d004126d4bc1a244925201f0cd3a1"
+              and .state == "open" and .draft == true and .changed_files == 9
+            ' "$RUNNER_TEMP/staging-v5-pr.json" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/pulls/228/files?per_page=100" > "$RUNNER_TEMP/staging-v5-files.json"
+            jq -e '
+              ([.[].filename] | sort) == ([
+                "api/src/ai.ts",
+                "docs/experiments/reply-v5-human-examples-20261122.md",
+                "prompts/prompt-v5-human.js",
+                "prompts/reply-v5-examples.js",
+                "prompts/reply-v5-quality.js",
+                "prompts/staging-reply-prompt-selector.js",
+                "tests/reply-v5-human.test.js",
+                "tests/reply-v5-quality.test.js",
+                "tests/staging-reply-prompt-selector.test.js"
+              ] | sort)
+            ' "$RUNNER_TEMP/staging-v5-files.json" > /dev/null
+            if [[ "$MODE" == "deploy" ]]; then
+              current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/experiment/staging-reply-v5-examples-20261122" --jq '.object.sha')
+              test "$current" = "$SOURCE_SHA" || { echo 'Staging V5 PR branch SHA changed; stop'; exit 1; }
+            fi
           fi
       - name: Checkout exact CI-approved source, no persisted credentials
         uses: actions/checkout@v4
@@ -145,6 +201,8 @@ jobs:
           assert bindings['DB']['type']=='d1' and bindings['DB']['id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
           assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in bindings
           assert 'EMAIL_LOGIN_ENABLED' not in bindings
+          if os.environ.get('CANDIDATE')=='v5':
+            assert 'STAGING_REPLY_PROMPT_VERSION' not in bindings, 'V5 requires absent prompt override; do not change settings'
           config=json.load(open('api/wrangler.jsonc'))['env']['staging']['vars']
           for k,v in config.items():
             assert bindings.get(k,{}).get('type')=='plain_text', 'Binding missing: '+k
@@ -187,6 +245,8 @@ jobs:
           plain={b["name"]:b["text"] for b in bindings if b["type"]=="plain_text"}
           assert all(isinstance(v,str) for v in plain.values())
           assert all(plain.get(k)==v for k,v in st["vars"].items()), "Declared vars drifted"
+          if os.environ.get("CANDIDATE")=="v5":
+              assert "STAGING_REPLY_PROMPT_VERSION" not in plain and "STAGING_REPLY_PROMPT_VERSION" not in st["vars"], "V5 requires absent prompt override"
           # Only known Dashboard-managed non-secret keys may be mirrored.
           # QA flags may be preserved if present, never created here.
           allowed={

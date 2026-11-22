@@ -76,13 +76,18 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   const original=JSON.stringify(cfg);
   writeFileSync(join(dir,'api/wrangler.jsonc'),original);
   const json=(file,result)=>writeFileSync(join(dir,file),JSON.stringify({success:true,result}));
-  const run=(b=bindings,d=domain,u={enabled:false,previews_enabled:false})=>{
+  const run=(b=bindings,d=domain,u={enabled:false,previews_enabled:false},candidate='v4')=>{
     json('bindings.json',{compatibility_date:'2026-10-14',compatibility_flags:[],bindings:b});
     json('staging-domains-before.json',[d]);
     json('staging-subdomain-before.json',u);
-    return spawnSync('python3',['-c',python],{cwd:dir,env:{...process.env,RUNNER_TEMP:dir},encoding:'utf8'});
+    return spawnSync('python3',['-c',python],{cwd:dir,env:{...process.env,RUNNER_TEMP:dir,CANDIDATE:candidate},encoding:'utf8'});
   };
   const valid=run(); assert.equal(valid.status,0,valid.stderr);
+  const v5=run(bindings,domain,{enabled:false,previews_enabled:false},'v5'); assert.equal(v5.status,0,v5.stderr);
+  const overridden=[...bindings,{name:'STAGING_REPLY_PROMPT_VERSION',type:'plain_text',text:'v4'}];
+  assert.equal(run(overridden,domain,{enabled:false,previews_enabled:false},'v4').status,0);
+  assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5').status,0);
+  assert.equal(run().status,0);
   const merged=JSON.parse(readFileSync(join(dir,'api/.wrangler-staging-strict.json'),'utf8'));
   assert.equal(merged.env.staging.vars.AI_PERFORMANCE_DIAGNOSTICS,'1');
   assert.equal(merged.env.staging.vars.STAGING_QA_SUBSCRIPTION_FIVE,'1');
@@ -102,4 +107,9 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   assert.notEqual(run(bindings.map(b=>b.name==='DB'?{...b,name:'WRONG_DB'}:b)).status,0);
   assert.notEqual(run([...bindings,{name:'OTHER_DB',type:'d1',id:db}]).status,0);
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('V5 release has separate explicit authorization, fixed V4 baseline, exact source scope and no prompt flag mutation',()=>{
+ for(const needle of ['options: ["v4", "v5"]','default: "v4"','check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER','20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5','27b23ad7-37f9-4fab-9ce4-587f1f760ed0','repos/$GITHUB_REPOSITORY/pulls/228','experiment/staging-reply-v5-examples-20261122','829b8596251d004126d4bc1a244925201f0cd3a1','.changed_files == 9','pulls/228/files?per_page=100','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
+ assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
 });
