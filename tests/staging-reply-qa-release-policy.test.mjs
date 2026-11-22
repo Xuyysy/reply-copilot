@@ -93,6 +93,8 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.2').status,0);
   assert.equal(run(bindings,domain,{enabled:false,previews_enabled:false},'v5.3').status,0);
   assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.3').status,0);
+  assert.equal(run(bindings,domain,{enabled:false,previews_enabled:false},'v5.4').status,0);
+  assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.4').status,0);
   assert.equal(run().status,0);
   const merged=JSON.parse(readFileSync(join(dir,'api/.wrangler-staging-strict.json'),'utf8'));
   assert.equal(merged.env.staging.vars.AI_PERFORMANCE_DIAGNOSTICS,'1');
@@ -116,7 +118,7 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
 });
 
 test('V5 release has separate explicit authorization, fixed V4 baseline, exact source scope and no prompt flag mutation',()=>{
- for(const needle of ['options: ["v4", "v5", "v5.1", "v5.2", "v5.3"]','default: "v4"','check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER','20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5','27b23ad7-37f9-4fab-9ce4-587f1f760ed0','repos/$GITHUB_REPOSITORY/pulls/228','experiment/staging-reply-v5-examples-20261122','829b8596251d004126d4bc1a244925201f0cd3a1','.changed_files == 9','pulls/228/files?per_page=100','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
+ for(const needle of ['options: ["v4", "v5", "v5.1", "v5.2", "v5.3", "v5.4"]','default: "v4"','check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER','20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5','27b23ad7-37f9-4fab-9ce4-587f1f760ed0','repos/$GITHUB_REPOSITORY/pulls/228','experiment/staging-reply-v5-examples-20261122','829b8596251d004126d4bc1a244925201f0cd3a1','.changed_files == 9','pulls/228/files?per_page=100','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
  assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
 });
 
@@ -133,4 +135,15 @@ test('V5.2 release separately authorizes exact retrieval source, deployed V5.1 b
 test('V5.3 release pins narrow natural-openings source, deployed V5.2 base and three modified files',()=>{
  for(const needle of ['check:CHECK_V53_ONLY|upload:UPLOAD_STAGING_V53_VERSION_ONLY|deploy:DEPLOY_STAGING_V53_WORKER','9fb255d7-b580-4f74-8305-e4e5954c53eb','d6188337-fc52-44b7-9dcc-4f14f807d140','ed5f5d602d9c1d100589bc338ff38acb013bec29','d811d4b85d6c84f20c8afecf364d6f83fd558473','repos/$GITHUB_REPOSITORY/pulls/234','experiment/staging-v53-natural-openings-20261122','.changed_files == 3','pulls/234/files?per_page=100','all(.[]; .status == "modified")','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
  assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
+});
+
+test('V5.4 release pins the 200-example candidate, deployed V5.3 base, and three modified files',()=>{
+ for(const needle of ['check:CHECK_V54_ONLY|upload:UPLOAD_STAGING_V54_VERSION_ONLY|deploy:DEPLOY_STAGING_V54_WORKER','67eec240-dd19-405e-aedc-0af2143e9a38','292da9f1-327d-4654-bc26-be2ce5bc3563','fe583fa8be4acb867b2830fc843a5fdd59969866','ed5f5d602d9c1d100589bc338ff38acb013bec29','repos/$GITHUB_REPOSITORY/pulls/236','experiment/staging-v54-curated-corpus-20261122','.changed_files == 3','pulls/236/files?per_page=100','all(.[]; .status == "modified")','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
+ assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
+});
+test('postflight waits only for exact Wrangler-returned version without re-deploying',()=>{
+ const block=policy.slice(policy.indexOf('      - name: Guard and deploy only'),policy.indexOf('      - name: Delete ephemeral deployment config'));
+ for(const needle of ['Current Version ID:','for attempt in {1..10}; do','--arg version "$deployed_version"','Unexpected deployment after upload; STOP','[[ "$observed" == 1 ]]','staging-bindings-after.fingerprint','/health','/v1/admin/dashboard'])assert.ok(block.includes(needle),needle);
+ assert.equal((block.match(/wrangler deploy --config/g)||[]).length,1);
+ assert.ok(block.indexOf('[[ "$observed" == 1 ]]')<block.indexOf('fingerprint "$RUNNER_TEMP/staging-new-settings.json"'));
 });
