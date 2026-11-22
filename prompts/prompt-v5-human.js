@@ -24,11 +24,15 @@ function language(args,text){
 // Broad terms alone often select an unrelated context, e.g. "流量" can
 // mean mobile data or impressions. A broad-only hit is deliberately abstained.
 const WEAK = new Set("买|钱|菜|工作|项目|内容|发布|功能|工具|速度|流量|关注|账号|上班|训练|随便|搭配|学|work|job|pay|buy|bought|post|posts|views|run|box|match|technology|app|room|art|money|food|drink|weekend|following|family|broken|仕事|脚|階段|일|퇴근".split("|"));
-const byLanguage=new Map();
-for(const sample of REPLY_V5_EXAMPLES){
+// Build the unchanged retrieval index only when a full-corpus request needs it.
+let byLanguage;
+function getExampleIndex(){
+ if(byLanguage)return byLanguage;
+ const index=new Map();
+ for(const sample of REPLY_V5_EXAMPLES){
   if(sample.retrievalDisabled||[sample.post,...sample.replies].some(s=>/[<>@]|https?:\/\//iu.test(s)||injection.test(s)))continue;
-  let bucket=byLanguage.get(sample.language);
-  if(!bucket){bucket={keys:new Map(),rows:[]};byLanguage.set(sample.language,bucket);}
+  let bucket=index.get(sample.language);
+  if(!bucket){bucket={keys:new Map(),rows:[]};index.set(sample.language,bucket);}
   const keys=[...new Set(sample.keywords.map(norm))];
   for(const k of keys)if(!bucket.keys.has(k)){
     const ascii=/^[a-z0-9 ]+$/.test(k);
@@ -36,6 +40,9 @@ for(const sample of REPLY_V5_EXAMPLES){
     bucket.keys.set(k,{test,weak:WEAK.has(k)});
   }
   bucket.rows.push({sample,keys});
+ }
+ byLanguage=index;
+ return byLanguage;
 }
 // A conservative speech-act heuristic, not a sentiment model. A positive
 // word alone (finally, hit, passed, 成功) is not evidence of celebration.
@@ -59,7 +66,7 @@ export function selectReplyV5Examples(args){
   // late sensitive disclosure or injection instruction select a joke example.
   if(!text.trim()||serious.test(text)||injection.test(text))return [];
   const lang=language(args,text);if(!lang)return [];
-  const bucket=byLanguage.get(lang);if(!bucket)return [];
+  const bucket=getExampleIndex().get(lang);if(!bucket)return [];
   const t=norm(text.slice(0,8000)),mood=scene(t);
   const matched=new Map();
   for(const [k,entry] of bucket.keys){
@@ -104,7 +111,7 @@ export function selectReplyV5Examples(args){
 // Keep this short, applicable even when no relevant example is retrieved.
 const FRIENDLY_TONE = "SOCIAL TONE: For the default relaxed_friendly voice, be approachable and warm rather than cold, dismissive, or constantly skeptical. Acknowledge a specific detail, celebrate a real win, or show brief sincere concern when appropriate. Friendly does not mean agreeing, flattering, generic praise, or fake closeness. Humor is with the author, not at their expense. Disagree without belittling; prefer a gentle observation over a loaded question. Respect explicitly selected confident_direct, balanced_thoughtful, bold, and custom voice preferences; do not force cheerfulness, slang, emojis, or extra length. Match serious or vulnerable posts with restraint.";
 
-export function buildHumanV5Prompts(args){
+export function buildHumanV5Prompts(args,{useExamples=true}={}){
   const baseline=buildFastV4Prompts(args);
   if(args?.outputSchemaVersion!==2)return baseline;
   const system=baseline.system+"\n\n"+FRIENDLY_TONE+"\nVARIATION: Give three genuinely different conversational moves: one warm direct reaction, one playful detail if appropriate (otherwise sincere), and one specific extension or open observation. Do not just change the wording of agreement. On celebrations or vulnerability, keep all options kind and no forced jokes or advice.";
@@ -112,6 +119,9 @@ export function buildHumanV5Prompts(args){
   // Existing local selected history only; do not fetch or append new history.
   const historyRule=Array.isArray(args?.recentHistory)&&args.recentHistory.slice(0,20).some(x=>typeof x?.reply==="string"&&x.reply.trim())?"\nHISTORY: Recent selected replies are style signals only. Avoid recurring optional openers, endings and sentence frames across posts, not normal words or expressions suited to this post. Never import history facts or relationships.":"";
   const conversationalSystem=naturalSystem+"\nCONVERSATION: Answer a genuine question directly when context allows. A fragment can stand alone. Do not pad with a lesson, advice or a question just to get engagement. Vary the actual reaction, not only the wording; preserve genuine warmth and explicit voice preferences."+historyRule;
+  // A/B: no corpus leaves the entire common prompt unchanged and does not
+  // run retrieval or build its index. Caller is the server-side selector.
+  if(!useExamples)return {system:conversationalSystem,user:baseline.user};
   const snippets=selectReplyV5Examples(args);
   if(!snippets.length)return {system:conversationalSystem,user:baseline.user};
   return {
