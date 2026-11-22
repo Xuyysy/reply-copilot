@@ -1,0 +1,248 @@
+name: Guarded Staging Reply QA Worker check, inactive upload or active deploy
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact passed Staging Reply QA API PR 223 source SHA
+        type: string
+        required: true
+      ci_run_id:
+        description: Successful Staging Reply QA API branch push CI run ID
+        type: string
+        required: true
+      expected_active_version:
+        description: Exact current Staging Worker active version UUID
+        type: string
+        required: true
+      expected_active_deployment:
+        description: Exact current Staging Worker deployment ID (required for active deploy)
+        type: string
+        required: false
+      mode:
+        type: choice
+        options: ["check", "upload", "deploy"]
+        default: "check"
+        required: true
+      confirmation:
+        description: CHECK_ONLY, UPLOAD_STAGING_VERSION_ONLY, or DEPLOY_STAGING_WORKER
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: reply-copilot-staging-reply-qa-worker
+  cancel-in-progress: false
+jobs:
+  check-or-upload:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' &&
+      github.repository == 'Xuyysy/reply-copilot' &&
+      github.actor == 'Xuyysy'
+    environment: staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      CI_RUN_ID: ${{ inputs.ci_run_id }}
+      EXPECTED: ${{ inputs.expected_active_version }}
+      EXPECTED_DEPLOYMENT: ${{ inputs.expected_active_deployment }}
+      MODE: ${{ inputs.mode }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Validate exact successful Staging QA PR and full CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$CI_RUN_ID" =~ ^[0-9]+$ ]] || exit 1
+          [[ "$EXPECTED" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
+          case "$MODE:$CONFIRMATION" in
+            check:CHECK_ONLY|upload:UPLOAD_STAGING_VERSION_ONLY|deploy:DEPLOY_STAGING_WORKER) ;;
+            *) echo 'Missing exact release confirmation'; exit 1 ;;
+          esac
+          if [[ "$MODE" == "deploy" ]]; then
+            [[ "$EXPECTED_DEPLOYMENT" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || exit 1
+          else
+            test -z "$EXPECTED_DEPLOYMENT" || exit 1
+          fi
+          test "$CLOUDFLARE_ACCOUNT_ID" = "cb5fc919a9f05dcf39b3ca29c9538a1f"
+          test -n "$CLOUDFLARE_API_TOKEN"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
+          jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .head_sha == $sha and .head_repository.full_name == $repo
+            and .head_branch == "qa/staging-five-remaining-verified-20261121" and .event == "push"
+            and .status == "completed" and .conclusion == "success"
+            and .path == ".github/workflows/ci.yml"
+          ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+          gh api "repos/$GITHUB_REPOSITORY/pulls/223" > "$RUNNER_TEMP/staging-qa-pr.json"
+          jq -e --arg sha "$SOURCE_SHA" '
+            .head.sha == $sha and .base.ref == "perf/staging-api-bootstrap-exact-deployed-20261117"
+            and .base.sha == "d7a7a62de0430e9e2c8ea870067f55ed7f0e96c1"
+            and .state == "open" and .draft == true
+          ' "$RUNNER_TEMP/staging-qa-pr.json" > /dev/null
+          if [[ "$MODE" == "deploy" ]]; then
+            current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/qa/staging-five-remaining-verified-20261121" --jq '.object.sha')
+            test "$current" = "$SOURCE_SHA" || { echo 'Staging QA PR branch SHA changed; stop'; exit 1; }
+          fi
+      - name: Checkout exact CI-approved source, no persisted credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Validate Staging-only configuration without remote D1 SQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          python3 - <<'PY'
+          import json
+          cfg=json.load(open('api/wrangler.jsonc'))
+          st=cfg['env']['staging']
+          assert st['name']=='reply-copilot-api-staging'
+          assert st['vars']['ENVIRONMENT']=='staging'
+          assert st['vars']['API_ORIGIN']=='https://api-staging.x-reply-helper.top'
+          assert st['vars']['WEB_ORIGIN']=='https://staging.x-reply-helper.top'
+          assert st['vars']['PAYMENTS_ENABLED']=='1'
+          assert st['d1_databases'][0]['binding']=='DB'
+          assert st['d1_databases'][0]['database_id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert cfg['env']['production']['d1_databases'][0]['database_id']!='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert 'EMAIL_LOGIN_ENABLED' not in st['vars']
+          assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in st['vars']
+          assert 'STAGING_QA_SUBSCRIPTION_FIVE' not in st['vars']
+          assert 'STAGING_QA_SUBSCRIPTION_USER_ID' not in st['vars']
+          print('PASS Staging-only config and default-off password mode')
+          PY
+      - name: Check exact currently deployed Staging version and D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+            > "$RUNNER_TEMP/live.json"
+          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/settings" \
+            > "$RUNNER_TEMP/bindings.json"
+          python3 - <<'PY'
+          import json,os
+          base=os.environ['RUNNER_TEMP']
+          d=json.load(open(base+'/live.json'))
+          s=json.load(open(base+'/bindings.json'))
+          assert d['success'] and s['success']
+          versions=d['result']['deployments'][0]['versions']
+          assert len(versions)==1 and versions[0]['percentage']==100
+          assert versions[0]['version_id']==os.environ['EXPECTED']
+          if os.environ['MODE']=='deploy':
+            assert d['result']['deployments'][0]['id']==os.environ['EXPECTED_DEPLOYMENT'], 'Staging deployment drift'
+          bindings={b['name']:b for b in s['result']['bindings']}
+          assert set(b['type'] for b in bindings.values()) <= {'plain_text','secret_text','d1'}
+          assert bindings['DB']['type']=='d1' and bindings['DB']['id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in bindings
+          assert 'EMAIL_LOGIN_ENABLED' not in bindings
+          config=json.load(open('api/wrangler.jsonc'))['env']['staging']['vars']
+          for k,v in config.items():
+            assert bindings.get(k,{}).get('type')=='plain_text', 'Binding missing: '+k
+            assert bindings[k].get('text')==v, 'Binding differs: '+k
+          print('PASS current Staging version, 27+ secret bindings preserved and all configured vars match (values redacted)')
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - name: Build and typecheck exact Staging code; never deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix api ci
+          npm --prefix api run check:staging
+          npm --prefix api run typecheck
+          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging \
+            --dry-run --outdir "$RUNNER_TEMP/staging-worker-compiled" --keep-vars --strict
+      - name: Optional inactive version upload, with active version rechecked twice
+        if: inputs.mode == 'upload'
+        shell: bash
+        run: |
+          set -euo pipefail
+          live() {
+            curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging/deployments" \
+              | jq -er '.result.deployments[0].versions | if length==1 and .[0].percentage==100 then .[0].version_id else error("Unexpected traffic split") end'
+          }
+          test "$(live)" = "$EXPECTED"
+          ./api/node_modules/.bin/wrangler versions upload --config api/wrangler.jsonc \
+            --env staging --keep-vars --strict --message "Staging Reply QA candidate $SOURCE_SHA" \
+            > "$RUNNER_TEMP/staging-upload.log" 2>&1 || {
+              echo 'Cloudflare refused inactive upload; no traffic changed' >&2
+              exit 1
+            }
+          test "$(live)" = "$EXPECTED"
+          echo 'PASS: Inactive Staging Worker version uploaded; live traffic unchanged' >> "$GITHUB_STEP_SUMMARY"
+      - name: Guard and deploy only the approved active Staging Worker
+        if: inputs.mode == 'deploy'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/reply-copilot-api-staging"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          curl -fsS -H "$auth" "$base/deployments" > "$RUNNER_TEMP/staging-immediate.json"
+          curl -fsS -H "$auth" "$base/settings" > "$RUNNER_TEMP/staging-settings-immediate.json"
+          jq -e --arg version "$EXPECTED" --arg deployment "$EXPECTED_DEPLOYMENT" '
+            .success and .result.deployments[0].id==$deployment
+            and (.result.deployments[0].versions|length)==1
+            and (.result.deployments[0].versions[0].version_id==$version)
+            and (.result.deployments[0].versions[0].percentage==100)
+          ' "$RUNNER_TEMP/staging-immediate.json" >/dev/null
+          # Compare all variable values, secret NAMES, D1 IDs, runtime flags.
+          # Never expose passwords or other variable values in logs.
+          fingerprint() {
+            jq -S '{plain:([.result.bindings[]|select(.type=="plain_text")|{name,text}]|sort_by(.name)),
+              secrets:([.result.bindings[]|select(.type=="secret_text")|.name]|sort),
+              d1:([.result.bindings[]|select(.type=="d1")|{name,id}]|sort_by(.name)),
+              compatibility_date:.result.compatibility_date,
+              compatibility_flags:(.result.compatibility_flags//[]|sort)}' "$1" > "$2"
+          }
+          fingerprint "$RUNNER_TEMP/bindings.json" "$RUNNER_TEMP/staging-bindings-before.fingerprint"
+          fingerprint "$RUNNER_TEMP/staging-settings-immediate.json" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint"
+          cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-immediate.fingerprint" ||
+            { echo 'Staging Worker settings changed since preflight; stop'; exit 1; }
+          # Strict mode refuses unexpected Script-API ownership transfer.
+          ./api/node_modules/.bin/wrangler deploy --config api/wrangler.jsonc --env staging --keep-vars --strict
+          curl -fsS -H "$auth" "$base/deployments" > "$RUNNER_TEMP/staging-new.json"
+          curl -fsS -H "$auth" "$base/settings" > "$RUNNER_TEMP/staging-new-settings.json"
+          jq -e --arg version "$EXPECTED" --arg deployment "$EXPECTED_DEPLOYMENT" '
+            .success and .result.deployments[0].id!=$deployment
+            and (.result.deployments[0].versions|length)==1
+            and (.result.deployments[0].versions[0].version_id!=$version)
+            and (.result.deployments[0].versions[0].percentage==100)
+          ' "$RUNNER_TEMP/staging-new.json" >/dev/null
+          fingerprint "$RUNNER_TEMP/staging-new-settings.json" "$RUNNER_TEMP/staging-bindings-after.fingerprint"
+          cmp -s "$RUNNER_TEMP/staging-bindings-before.fingerprint" "$RUNNER_TEMP/staging-bindings-after.fingerprint" ||
+            { echo 'Staging Worker settings/secrets/D1 changed after deploy; STOP'; exit 1; }
+          curl -fsS --retry 4 --retry-all-errors --max-time 15 \
+            https://api-staging.x-reply-helper.top/health | jq -e '.ok==true' >/dev/null
+          code=$(curl -sS --max-time 15 -o "$RUNNER_TEMP/staging-auth.json" -w '%{http_code}' \
+            https://api-staging.x-reply-helper.top/v1/admin/dashboard)
+          [[ "$code" == "401" || "$code" == "403" ]] ||
+            { echo "Staging admin auth guard changed: HTTP $code"; exit 1; }
+          echo 'PASS: New Worker at 100%; existing vars/secrets/D1 and admin auth preserved'
+      - name: Final verified summary
+        if: success()
+        shell: bash
+        run: |
+          {
+            echo "### Staging Worker validation: $MODE"
+            echo "- Release source: $SOURCE_SHA"
+            echo "- Successful Staging QA source CI run: $CI_RUN_ID"
+            if [[ "$MODE" == "deploy" ]]; then
+              echo "- Previous Staging version: $EXPECTED; strict deploy and postflight succeeded"
+            else
+              echo "- Active Staging version preserved: $EXPECTED"
+            fi
+            echo "- No Production deployment, no remote D1 SQL, no Staging QA account override activated"
+          } >> "$GITHUB_STEP_SUMMARY"
