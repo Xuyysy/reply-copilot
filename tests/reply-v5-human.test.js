@@ -123,3 +123,19 @@ test("sensitive context anywhere in an accepted long post suppresses retrieval",
  const content="AI code bug ".repeat(710)+"my friend died yesterday";
  assert.deepEqual(selectReplyV5Examples(args(content)),[]);
 });
+
+test("V5.3 discourages habitual agreement openings without banning natural agreement or warmth",()=>{
+ for(const a of [args("做自媒体越来越难了","zh"),args("AI code has another bug","en"),args("quantum entanglement"),args("终于拿到offer了","zh")]){
+ const result=buildHumanV5Prompts(a),baseline=buildFastV4Prompts(a);
+ assert.ok(result.system.startsWith(baseline.system));
+ assert.match(result.system,/Friendliness does not require an agreement preface/);
+ assert.match(result.system,/确实.*的确.*没错.*太真实了/);
+ assert.match(result.system,/Do not swap one filler for another/);
+ assert.match(result.system,/at most one generic agreement opening unless explicitly requested/);
+ assert.match(result.system,/agreement marker inside a substantive sentence is fine/);
+ assert.match(result.system,/Do not force disagreement or remove natural support/);
+ assert.match(result.system,/Follow explicit personal voice and register/);
+ assert.ok(result.user.startsWith(baseline.user));
+ assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),baseline);
+ }
+});
