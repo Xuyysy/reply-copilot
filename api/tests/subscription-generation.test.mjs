@@ -300,6 +300,8 @@ test('Staging five-use selector safely targets unique username yyx13 only with v
    assert.deepEqual({...daily(f)},{used:0,reserved:1});
    await finishGeneration(f.env,'test-user',id(799),'QA username target',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
    assert.equal((await ack(f,799)).status,200);
+   // ACK rebinds the test session as an extension; /v1/usage is web-only.
+   f.sql.exec("UPDATE sessions SET kind='web'");
    assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,4);
    assert.deepEqual({...daily(f)},{used:1,reserved:0});
    assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500,'no payment plan mutation');
