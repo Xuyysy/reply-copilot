@@ -893,7 +893,7 @@
     if(action==='recover-generation'||action==='abandon-generation'){
       if(current.recovering)return;
       current.recovering=true;current.assistant?.showLoading('正在检查上一条生成…');
-      void safeSend({type:'REPLY_COPILOT_RECOVER_GENERATION',abandon:action==='abandon-generation'}).then(async response=>{
+      void safeSend({type:'REPLY_COPILOT_RECOVER_GENERATION',abandon:action==='abandon-generation',requestId:current.requestId}).then(async response=>{
         if(active!==current||current.cancelled)return;
         if(!response?.ok)throw Error(response?.error||'恢复未完成，请稍后再试。');
         await refreshAccount(current);

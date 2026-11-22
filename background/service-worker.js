@@ -277,9 +277,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void broadcastSettingsChanged();
     sendResponse({ ok: true }); return false;
   }
+  if(message?.type === "REPLY_COPILOT_LIST_PENDING_GENERATIONS"){
+    if(!fromExtensionPage){sendResponse({ok:false});return false;}
+    void deliveryCoordinator.listPending().then(
+      requests=>sendResponse({ok:true,requests}),
+      ()=>sendResponse({ok:false,requests:[]})
+    );
+    return true;
+  }
   if(message?.type === "REPLY_COPILOT_RECOVER_GENERATION"){
     if((!fromXPage&&!fromExtensionPage)||typeof message.abandon!=='boolean'){sendResponse({ok:false});return false;}
-    void deliveryCoordinator.recoverPending({abandon:message.abandon}).then(state=>{accountStates.invalidate();return sendResponse({ok:true,...state,...(state.raw?{result:parseAIOutput(state.raw),raw:undefined}:{})});},error=>sendResponse({ok:false,error:error?.message||'恢复失败，请重试。',code:error?.code||'NETWORK_ERROR'}));
+    void deliveryCoordinator.recoverPending({abandon:message.abandon,...(typeof message.requestId==='string'&&/^[0-9a-f-]{36}$/i.test(message.requestId)?{requestId:message.requestId}:{})}).then(state=>{accountStates.invalidate();return sendResponse({ok:true,...state,...(state.raw?{result:parseAIOutput(state.raw),raw:undefined}:{})});},error=>sendResponse({ok:false,error:error?.message||'恢复失败，请重试。',code:error?.code||'NETWORK_ERROR'}));
     return true;
   }
   if (message?.type === "REPLY_COPILOT_GENERATE") {
