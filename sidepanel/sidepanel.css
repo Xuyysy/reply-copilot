@@ -82,3 +82,10 @@ footer { background:var(--bg);border-color:var(--line); }
 
 .subscription-overage{margin-top:10px;padding:11px 12px;border:1px solid var(--xrh-pro-line,var(--line));border-radius:10px;background:var(--xrh-pro-surface,var(--soft));color:var(--text)}
 .subscription-overage p{margin:0 0 8px;font-size:12px;line-height:1.5}.subscription-overage .button{margin-top:4px}
+
+/* Local-only follow manager entry (does not affect reply composer). */
+.follow-manager-entry{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.follow-manager-entry h2{margin:0 0 5px}
+.follow-manager-entry p{margin:0;font-size:11px;line-height:1.55}
+.follow-manager-entry button{flex:0 0 auto;max-width:125px}
+@media(max-width:365px){.follow-manager-entry{flex-wrap:wrap}.follow-manager-entry button{max-width:none;width:100%}}

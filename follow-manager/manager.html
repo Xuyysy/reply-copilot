@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>互关助手 · X Reply Helper</title>
+  <link rel="stylesheet" href="../content/design-tokens.css">
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+<main class="container">
+  <header class="page-heading">
+    <img src="../icons/icon-48.png" width="44" height="44" alt="">
+    <div><p class="eyebrow">X REPLY HELPER</p><h1>互关助手</h1><p class="muted">免费分析 X 官方数据归档 · 全程在浏览器本地完成</p></div>
+  </header>
+
+  <section class="panel" aria-labelledby="import-heading">
+    <div class="heading-line"><h2 id="import-heading">导入关注数据</h2><span class="tag">不读取 Cookie · 不调用 X API</span></div>
+    <p>先到 <a href="https://x.com/settings/download_your_data" target="_blank" rel="noopener noreferrer">X 申请个人数据归档</a>，下载 ZIP 并解压。从 <code>data/</code> 文件夹选择对应的 <code>follower.js</code> 与 <code>following.js</code>。如果同类文件有多个 part 分片，请全部选中。</p>
+    <form id="archive-form">
+      <label class="field">归档所属 X 用户名
+        <input id="owner" name="owner" placeholder="例如 @yourhandle" autocomplete="off" maxlength="16" required>
+      </label>
+      <div class="file-grid">
+        <label class="field">粉丝名单（follower.js）
+          <input id="follower-files" type="file" accept=".js" multiple required aria-describedby="file-tip">
+        </label>
+        <label class="field">我关注的人（following.js）
+          <input id="following-files" type="file" accept=".js" multiple required aria-describedby="file-tip">
+        </label>
+      </div>
+      <p class="muted small" id="file-tip">仅选择解压后的名单文件，不要导入包含私信等敏感资料的整个 ZIP。每个文件限 32 MB，每组最多 25 万个账号。</p>
+      <label class="confirmation"><input type="checkbox" id="same-account" required> 我确认两组文件来自同一份、同一个 X 账号的官方归档。</label>
+      <div class="actions">
+        <button class="primary" id="import-button" type="submit">导入并分析</button>
+        <button class="secondary" id="load-saved" type="button">读取此账号的本地快照</button>
+        <button class="danger" id="delete-saved" type="button">清除此账号的数据</button>
+      </div>
+    </form>
+    <p role="status" aria-live="polite" id="feedback" class="feedback">尚未导入数据。</p>
+  </section>
+
+  <section class="panel" id="results-panel" aria-labelledby="results-heading" hidden>
+    <div class="heading-line"><h2 id="results-heading">关系分析</h2><span class="tag" id="snapshot-owner"></span></div>
+    <p class="muted small" id="snapshot-time"></p>
+    <div class="stats" aria-label="账号关系统计">
+      <div><strong id="count-mutual">0</strong><span>互相关注</span></div>
+      <div><strong id="count-not-following-back">0</strong><span>没回关我</span></div>
+      <div><strong id="count-i-have-not-followed-back">0</strong><span>我没回关</span></div>
+    </div>
+    <p class="notice">这些结果是导入归档时的快照，并非实时关注关系；没有回关不代表最近取关。部分归档只有数字 ID，打开 X 主页可查看具体账号。</p>
+    <nav class="tabs" aria-label="选择关系类型">
+      <button type="button" class="tab" data-kind="notFollowingBack" aria-pressed="true">没回关我</button>
+      <button type="button" class="tab" data-kind="iHaveNotFollowedBack" aria-pressed="false">我没回关</button>
+      <button type="button" class="tab" data-kind="mutual" aria-pressed="false">互相关注</button>
+    </nav>
+    <div class="list-tools">
+      <label class="field">筛选账号数字 ID
+        <input id="filter-id" type="search" inputmode="numeric" placeholder="输入用户 ID 中的一部分">
+      </label>
+      <button id="export-csv" type="button" class="secondary">导出当前列表 CSV</button>
+    </div>
+    <p class="muted small" id="result-count" role="status"></p>
+    <div id="result-list" class="result-list" role="list"></div>
+    <div class="pagination">
+      <button type="button" class="secondary" id="page-prev">上一页</button>
+      <span id="page-info" aria-live="polite">1 / 1</span>
+      <button type="button" class="secondary" id="page-next">下一页</button>
+    </div>
+  </section>
+  <footer>本功能不会读取 X 登录凭据、自动关注或取消关注，也不会把名单上传到 X Reply Helper 服务器。</footer>
+</main>
+<script type="module" src="manager.js"></script>
+</body>
+</html>

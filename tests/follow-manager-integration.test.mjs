@@ -1,0 +1,50 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {readFileSync} from "node:fs";
+
+const read = path => readFileSync(new URL("../" + path, import.meta.url), "utf8");
+
+test("offline follow manager ships inside every extension build and opens from native side panel", () => {
+  const html = read("sidepanel/sidepanel.html");
+  const js = read("sidepanel/sidepanel.js");
+  const build = read("scripts/build.js");
+  const page = read("follow-manager/manager.html");
+  assert.match(html, /id="nav-follow-manager"/);
+  assert.match(js, /chrome\.tabs\.create\(\{url:chrome\.runtime\.getURL\('follow-manager\/manager\.html'\)\}\)/);
+  assert.match(build, /"follow-manager"/);
+  assert.match(page, /content\/design-tokens\.css/);
+  assert.match(page, /id="follower-files"/);
+  assert.match(page, /id="following-files"/);
+  assert.match(page, /id="same-account"/);
+  assert.match(page, /id="delete-saved"/);
+  assert.match(page, /id="export-csv"/);
+  assert.match(page, /script type="module" src="manager\.js"/);
+});
+
+test("the MVP never obtains X session secrets or sends followers to an API", () => {
+  const manifest = JSON.parse(read("manifest.json"));
+  assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.permissions.includes("cookies"), false);
+  assert.equal(manifest.permissions.includes("scripting"), false);
+  assert.equal(manifest.host_permissions.some(p => /x\.com|twitter\.com/.test(p)), false);
+  for (const path of [
+    "follow-manager/archive.js", "follow-manager/store.js", "follow-manager/manager.js"
+  ]) {
+    const file = read(path);
+    assert.doesNotMatch(file, /chrome\.cookies|document\.cookie|auth_token|x-csrf-token|graphql|XMLHttpRequest|fetch\s*\(|sendBeacon|eval\s*\(|new Function/);
+  }
+  const page = read("follow-manager/manager.html");
+  assert.doesNotMatch(page, /<script[^>]+src="https?:\/\//);
+  assert.doesNotMatch(read("follow-manager/manager.js"), /chrome\.runtime\.sendMessage|chrome\.storage/);
+  assert.match(read("follow-manager/store.js"), /indexedDB\.open/);
+});
+
+test("follow manager does not touch existing AI, account, Worker, D1 or quota paths", () => {
+  const js = read("follow-manager/manager.js");
+  assert.doesNotMatch(js, /REPLY_COPILOT_|AccountClient|HostedAIClient|Quota|ReplyEngine|payment|subscription/);
+  const html = read("sidepanel/sidepanel.html");
+  assert.match(html, /id="momentum-control"/);
+  assert.match(html, /id="subscription-quota"/);
+  assert.match(html, /id="quick-style"/);
+  assert.match(html, /id="account-name"/);
+});
