@@ -11,13 +11,15 @@ export function subscriptionsEnabled(env: Env): boolean {
 // Staging-only, opt-in soft limit for ONE real verified subscriber.
 // Never fabricate a subscription/payment or edit the D1 ledger. The immutable
 // purchased plan remains 500/1000/1500/2000 in subscription_periods.
-export function effectiveDailySubscriptionLimit(env:Env,userId:string,normalLimit:number):number {
-  return env.ENVIRONMENT==='staging'&&
-    env.STAGING_QA_SUBSCRIPTION_FIVE==='1'&&
-    typeof env.STAGING_QA_SUBSCRIPTION_USER_ID==='string'&&
-    env.STAGING_QA_SUBSCRIPTION_USER_ID.length>0&&
-    env.STAGING_QA_SUBSCRIPTION_USER_ID===userId
-      ?Math.min(normalLimit,5):normalLimit;
+export function effectiveDailySubscriptionLimit(env:Env,userId:string,normalLimit:number,username:string|null=null):number {
+  if(env.ENVIRONMENT!=='staging'||env.STAGING_QA_SUBSCRIPTION_FIVE!=='1')return normalLimit;
+  const configuredId=env.STAGING_QA_SUBSCRIPTION_USER_ID?.trim();
+  const configuredUsername=env.STAGING_QA_SUBSCRIPTION_USERNAME?.trim();
+  // A configured UUID has priority; never fall through to a different user.
+  const targeted=configuredId
+    ?configuredId===userId
+    :Boolean(configuredUsername&&username&&configuredUsername.toLowerCase()===username.toLowerCase());
+  return targeted?Math.min(normalLimit,5):normalLimit;
 }
 
 export type SubscriptionAccount = {
@@ -41,6 +43,7 @@ const NONE: Readonly<SubscriptionAccount> = Object.freeze({
 type ActivePeriod = {
   id: string;
   plan_code: string;
+  account_username: string|null;
   daily_limit: number;
   start_at: number;
   end_at: number;
@@ -55,7 +58,7 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   if (!subscriptionsEnabled(env)) return { ...NONE };
   if (!Number.isSafeInteger(now) || now < 0) throw new ApiFailure(503, 'SUBSCRIPTION_CLOCK_INVALID', '订阅时间暂时不可用。');
 
-  const activeQuery = () => env.DB.prepare(`SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code
+  const activeQuery = () => env.DB.prepare(`SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code,u.username AS account_username
     FROM subscription_periods p
     JOIN subscription_plan_versions v ON v.id=p.plan_version_id
     JOIN subscription_orders o ON o.id=p.source_order_id AND o.user_id=p.user_id
@@ -80,7 +83,7 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   // before an independently approved Staging migration has been applied.
   const cryptoReady=env.ENVIRONMENT==='staging'&&env.BOLTUTIL_SCHEMA_READY==='1';
   const cryptoQuery=()=>env.DB.prepare(
-    "SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code FROM subscription_periods p "+
+    "SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code,u.username AS account_username FROM subscription_periods p "+
     "JOIN subscription_plan_versions v ON v.id=p.plan_version_id "+
     "JOIN subscription_orders o ON o.id=p.source_order_id AND o.user_id=p.user_id "+
     "JOIN boltutil_orders b ON b.subscription_order_id=o.id AND b.user_id=p.user_id "+
@@ -112,7 +115,7 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   const usage = await env.DB.prepare(
     'SELECT used,reserved FROM subscription_daily_usage WHERE period_id=? AND day_index=?'
   ).bind(row.id,window.dayIndex).first<{used:number;reserved:number}>();
-  const qaLimit=effectiveDailySubscriptionLimit(env,userId,row.daily_limit);
+  const qaLimit=effectiveDailySubscriptionLimit(env,userId,row.daily_limit,row.account_username);
   if(qaLimit<row.daily_limit&&(usage?.used??0)+(usage?.reserved??0)>qaLimit)
     throw new ApiFailure(409,'STAGING_QA_DAY_NOT_FRESH','该测试账户今天已使用超过 5 次，请等待下个订阅日或使用独立测试账户。');
   let quota: ReturnType<typeof subscriptionDailyAvailability>;

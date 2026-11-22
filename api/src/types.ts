@@ -44,6 +44,8 @@ export interface Env {
   /** Disabled-by-default 5-use QA ceiling, only for one authenticated Staging subscriber. */
   STAGING_QA_SUBSCRIPTION_FIVE?: string;
   STAGING_QA_SUBSCRIPTION_USER_ID?: string;
+  /** Optional unique Staging username selector; ID selector takes precedence. */
+  STAGING_QA_SUBSCRIPTION_USERNAME?: string;
   SUBSCRIPTION_PURCHASES_ENABLED?: string;
   SUBSCRIPTION_CHECKOUT_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;

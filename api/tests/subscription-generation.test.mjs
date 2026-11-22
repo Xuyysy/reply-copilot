@@ -278,6 +278,27 @@ test('Staging QA five-use cap still enforces atomic final subscription slot with
  }finally{f.sql.close();}
 });
 
+test('Staging five-use selector safely targets unique username yyx13 only with verified subscription',async()=>{
+ const f=fixture();try{
+   setup(f);
+   f.sql.exec("UPDATE users SET username='yyx13' WHERE id='test-user'");
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='YYX13';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID=undefined;
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,5,'unique username matches case-insensitively');
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='another-user';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'nonmatching username cannot be affected');
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='yyx13';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID='some-other-id';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'ID selector wins; no fallback to alternate username');
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID=undefined;
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='0';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'disabled flag must leave real plan unchanged');
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500,'no payment plan mutation');
+ }finally{f.sql.close();}
+});
+
 test('STAGING QA five-subscription-use walkthrough falls back to one free, one paid, then purchase required',async()=>{
  const f=fixture();try{
    setup(f,{used:495,paid:1});
