@@ -13,14 +13,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "下班前五分钟才说这个需求今天要上线",
     "replies": [
-      "这时间点选得挺讲究",
-      "五分钟是留给你关电脑的吧",
-      "要是今天必须上线，为什么现在才说"
+      "给个提前量也好啊，就剩五分钟了",
+      "五分钟连部署日志都看不完吧"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-2",
@@ -34,14 +34,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "开了两个小时的会，结论是下周再开一次",
     "replies": [
-      "下周那个会有结论吗",
-      "所以今天开的是预告片",
-      "两个小时都没把下一步定下来"
+      "两小时下来连个负责人都没定吗",
+      "这会开得跟预告片似的"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-3",
@@ -79,14 +79,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "AI 写的代码能跑就行，为什么非要看懂每一行",
     "replies": [
-      "出了问题总得知道去哪找吧",
-      "能跑的定义包括下次还能改吗",
-      "小脚本和长期维护的服务不是一回事"
+      "临时脚本可能无所谓，接手维护的时候就不一样了",
+      "能跑是一回事，出问题能不能定位又是一回事"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-5",
@@ -102,14 +102,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "现在最烦的不是AI回答错，是等半天发现它答错了",
     "replies": [
-      "两种时间都浪费了",
-      "加载动画越长越有落差",
-      "如果不确定能早点说就好"
+      "最怕等了半天还得从头验证一遍",
+      "进度条走完那一刻才知道白等了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-6",
@@ -124,14 +124,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "熬了一个星期，终于把第一个付费功能上线了",
     "replies": [
-      "第一单应该会记很久",
-      "先别急着看后台，今晚睡觉",
-      "能收钱比本地跑通多了好多道坎"
+      "恭喜！第一个付费功能上线，值得开心一下",
+      "熬了一周终于能看到真实用户怎么用了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-7",
@@ -147,14 +147,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "月薪两万但每天工作十二小时，和一万五准点下班选哪个",
     "replies": [
-      "先看看通勤多久",
-      "下班以后那四个小时也值钱啊",
-      "如果能学到东西，前者的期限也很重要"
+      "我选一万五，每天能多出四个小时",
+      "要是两万那份只忙一两个月，我倒是会考虑"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-8",
@@ -169,14 +169,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "买东西最难受的不是贵，是买完发现根本没用几次",
     "replies": [
-      "还得找地方放它",
-      "闲鱼见",
-      "租来试几天也许比买便宜"
+      "最烦的是还得给它腾个地方",
+      "闲鱼又多一件几乎全新的东西"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-9",
@@ -191,14 +191,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "每个月十几个软件订阅，已经不记得哪个在扣钱了",
     "replies": [
-      "先把账单打开吧",
-      "最稳定的是它们的收入",
-      "年度订阅更容易忘"
+      "光是弄清楚哪笔是哪家的就够烦的",
+      "特别是年付的，扣钱那天才想起来"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-10",
@@ -213,14 +213,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "练完腿回家发现电梯坏了",
     "replies": [
-      "今天是真走不动了",
-      "楼梯突然变成第二个训练计划",
-      "上楼还好说，下楼才费劲"
+      "腿练完了，楼梯还在等你",
+      "下楼的时候估计更难受"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-11",
@@ -258,14 +258,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "终于第一次连续跑完五公里，中途没走路",
     "replies": [
-      "可以啊，这个挺实在的",
-      "下一次别急着卷配速",
-      "连续跑完这关过了就好安排后面的训练了"
+      "厉害啊！第一次五公里全程没走，值得记一下",
+      "能连续跑完的那一下应该挺开心的"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-13",
@@ -302,14 +302,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "外卖满减凑了十块钱，最后多花十五",
     "replies": [
-      "本来只想吃个饭",
-      "平台就喜欢这样的数学题",
-      "下次直接按总价看省事"
+      "本来只想吃个饭，怎么还做上数学题了",
+      "越凑越贵也是绝了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-15",
@@ -324,14 +324,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "周日晚上永远比周一早上难熬",
     "replies": [
-      "九点开始就不太对劲了",
-      "明明还没上班",
-      "周一的事要是能少一点，周日也能过好"
+      "明明还有几个小时假期，心已经到周一了",
+      "周日晚上能不能别过那么快"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-16",
@@ -368,14 +368,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "发认真写的帖子没人看，随便发句吐槽却几万浏览",
     "replies": [
-      "吐槽是发给谁看的，认真帖又是发给谁的",
-      "算法先下班了",
-      "可能不是质量问题，是进入话题的门槛不一样"
+      "认真写的那篇说不定更值得被看见",
+      "随手一句可能刚好戳中很多人了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-18",
@@ -390,14 +390,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "账号终于破一千粉了",
     "replies": [
-      "一千个真实的人，挺不容易的",
-      "截图先存一下",
-      "接下来看看哪些内容能把人留下来"
+      "恭喜破千！从零积攒起来可不容易",
+      "四位数了，值得截张图留念"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-19",
@@ -412,14 +412,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "论文改到第六版，老师说第一版那个标题还不错",
     "replies": [
-      "这句话多少有点杀伤力",
-      "文件可以改名final_final了",
-      "标题其实可以单独先确认下来"
+      "第六版看到这句话真的会沉默",
+      "第一版文件还留着吧哈哈"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-20",
@@ -434,14 +434,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "赢一把排位只要二十分钟，输一把之后能气一晚",
     "replies": [
-      "下一把按钮有点危险",
-      "晚上最好别点继续",
-      "那一把的情绪都带进下一把了"
+      "气归气，最怕又点开下一把",
+      "那个想把分赢回来的念头太难忍了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-21",
@@ -456,14 +456,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "提前三个小时到机场，航班延误四小时",
     "replies": [
-      "在机场过半天了",
-      "早到的奖励是什么",
-      "这种时候最烦的是不知道还要等多久"
+      "早到三个小时再延误四小时，半天搭进去了",
+      "希望起飞时间别再往后改了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-22",
@@ -478,14 +478,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "一个人做饭到底怎么买菜才不会剩一冰箱",
     "replies": [
-      "买能冻的先",
-      "青菜才是最难处理的",
-      "先按两顿能吃完的量买可能简单点"
+      "青菜买当天的，肉分小袋冷冻会方便很多",
+      "我会先按两顿的量买，吃完再补"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-23",
@@ -500,14 +500,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Spent an hour in a meeting to decide who should schedule the next meeting.",
     "replies": [
-      "calendar's looking very productive",
-      "could've been a calendar invite",
-      "Who actually owns the decision now?"
+      "an hour and not a single decision?",
+      "that really could've been a calendar invite"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-24",
@@ -522,14 +522,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My boss sent a 'quick question' at 5:59 on Friday.",
     "replies": [
-      "the timing is immaculate",
-      "nothing quick about that notification",
-      "I'd want to know if it actually needs an answer today."
+      "5:59 is such a rough time to see that notification",
+      "hope it really was a quick question"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-25",
@@ -611,14 +611,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Finally shipped the feature I've been working on for two weeks.",
     "replies": [
-      "nice, go close those tabs",
-      "hope the deploy button gets a break",
-      "The first bit of real feedback should be interesting."
+      "congrats!! two weeks of work finally out in the world",
+      "hope you get a good night off now"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-29",
@@ -633,14 +633,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Would you take $20k more a year if it meant losing your weekends?",
     "replies": [
-      "how many weekends are we talking",
-      "the fine print is doing a lot of work here",
-      "I'd want an end date on that arrangement."
+      "I'd keep the weekends, personally",
+      "maybe for a few months, but not indefinitely"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-30",
@@ -655,14 +655,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Found three subscriptions I forgot I was paying for.",
     "replies": [
-      "cancel button time",
-      "the most loyal customer is an asleep one",
-      "Annual renewals are especially easy to miss."
+      "annual renewals are the sneaky ones",
+      "the worst part is working out what each charge is for"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-31",
@@ -677,14 +677,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Bought a fancy coffee machine and now I still get coffee on the way to work.",
     "replies": [
-      "the counter looks great though",
-      "convenience wins again",
-      "The routine was probably the hard part to replace."
+      "the morning coffee stop just hits differently",
+      "maybe the machine is more of a weekend thing"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-32",
@@ -721,14 +721,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Ran my first 5k without stopping today.",
     "replies": [
-      "that's a good milestone",
-      "don't let the watch talk you into a 10k tomorrow",
-      "Now you've got a distance you know you can finish."
+      "first nonstop 5k! congrats",
+      "bet crossing that finish felt pretty good"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-34",
@@ -809,14 +809,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My cat has chosen the box over the very expensive bed.",
     "replies": [
-      "keep the receipt",
-      "at least the box was included",
-      "The enclosed sides might be what it likes."
+      "the box was the real purchase all along",
+      "at least now you know what to get the cat next time"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-38",
@@ -853,14 +853,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Spent days on an article that got 50 views. A random joke got 30k.",
     "replies": [
-      "the internet has its own schedule",
-      "at least you know which one people could finish",
-      "The joke probably asked less of a stranger scrolling by."
+      "hope the article finds its people too",
+      "the joke got people in the door, now if only they'd read the article"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-40",
@@ -875,14 +875,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Hit 1,000 newsletter subscribers this morning.",
     "replies": [
-      "that's a lot of inboxes",
-      "save that screenshot",
-      "I'd be curious how many came through word of mouth."
+      "congrats on 1k! that's a lot of people choosing to hear from you",
+      "four digits looks pretty good on that subscriber count"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-41",
@@ -897,14 +897,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My advisor's latest edit is to change the title back to the original one.",
     "replies": [
-      "that file history has seen things",
-      "version one quietly won",
-      "Might be worth settling the title separately from the rest."
+      "hope you still have version one saved",
+      "the title really took the scenic route"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-42",
@@ -919,14 +919,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Won one ranked game, lost two, and somehow it's midnight.",
     "replies": [
-      "the exit button is right there",
-      "one more is a dangerous phrase",
-      "The second loss probably wasn't the best time to queue again."
+      "the urge to win the points back is dangerous",
+      "and that's how one more game turns into six"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-43",
@@ -963,14 +963,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "3時間バグと格闘した結果、変数名の打ち間違いだった",
     "replies": [
-      "一番見つけにくいやつ",
-      "3時間分の経験値は入ったと思いたい",
-      "エラーがもう少し親切ならなあ"
+      "3時間かけてそこにたどり着くのはつらい",
+      "変数名だったか…お疲れさまです"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-45",
@@ -984,14 +984,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "会議が長引いた結果、次の会議の日程だけ決まった",
     "replies": [
-      "今日はそれだけ？",
-      "会議のための会議だ",
-      "決める人がいなかったのかな"
+      "それだけで終わっちゃったのか…",
+      "次はちゃんと何か決まるといいですね"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-46",
@@ -1006,14 +1006,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "脚トレの翌日にエレベーター点検はきつい",
     "replies": [
-      "下りがきつそう",
-      "もう一種目追加された",
-      "今日は無理せずゆっくりで"
+      "下りの方がきつそう",
+      "脚トレ延長戦だ"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-47",
@@ -1071,14 +1071,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "버그 잡느라 세 시간 썼는데 알고 보니 오타였다",
     "replies": [
-      "이런 게 제일 안 보임",
-      "코드는 억울하겠네",
-      "오류 메시지에 위치라도 나왔으면"
+      "세 시간 만에 오타 발견하면 진짜 허탈하죠",
+      "코드가 아니라 변수명이 범인이었네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-50",
@@ -1093,14 +1093,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "한 시간 회의하고 다음 회의 날짜만 잡음",
     "replies": [
-      "그래서 오늘 정한 건 날짜뿐인가요",
-      "달력만 열일했네",
-      "결정할 사람이 없었던 건가"
+      "한 시간 썼는데 날짜만 정해진 거네요",
+      "다음 회의에서는 뭔가 결정되면 좋겠네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-51",
@@ -1115,14 +1115,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "하체 운동했는데 엘리베이터 점검 중",
     "replies": [
-      "내려갈 때가 진짜 힘들겠다",
-      "운동이 아직 안 끝났네요",
-      "오늘은 좀 천천히 움직여야겠네"
+      "내려갈 때가 더 힘들겠어요",
+      "하체 운동 연장전이네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-52",
@@ -1158,14 +1158,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "혼자 사는데 채소 남기지 않고 먹는 방법 있나요",
     "replies": [
-      "잎채소가 제일 어렵죠",
-      "냉동실이 다 해결해 주더라고요",
-      "두 끼 먹을 양만 사는 것부터 괜찮을 듯"
+      "잎채소는 조금씩 사고 나머지는 냉동해 두면 편할 것 같아요",
+      "두 끼 정도 먹을 양만 사는 건 어때요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "lccc-toy-train-19",
@@ -1189,7 +1189,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "private_or_familiar_context"
   },
   {
     "id": "lccc-toy-train-29",
@@ -1261,7 +1262,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-112",
@@ -1285,7 +1287,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_agreement"
   },
   {
     "id": "lccc-toy-train-150",
@@ -1358,7 +1361,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-249",
@@ -1381,7 +1385,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unrelated_first_person_tangent"
   },
   {
     "id": "lccc-toy-train-123",
@@ -1404,7 +1409,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unsupported_claim_context"
   },
   {
     "id": "uo-record-114",
@@ -1526,7 +1532,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "predictive_flattery"
   },
   {
     "id": "uo-record-1273",
@@ -1600,7 +1607,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "agreement_and_restatement"
   },
   {
     "id": "lccc-toy-train-291-turn-0",
@@ -1625,7 +1633,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "asks_for_already_given_detail"
   },
   {
     "id": "lccc-toy-train-573-turn-0",
@@ -1674,7 +1683,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "restatement"
   },
   {
     "id": "lccc-toy-train-902-turn-0",
@@ -1749,7 +1759,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unsupported_assumption"
   },
   {
     "id": "lccc-toy-train-141-turn-2",
@@ -1798,7 +1809,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-218-turn-3",
@@ -1899,7 +1911,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_praise"
   },
   {
     "id": "lccc-toy-train-683-turn-7",
@@ -1948,7 +1961,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "dismisses_frustration"
   },
   {
     "id": "lccc-toy-train-887-turn-4",
@@ -1973,7 +1987,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_agreement"
   },
   {
     "id": "lccc-toy-train-978-turn-1",
@@ -2050,7 +2065,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 7.666666666666667,
       "annotation_confidence": 79
-    }
+    },
+    "retrievalDisabled": "answers_different_question"
   },
   {
     "id": "uo-record-1232",
@@ -2103,7 +2119,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 33.666666666666664,
       "annotation_confidence": 72.33333333333333
-    }
+    },
+    "retrievalDisabled": "asks_for_already_given_detail"
   },
   {
     "id": "uo-record-2397",
@@ -2183,7 +2200,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 26.6,
       "annotation_confidence": 75.4
-    }
+    },
+    "retrievalDisabled": "dismissive_recommendation"
   },
   {
     "id": "uo-record-1137",
@@ -2210,7 +2228,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 29.333333333333332,
       "annotation_confidence": 97
-    }
+    },
+    "retrievalDisabled": "redirects_complaint_to_blame"
   },
   {
     "id": "uo-record-1450",
@@ -2311,7 +2330,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unverified_first_person_experience"
   },
   {
     "id": "lccc-toy-train-306-turn-1",
@@ -2336,7 +2356,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "private_or_familiar_context"
   },
   {
     "id": "lccc-toy-train-320-turn-1",
@@ -2360,7 +2381,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_question"
   },
   {
     "id": "lccc-toy-train-678-turn-2",
@@ -2433,7 +2455,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unverified_first_person_experience"
   },
   {
     "id": "lccc-toy-train-535-turn-2",
@@ -2542,14 +2565,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "准备了好久的面试还是被拒了，有点难受",
     "replies": [
-      "准备了这么久，难受也很正常啊",
-      "今天先别复盘了，结果已经够烦的了",
-      "这一家的结果不一定能说明你准备得怎么样"
+      "准备了那么久，收到这个结果肯定不好受",
+      "真可惜，希望下一次碰到更合适的机会"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-4",
@@ -2564,14 +2587,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "连续写了半个月原创，感觉好像没人看到",
     "replies": [
-      "半个月都在认真写，没回应确实挺磨人的",
-      "能先有一两个会接话的人就好了",
-      "有人看完但没互动也有可能，别只看点赞数"
+      "认真写了半个月，没什么回应挺磨人的",
+      "希望那几篇慢慢能被更多人看到"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-5",
@@ -2630,14 +2653,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Didn't get the job I'd spent weeks preparing for. Pretty gutted.",
     "replies": [
-      "ugh, that wait makes it even harder. sorry",
-      "no need to be productive about it tonight",
-      "One rejection doesn't tell you everything about how the interview went."
+      "ah that sucks, especially after weeks of prep",
+      "sorry it didn't work out. hope the next one goes better"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-8",
@@ -2652,14 +2675,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Been writing every week and sometimes it feels like nobody's reading.",
     "replies": [
-      "that part of writing can feel really lonely",
-      "the quiet weeks are tough",
-      "A few people who keep coming back can matter more than the visible count."
+      "hope those posts find the right readers eventually",
+      "putting in the work every week with no response sounds pretty rough"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-9",
@@ -2716,14 +2739,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "第一志望の面接落ちた。結構へこんでる",
     "replies": [
-      "それはへこむよね。準備お疲れさま",
-      "今日はちょっと休んでもいいと思う",
-      "一社の結果だけでは分からないことも多いよ"
+      "第一志望だったんですね。それはへこみますよね",
+      "準備お疲れさまでした。次はいいご縁があるといいですね"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-12",
@@ -2802,14 +2825,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "열심히 준비한 면접에서 떨어졌다. 좀 속상하네",
     "replies": [
-      "많이 준비한 만큼 속상하겠어요",
-      "오늘은 다른 생각 좀 해도 괜찮죠",
-      "한 번의 결과로 다 판단할 수는 없을 것 같아요"
+      "많이 준비한 만큼 속상하시겠어요",
+      "다음에는 더 잘 맞는 기회가 있으면 좋겠네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-16",
@@ -2827,6 +2850,68 @@ export const REPLY_V5_EXAMPLES = [
       "시간 들인 글도 좀 읽어줬으면 좋겠네요",
       "참 알다가도 모르겠어요",
       "짧은 글은 처음 보는 사람도 반응하기 편한가 봐요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-original-1",
+    "language": "zh",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "电影",
+      "上映",
+      "电影票",
+      "影片"
+    ],
+    "post": "这个月想看的两部电影居然同一天上映",
+    "replies": [
+      "这下得排个先后顺序了",
+      "能不能一天连着看两场哈哈"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-original-2",
+    "language": "en",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "camera",
+      "video",
+      "lens"
+    ],
+    "post": "The video quality on this little camera is way better than I expected.",
+    "replies": [
+      "nice! curious what it does in low light",
+      "wild how much you can get out of a camera that small now"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-original-3",
+    "language": "zh",
+    "topic": "work",
+    "scene": "complaint",
+    "keywords": [
+      "加班",
+      "五一",
+      "假期",
+      "放假"
+    ],
+    "post": "别人都在准备五一出去玩，我还在等公司通知要不要加班",
+    "replies": [
+      "假期都快到了还不通知，最烦这种",
+      "希望最后能正常放假，哪怕早点说也好"
     ],
     "source": {
       "kind": "synthetic",
