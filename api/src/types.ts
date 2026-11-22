@@ -1,6 +1,8 @@
 export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
+  /** Staging-only prompt experiment: absent/v4, v3 (comparison), legacy (rollback). */
+  STAGING_REPLY_PROMPT_VERSION?: string;
   WEB_ORIGIN: string;
   API_ORIGIN: string;
   EXTENSION_ORIGIN?: string;
