@@ -162,13 +162,221 @@ test('exhausted subscription with no free or permanent credits denies a new gene
  }finally{f.sql.close();}
 });
 
-test('concurrent reservation calls can start at most one active model generation',async()=>{
+test('two independent subscription requests reserve concurrently and settle separately',async()=>{
  const f=fixture();try{
    setup(f);
    const result=await Promise.allSettled([reserve(f,41),reserve(f,42)]);
-   assert.equal(result.filter(r=>r.status==='fulfilled').length,1,JSON.stringify(result.map(r=>r.status)));
-   assert.equal(daily(f).reserved,1);
-   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,1);
+   assert.equal(result.filter(r=>r.status==='fulfilled').length,2,JSON.stringify(result.map(r=>r.status)));
+   assert.deepEqual({...daily(f)},{used:0,reserved:2});
+   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations WHERE state='reserved'").get().n,2);
+   await finishGeneration(f.env,'test-user',id(42),'second complete',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   assert.equal((await ack(f,42)).status,200);
+   assert.deepEqual({...daily(f)},{used:1,reserved:1});
+   await finishGeneration(f.env,'test-user',id(41),null,{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:8});
+   assert.deepEqual({...daily(f)},{used:1,reserved:0});
+ }finally{f.sql.close();}
+});
+test('daily subscription quota still prevents parallel over-allocation',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499});
+   f.sql.exec("UPDATE credit_batches SET remaining_credits=0,consumed_credits=grant_credits WHERE bucket='free'; UPDATE credit_accounts SET free_balance=0");
+   assert.equal((await reserve(f,71)).kind,'new');
+   await assert.rejects(reserve(f,72),e=>e.code==='INSUFFICIENT_CREDITS');
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+ }finally{f.sql.close();}
+});
+
+test('cross-source race uses one last subscription slot and one free credit, with out-of-order idempotent ACKs',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499,paid:1});
+   const attempts=await Promise.allSettled([reserve(f,91),reserve(f,92)]);
+   assert.equal(attempts.filter(x=>x.status==='fulfilled').length,2,JSON.stringify(attempts.map(x=>x.status)));
+   const sources=[91,92].map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.equal(sources.filter(x=>x.source===null).length,1,'exactly one request may reserve the final subscription slot');
+   assert.equal(sources.filter(x=>x.source==='free').length,1,'the other request must use a separate free lot');
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.equal(f.sql.prepare("SELECT free_generation_reserved FROM credit_accounts").get().free_generation_reserved,1);
+   for(const {n} of sources)await finishGeneration(f.env,'test-user',id(n),'valid response',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   const free=sources.find(x=>x.source==='free').n,sub=sources.find(x=>x.source===null).n;
+   assert.equal((await ack(f,free)).status,200);
+   assert.equal((await ack(f,free)).body.alreadyConfirmed,true);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1},'free ACK must not consume a subscription slot');
+   assert.equal((await ack(f,sub)).status,200);
+   assert.equal((await ack(f,sub)).body.alreadyConfirmed,true);
+   assert.deepEqual({...daily(f)},{used:500,reserved:0});
+   assert.deepEqual({...f.sql.prepare("SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts").get()},{free_balance:199,paid_balance:1,free_generation_reserved:0,paid_generation_reserved:0});
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,1);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,1);
+ }finally{f.sql.close();}
+});
+
+test('Staging-only subscriber-scoped five-use QA ceiling preserves paid plan proof and falls back free then paid',async()=>{
+ const f=fixture();try{
+   setup(f,{paid:1});
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID='other-account';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'override must never affect another subscriber');
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID='test-user';
+   let state=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(state.body.subscription.dailyLimit,5);
+   assert.equal(state.body.subscription.remainingToday,5);
+   assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500,'purchased subscription stays 500/day in D1');
+   for(let i=1;i<=5;i++){
+     const n=700+i;
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,null);
+     await finishGeneration(f.env,'test-user',id(n),'valid draft',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     const result=await ack(f,n);
+     assert.equal(result.status,200,JSON.stringify(result.body));
+     assert.equal(result.body.subscription.remainingToday,5-i);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true);
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   state=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(state.body.subscription.remainingToday,0);
+   assert.equal(state.body.quota.freeRemaining,1);
+   assert.equal(state.body.quota.paidRemaining,1);
+   for(const [n,source] of [[706,'free'],[707,'paid']]){
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,source);
+     await finishGeneration(f.env,'test-user',id(n),'valid fallback',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   assert.equal((await f.call('/v1/entitlements',{method:'GET'})).body.status,'credits_exhausted');
+   await assert.rejects(reserve(f,708),e=>e.code==='INSUFFICIENT_CREDITS');
+   assert.deepEqual({...daily(f)},{used:5,reserved:0});
+   assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,5);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,2);
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='0';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,495,'disabling QA must restore actual paid entitlement without corrupting ledger');
+ }finally{f.sql.close();}
+});
+
+test('Staging QA five-use cap still enforces atomic final subscription slot with concurrent free and paid',async()=>{
+ const f=fixture();try{
+   setup(f,{used:4,paid:1});
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID='test-user';
+   const ns=[751,752,753];
+   const attempted=await Promise.allSettled(ns.map(n=>reserve(f,n)));
+   assert.equal(attempted.filter(x=>x.status==='fulfilled').length,3,JSON.stringify(attempted.map(x=>x.status==='rejected'?x.reason?.code:'ok')));
+   const sources=ns.map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.deepEqual(sources.map(x=>x.source??'subscription').sort(),['free','paid','subscription']);
+   assert.deepEqual({...daily(f)},{used:4,reserved:1});
+   for(const {n} of [...sources].reverse()){
+     await finishGeneration(f.env,'test-user',id(n),'valid draft',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true);
+   }
+   assert.deepEqual({...daily(f)},{used:5,reserved:0});
+   assert.deepEqual({...f.sql.prepare('SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts').get()},{free_balance:0,paid_balance:0,free_generation_reserved:0,paid_generation_reserved:0});
+   await assert.rejects(reserve(f,754),e=>e.code==='INSUFFICIENT_CREDITS');
+ }finally{f.sql.close();}
+});
+
+test('Staging five-use selector safely targets unique username yyx13 only with verified subscription',async()=>{
+ const f=fixture();try{
+   setup(f);
+   f.sql.exec("UPDATE users SET username='yyx13' WHERE id='test-user'");
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='YYX13';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID=undefined;
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,5,'unique username matches case-insensitively');
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='another-user';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'nonmatching username cannot be affected');
+   f.env.STAGING_QA_SUBSCRIPTION_USERNAME='yyx13';
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID='some-other-id';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'ID selector wins; no fallback to alternate username');
+   f.env.STAGING_QA_SUBSCRIPTION_USER_ID=undefined;
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='0';
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,500,'disabled flag must leave real plan unchanged');
+   f.env.STAGING_QA_SUBSCRIPTION_FIVE='1';
+   // Prove username selection applies to an actual atomic subscription reservation and ACK.
+   assert.equal((await reserve(f,799)).kind,'new');
+   assert.deepEqual({...daily(f)},{used:0,reserved:1});
+   await finishGeneration(f.env,'test-user',id(799),'QA username target',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+   assert.equal((await ack(f,799)).status,200);
+   // ACK rebinds the test session as an extension; /v1/usage is web-only.
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   assert.equal((await f.call('/v1/usage',{method:'GET'})).body.subscription.remainingToday,4);
+   assert.deepEqual({...daily(f)},{used:1,reserved:0});
+   assert.equal(f.sql.prepare("SELECT daily_limit FROM subscription_periods WHERE id='sub-period'").get().daily_limit,500,'no payment plan mutation');
+ }finally{f.sql.close();}
+});
+
+test('STAGING QA five-subscription-use walkthrough falls back to one free, one paid, then purchase required',async()=>{
+ const f=fixture();try{
+   setup(f,{used:495,paid:1});
+   // In-memory Staging fixture ONLY. Real subscription CHECK allows only 500/1000/1500/2000.
+   // A legitimate 500/day paid period with 495 used has exactly FIVE remaining for QA.
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   for(let i=1;i<=5;i++){
+     const n=900+i;
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,null,'first five uses must be subscription');
+     assert.deepEqual({...daily(f)},{used:494+i,reserved:1});
+     await finishGeneration(f.env,'test-user',id(n),'draft '+i,{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     const settled=await ack(f,n);
+     assert.equal(settled.status,200,JSON.stringify(settled.body));
+     assert.equal(settled.body.subscription.dailyLimit,500,'original paid plan remains unchanged');
+     assert.equal(settled.body.subscription.remainingToday,5-i);
+     assert.deepEqual({...daily(f)},{used:495+i,reserved:0});
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   let status=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(status.status,200);
+   assert.equal(status.body.subscription.remainingToday,0);
+   assert.equal(status.body.quota.freeRemaining,1);
+   assert.equal(status.body.quota.paidRemaining,1);
+   assert.equal(status.body.availableNow,2);
+   for(const [n,source] of [[906,'free'],[907,'paid']]){
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,source);
+     await finishGeneration(f.env,'test-user',id(n),'next draft',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true,'duplicate ACK must not consume again');
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   status=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(status.status,200);
+   assert.equal(status.body.availableNow,0);
+   assert.deepEqual({...status.body.quota},{freeRemaining:0,paidRemaining:0,totalRemaining:0});
+   assert.equal(status.body.subscription.remainingToday,0);
+   const entitlement=await f.call('/v1/entitlements',{method:'GET'});
+   assert.equal(entitlement.body.status,'credits_exhausted');
+   await assert.rejects(reserve(f,908),error=>error.code==='INSUFFICIENT_CREDITS');
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,5);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,2);
+ }finally{f.sql.close();}
+});
+
+test('STAGING QA five-use cap cannot overbook last slot; concurrent overflow reserves free then paid exactly once',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499,paid:1});
+   // Keep legitimate 500/day DB invariant; 499 used leaves the final 1 of five test uses.
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   const ns=[941,942,943];
+   const outcomes=await Promise.allSettled(ns.map(n=>reserve(f,n)));
+   assert.equal(outcomes.filter(o=>o.status==='fulfilled').length,3,JSON.stringify(outcomes.map(o=>o.status==='rejected'?o.reason?.code:'ok')));
+   const sources=ns.map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.deepEqual(sources.map(x=>x.source??'subscription').sort(),['free','paid','subscription']);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.deepEqual({...f.sql.prepare("SELECT free_generation_reserved,paid_generation_reserved FROM credit_accounts").get()},{free_generation_reserved:1,paid_generation_reserved:1});
+   const sequence=[...sources].sort((x,y)=>({paid:0,free:1,subscription:2}[x.source??'subscription'])-({paid:0,free:1,subscription:2}[y.source??'subscription']));
+   for(const {n} of sequence){
+     await finishGeneration(f.env,'test-user',id(n),'ready',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true);
+   }
+   assert.deepEqual({...daily(f)},{used:500,reserved:0});
+   assert.deepEqual({...f.sql.prepare("SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts").get()},{free_balance:0,paid_balance:0,free_generation_reserved:0,paid_generation_reserved:0});
+   await assert.rejects(reserve(f,944),error=>error.code==='INSUFFICIENT_CREDITS');
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,1);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,2);
  }finally{f.sql.close();}
 });
 

@@ -1,6 +1,8 @@
 export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
+  /** Staging-only prompt experiment: absent/v4, v3 (comparison), legacy (rollback). */
+  STAGING_REPLY_PROMPT_VERSION?: string;
   WEB_ORIGIN: string;
   API_ORIGIN: string;
   EXTENSION_ORIGIN?: string;
@@ -41,6 +43,11 @@ export interface Env {
   /** Fixed, operator-approved CNY per USDT in 1e-6 CNY, staging only. */
   BOLTUTIL_CNY_PER_USDT_MICROS?: string;
   SUBSCRIPTIONS_ENABLED?: string;
+  /** Disabled-by-default 5-use QA ceiling, only for one authenticated Staging subscriber. */
+  STAGING_QA_SUBSCRIPTION_FIVE?: string;
+  STAGING_QA_SUBSCRIPTION_USER_ID?: string;
+  /** Optional unique Staging username selector; ID selector takes precedence. */
+  STAGING_QA_SUBSCRIPTION_USERNAME?: string;
   SUBSCRIPTION_PURCHASES_ENABLED?: string;
   SUBSCRIPTION_CHECKOUT_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;

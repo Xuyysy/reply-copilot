@@ -98,7 +98,7 @@ export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generati
   )) needs_cleanup
   FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean} = {}): Promise<Reservation> {
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
   if(!options.prechecked){
     await releaseExpiredDeliveryReservations(env, now, session.user_id);
@@ -136,12 +136,12 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
       const concurrent=await existing(env,session.user_id,requestId);
       if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs());
-      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{prechecked:true,cleanupRetried:true});
+      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{...options,prechecked:true,cleanupRetried:true});
     }
     throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
   }
-  // Provider execution is serialized; completed results keep their own quota
-  // reservation and replay/ACK contract without locking unrelated new replies.
+  // Different request IDs can start independently: each retains atomic
+  // credit-batch allocation, quota checks, server budget and ACK contract.
   const nonce = uuid(), allocationId = uuid();
   const batch = [
     env.DB.prepare("INSERT INTO site_daily_usage(quota_date,used) VALUES(?,0) ON CONFLICT(quota_date) DO NOTHING").bind(date),
@@ -152,8 +152,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       AND EXISTS(SELECT 1 FROM users WHERE id=? AND status='active')
       AND EXISTS(SELECT 1 FROM ai_budget_days WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=?)
       AND ((? IS NULL AND NOT EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id IS NOT NULL)) OR EXISTS(SELECT 1 FROM ai_provider_runtime WHERE id=1 AND active_config_id=? AND active_version=?))
-      AND NOT EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND status='reserved' AND (COALESCE(generation_phase,'unknown')<>'awaiting_delivery' OR raw_response IS NULL OR response_expires_at IS NULL))
-      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,providerSnapshot?.id??null,providerSnapshot?.version??null,session.user_id,session.user_id,budgetDay,budgetReserve,budgetLimit,providerSnapshot?.id??null,providerSnapshot?.id??null,providerSnapshot?.version??null,session.user_id),
+      ON CONFLICT(user_id,request_id) DO NOTHING`).bind(requestId,session.user_id,date,nonce,requestHash,now,lot.bucket,budgetDay,budgetReserve,providerSnapshot?.id??null,providerSnapshot?.version??null,session.user_id,session.user_id,budgetDay,budgetReserve,budgetLimit,providerSnapshot?.id??null,providerSnapshot?.id??null,providerSnapshot?.version??null),
     env.DB.prepare(`INSERT INTO ai_credit_allocations(id,user_id,request_id,credit_batch_id,credits,state,created_at)
       SELECT ?,?,?,?,1,'reserved',? WHERE EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)
       ON CONFLICT(user_id,request_id) DO NOTHING`).bind(allocationId,session.user_id,requestId,lot.id,now,session.user_id,requestId,nonce),
@@ -175,12 +174,16 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   try { await env.DB.batch(batch); } catch {
     const concurrent = await existing(env, session.user_id, requestId);
     if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now);
-    const inFlight = await env.DB.prepare("SELECT 1 AS pending FROM ai_requests WHERE user_id=? AND status='reserved' AND (COALESCE(generation_phase,'unknown')<>'awaiting_delivery' OR raw_response IS NULL OR response_expires_at IS NULL) LIMIT 1").bind(session.user_id).first<{pending:number}>();
-    if (inFlight) throw new ApiFailure(409,"GENERATION_IN_PROGRESS","上一条回复仍在生成，请稍后重试。",3);
     const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
     if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
     const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
     if ((budget?.reserved_micro_usd||0)+(budget?.settled_micro_usd||0)+budgetReserve>budgetLimit) throw new ApiFailure(503,"AI_BUDGET_EXHAUSTED","AI 成本安全预算已用完，请稍后再试。");
+    // A different request may have reserved the last FREE lot after our
+    // initial selection. Re-evaluate once so this request can atomically
+    // choose the remaining PAID lot; never repeat an upstream AI call.
+    if(!options.creditLotRetried)
+      return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,
+        {...options,prechecked:true,creditLotRetried:true});
     throw new ApiFailure(409,"GENERATION_RESERVATION_CONFLICT","额度状态刚刚变化，请重新生成。");
   }
   return { kind: "new", quota: await balance(env, session.user_id) };
