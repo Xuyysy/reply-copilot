@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { REPLY_V5_EXAMPLES } from "../prompts/reply-v5-examples.js";
 import { buildHumanV5Prompts, selectReplyV5Examples,V5_EXAMPLE_MAX_BYTES } from "../prompts/prompt-v5-human.js";
 import { buildFastV4Prompts } from "../prompts/prompt-v4-fast.js";
@@ -35,9 +36,9 @@ test("external examples can be retrieved and never expose provenance",()=>{
  assert.doesNotMatch(result.user,/owner_reported|csv-record|4303b89c/);
  assert.match(result.system,/Never repeat example text/);
 });
-test("V5 candidate default is Staging only, explicit V4 and V1 unchanged",()=>{
+test("V5 no-corpus candidate default is Staging only, explicit full V5, V4 and V1 unchanged",()=>{
  const a=args("我的代码跑不动");
- assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},a),buildHumanV5Prompts(a));
+ assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},a),buildHumanV5Prompts(a,{useExamples:false}));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),buildFastV4Prompts(a));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v5"},a),buildHumanV5Prompts(a));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"production",STAGING_REPLY_PROMPT_VERSION:"v5"},a),buildPrompts(a));
@@ -203,4 +204,30 @@ test("V5.5 uses existing selected history for expression variation without trans
   assert.doesNotMatch(without.system,/HISTORY: Recent selected replies/);
   assert.deepEqual(buildHumanV5Prompts({...a,outputSchemaVersion:1}),buildFastV4Prompts({...a,outputSchemaVersion:1}));
  }
+});
+
+test("V5.5 ablation strips only retrieved examples and their dependent guidance",()=>{
+ for(const [text,language] of [["今天AI写代码又报错了","zh"],["AI code has another bug","en"],["コードのバグが見つからない","ja"],["코드 버그 때문에 야근","ko"],["quantum entanglement","en"],["my friend died yesterday","en"]]){
+  const a={...args(text,language),voiceProfile:{language,tone:"relaxed_friendly",writingSamples:["My own style sample"],customInstructions:"Use plain words"},recentHistory:[{style:"natural",reply:"A previously selected reply."}]};
+  const full=buildHumanV5Prompts(a),none=buildHumanV5Prompts(a,{useExamples:false}),baseline=buildFastV4Prompts(a);
+  assert.equal(none.user,baseline.user);
+  assert.equal(none.system,full.system.split("\n\nSTYLE EXAMPLES:")[0]);
+  assert.ok(none.system.includes("My own style sample"));
+  assert.ok(none.user.includes("A previously selected reply."));
+  assert.ok(none.system.includes("HISTORY: Recent selected replies"));
+  assert.doesNotMatch(none.user,/<reply_style_examples_json>/);
+  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging"},a),none);
+  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v5"},a),full);
+  const selected=selectReplyV5Examples(a);
+  if(selected.length)assert.match(full.user,/<reply_style_examples_json>/);
+  else assert.deepEqual(full,none);
+  assert.deepEqual(buildHumanV5Prompts({...a,outputSchemaVersion:1},{useExamples:false}),buildPrompts({...a,outputSchemaVersion:1}));
+ }
+});
+test("No-corpus early return precedes retrieval and the retrieval index is lazy",()=>{
+ const source=readFileSync(new URL("../prompts/prompt-v5-human.js",import.meta.url),"utf8");
+ const build=source.slice(source.indexOf("export function buildHumanV5Prompts"));
+ assert.ok(build.indexOf("if(!useExamples)return")<build.indexOf("const snippets=selectReplyV5Examples"));
+ assert.match(source,/function getExampleIndex\(\)\s*\{\s*if\(byLanguage\)return byLanguage;/);
+ assert.equal((source.match(/getExampleIndex\(\)/g)||[]).length,2);
 });
