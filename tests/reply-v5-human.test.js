@@ -170,3 +170,37 @@ test("V5.4 complete curated corpus has 200 enabled records and bounded four-lang
   const result=selectReplyV5Examples(args(text,language));assert.ok(result.length,text);assert.ok(result.some(s=>expanded.some(x=>x.post===s.post)),text);assert.ok(new TextEncoder().encode(JSON.stringify(result)).length<=V5_EXAMPLE_MAX_BYTES);
  }
 });
+
+test("V5.5 does not mistake negated success or ambiguous positive words for celebration",()=>{
+ for(const [text,language] of [
+  ["终于把接口调通了，结果又遇到限流","zh"],
+  ["AI 代码没成功运行，怎么改这个报错？","zh"],
+  ["Finally hit the API rate limit again","en"],
+  ["My first signup failed, how do I fix the checkout?","en"],
+  ["ライブラリを更新したら依存関係が崩れた","ja"],
+  ["라이브러리 업데이트 드디어 했는데 의존성이 꼬였다","ko"]
+ ]){
+  const selected=selectReplyV5Examples(args(text,language));
+  assert.ok(selected.length,text);
+  assert.ok(selected.every(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.scene!=="celebration"&&x.scene!=="support")),text);
+ }
+});
+test("V5.5 prefers a question example when relevant and keeps matching scene for the second example",()=>{
+ for(const [text,language] of [["开源许可证和维护者责任怎么选？","zh"],["Should I maintain my open source project forever?","en"],["在宅勤務と出社どちらがおすすめですか？","ja"],["재택근무랑 사무실 출근 중 뭐가 더 좋아요?","ko"]]){
+  const selected=selectReplyV5Examples(args(text,language));
+  assert.ok(selected.length,text);
+  assert.ok(selected.every(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.scene==="question")),text);
+ }
+});
+test("V5.5 uses existing selected history for expression variation without transmitting extra data",()=>{
+ for(const text of ["AI code has another bug","quantum entanglement"]){
+  const a={...args(text),recentHistory:[{style:"natural",reply:"Exactly, I tried it yesterday."}]};
+  const result=buildHumanV5Prompts(a),baseline=buildFastV4Prompts(a),without=buildHumanV5Prompts(args(text));
+  assert.match(result.system,/Avoid recurring optional openers, endings and sentence frames/);
+  assert.match(result.system,/Never import history facts or relationships/);
+  assert.match(result.system,/Answer a genuine question directly/);
+  assert.ok(result.user.startsWith(baseline.user));
+  assert.doesNotMatch(without.system,/HISTORY: Recent selected replies/);
+  assert.deepEqual(buildHumanV5Prompts({...a,outputSchemaVersion:1}),buildFastV4Prompts({...a,outputSchemaVersion:1}));
+ }
+});
