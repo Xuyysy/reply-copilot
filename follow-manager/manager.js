@@ -1,5 +1,6 @@
 import {MAX_ARCHIVE_BYTES, MAX_ARCHIVE_USERS, normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships, profileUrl} from "./archive.js";
 import {readSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
+import {groupArchiveFiles} from "./file-selection.js";
 
 const $ = id => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -8,6 +9,90 @@ let current = null;
 let relationships = null;
 let selectedKind = "notFollowingBack";
 let page = 0;
+const selectedFiles = {follower:[], following:[]};
+
+function describeSelection(kind) {
+  const files = selectedFiles[kind];
+  const target = $(kind === "follower" ? "selected-follower" : "selected-following");
+  const label = kind === "follower" ? "粉丝文件" : "关注文件";
+  target.textContent = !files.length ? label + "：未选择" :
+    label + "：" + files.length + " 个（" + files.map(file => file.name).join("、") + "）";
+}
+
+function refreshSelection() {
+  describeSelection("follower");
+  describeSelection("following");
+}
+
+// Both the dropzone and browse controls use the same validation and selections.
+async function acceptFiles(fileList, expectedKind = null) {
+  if ($("import-button").disabled) return;
+  try {
+    const groups = await groupArchiveFiles(fileList);
+    if (expectedKind && groups[expectedKind === "follower" ? "following" : "follower"].length) {
+      throw new Error("文件类型与选择框不匹配。请将粉丝文件放入粉丝框，关注文件放入关注框。");
+    }
+    for (const kind of ["follower", "following"]) {
+      if (groups[kind].length) selectedFiles[kind] = groups[kind];
+    }
+    refreshSelection();
+    const pending = ["follower", "following"].filter(kind => !selectedFiles[kind].length);
+    feedback(pending.length ?
+      "已识别导入文件，还需要选择" + (pending.includes("follower") ? "粉丝" : "关注") + "名单。":
+      "已选择两组归档文件，确认属于同一份账号归档后点击「导入并分析」。单独替换某一组时，另一组沿用之前已选文件。");
+  } catch (error) { reportError(error); }
+}
+
+$("choose-files").addEventListener("click", () => $("archive-picker").click());
+$("archive-picker").addEventListener("change", event => {
+  const files = [...event.target.files];
+  event.target.value = "";
+  if (files.length) void acceptFiles(files);
+});
+for (const [kind, inputId] of [["follower","follower-files"], ["following","following-files"]]) {
+  $(inputId).addEventListener("change", event => {
+    const files = [...event.target.files];
+    event.target.value = "";
+    if (files.length) void acceptFiles(files, kind);
+  });
+}
+$("clear-selection").addEventListener("click", () => {
+  selectedFiles.follower = [];
+  selectedFiles.following = [];
+  refreshSelection();
+  feedback("已清空待导入文件；之前保存的本地快照不受影响。");
+});
+
+const dropzone = $("archive-dropzone");
+let dragDepth = 0;
+function isFileDrag(event) {
+  return [...(event.dataTransfer?.types || [])].includes("Files");
+}
+dropzone.addEventListener("dragenter", event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  dragDepth++;
+  dropzone.classList.add("is-dragging");
+});
+dropzone.addEventListener("dragover", event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+});
+dropzone.addEventListener("dragleave", event => {
+  if (!isFileDrag(event)) return;
+  event.preventDefault();
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) dropzone.classList.remove("is-dragging");
+});
+dropzone.addEventListener("drop", event => {
+  event.preventDefault();
+  dragDepth = 0;
+  dropzone.classList.remove("is-dragging");
+  const files = [...(event.dataTransfer?.files || [])];
+  void acceptFiles(files);
+});
+refreshSelection();
 
 function feedback(message, error = false) {
   $("feedback").textContent = message;
@@ -107,8 +192,8 @@ $("archive-form").addEventListener("submit", async event => {
     const owner = ownerValue();
     if (!$("same-account").checked) throw new Error("请先确认两组名单属于同一账号、同一份归档。");
     const [followers, following] = await Promise.all([
-      readGroup($("follower-files").files, "follower"),
-      readGroup($("following-files").files, "following")
+      readGroup(selectedFiles.follower, "follower"),
+      readGroup(selectedFiles.following, "following")
     ]);
     if (followers.ids.length > MAX_ARCHIVE_USERS || following.ids.length > MAX_ARCHIVE_USERS) {
       throw new Error("账号列表超过支持上限。");

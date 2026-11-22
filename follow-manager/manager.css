@@ -53,3 +53,16 @@ button:disabled{cursor:not-allowed;opacity:.55}
 footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 @media(max-width:600px){.container{padding:18px 12px 32px}.panel{padding:16px}.file-grid{grid-template-columns:1fr}.list-tools{flex-direction:column;align-items:stretch}.list-tools .field{max-width:none}.stats{gap:7px}.stats div{padding:11px}.stats strong{font-size:23px}.stats span{font-size:10px}.result-row{padding:11px 10px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+
+/* Local archive import: one shared drop target plus optional separate pickers. */
+.archive-dropzone{margin-top:16px;padding:24px 18px;border:2px dashed var(--xrh-pro-line);border-radius:14px;background:var(--xrh-surface-soft);text-align:center;transition:background-color 140ms,border-color 140ms}
+.archive-dropzone .drop-icon{display:block;font-size:28px;line-height:1.15;color:var(--xrh-brand-text);font-weight:700}
+.archive-dropzone strong{display:block;margin-top:8px;font-size:15px}
+.archive-dropzone p{margin:8px auto 12px;max-width:540px}
+.archive-dropzone.is-dragging{border-color:var(--xrh-brand);background:var(--xrh-pro-surface)}
+.archive-dropzone button{background:var(--xrh-surface);border-color:var(--xrh-pro-line)}
+.selected-files{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px;margin-top:13px;color:var(--xrh-muted);font-size:12px}
+.selected-files span{overflow-wrap:anywhere}
+.text-action{padding:4px 0;background:transparent;color:var(--xrh-brand-text);text-decoration:underline}
+@media(prefers-reduced-motion:reduce){.archive-dropzone{transition:none}}

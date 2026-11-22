@@ -21,15 +21,27 @@
       <label class="field">归档所属 X 用户名
         <input id="owner" name="owner" placeholder="例如 @yourhandle" autocomplete="off" maxlength="16" required>
       </label>
+      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖拽 X 官方关注归档文件到这里">
+        <span class="drop-icon" aria-hidden="true">⇧</span>
+        <strong>把 follower.js 和 following.js 拖到这里</strong>
+        <p class="muted small">也可以点击按钮选择两个文件；支持拖拽或选择同类的多个 part 分片。</p>
+        <button id="choose-files" class="secondary" type="button">选择归档文件</button>
+      </div>
+      <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="选择粉丝与关注归档文件">
       <div class="file-grid">
-        <label class="field">粉丝名单（follower.js）
-          <input id="follower-files" type="file" accept=".js" multiple required aria-describedby="file-tip">
+        <label class="field">或者单独选择粉丝名单（follower.js）
+          <input id="follower-files" type="file" accept=".js" multiple aria-describedby="file-tip">
         </label>
-        <label class="field">我关注的人（following.js）
-          <input id="following-files" type="file" accept=".js" multiple required aria-describedby="file-tip">
+        <label class="field">或者单独选择关注名单（following.js）
+          <input id="following-files" type="file" accept=".js" multiple aria-describedby="file-tip">
         </label>
       </div>
-      <p class="muted small" id="file-tip">仅选择解压后的名单文件，不要导入包含私信等敏感资料的整个 ZIP。每个文件限 32 MB，每组最多 25 万个账号。</p>
+      <div class="selected-files" aria-live="polite" aria-label="已选文件">
+        <span id="selected-follower">粉丝文件：未选择</span>
+        <span id="selected-following">关注文件：未选择</span>
+        <button id="clear-selection" class="text-action" type="button">清空待导入文件</button>
+      </div>
+      <p class="muted small" id="file-tip">拖拽和点击选择均只在浏览器本地读取解压后的 .js 文件，不上传服务器；不支持直接导入 ZIP。每个文件限 32 MB，每组最多 25 万个账号。</p>
       <label class="confirmation"><input type="checkbox" id="same-account" required> 我确认两组文件来自同一份、同一个 X 账号的官方归档。</label>
       <div class="actions">
         <button class="primary" id="import-button" type="submit">导入并分析</button>
