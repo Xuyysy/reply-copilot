@@ -182,7 +182,7 @@ jobs:
           bindings=live["bindings"]
           assert len({b["name"] for b in bindings})==len(bindings)
           assert all(b["type"] in ("plain_text","secret_text","d1") for b in bindings)
-          assert [b["id"] for b in bindings if b["type"]=="d1"]==["cd44bb44-b525-42c4-b286-2cc84dae7fdb"]
+          assert [(b["name"],b["id"]) for b in bindings if b["type"]=="d1"]==[("DB","cd44bb44-b525-42c4-b286-2cc84dae7fdb")]
           assert len([b for b in bindings if b["type"]=="secret_text"])>=27
           plain={b["name"]:b["text"] for b in bindings if b["type"]=="plain_text"}
           assert all(isinstance(v,str) for v in plain.values())
@@ -214,6 +214,11 @@ jobs:
           assert domain["enabled"] is True and domain["previews_enabled"] is False
           subdomain=result("staging-subdomain-before.json")
           assert subdomain=={"enabled":False,"previews_enabled":False}, "Unexpected workers.dev or preview state"
+          # Wrangler 4.151.0 strict comparison treats local D1 name/migration
+          # metadata as drift from Dashboard bindings, which only contain name/id.
+          # Source config was checked above; normalize ONLY the ephemeral deploy
+          # config. No database lookup, migration, or change to binding identity.
+          st["d1_databases"]=[{"binding":b["name"],"database_id":b["id"]} for b in bindings if b["type"]=="d1"]
           st["vars"]=plain
           st["preview_urls"]=False
           st["routes"]=[{"pattern":domain["hostname"],"zone_name":domain["zone_name"],"custom_domain":True,"enabled":True,"previews_enabled":False}]
