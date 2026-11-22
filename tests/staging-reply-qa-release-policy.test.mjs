@@ -89,6 +89,9 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   assert.equal(merged.env.staging.vars.SECRET_0,undefined);
   assert.equal(merged.env.staging.routes[0].pattern,domain.hostname);
   assert.equal(merged.env.staging.preview_urls,false);
+  assert.deepEqual(merged.env.staging.d1_databases,[{binding:'DB',database_id:db}]);
+  assert.equal(merged.env.staging.d1_databases[0].database_name,undefined);
+  assert.equal(merged.env.staging.d1_databases[0].migrations_dir,undefined);
   assert.deepEqual(merged.env.production,cfg.env.production);
   assert.equal(readFileSync(join(dir,'api/wrangler.jsonc'),'utf8'),original);
   assert.notEqual(run([...bindings,{name:'UNEXPECTED_VAR',type:'plain_text',text:'1'}]).status,0);
@@ -96,5 +99,7 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   assert.notEqual(run(bindings,domain,{enabled:false,previews_enabled:true}).status,0);
   assert.notEqual(run(bindings.map(b=>b.name==='PAYMENTS_ENABLED'?{...b,text:'0'}:b)).status,0);
   assert.notEqual(run(bindings.map(b=>b.name==='DB'?{...b,id:'wrong'}:b)).status,0);
+  assert.notEqual(run(bindings.map(b=>b.name==='DB'?{...b,name:'WRONG_DB'}:b)).status,0);
+  assert.notEqual(run([...bindings,{name:'OTHER_DB',type:'d1',id:db}]).status,0);
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
