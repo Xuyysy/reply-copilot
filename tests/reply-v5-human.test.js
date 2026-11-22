@@ -43,7 +43,11 @@ test("V5 candidate default is Staging only, explicit V4 and V1 unchanged",()=>{
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"production",STAGING_REPLY_PROMPT_VERSION:"v5"},a),buildPrompts(a));
  const legacy={...a,outputSchemaVersion:1};
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v5"},legacy),buildPrompts(legacy));
- assert.deepEqual(buildHumanV5Prompts(args("quantum entanglement")),buildFastV4Prompts(args("quantum entanglement")));
+ const unmatched=args("quantum entanglement");
+ const fallback=buildHumanV5Prompts(unmatched),v4=buildFastV4Prompts(unmatched);
+ assert.equal(fallback.user,v4.user);
+ assert.ok(fallback.system.startsWith(v4.system+"\n\nSOCIAL TONE:"));
+ assert.doesNotMatch(fallback.user,/<reply_style_examples_json>/);
 });
 
 test("real conversation retrieval favors a relevant real pair without increasing prompt budget",()=>{
@@ -58,5 +62,30 @@ test("corpus avoids duplicate posts and has bounded same-language examples",()=>
  for(const x of REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation")){
    assert.ok(x.replies.length===1);
    assert.ok(x.post.length<=200&&x.replies[0].length<=110);
+ }
+});
+
+test("V5 warmth applies with and without retrieval, preserving voice, language and reply length",()=>{
+ for(const [text,language] of [["今天代码又报错了","zh"],["终于拿到想要的offer了","zh"],["I lost someone close to me","en"],["コードのバグが見つからない","ja"],["코드 버그 때문에 야근","ko"]]){
+  const a={...args(text,language),voiceProfile:{name:"test",tone:"relaxed_friendly",language,replyLength:"short",humorLevel:"low",customInstructions:"Use plain words"}};
+  const result=buildHumanV5Prompts(a),baseline=buildFastV4Prompts(a);
+  assert.ok(result.system.startsWith(baseline.system+"\n\nSOCIAL TONE:"));
+  assert.match(result.system,/approachable and warm/);
+  assert.match(result.system,/Friendly does not mean agreeing, flattering, generic praise, or fake closeness/);
+  assert.match(result.system,/Humor is with the author, not at their expense/);
+  assert.match(result.system,/serious or vulnerable posts with restraint/);
+  assert.ok(result.user.startsWith(baseline.user));
+ }
+});
+test("V5 friendliness does not override explicit direct or thoughtful style or legacy clients",()=>{
+ for(const tone of ["confident_direct","balanced_thoughtful"]){
+  const a={...args("AI code has another bug","en"),replyStyle:"bold",voiceProfile:{tone,language:"en",replyLength:"short"}};
+  const result=buildHumanV5Prompts(a),baseline=buildFastV4Prompts(a);
+  assert.ok(result.system.startsWith(baseline.system));
+  assert.match(result.system,/Respect explicitly selected confident_direct, balanced_thoughtful, bold/);
+  assert.match(result.system,/do not force cheerfulness/);
+  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),baseline);
+  const legacy={...a,outputSchemaVersion:1};
+  assert.deepEqual(buildHumanV5Prompts(legacy),buildFastV4Prompts(legacy));
  }
 });
