@@ -8,6 +8,17 @@ import { activateQueuedSubscriptionForUser } from './subscription-renewal';
 export function subscriptionsEnabled(env: Env): boolean {
   return env.SUBSCRIPTIONS_ENABLED === '1';
 }
+// Staging-only, opt-in soft limit for ONE real verified subscriber.
+// Never fabricate a subscription/payment or edit the D1 ledger. The immutable
+// purchased plan remains 500/1000/1500/2000 in subscription_periods.
+export function effectiveDailySubscriptionLimit(env:Env,userId:string,normalLimit:number):number {
+  return env.ENVIRONMENT==='staging'&&
+    env.STAGING_QA_SUBSCRIPTION_FIVE==='1'&&
+    typeof env.STAGING_QA_SUBSCRIPTION_USER_ID==='string'&&
+    env.STAGING_QA_SUBSCRIPTION_USER_ID.length>0&&
+    env.STAGING_QA_SUBSCRIPTION_USER_ID===userId
+      ?Math.min(normalLimit,5):normalLimit;
+}
 
 export type SubscriptionAccount = {
   status: 'none' | 'active';
@@ -101,9 +112,12 @@ export async function subscriptionAccount(env: Env, userId: string, now: number 
   const usage = await env.DB.prepare(
     'SELECT used,reserved FROM subscription_daily_usage WHERE period_id=? AND day_index=?'
   ).bind(row.id,window.dayIndex).first<{used:number;reserved:number}>();
+  const qaLimit=effectiveDailySubscriptionLimit(env,userId,row.daily_limit);
+  if(qaLimit<row.daily_limit&&(usage?.used??0)+(usage?.reserved??0)>qaLimit)
+    throw new ApiFailure(409,'STAGING_QA_DAY_NOT_FRESH','该测试账户今天已使用超过 5 次，请等待下个订阅日或使用独立测试账户。');
   let quota: ReturnType<typeof subscriptionDailyAvailability>;
   try {
-    quota = subscriptionDailyAvailability(row.daily_limit,usage?.used??0,usage?.reserved??0);
+    quota = subscriptionDailyAvailability(qaLimit,usage?.used??0,usage?.reserved??0);
   } catch {
     throw new ApiFailure(503, 'SUBSCRIPTION_USAGE_INVALID', '订阅额度状态暂不可用，请联系支持。');
   }

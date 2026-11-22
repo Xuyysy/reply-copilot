@@ -41,6 +41,9 @@ export interface Env {
   /** Fixed, operator-approved CNY per USDT in 1e-6 CNY, staging only. */
   BOLTUTIL_CNY_PER_USDT_MICROS?: string;
   SUBSCRIPTIONS_ENABLED?: string;
+  /** Disabled-by-default 5-use QA ceiling, only for one authenticated Staging subscriber. */
+  STAGING_QA_SUBSCRIPTION_FIVE?: string;
+  STAGING_QA_SUBSCRIPTION_USER_ID?: string;
   SUBSCRIPTION_PURCHASES_ENABLED?: string;
   SUBSCRIPTION_CHECKOUT_ENABLED?: string;
   XIAODOU_WEBHOOKS_ENABLED?: string;
