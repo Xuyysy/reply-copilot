@@ -218,7 +218,7 @@ export class DeliveryCoordinator {
     this.fenced.add(record.ownerId+':'+record.input.requestId);
     if(this.pendingMemory?.input.requestId===record.input.requestId&&this.pendingMemory?.ownerId===record.ownerId)this.pendingMemory=null;
     await this.writeLocked(()=>withLocalRecordWrite(this.storage,async()=>{
-      const data=await this.storage.get(this.fastPostSwitch?[PENDING,PENDING_INDEX]:[PENDING]);
+      const data=await this.storage.get(this.fastPostSwitch?[PENDING,PENDING_INDEX]:PENDING);
       const match=data[PENDING]?.ownerId===record.ownerId&&data[PENDING]?.input.requestId===record.input.requestId;
       if(this.fastPostSwitch){
         const index=pendingEntries(data[PENDING_INDEX],data[PENDING],this.clock())
