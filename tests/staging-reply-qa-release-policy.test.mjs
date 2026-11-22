@@ -97,6 +97,8 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
   assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.4').status,0);
   assert.equal(run(bindings,domain,{enabled:false,previews_enabled:false},'v5.5').status,0);
   assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.5').status,0);
+  assert.equal(run(bindings,domain,{enabled:false,previews_enabled:false},'v5.5-no-corpus').status,0);
+  assert.notEqual(run(overridden,domain,{enabled:false,previews_enabled:false},'v5.5-no-corpus').status,0);
   assert.equal(run().status,0);
   const merged=JSON.parse(readFileSync(join(dir,'api/.wrangler-staging-strict.json'),'utf8'));
   assert.equal(merged.env.staging.vars.AI_PERFORMANCE_DIAGNOSTICS,'1');
@@ -120,7 +122,7 @@ test('ephemeral configuration mirrors only known live vars and exact route; unkn
 });
 
 test('V5 release has separate explicit authorization, fixed V4 baseline, exact source scope and no prompt flag mutation',()=>{
- for(const needle of ['options: ["v4", "v5", "v5.1", "v5.2", "v5.3", "v5.4", "v5.5"]','default: "v4"','check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER','20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5','27b23ad7-37f9-4fab-9ce4-587f1f760ed0','repos/$GITHUB_REPOSITORY/pulls/228','experiment/staging-reply-v5-examples-20261122','829b8596251d004126d4bc1a244925201f0cd3a1','.changed_files == 9','pulls/228/files?per_page=100','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
+ for(const needle of ['options: ["v4", "v5", "v5.1", "v5.2", "v5.3", "v5.4", "v5.5", "v5.5-no-corpus"]','default: "v4"','check:CHECK_V5_ONLY|upload:UPLOAD_STAGING_V5_VERSION_ONLY|deploy:DEPLOY_STAGING_V5_WORKER','20c4eaa6-85a1-4b2b-a5fa-8648dfeebdf5','27b23ad7-37f9-4fab-9ce4-587f1f760ed0','repos/$GITHUB_REPOSITORY/pulls/228','experiment/staging-reply-v5-examples-20261122','829b8596251d004126d4bc1a244925201f0cd3a1','.changed_files == 9','pulls/228/files?per_page=100','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
  assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
 });
 
@@ -152,5 +154,10 @@ test('postflight waits only for exact Wrangler-returned version without re-deplo
 
 test('V5.5 separately pins context candidate, deployed V5.4 base and three modified files',()=>{
  for(const needle of ['check:CHECK_V55_ONLY|upload:UPLOAD_STAGING_V55_VERSION_ONLY|deploy:DEPLOY_STAGING_V55_WORKER','9bbdcb1f-4a7d-4e4e-aaee-d44538a141f8','a3227e17-2fb0-4958-ad5d-190fc2b877bf','e1ef6b6525550ba76320d2a92af6d1e27bceab21','fe583fa8be4acb867b2830fc843a5fdd59969866','repos/$GITHUB_REPOSITORY/pulls/238','experiment/staging-v55-context-20261122','.changed_files == 3','pulls/238/files?per_page=100','all(.[]; .status == "modified")','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
+ assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
+});
+
+test('V5.5 no-corpus trial pins exact ablation source, V5.5 baseline, and five modified files',()=>{
+ for(const needle of ['check:CHECK_V55_NO_CORPUS_ONLY|upload:UPLOAD_STAGING_V55_NO_CORPUS_VERSION_ONLY|deploy:DEPLOY_STAGING_V55_NO_CORPUS_WORKER','8a8111b3-4af5-49e0-ab13-42bc0580a03a','cedad7bb-1d8a-477a-b88d-abcbc01ca12a','76532ca5ef8993a338ebc283f6a71a324a484d23','e1ef6b6525550ba76320d2a92af6d1e27bceab21','repos/$GITHUB_REPOSITORY/pulls/240','experiment/staging-v55-no-corpus-20261122','.changed_files == 5','pulls/240/files?per_page=100','all(.[]; .status == "modified")','V5 requires absent prompt override','--keep-vars --strict'])assert.ok(policy.includes(needle),needle);
  assert.doesNotMatch(policy,/wrangler\s+secret\s+(?:put|delete)|wrangler\s+d1\s+execute|--strict=false|--no-strict/);
 });
