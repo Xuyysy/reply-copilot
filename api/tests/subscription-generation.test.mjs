@@ -306,3 +306,75 @@ test('Production: missing crypto schema readiness, held payment and insufficient
   assert.equal(f.sql.prepare("SELECT count(*) n FROM subscription_ai_allocations").get().n,0);
  }finally{f.sql.close();}
 });
+
+test('Five remaining subscription uses walkthrough falls back to one free, one paid, then purchase required',async()=>{
+ const f=fixture();try{
+   setup(f,{used:495,paid:1});
+   // In-memory fixture ONLY. Real subscription CHECK allows only 500/1000/1500/2000.
+   // A legitimate 500/day paid period with 495 used has exactly FIVE remaining for QA.
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   for(let i=1;i<=5;i++){
+     const n=900+i;
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,null,'first five uses must be subscription');
+     assert.deepEqual({...daily(f)},{used:494+i,reserved:1});
+     await finishGeneration(f.env,'test-user',id(n),'draft '+i,{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     const settled=await ack(f,n);
+     assert.equal(settled.status,200,JSON.stringify(settled.body));
+     assert.equal(settled.body.subscription.dailyLimit,500,'original paid plan remains unchanged');
+     assert.equal(settled.body.subscription.remainingToday,5-i);
+     assert.deepEqual({...daily(f)},{used:495+i,reserved:0});
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   let status=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(status.status,200);
+   assert.equal(status.body.subscription.remainingToday,0);
+   assert.equal(status.body.quota.freeRemaining,1);
+   assert.equal(status.body.quota.paidRemaining,1);
+   assert.equal(status.body.availableNow,2);
+   for(const [n,source] of [[906,'free'],[907,'paid']]){
+     assert.equal((await reserve(f,n)).kind,'new');
+     assert.equal(f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source,source);
+     await finishGeneration(f.env,'test-user',id(n),'next draft',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true,'duplicate ACK must not consume again');
+   }
+   f.sql.exec("UPDATE sessions SET kind='web'");
+   status=await f.call('/v1/usage',{method:'GET'});
+   assert.equal(status.status,200);
+   assert.equal(status.body.availableNow,0);
+   assert.deepEqual({...status.body.quota},{freeRemaining:0,paidRemaining:0,totalRemaining:0});
+   assert.equal(status.body.subscription.remainingToday,0);
+   const entitlement=await f.call('/v1/entitlements',{method:'GET'});
+   assert.equal(entitlement.body.status,'credits_exhausted');
+   await assert.rejects(reserve(f,908),error=>error.code==='INSUFFICIENT_CREDITS');
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,5);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,2);
+ }finally{f.sql.close();}
+});
+
+test('Concurrent final subscription slot cannot overbook; concurrent overflow reserves free then paid exactly once',async()=>{
+ const f=fixture();try{
+   setup(f,{used:499,paid:1});
+   // Keep legitimate 500/day DB invariant; 499 used leaves the final subscription slot.
+   f.sql.exec("UPDATE credit_batches SET grant_credits=1,remaining_credits=1,consumed_credits=0 WHERE id='free-batch'; UPDATE credit_accounts SET free_balance=1 WHERE user_id='test-user'");
+   const ns=[941,942,943];
+   const outcomes=await Promise.allSettled(ns.map(n=>reserve(f,n)));
+   assert.equal(outcomes.filter(o=>o.status==='fulfilled').length,3,JSON.stringify(outcomes.map(o=>o.status==='rejected'?o.reason?.code:'ok')));
+   const sources=ns.map(n=>({n,source:f.sql.prepare("SELECT credit_source FROM ai_requests WHERE request_id=?").get(id(n)).credit_source}));
+   assert.deepEqual(sources.map(x=>x.source??'subscription').sort(),['free','paid','subscription']);
+   assert.deepEqual({...daily(f)},{used:499,reserved:1});
+   assert.deepEqual({...f.sql.prepare("SELECT free_generation_reserved,paid_generation_reserved FROM credit_accounts").get()},{free_generation_reserved:1,paid_generation_reserved:1});
+   const sequence=[...sources].sort((x,y)=>({paid:0,free:1,subscription:2}[x.source??'subscription'])-({paid:0,free:1,subscription:2}[y.source??'subscription']));
+   for(const {n} of sequence){
+     await finishGeneration(f.env,'test-user',id(n),'ready',{model:'mock',inputTokens:1,outputTokens:1,costMicroUsd:10});
+     assert.equal((await ack(f,n)).status,200);
+     assert.equal((await ack(f,n)).body.alreadyConfirmed,true);
+   }
+   assert.deepEqual({...daily(f)},{used:500,reserved:0});
+   assert.deepEqual({...f.sql.prepare("SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts").get()},{free_balance:0,paid_balance:0,free_generation_reserved:0,paid_generation_reserved:0});
+   await assert.rejects(reserve(f,944),error=>error.code==='INSUFFICIENT_CREDITS');
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM subscription_usage_events WHERE event_type='consume'").get().n,1);
+   assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_debit'").get().n,2);
+ }finally{f.sql.close();}
+});
