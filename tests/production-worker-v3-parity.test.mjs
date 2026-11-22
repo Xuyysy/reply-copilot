@@ -21,7 +21,7 @@ test('Production parity helper cannot change V1 prompt hash or behavior',()=>{
  assert.deepEqual(buildLiveProductionV3Prompts(first),buildPrompts(first));
 });
 
-test('Live V3 only activates for Production outputSchemaVersion V2 in API source',()=>{
+test('Production V5.5 no-corpus only activates for Production outputSchemaVersion V2 in API source',()=>{
  const ai=readFileSync(new URL('../api/src/ai.ts',import.meta.url),'utf8');
- assert.match(ai,/env\.ENVIRONMENT===\"production\"&&input\.outputSchemaVersion===2\?buildLiveProductionV3Prompts:buildPrompts/);
+ assert.match(ai,/env\.ENVIRONMENT===\"production\"&&input\.outputSchemaVersion===2\?buildProductionV55NoCorpusPrompts:buildPrompts/);
 });
