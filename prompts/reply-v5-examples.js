@@ -13,14 +13,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "下班前五分钟才说这个需求今天要上线",
     "replies": [
-      "这时间点选得挺讲究",
-      "五分钟是留给你关电脑的吧",
-      "要是今天必须上线，为什么现在才说"
+      "给个提前量也好啊，就剩五分钟了",
+      "五分钟连部署日志都看不完吧"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-2",
@@ -34,14 +34,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "开了两个小时的会，结论是下周再开一次",
     "replies": [
-      "下周那个会有结论吗",
-      "所以今天开的是预告片",
-      "两个小时都没把下一步定下来"
+      "两小时下来连个负责人都没定吗",
+      "这会开得跟预告片似的"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-3",
@@ -79,14 +79,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "AI 写的代码能跑就行，为什么非要看懂每一行",
     "replies": [
-      "出了问题总得知道去哪找吧",
-      "能跑的定义包括下次还能改吗",
-      "小脚本和长期维护的服务不是一回事"
+      "临时脚本可能无所谓，接手维护的时候就不一样了",
+      "能跑是一回事，出问题能不能定位又是一回事"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-5",
@@ -102,14 +102,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "现在最烦的不是AI回答错，是等半天发现它答错了",
     "replies": [
-      "两种时间都浪费了",
-      "加载动画越长越有落差",
-      "如果不确定能早点说就好"
+      "最怕等了半天还得从头验证一遍",
+      "进度条走完那一刻才知道白等了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-6",
@@ -124,14 +124,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "熬了一个星期，终于把第一个付费功能上线了",
     "replies": [
-      "第一单应该会记很久",
-      "先别急着看后台，今晚睡觉",
-      "能收钱比本地跑通多了好多道坎"
+      "恭喜！第一个付费功能上线，值得开心一下",
+      "熬了一周终于能看到真实用户怎么用了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-7",
@@ -147,14 +147,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "月薪两万但每天工作十二小时，和一万五准点下班选哪个",
     "replies": [
-      "先看看通勤多久",
-      "下班以后那四个小时也值钱啊",
-      "如果能学到东西，前者的期限也很重要"
+      "我选一万五，每天能多出四个小时",
+      "要是两万那份只忙一两个月，我倒是会考虑"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-8",
@@ -169,14 +169,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "买东西最难受的不是贵，是买完发现根本没用几次",
     "replies": [
-      "还得找地方放它",
-      "闲鱼见",
-      "租来试几天也许比买便宜"
+      "最烦的是还得给它腾个地方",
+      "闲鱼又多一件几乎全新的东西"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-9",
@@ -191,14 +191,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "每个月十几个软件订阅，已经不记得哪个在扣钱了",
     "replies": [
-      "先把账单打开吧",
-      "最稳定的是它们的收入",
-      "年度订阅更容易忘"
+      "光是弄清楚哪笔是哪家的就够烦的",
+      "特别是年付的，扣钱那天才想起来"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-10",
@@ -213,14 +213,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "练完腿回家发现电梯坏了",
     "replies": [
-      "今天是真走不动了",
-      "楼梯突然变成第二个训练计划",
-      "上楼还好说，下楼才费劲"
+      "腿练完了，楼梯还在等你",
+      "下楼的时候估计更难受"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-11",
@@ -258,14 +258,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "终于第一次连续跑完五公里，中途没走路",
     "replies": [
-      "可以啊，这个挺实在的",
-      "下一次别急着卷配速",
-      "连续跑完这关过了就好安排后面的训练了"
+      "厉害啊！第一次五公里全程没走，值得记一下",
+      "能连续跑完的那一下应该挺开心的"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-13",
@@ -302,14 +302,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "外卖满减凑了十块钱，最后多花十五",
     "replies": [
-      "本来只想吃个饭",
-      "平台就喜欢这样的数学题",
-      "下次直接按总价看省事"
+      "本来只想吃个饭，怎么还做上数学题了",
+      "越凑越贵也是绝了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-15",
@@ -324,14 +324,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "周日晚上永远比周一早上难熬",
     "replies": [
-      "九点开始就不太对劲了",
-      "明明还没上班",
-      "周一的事要是能少一点，周日也能过好"
+      "明明还有几个小时假期，心已经到周一了",
+      "周日晚上能不能别过那么快"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-16",
@@ -368,14 +368,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "发认真写的帖子没人看，随便发句吐槽却几万浏览",
     "replies": [
-      "吐槽是发给谁看的，认真帖又是发给谁的",
-      "算法先下班了",
-      "可能不是质量问题，是进入话题的门槛不一样"
+      "认真写的那篇说不定更值得被看见",
+      "随手一句可能刚好戳中很多人了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-18",
@@ -390,14 +390,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "账号终于破一千粉了",
     "replies": [
-      "一千个真实的人，挺不容易的",
-      "截图先存一下",
-      "接下来看看哪些内容能把人留下来"
+      "恭喜破千！从零积攒起来可不容易",
+      "四位数了，值得截张图留念"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-19",
@@ -412,14 +412,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "论文改到第六版，老师说第一版那个标题还不错",
     "replies": [
-      "这句话多少有点杀伤力",
-      "文件可以改名final_final了",
-      "标题其实可以单独先确认下来"
+      "第六版看到这句话真的会沉默",
+      "第一版文件还留着吧哈哈"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-20",
@@ -434,14 +434,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "赢一把排位只要二十分钟，输一把之后能气一晚",
     "replies": [
-      "下一把按钮有点危险",
-      "晚上最好别点继续",
-      "那一把的情绪都带进下一把了"
+      "气归气，最怕又点开下一把",
+      "那个想把分赢回来的念头太难忍了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-21",
@@ -456,14 +456,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "提前三个小时到机场，航班延误四小时",
     "replies": [
-      "在机场过半天了",
-      "早到的奖励是什么",
-      "这种时候最烦的是不知道还要等多久"
+      "早到三个小时再延误四小时，半天搭进去了",
+      "希望起飞时间别再往后改了"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-22",
@@ -478,14 +478,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "一个人做饭到底怎么买菜才不会剩一冰箱",
     "replies": [
-      "买能冻的先",
-      "青菜才是最难处理的",
-      "先按两顿能吃完的量买可能简单点"
+      "青菜买当天的，肉分小袋冷冻会方便很多",
+      "我会先按两顿的量买，吃完再补"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-23",
@@ -500,14 +500,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Spent an hour in a meeting to decide who should schedule the next meeting.",
     "replies": [
-      "calendar's looking very productive",
-      "could've been a calendar invite",
-      "Who actually owns the decision now?"
+      "an hour and not a single decision?",
+      "that really could've been a calendar invite"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-24",
@@ -522,14 +522,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My boss sent a 'quick question' at 5:59 on Friday.",
     "replies": [
-      "the timing is immaculate",
-      "nothing quick about that notification",
-      "I'd want to know if it actually needs an answer today."
+      "5:59 is such a rough time to see that notification",
+      "hope it really was a quick question"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-25",
@@ -611,14 +611,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Finally shipped the feature I've been working on for two weeks.",
     "replies": [
-      "nice, go close those tabs",
-      "hope the deploy button gets a break",
-      "The first bit of real feedback should be interesting."
+      "congrats!! two weeks of work finally out in the world",
+      "hope you get a good night off now"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-29",
@@ -633,14 +633,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Would you take $20k more a year if it meant losing your weekends?",
     "replies": [
-      "how many weekends are we talking",
-      "the fine print is doing a lot of work here",
-      "I'd want an end date on that arrangement."
+      "I'd keep the weekends, personally",
+      "maybe for a few months, but not indefinitely"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-30",
@@ -655,14 +655,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Found three subscriptions I forgot I was paying for.",
     "replies": [
-      "cancel button time",
-      "the most loyal customer is an asleep one",
-      "Annual renewals are especially easy to miss."
+      "annual renewals are the sneaky ones",
+      "the worst part is working out what each charge is for"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-31",
@@ -677,14 +677,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Bought a fancy coffee machine and now I still get coffee on the way to work.",
     "replies": [
-      "the counter looks great though",
-      "convenience wins again",
-      "The routine was probably the hard part to replace."
+      "the morning coffee stop just hits differently",
+      "maybe the machine is more of a weekend thing"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-32",
@@ -721,14 +721,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Ran my first 5k without stopping today.",
     "replies": [
-      "that's a good milestone",
-      "don't let the watch talk you into a 10k tomorrow",
-      "Now you've got a distance you know you can finish."
+      "first nonstop 5k! congrats",
+      "bet crossing that finish felt pretty good"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-34",
@@ -809,14 +809,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My cat has chosen the box over the very expensive bed.",
     "replies": [
-      "keep the receipt",
-      "at least the box was included",
-      "The enclosed sides might be what it likes."
+      "the box was the real purchase all along",
+      "at least now you know what to get the cat next time"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-38",
@@ -853,14 +853,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Spent days on an article that got 50 views. A random joke got 30k.",
     "replies": [
-      "the internet has its own schedule",
-      "at least you know which one people could finish",
-      "The joke probably asked less of a stranger scrolling by."
+      "hope the article finds its people too",
+      "the joke got people in the door, now if only they'd read the article"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-40",
@@ -875,14 +875,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Hit 1,000 newsletter subscribers this morning.",
     "replies": [
-      "that's a lot of inboxes",
-      "save that screenshot",
-      "I'd be curious how many came through word of mouth."
+      "congrats on 1k! that's a lot of people choosing to hear from you",
+      "four digits looks pretty good on that subscriber count"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-41",
@@ -897,14 +897,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "My advisor's latest edit is to change the title back to the original one.",
     "replies": [
-      "that file history has seen things",
-      "version one quietly won",
-      "Might be worth settling the title separately from the rest."
+      "hope you still have version one saved",
+      "the title really took the scenic route"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-42",
@@ -919,14 +919,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Won one ranked game, lost two, and somehow it's midnight.",
     "replies": [
-      "the exit button is right there",
-      "one more is a dangerous phrase",
-      "The second loss probably wasn't the best time to queue again."
+      "the urge to win the points back is dangerous",
+      "and that's how one more game turns into six"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-43",
@@ -963,14 +963,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "3時間バグと格闘した結果、変数名の打ち間違いだった",
     "replies": [
-      "一番見つけにくいやつ",
-      "3時間分の経験値は入ったと思いたい",
-      "エラーがもう少し親切ならなあ"
+      "3時間かけてそこにたどり着くのはつらい",
+      "変数名だったか…お疲れさまです"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-45",
@@ -984,14 +984,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "会議が長引いた結果、次の会議の日程だけ決まった",
     "replies": [
-      "今日はそれだけ？",
-      "会議のための会議だ",
-      "決める人がいなかったのかな"
+      "それだけで終わっちゃったのか…",
+      "次はちゃんと何か決まるといいですね"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-46",
@@ -1006,14 +1006,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "脚トレの翌日にエレベーター点検はきつい",
     "replies": [
-      "下りがきつそう",
-      "もう一種目追加された",
-      "今日は無理せずゆっくりで"
+      "下りの方がきつそう",
+      "脚トレ延長戦だ"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-47",
@@ -1071,14 +1071,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "버그 잡느라 세 시간 썼는데 알고 보니 오타였다",
     "replies": [
-      "이런 게 제일 안 보임",
-      "코드는 억울하겠네",
-      "오류 메시지에 위치라도 나왔으면"
+      "세 시간 만에 오타 발견하면 진짜 허탈하죠",
+      "코드가 아니라 변수명이 범인이었네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-50",
@@ -1093,14 +1093,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "한 시간 회의하고 다음 회의 날짜만 잡음",
     "replies": [
-      "그래서 오늘 정한 건 날짜뿐인가요",
-      "달력만 열일했네",
-      "결정할 사람이 없었던 건가"
+      "한 시간 썼는데 날짜만 정해진 거네요",
+      "다음 회의에서는 뭔가 결정되면 좋겠네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-51",
@@ -1115,14 +1115,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "하체 운동했는데 엘리베이터 점검 중",
     "replies": [
-      "내려갈 때가 진짜 힘들겠다",
-      "운동이 아직 안 끝났네요",
-      "오늘은 좀 천천히 움직여야겠네"
+      "내려갈 때가 더 힘들겠어요",
+      "하체 운동 연장전이네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "original-52",
@@ -1158,14 +1158,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "혼자 사는데 채소 남기지 않고 먹는 방법 있나요",
     "replies": [
-      "잎채소가 제일 어렵죠",
-      "냉동실이 다 해결해 주더라고요",
-      "두 끼 먹을 양만 사는 것부터 괜찮을 듯"
+      "잎채소는 조금씩 사고 나머지는 냉동해 두면 편할 것 같아요",
+      "두 끼 정도 먹을 양만 사는 건 어때요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "lccc-toy-train-19",
@@ -1189,7 +1189,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "private_or_familiar_context"
   },
   {
     "id": "lccc-toy-train-29",
@@ -1261,7 +1262,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-112",
@@ -1285,7 +1287,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_agreement"
   },
   {
     "id": "lccc-toy-train-150",
@@ -1358,7 +1361,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-249",
@@ -1381,7 +1385,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unrelated_first_person_tangent"
   },
   {
     "id": "lccc-toy-train-123",
@@ -1404,7 +1409,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unsupported_claim_context"
   },
   {
     "id": "uo-record-114",
@@ -1526,7 +1532,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "predictive_flattery"
   },
   {
     "id": "uo-record-1273",
@@ -1600,7 +1607,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "agreement_and_restatement"
   },
   {
     "id": "lccc-toy-train-291-turn-0",
@@ -1625,7 +1633,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "asks_for_already_given_detail"
   },
   {
     "id": "lccc-toy-train-573-turn-0",
@@ -1674,7 +1683,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "restatement"
   },
   {
     "id": "lccc-toy-train-902-turn-0",
@@ -1749,7 +1759,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unsupported_assumption"
   },
   {
     "id": "lccc-toy-train-141-turn-2",
@@ -1798,7 +1809,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "depends_on_missing_prior_context"
   },
   {
     "id": "lccc-toy-train-218-turn-3",
@@ -1899,7 +1911,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_praise"
   },
   {
     "id": "lccc-toy-train-683-turn-7",
@@ -1948,7 +1961,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "dismisses_frustration"
   },
   {
     "id": "lccc-toy-train-887-turn-4",
@@ -1973,7 +1987,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_agreement"
   },
   {
     "id": "lccc-toy-train-978-turn-1",
@@ -2050,7 +2065,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 7.666666666666667,
       "annotation_confidence": 79
-    }
+    },
+    "retrievalDisabled": "answers_different_question"
   },
   {
     "id": "uo-record-1232",
@@ -2103,7 +2119,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 33.666666666666664,
       "annotation_confidence": 72.33333333333333
-    }
+    },
+    "retrievalDisabled": "asks_for_already_given_detail"
   },
   {
     "id": "uo-record-2397",
@@ -2183,7 +2200,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 26.6,
       "annotation_confidence": 75.4
-    }
+    },
+    "retrievalDisabled": "dismissive_recommendation"
   },
   {
     "id": "uo-record-1137",
@@ -2210,7 +2228,8 @@ export const REPLY_V5_EXAMPLES = [
       "review": "editorial_candidate",
       "annotated_offensiveness": 29.333333333333332,
       "annotation_confidence": 97
-    }
+    },
+    "retrievalDisabled": "redirects_complaint_to_blame"
   },
   {
     "id": "uo-record-1450",
@@ -2311,7 +2330,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unverified_first_person_experience"
   },
   {
     "id": "lccc-toy-train-306-turn-1",
@@ -2336,7 +2356,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "private_or_familiar_context"
   },
   {
     "id": "lccc-toy-train-320-turn-1",
@@ -2360,7 +2381,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "generic_question"
   },
   {
     "id": "lccc-toy-train-678-turn-2",
@@ -2433,7 +2455,8 @@ export const REPLY_V5_EXAMPLES = [
       "permission": "owner_reported",
       "transform": "remove token separators",
       "review": "editorial_candidate"
-    }
+    },
+    "retrievalDisabled": "unverified_first_person_experience"
   },
   {
     "id": "lccc-toy-train-535-turn-2",
@@ -2542,14 +2565,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "准备了好久的面试还是被拒了，有点难受",
     "replies": [
-      "准备了这么久，难受也很正常啊",
-      "今天先别复盘了，结果已经够烦的了",
-      "这一家的结果不一定能说明你准备得怎么样"
+      "准备了那么久，收到这个结果肯定不好受",
+      "真可惜，希望下一次碰到更合适的机会"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-4",
@@ -2564,14 +2587,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "连续写了半个月原创，感觉好像没人看到",
     "replies": [
-      "半个月都在认真写，没回应确实挺磨人的",
-      "能先有一两个会接话的人就好了",
-      "有人看完但没互动也有可能，别只看点赞数"
+      "认真写了半个月，没什么回应挺磨人的",
+      "希望那几篇慢慢能被更多人看到"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-5",
@@ -2630,14 +2653,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Didn't get the job I'd spent weeks preparing for. Pretty gutted.",
     "replies": [
-      "ugh, that wait makes it even harder. sorry",
-      "no need to be productive about it tonight",
-      "One rejection doesn't tell you everything about how the interview went."
+      "ah that sucks, especially after weeks of prep",
+      "sorry it didn't work out. hope the next one goes better"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-8",
@@ -2652,14 +2675,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "Been writing every week and sometimes it feels like nobody's reading.",
     "replies": [
-      "that part of writing can feel really lonely",
-      "the quiet weeks are tough",
-      "A few people who keep coming back can matter more than the visible count."
+      "hope those posts find the right readers eventually",
+      "putting in the work every week with no response sounds pretty rough"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-9",
@@ -2716,14 +2739,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "第一志望の面接落ちた。結構へこんでる",
     "replies": [
-      "それはへこむよね。準備お疲れさま",
-      "今日はちょっと休んでもいいと思う",
-      "一社の結果だけでは分からないことも多いよ"
+      "第一志望だったんですね。それはへこみますよね",
+      "準備お疲れさまでした。次はいいご縁があるといいですね"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-12",
@@ -2802,14 +2825,14 @@ export const REPLY_V5_EXAMPLES = [
     ],
     "post": "열심히 준비한 면접에서 떨어졌다. 좀 속상하네",
     "replies": [
-      "많이 준비한 만큼 속상하겠어요",
-      "오늘은 다른 생각 좀 해도 괜찮죠",
-      "한 번의 결과로 다 판단할 수는 없을 것 같아요"
+      "많이 준비한 만큼 속상하시겠어요",
+      "다음에는 더 잘 맞는 기회가 있으면 좋겠네요"
     ],
     "source": {
       "kind": "synthetic",
       "review": "editorial_candidate"
-    }
+    },
+    "editorialRevision": "v5.4"
   },
   {
     "id": "v52-original-16",
@@ -2832,5 +2855,2314 @@ export const REPLY_V5_EXAMPLES = [
       "kind": "synthetic",
       "review": "editorial_candidate"
     }
+  },
+  {
+    "id": "v54-original-1",
+    "language": "zh",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "电影",
+      "上映",
+      "电影票",
+      "影片"
+    ],
+    "post": "这个月想看的两部电影居然同一天上映",
+    "replies": [
+      "这下得排个先后顺序了",
+      "能不能一天连着看两场哈哈"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-original-2",
+    "language": "en",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "camera",
+      "video",
+      "lens"
+    ],
+    "post": "The video quality on this little camera is way better than I expected.",
+    "replies": [
+      "nice! curious what it does in low light",
+      "wild how much you can get out of a camera that small now"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-original-3",
+    "language": "zh",
+    "topic": "work",
+    "scene": "complaint",
+    "keywords": [
+      "加班",
+      "五一",
+      "假期",
+      "放假"
+    ],
+    "post": "别人都在准备五一出去玩，我还在等公司通知要不要加班",
+    "replies": [
+      "假期都快到了还不通知，最烦这种",
+      "希望最后能正常放假，哪怕早点说也好"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "v54-curated-zh-1",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "agent",
+      "智能体",
+      "上下文"
+    ],
+    "post": "Agent 跑了半天最后卡在一个弹窗上",
+    "replies": [
+      "有时候最难的不是推理，是那个确定按钮",
+      "能自动做完九成，最后一成还是挺考验耐心的"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-2",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "开源",
+      "许可证",
+      "维护者"
+    ],
+    "post": "小工具开源以后还要负责维护吗？",
+    "replies": [
+      "不一定，README 里提前说清楚维护范围就好",
+      "愿意分享代码不代表要承诺长期客服"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-3",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "首个用户",
+      "注册用户",
+      "独立开发"
+    ],
+    "post": "今天有一个完全不认识的人注册了我的小工具",
+    "replies": [
+      "陌生人的第一个注册真的挺有意义，恭喜啊",
+      "不是朋友帮忙捧场，这次是真有人需要它"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-4",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "依赖",
+      "版本冲突",
+      "依赖包"
+    ],
+    "post": "装一个依赖包，顺便把其他三个依赖搞挂了",
+    "replies": [
+      "这下又要开始考古版本号了",
+      "最烦的是本来那个功能已经能用了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-5",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "本地模型",
+      "显存",
+      "量化"
+    ],
+    "post": "本地模型是选大一点的量化版还是小一点的原精度版",
+    "replies": [
+      "我会先拿自己常用的任务试一遍，跑得动不代表适合用",
+      "显存刚好卡住的话，小一点的日常用着可能更舒服"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-6",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "文档",
+      "readme",
+      "使用说明"
+    ],
+    "post": "一个工具最有用的功能居然藏在文档最下面",
+    "replies": [
+      "这一页应该放到首页去啊",
+      "好东西藏得太深了，不看完根本不知道"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-7",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "接口",
+      "限流",
+      "429"
+    ],
+    "post": "接口调通以后发现限流比想象中低多了",
+    "replies": [
+      "通是通了，一认真用就不让用了",
+      "看样子真正的难题是请求怎么排队"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-8",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "键盘",
+      "机械键盘",
+      "轴体"
+    ],
+    "post": "换了静音轴之后才发现原来的键盘有多吵",
+    "replies": [
+      "晚上打字应该舒服多了",
+      "有时候最先感受到升级的是旁边的人"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-9",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "git",
+      "提交记录",
+      "commit"
+    ],
+    "post": "你们提交记录都是写得很规范还是随便写？",
+    "replies": [
+      "多人维护的仓库我会认真写，自己的小实验就随意一点",
+      "至少得让下周的自己知道改过什么"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-10",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "自动化",
+      "脚本",
+      "重复操作"
+    ],
+    "post": "终于写脚本把每天重复点的那几个按钮干掉了",
+    "replies": [
+      "每天能少点几下，过一阵就知道有多值了",
+      "恭喜把自己从重复劳动里赎出来一点"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-11",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "question",
+    "keywords": [
+      "长文",
+      "文章",
+      "标题"
+    ],
+    "post": "长文发出去之前最纠结的居然是标题，大家也是吗？",
+    "replies": [
+      "标题要让别人知道为什么值得点进去，这一步还真挺费脑子",
+      "我会先写个直白的，最后再看看有没有更好的"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-12",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "评论区",
+      "回复",
+      "讨论"
+    ],
+    "post": "有时候评论区比原帖本身更有意思",
+    "replies": [
+      "尤其是有人补了原帖没说到的那一段",
+      "看到不同经历的人接话才是最有趣的部分"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-13",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "celebration",
+    "keywords": [
+      "第一篇",
+      "阅读量",
+      "长文"
+    ],
+    "post": "第一篇长文居然有陌生人看完还认真留言了",
+    "replies": [
+      "这种留言比一个顺手的赞有意思多了",
+      "恭喜，能让人看完还愿意花时间写回复不容易"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-14",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "support",
+    "keywords": [
+      "数据下滑",
+      "阅读量",
+      "低迷"
+    ],
+    "post": "最近帖子数据掉得厉害，有点不知道写什么了",
+    "replies": [
+      "发出去没人接话的时候真的会有点泄气",
+      "希望能碰到一个自己还想继续聊的话题"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-15",
+    "language": "zh",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "截图",
+      "内容创作",
+      "素材"
+    ],
+    "post": "有些想法没及时记下来，等要发帖的时候已经忘了",
+    "replies": [
+      "当时那点情绪过去了，回来就怎么写都不像",
+      "最可惜的是只记得当时觉得特别有意思"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-16",
+    "language": "zh",
+    "topic": "work",
+    "scene": "question",
+    "keywords": [
+      "远程办公",
+      "工位",
+      "办公室"
+    ],
+    "post": "远程办公和去办公室，你更喜欢哪种？",
+    "replies": [
+      "我会选能自己安排几天去公司的那种",
+      "需要专心写东西的时候，少一点来回打断就很舒服"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-17",
+    "language": "zh",
+    "topic": "work",
+    "scene": "observation",
+    "keywords": [
+      "下班",
+      "消息通知",
+      "工作群"
+    ],
+    "post": "把工作群设成免打扰以后，下班像真的下班了",
+    "replies": [
+      "终于不用每响一声就猜是不是公司的事",
+      "只要不是值班，晚上的消息明早看也来得及"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-18",
+    "language": "zh",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "转正",
+      "试用期",
+      "同事"
+    ],
+    "post": "试用期过了，今天终于正式转正",
+    "replies": [
+      "恭喜啊！这段时间总算踏实下来了",
+      "可以给自己好好吃一顿庆祝了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-19",
+    "language": "zh",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "辞职",
+      "交接",
+      "离职"
+    ],
+    "post": "在一家公司待了三年，今天最后一天，有点舍不得",
+    "replies": [
+      "三年肯定有不少习惯和熟悉的人，舍不得很正常",
+      "希望下一站也能遇到聊得来的同事"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-20",
+    "language": "zh",
+    "topic": "study",
+    "scene": "question",
+    "keywords": [
+      "记笔记",
+      "复习",
+      "教材"
+    ],
+    "post": "看书的时候一定要记笔记吗？",
+    "replies": [
+      "遇到以后想找回来的东西我会记，没必要每页都摘",
+      "有时看完能用自己的话讲出来就够了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-21",
+    "language": "zh",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "奖学金",
+      "科研",
+      "投稿录用"
+    ],
+    "post": "第一次投稿就收到录用通知了！",
+    "replies": [
+      "恭喜！第一次走完整个投稿流程就有结果了",
+      "收到那封邮件的时候肯定忍不住多看几遍"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-22",
+    "language": "zh",
+    "topic": "study",
+    "scene": "complaint",
+    "keywords": [
+      "实验数据",
+      "样本",
+      "重做"
+    ],
+    "post": "实验数据整理到最后发现有一组时间对不上",
+    "replies": [
+      "最难受的是其他数据都已经整理好了",
+      "希望原始记录还在，能把那一组找回来"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-23",
+    "language": "zh",
+    "topic": "study",
+    "scene": "observation",
+    "keywords": [
+      "图书馆",
+      "座位",
+      "自习"
+    ],
+    "post": "图书馆最喜欢的是靠窗又没有人的那一排",
+    "replies": [
+      "不用隔一会儿就给别人让路真的很舒服",
+      "有时候能找到一个舒服的位置就更愿意待下去了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-24",
+    "language": "zh",
+    "topic": "money",
+    "scene": "question",
+    "keywords": [
+      "记账",
+      "固定支出",
+      "账本"
+    ],
+    "post": "你们记账会详细分到每一杯饮料吗？",
+    "replies": [
+      "固定支出我会记细一点，小额消费按类记就行",
+      "要是记账比花钱本身还累，可能很难长期做下去"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-25",
+    "language": "zh",
+    "topic": "money",
+    "scene": "observation",
+    "keywords": [
+      "二手",
+      "闲置",
+      "转卖"
+    ],
+    "post": "第一次把闲置卖出去，居然比买东西还开心",
+    "replies": [
+      "钱回来了，东西也不用继续占地方",
+      "尤其是买家真的用得上，那感觉还不错"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-26",
+    "language": "zh",
+    "topic": "money",
+    "scene": "complaint",
+    "keywords": [
+      "退款",
+      "客服",
+      "退货"
+    ],
+    "post": "退款申请提交三天了，客服一直让我耐心等待",
+    "replies": [
+      "给个明确时间也好啊，一直等最烦了",
+      "三天了还没有进度，难怪你着急"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-27",
+    "language": "zh",
+    "topic": "money",
+    "scene": "question",
+    "keywords": [
+      "冲动消费",
+      "购物车",
+      "付款"
+    ],
+    "post": "大家遇到想买但不急着用的东西会直接付款吗？",
+    "replies": [
+      "我倾向先放购物车，过两天还想要再说",
+      "如果暂时想不出用在哪儿，我就会先等等"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-28",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "celebration",
+    "keywords": [
+      "引体向上",
+      "自重",
+      "单杠"
+    ],
+    "post": "终于做出了第一个标准引体向上",
+    "replies": [
+      "漂亮！第一个上去的瞬间肯定特别爽",
+      "这一关过去以后才有东西可以继续练了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-29",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "observation",
+    "keywords": [
+      "体能",
+      "爬山",
+      "有氧"
+    ],
+    "post": "以前爬两层就喘，现在走上五楼居然还好",
+    "replies": [
+      "这种生活里突然发现的进步最有意思",
+      "不用特地测也能感受到体能变好了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-30",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "question",
+    "keywords": [
+      "拉伸",
+      "热身",
+      "动作幅度"
+    ],
+    "post": "你们训练前热身多久合适？",
+    "replies": [
+      "看当天练什么吧，正式动作前先做几组轻重量也挺实用",
+      "我更在意动作有没有活动开，不太看分钟数"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-31",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "complaint",
+    "keywords": [
+      "握力",
+      "硬拉",
+      "前臂"
+    ],
+    "post": "硬拉还没拉累，手先没劲了",
+    "replies": [
+      "背和腿明明还能继续，手先罢工了",
+      "重量一上去才发现握力是另一回事"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-32",
+    "language": "zh",
+    "topic": "food",
+    "scene": "observation",
+    "keywords": [
+      "面包",
+      "烘焙",
+      "烤箱"
+    ],
+    "post": "面包刚出炉的时候太香了，根本等不及凉下来",
+    "replies": [
+      "最难的步骤竟然是等它凉",
+      "切开的时候还热乎乎的，想想就香"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-33",
+    "language": "zh",
+    "topic": "food",
+    "scene": "question",
+    "keywords": [
+      "早餐",
+      "三明治",
+      "早饭"
+    ],
+    "post": "通勤路上有什么方便带着吃的早餐？",
+    "replies": [
+      "三明治挺方便的，提前包好就能走",
+      "饭团不容易掉得到处都是，路上也好拿"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-34",
+    "language": "zh",
+    "topic": "food",
+    "scene": "humor",
+    "keywords": [
+      "火锅",
+      "锅底",
+      "蘸料"
+    ],
+    "post": "火锅还没开始吃，光配蘸料就已经搞了十分钟",
+    "replies": [
+      "蘸料才是今天的正餐吧",
+      "每次配着配着就成一碗小菜了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-35",
+    "language": "zh",
+    "topic": "food",
+    "scene": "celebration",
+    "keywords": [
+      "蛋糕",
+      "打发",
+      "烘焙"
+    ],
+    "post": "第一次自己做的蛋糕居然没塌！",
+    "replies": [
+      "恭喜！从烤箱里拿出来那刻应该很开心",
+      "下一步是不是可以开始挑好看的盘子了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-36",
+    "language": "zh",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "散步",
+      "傍晚",
+      "路灯"
+    ],
+    "post": "吃完饭沿着河边走了半小时，手机都没怎么看",
+    "replies": [
+      "傍晚这种不用赶时间的散步挺舒服的",
+      "偶尔不带着任务出门也很好"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-37",
+    "language": "zh",
+    "topic": "life",
+    "scene": "question",
+    "keywords": [
+      "合租",
+      "室友",
+      "公共空间"
+    ],
+    "post": "合租的公共区域怎么分摊打扫比较好？",
+    "replies": [
+      "固定轮流负责会比临时喊人公平一点",
+      "最好先说清楚什么叫打扫完，不然容易各有标准"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-38",
+    "language": "zh",
+    "topic": "life",
+    "scene": "celebration",
+    "keywords": [
+      "搬家",
+      "新房间",
+      "收拾"
+    ],
+    "post": "搬完家终于把自己的小房间布置好了",
+    "replies": [
+      "太好了，终于可以安心待在自己的空间里了",
+      "最有成就感的可能是最后一个纸箱终于空了"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-39",
+    "language": "zh",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "疲惫",
+      "没精神",
+      "休息日"
+    ],
+    "post": "这周没发生什么大事但就是觉得很疲惫",
+    "replies": [
+      "有时候累就是累，不一定非要找出个原因",
+      "希望这周末能有点真正不用忙的时间"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-40",
+    "language": "zh",
+    "topic": "life",
+    "scene": "humor",
+    "keywords": [
+      "闹钟",
+      "赖床",
+      "贪睡"
+    ],
+    "post": "定了五个闹钟，最后被第六个意外来的电话叫醒",
+    "replies": [
+      "五个闹钟集体失业了",
+      "电话那头可能还不知道自己救了你一早上"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-41",
+    "language": "zh",
+    "topic": "travel",
+    "scene": "observation",
+    "keywords": [
+      "民宿",
+      "窗外",
+      "海边"
+    ],
+    "post": "住的民宿窗外正好能看到海，早上醒来就不想出门了",
+    "replies": [
+      "那不出门也算旅行的一部分啊",
+      "这种窗景值得多赖一会儿床"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-42",
+    "language": "zh",
+    "topic": "travel",
+    "scene": "question",
+    "keywords": [
+      "行李箱",
+      "打包",
+      "短途"
+    ],
+    "post": "两天一夜的短途旅行真的需要带行李箱吗？",
+    "replies": [
+      "一个双肩包基本够了，除非有要带回来的东西",
+      "少带一点上车下车都轻松"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-43",
+    "language": "zh",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "演唱会",
+      "现场",
+      "返场"
+    ],
+    "post": "演唱会最后一首歌结束以后，全场都没急着走",
+    "replies": [
+      "那几分钟应该挺舍不得的",
+      "灯都亮了还想再听一首的感觉"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-44",
+    "language": "zh",
+    "topic": "gaming",
+    "scene": "question",
+    "keywords": [
+      "单机",
+      "剧情",
+      "游戏时长"
+    ],
+    "post": "一款单机游戏剧情好但操作一般，你会玩完吗？",
+    "replies": [
+      "剧情够吸引我就会，操作只要没折磨到玩不下去",
+      "能让我想知道下一段故事发生什么就行"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-zh-45",
+    "language": "zh",
+    "topic": "shopping",
+    "scene": "complaint",
+    "keywords": [
+      "快递柜",
+      "包裹",
+      "取件码"
+    ],
+    "post": "到了快递柜才发现有三个包裹被放到了三个地方",
+    "replies": [
+      "取个快递变成散步路线规划了",
+      "最想早点回家的时候碰上这个真烦"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-1",
+    "language": "en",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "agent",
+      "browser automation",
+      "popup"
+    ],
+    "post": "My agent did the hard part perfectly and then got stuck on a cookie banner.",
+    "replies": [
+      "the final boss was consent preferences",
+      "Funny how much of automation comes down to the last button."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-2",
+    "language": "en",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "open source",
+      "maintainer",
+      "license"
+    ],
+    "post": "If I open source a weekend project, am I signing up to maintain it forever?",
+    "replies": [
+      "nope, just be clear about what you intend to maintain",
+      "sharing the code doesn't have to mean opening a support desk"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-3",
+    "language": "en",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "first customer",
+      "first user",
+      "signup"
+    ],
+    "post": "My first signup from someone I don't know came in today.",
+    "replies": [
+      "ah congrats! a stranger actually needed the thing you built",
+      "the first one that isn't a friend is a special one"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-4",
+    "language": "en",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "dependency",
+      "dependencies",
+      "package lock"
+    ],
+    "post": "Updated one dependency, now somehow three other packages are broken.",
+    "replies": [
+      "the package lock file has entered the chat",
+      "ugh, especially when the feature was already working"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-5",
+    "language": "en",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "local model",
+      "vram",
+      "quantized"
+    ],
+    "post": "Bigger quantized model or a smaller full precision one for local use?",
+    "replies": [
+      "I'd compare them on the actual tasks you care about first",
+      "The one that runs comfortably on your machine has a real advantage."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-6",
+    "language": "en",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "readme",
+      "documentation",
+      "manual"
+    ],
+    "post": "The most useful feature in this tool was buried at the bottom of the README.",
+    "replies": [
+      "that deserves a spot right at the top",
+      "glad you found it before giving up on the tool"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-7",
+    "language": "en",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "rate limit",
+      "429",
+      "api quota"
+    ],
+    "post": "My API integration finally works and now I'm running into the rate limit.",
+    "replies": [
+      "the next challenge is keeping the requests in line",
+      "getting it working only to be told to slow down is rough"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-8",
+    "language": "en",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "keyboard",
+      "switches",
+      "typing"
+    ],
+    "post": "Switched to quiet keyboard switches and didn't realize how loud my old ones were.",
+    "replies": [
+      "the people around you probably noticed too",
+      "late night typing just got a lot nicer"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-9",
+    "language": "en",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "git commit",
+      "commit message",
+      "commits"
+    ],
+    "post": "Do you take commit messages seriously on solo projects?",
+    "replies": [
+      "enough to help me remember what changed a week later",
+      "I'd save the elaborate ones for changes with a surprising reason"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-10",
+    "language": "en",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "automation",
+      "script",
+      "repetitive"
+    ],
+    "post": "Wrote a script that eliminates the same boring clicks I have to do every morning.",
+    "replies": [
+      "nicely done! that is going to add up over time",
+      "pretty satisfying to remove something from your daily routine"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-11",
+    "language": "en",
+    "topic": "creator",
+    "scene": "question",
+    "keywords": [
+      "headline",
+      "essay title",
+      "article title"
+    ],
+    "post": "Anyone else spend more time on the title than finishing the article?",
+    "replies": [
+      "the title has to make sense to someone who hasn't read any of it",
+      "I'd start with the plain version and see if anything better comes up"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-12",
+    "language": "en",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "comment section",
+      "replies",
+      "discussion"
+    ],
+    "post": "Sometimes the comment section ends up being better than the post.",
+    "replies": [
+      "especially when somebody adds a detail the author missed",
+      "the best threads are the ones where different people bring something new"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-13",
+    "language": "en",
+    "topic": "creator",
+    "scene": "celebration",
+    "keywords": [
+      "first essay",
+      "published essay",
+      "reader feedback"
+    ],
+    "post": "Someone I don't know read my first essay and left a really thoughtful comment.",
+    "replies": [
+      "congrats! that kind of comment is worth hanging onto",
+      "they read it and then took the time to write something back. pretty cool"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-14",
+    "language": "en",
+    "topic": "creator",
+    "scene": "support",
+    "keywords": [
+      "engagement dropped",
+      "low engagement",
+      "impressions"
+    ],
+    "post": "Engagement has been pretty low lately and I'm struggling to find things to write about.",
+    "replies": [
+      "that quiet stretch can be discouraging",
+      "hope you find a topic you're excited to get back to"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-15",
+    "language": "en",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "drafts",
+      "idea notebook",
+      "notes app"
+    ],
+    "post": "I always have a great post idea when I can't write it down.",
+    "replies": [
+      "and by the time you open the notes app it's gone",
+      "half an idea in the notes is better than hoping to remember it"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-16",
+    "language": "en",
+    "topic": "work",
+    "scene": "question",
+    "keywords": [
+      "remote work",
+      "office days",
+      "hybrid"
+    ],
+    "post": "Would you rather work remotely or go into the office every day?",
+    "replies": [
+      "I'd go for a bit of both if I could choose the days",
+      "For tasks that need concentration, having fewer interruptions matters a lot."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-17",
+    "language": "en",
+    "topic": "work",
+    "scene": "observation",
+    "keywords": [
+      "notifications",
+      "work chat",
+      "after hours"
+    ],
+    "post": "Muted my work chat after hours and suddenly my evenings feel like evenings again.",
+    "replies": [
+      "nice not having every buzz turn into a work thought",
+      "Some messages really can wait until morning."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-18",
+    "language": "en",
+    "topic": "work",
+    "scene": "celebration",
+    "keywords": [
+      "probation",
+      "permanent role",
+      "promotion"
+    ],
+    "post": "Passed my probation period today! Officially staying.",
+    "replies": [
+      "congrats!! must be a relief to have that settled",
+      "hope you get to do something nice to celebrate"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-19",
+    "language": "en",
+    "topic": "work",
+    "scene": "support",
+    "keywords": [
+      "last day",
+      "leaving company",
+      "coworkers"
+    ],
+    "post": "Last day at the company after three years. Feeling a bit sad about it.",
+    "replies": [
+      "three years is a lot of familiar faces to leave behind",
+      "hope you keep in touch with the people you'll miss"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-20",
+    "language": "en",
+    "topic": "study",
+    "scene": "question",
+    "keywords": [
+      "note taking",
+      "textbook",
+      "revision"
+    ],
+    "post": "Do you take notes on everything you read?",
+    "replies": [
+      "just the things I'd want to find again later",
+      "Sometimes being able to explain it in your own words is enough."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-21",
+    "language": "en",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "paper accepted",
+      "conference acceptance",
+      "research paper"
+    ],
+    "post": "My first paper got accepted!",
+    "replies": [
+      "congrats!! getting through that first submission is a big deal",
+      "bet you reread that email a few times"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-22",
+    "language": "en",
+    "topic": "study",
+    "scene": "complaint",
+    "keywords": [
+      "experiment data",
+      "timestamps",
+      "dataset"
+    ],
+    "post": "Almost finished cleaning my experiment data and found a batch with mismatched timestamps.",
+    "replies": [
+      "oh no, right at the end too",
+      "hopefully the original records are still there to compare"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-23",
+    "language": "en",
+    "topic": "study",
+    "scene": "observation",
+    "keywords": [
+      "library",
+      "window seat",
+      "studying"
+    ],
+    "post": "Found a really quiet window seat in the library and now I never want to study anywhere else.",
+    "replies": [
+      "a good seat makes a surprising difference",
+      "hope nobody else discovers it too soon"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-24",
+    "language": "en",
+    "topic": "money",
+    "scene": "question",
+    "keywords": [
+      "budgeting",
+      "expense tracking",
+      "budget app"
+    ],
+    "post": "Do you track tiny purchases individually when budgeting?",
+    "replies": [
+      "I'd group the small stuff and keep an eye on the recurring expenses",
+      "the simpler it is to keep up with, the more useful it is"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-25",
+    "language": "en",
+    "topic": "money",
+    "scene": "observation",
+    "keywords": [
+      "secondhand",
+      "declutter",
+      "resold"
+    ],
+    "post": "Sold something I never use and felt way happier than when I bought it.",
+    "replies": [
+      "getting the space back is half the fun",
+      "nice when the buyer actually has a use for it too"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-26",
+    "language": "en",
+    "topic": "money",
+    "scene": "complaint",
+    "keywords": [
+      "refund",
+      "customer service",
+      "return request"
+    ],
+    "post": "It's been three days and customer support keeps telling me my refund is being processed.",
+    "replies": [
+      "even a rough date would be better than endless waiting",
+      "hope you get an actual update soon"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-27",
+    "language": "en",
+    "topic": "money",
+    "scene": "question",
+    "keywords": [
+      "impulse purchase",
+      "shopping cart",
+      "checkout"
+    ],
+    "post": "Do you buy things you want immediately or leave them in the cart for a while?",
+    "replies": [
+      "I'd leave it there for a couple of days if I don't need it now",
+      "Sometimes the urge disappears before you even get back to the cart."
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-28",
+    "language": "en",
+    "topic": "fitness",
+    "scene": "celebration",
+    "keywords": [
+      "pull up",
+      "pull-up",
+      "chin-up"
+    ],
+    "post": "Finally managed my first unassisted pull-up!",
+    "replies": [
+      "let's go!! getting that first one feels huge",
+      "congrats, one good rep to build on"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-29",
+    "language": "en",
+    "topic": "fitness",
+    "scene": "observation",
+    "keywords": [
+      "stamina",
+      "cardio",
+      "staircase"
+    ],
+    "post": "Used to get winded on the stairs and today made it to the fifth floor without noticing.",
+    "replies": [
+      "that's such a satisfying way to notice progress",
+      "the everyday stuff is where it really becomes apparent"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-30",
+    "language": "en",
+    "topic": "fitness",
+    "scene": "question",
+    "keywords": [
+      "warmup",
+      "warm-up",
+      "mobility"
+    ],
+    "post": "How long do you usually warm up before lifting?",
+    "replies": [
+      "depends what I'm lifting, a few lighter sets first make sense",
+      "I'd go by how ready the movement feels rather than a fixed timer"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-31",
+    "language": "en",
+    "topic": "fitness",
+    "scene": "complaint",
+    "keywords": [
+      "grip strength",
+      "deadlift",
+      "forearms"
+    ],
+    "post": "My grip gives out on deadlifts before anything else feels tired.",
+    "replies": [
+      "annoying when the rest of you has more reps in it",
+      "grip has a schedule of its own apparently"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-32",
+    "language": "en",
+    "topic": "food",
+    "scene": "observation",
+    "keywords": [
+      "fresh bread",
+      "baking bread",
+      "sourdough"
+    ],
+    "post": "Just pulled a loaf out of the oven. Waiting for it to cool is the hardest part.",
+    "replies": [
+      "the smell makes waiting pretty unreasonable",
+      "hope the first slice is worth it"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-33",
+    "language": "en",
+    "topic": "food",
+    "scene": "question",
+    "keywords": [
+      "portable breakfast",
+      "sandwich",
+      "breakfast commute"
+    ],
+    "post": "What breakfast can I take on a commute without making a huge mess?",
+    "replies": [
+      "a wrapped sandwich is a pretty easy option",
+      "a rice ball is good if you want something you can hold in one hand"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-34",
+    "language": "en",
+    "topic": "food",
+    "scene": "humor",
+    "keywords": [
+      "hot pot",
+      "dipping sauce",
+      "sauce bar"
+    ],
+    "post": "Spent ten minutes making my hot pot dipping sauce before eating anything.",
+    "replies": [
+      "you've basically made an appetizer",
+      "half the meal is deciding what goes in that bowl"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-35",
+    "language": "en",
+    "topic": "food",
+    "scene": "celebration",
+    "keywords": [
+      "cake baking",
+      "first cake",
+      "sponge cake"
+    ],
+    "post": "My first homemade cake didn't collapse!",
+    "replies": [
+      "congrats! that must have been a nice moment opening the oven",
+      "now you get to do the fun part and decorate it"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-36",
+    "language": "en",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "evening walk",
+      "riverside",
+      "sunset walk"
+    ],
+    "post": "Went for a walk by the river after dinner and barely looked at my phone.",
+    "replies": [
+      "sounds like a pretty good way to end the day",
+      "nice when there's nowhere in particular you need to be"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-37",
+    "language": "en",
+    "topic": "life",
+    "scene": "question",
+    "keywords": [
+      "roommates",
+      "shared space",
+      "chores"
+    ],
+    "post": "What's a fair way for roommates to split cleaning?",
+    "replies": [
+      "a simple rotation works if everyone agrees what needs doing",
+      "I'd write down the common areas and divvy those up first"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-38",
+    "language": "en",
+    "topic": "life",
+    "scene": "celebration",
+    "keywords": [
+      "new apartment",
+      "unpacked",
+      "moving day"
+    ],
+    "post": "Finally unpacked the last box at my new place.",
+    "replies": [
+      "congrats! it can actually feel like home now",
+      "that last cardboard box deserves a little celebration"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-39",
+    "language": "en",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "worn out",
+      "exhausted",
+      "rest day"
+    ],
+    "post": "Nothing particularly bad happened this week but I feel completely worn out.",
+    "replies": [
+      "hope the weekend gives you a little room to just exist",
+      "sometimes a week is tiring even without a big reason"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-40",
+    "language": "en",
+    "topic": "life",
+    "scene": "humor",
+    "keywords": [
+      "alarm clock",
+      "snooze",
+      "overslept"
+    ],
+    "post": "Set five alarms and only woke up when somebody called me.",
+    "replies": [
+      "the five alarms have some explaining to do",
+      "whoever called you accidentally saved the morning"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-41",
+    "language": "en",
+    "topic": "travel",
+    "scene": "observation",
+    "keywords": [
+      "sea view",
+      "seaside",
+      "ocean view"
+    ],
+    "post": "Woke up to a sea view at this little guesthouse and don't really want to leave the room.",
+    "replies": [
+      "staying put sounds like a perfectly good holiday plan",
+      "a slow breakfast with that view would be lovely"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-en-42",
+    "language": "en",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "encore",
+      "concert",
+      "live show"
+    ],
+    "post": "The lights came on after the last song and nobody seemed ready to leave.",
+    "replies": [
+      "that's a pretty nice sign of a good night",
+      "there's something about the few minutes after a great set"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-1",
+    "language": "ja",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "個人開発",
+      "初ユーザー",
+      "登録"
+    ],
+    "post": "個人開発したサービスに初めて知らない人が登録してくれた！",
+    "replies": [
+      "おめでとうございます！身内以外の最初の一人はうれしいですね",
+      "ちゃんと必要としてくれる人に届いたんですね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-2",
+    "language": "ja",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "依存関係",
+      "ライブラリ",
+      "アップデート"
+    ],
+    "post": "ライブラリ一つ更新したら依存関係が崩れた",
+    "replies": [
+      "元に戻すだけでも時間かかりそう…",
+      "動いてたところまで巻き込まれるのがつらいですね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-3",
+    "language": "ja",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "コメント欄",
+      "返信",
+      "感想"
+    ],
+    "post": "投稿よりコメント欄の方がおもしろいことがある",
+    "replies": [
+      "別の経験を持ってる人の話が聞けるのがいいですよね",
+      "元の投稿になかった話が出てくるとつい読んじゃいます"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-4",
+    "language": "ja",
+    "topic": "work",
+    "scene": "question",
+    "keywords": [
+      "在宅勤務",
+      "出社",
+      "リモート"
+    ],
+    "post": "在宅勤務と出社、どっちが好きですか？",
+    "replies": [
+      "曜日を自分で選べるなら両方あるのがいいかな",
+      "集中したい日は家で作業できるとうれしいですね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-5",
+    "language": "ja",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "採択",
+      "学会",
+      "研究"
+    ],
+    "post": "初めての投稿が採択された！",
+    "replies": [
+      "おめでとうございます！通知を見た瞬間うれしかったでしょうね",
+      "初投稿でこの結果はうれしいですね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-6",
+    "language": "ja",
+    "topic": "fitness",
+    "scene": "celebration",
+    "keywords": [
+      "懸垂",
+      "自重",
+      "鉄棒"
+    ],
+    "post": "初めて懸垂一回できた！",
+    "replies": [
+      "おめでとう！最初の一回はうれしいですね",
+      "ここから少しずつ回数増やしていけそうですね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-7",
+    "language": "ja",
+    "topic": "food",
+    "scene": "question",
+    "keywords": [
+      "朝食",
+      "サンドイッチ",
+      "通勤中"
+    ],
+    "post": "通勤中に食べやすい朝食って何がありますか？",
+    "replies": [
+      "包んだサンドイッチなら持ち歩きやすいですね",
+      "おにぎりも片手で食べられて便利ですよ"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-8",
+    "language": "ja",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "散歩",
+      "夕方",
+      "川沿い"
+    ],
+    "post": "夕飯のあと川沿いを散歩した。スマホもほとんど見なかった",
+    "replies": [
+      "そういう時間いいですね",
+      "急ぐ用事がない散歩って気持ちいいですよね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-9",
+    "language": "ja",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "疲れ",
+      "気力",
+      "休み"
+    ],
+    "post": "何かあったわけじゃないけど今週は妙に疲れた",
+    "replies": [
+      "週末少しゆっくりできるといいですね",
+      "特別なことがなくても疲れる週ってありますよね"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ja-10",
+    "language": "ja",
+    "topic": "travel",
+    "scene": "observation",
+    "keywords": [
+      "海",
+      "窓",
+      "宿"
+    ],
+    "post": "宿の窓から海が見えて、出かける気がなくなった",
+    "replies": [
+      "その景色なら部屋でのんびりするのもいいですね",
+      "朝ごはんもゆっくり食べたくなりそう"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-1",
+    "language": "ko",
+    "topic": "tech",
+    "scene": "celebration",
+    "keywords": [
+      "개인 개발",
+      "첫 사용자",
+      "가입"
+    ],
+    "post": "개인 개발한 서비스에 모르는 사람이 처음 가입했다!",
+    "replies": [
+      "축하해요! 지인 아닌 첫 사용자라 더 기쁘겠네요",
+      "필요한 사람한테 드디어 닿았네요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-2",
+    "language": "ko",
+    "topic": "tech",
+    "scene": "complaint",
+    "keywords": [
+      "의존성",
+      "라이브러리",
+      "업데이트"
+    ],
+    "post": "라이브러리 하나 업데이트했더니 의존성이 다 꼬였다",
+    "replies": [
+      "잘 되던 것까지 건드려지는 게 제일 힘들죠",
+      "원래 하던 작업은 언제 다시 하죠…"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-3",
+    "language": "ko",
+    "topic": "creator",
+    "scene": "observation",
+    "keywords": [
+      "댓글",
+      "대댓글",
+      "게시글"
+    ],
+    "post": "가끔 원래 글보다 댓글이 더 재미있다",
+    "replies": [
+      "다른 경험 가진 사람들이 얘기 보태는 게 재밌어요",
+      "글에는 없던 이야기가 나올 때가 있죠"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-4",
+    "language": "ko",
+    "topic": "work",
+    "scene": "question",
+    "keywords": [
+      "재택근무",
+      "출근",
+      "사무실"
+    ],
+    "post": "재택근무랑 사무실 출근 중 뭐가 더 좋으세요?",
+    "replies": [
+      "요일을 고를 수 있으면 둘 다 있는 게 좋겠어요",
+      "집에서 집중할 수 있는 날이 있으면 편하죠"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-5",
+    "language": "ko",
+    "topic": "study",
+    "scene": "celebration",
+    "keywords": [
+      "논문 채택",
+      "학회",
+      "연구"
+    ],
+    "post": "처음 투고한 논문이 채택됐어요!",
+    "replies": [
+      "축하해요! 메일 보고 정말 기뻤겠네요",
+      "첫 투고부터 좋은 소식이라니 좋네요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-6",
+    "language": "ko",
+    "topic": "fitness",
+    "scene": "celebration",
+    "keywords": [
+      "턱걸이",
+      "풀업",
+      "철봉"
+    ],
+    "post": "오늘 처음으로 턱걸이 한 개 성공했다!",
+    "replies": [
+      "축하해요! 첫 한 개가 정말 어렵죠",
+      "이제 조금씩 늘려가는 재미가 있겠네요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-7",
+    "language": "ko",
+    "topic": "food",
+    "scene": "question",
+    "keywords": [
+      "아침 식사",
+      "샌드위치",
+      "통근"
+    ],
+    "post": "출근길에 먹기 편한 아침 식사 추천 있나요?",
+    "replies": [
+      "포장한 샌드위치가 들고 다니기 편해요",
+      "주먹밥도 한 손으로 먹기 좋죠"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-8",
+    "language": "ko",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "산책",
+      "저녁",
+      "강변"
+    ],
+    "post": "저녁 먹고 강변을 산책했다. 휴대폰도 거의 안 봄",
+    "replies": [
+      "그런 시간 참 좋죠",
+      "딱히 급하게 갈 곳 없는 산책이 편하더라고요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-9",
+    "language": "ko",
+    "topic": "life",
+    "scene": "support",
+    "keywords": [
+      "피곤",
+      "지쳤",
+      "휴식"
+    ],
+    "post": "별일 없었는데 이번 주는 유난히 피곤하네",
+    "replies": [
+      "주말에는 좀 편하게 쉴 수 있으면 좋겠어요",
+      "특별한 일 없어도 유난히 지치는 주가 있죠"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
+  },
+  {
+    "id": "v54-curated-ko-10",
+    "language": "ko",
+    "topic": "travel",
+    "scene": "observation",
+    "keywords": [
+      "바다 전망",
+      "숙소",
+      "오션뷰"
+    ],
+    "post": "숙소에서 바다가 보여서 밖에 나가기 싫어졌다",
+    "replies": [
+      "그냥 숙소에서 쉬는 것도 여행이죠",
+      "그 풍경이면 아침부터 천천히 보내고 싶겠네요"
+    ],
+    "source": {
+      "kind": "synthetic",
+      "review": "editorial_candidate"
+    },
+    "editorialRevision": "v5.4-expanded"
   }
 ];

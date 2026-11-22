@@ -9,7 +9,7 @@ const args=(text,language="auto")=>({postContext:{text},voiceProfile:{language},
 test("V5 sample provenance, four languages, distinct IDs and bounded records",()=>{
  assert.equal(new Set(REPLY_V5_EXAMPLES.map(x=>x.id)).size,REPLY_V5_EXAMPLES.length);
  assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,53);
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,69);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,179);
  for(const lang of ["zh","en","ja","ko"])assert.ok(REPLY_V5_EXAMPLES.some(x=>x.language===lang));
  for(const x of REPLY_V5_EXAMPLES){assert.ok(x.post&&x.replies.length&&x.replies.every(Boolean)&&x.keywords.length);if(x.source.kind==="external_conversation"){assert.match(x.source.blob,/^[0-9a-f]{40}$/);assert.equal(x.source.permission,"owner_reported");assert.ok(x.source.record);}}
 });
@@ -51,7 +51,7 @@ test("V5 candidate default is Staging only, explicit V4 and V1 unchanged",()=>{
 });
 
 test("real conversation retrieval favors a relevant real pair without increasing prompt budget",()=>{
- for(const text of ["会员自动续费又扣钱了","五一假期还要加班","phone broken, how do I tell my parents?"]){
+ for(const text of ["手机流量套餐还有通话分钟","安卓游戏通关了还想玩后面两部","phone broken, how do I tell my parents?"]){
   const a=args(text),selected=selectReplyV5Examples(a);
   assert.ok(selected.some(s=>REPLY_V5_EXAMPLES.some(x=>x.source.kind==="external_conversation"&&x.post===s.post)),text);
   assert.ok(selected.length<=2&&new TextEncoder().encode(JSON.stringify(selected)).length<=V5_EXAMPLE_MAX_BYTES);
@@ -99,7 +99,7 @@ test("V5.2 abstains on broad-only hits, favors coherent examples, and excludes f
   assert.ok(result.length,text);
   assert.ok(result.every(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.topic===topic&&!x.retrievalDisabled)),text);
  }
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.retrievalDisabled).length,9);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.retrievalDisabled).length,32);
  assert.deepEqual(selectReplyV5Examples(args("Hazelnut coffee anyone else?")),[]);
 });
 test("V5.2 retrieves support/celebration examples instead of vent jokes in all four languages",()=>{
@@ -137,5 +137,36 @@ test("V5.3 discourages habitual agreement openings without banning natural agree
  assert.match(result.system,/Follow explicit personal voice and register/);
  assert.ok(result.user.startsWith(baseline.user));
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),baseline);
+ }
+});
+
+test("V5.4 freezes external provenance, disables low-value examples and selectively revises synthetic replies",()=>{
+ const disabled=REPLY_V5_EXAMPLES.filter(x=>x.retrievalDisabled);
+ assert.equal(disabled.length,32);
+ assert.ok(disabled.every(x=>x.source.kind==="external_conversation"));
+ const reviewed=REPLY_V5_EXAMPLES.filter(x=>x.editorialRevision==="v5.4");
+ assert.equal(reviewed.length,43);
+ assert.ok(reviewed.every(x=>x.source.kind==="synthetic"&&x.replies.length===2));
+ // These previous generic or context-dependent replies must not be retrieved.
+ for(const text of ["广告帖为什么取关","照片内存又满了","五一假期又要加班","我买了电影票，想看新上映的电影","I bought a new camera for video","手机自动续费扣钱了","去健身房之前吃东西吗"]){
+  const selected=selectReplyV5Examples(args(text));
+  assert.ok(selected.every(s=>!disabled.some(x=>x.post===s.post)),text);
+ }
+ for(const text of ["五一假期又要加班","我买了电影票，想看新上映的电影","I bought a new camera for video","会员自动续费又扣钱了"]){
+  const selected=selectReplyV5Examples(args(text));
+  assert.ok(selected.length,text);
+  assert.ok(selected.some(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.source.kind==="synthetic")),text);
+ }
+});
+
+test("V5.4 complete curated corpus has 200 enabled records and bounded four-language coverage",()=>{
+ const active=REPLY_V5_EXAMPLES.filter(x=>!x.retrievalDisabled);
+ assert.equal(active.length,200);
+ const expanded=active.filter(x=>x.editorialRevision==="v5.4-expanded");
+ assert.equal(expanded.length,107);
+ for(const row of expanded){assert.equal(row.source.kind,"synthetic");assert.equal(row.replies.length,2);assert.ok(row.replies.every(s=>s.length<=110));}
+ for(const language of ["zh","en","ja","ko"]){assert.ok(active.filter(x=>x.language===language).length>=19);}
+ for(const [text,language] of [["我的依赖包更新后版本冲突了","zh"],["My dependencies are broken again","en"],["ライブラリの依存関係が崩れた","ja"],["라이브러리 업데이트하고 의존성이 꼬였다","ko"]]){
+  const result=selectReplyV5Examples(args(text,language));assert.ok(result.length,text);assert.ok(result.some(s=>expanded.some(x=>x.post===s.post)),text);assert.ok(new TextEncoder().encode(JSON.stringify(result)).length<=V5_EXAMPLE_MAX_BYTES);
  }
 });
