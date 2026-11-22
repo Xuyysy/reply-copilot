@@ -8,8 +8,8 @@ import { selectStagingReplyPrompts } from "../prompts/staging-reply-prompt-selec
 const args=(text,language="auto")=>({postContext:{text},voiceProfile:{language},outputSchemaVersion:2});
 test("V5 sample provenance, four languages, distinct IDs and bounded records",()=>{
  assert.equal(new Set(REPLY_V5_EXAMPLES.map(x=>x.id)).size,REPLY_V5_EXAMPLES.length);
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,43);
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,53);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,53);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,69);
  for(const lang of ["zh","en","ja","ko"])assert.ok(REPLY_V5_EXAMPLES.some(x=>x.language===lang));
  for(const x of REPLY_V5_EXAMPLES){assert.ok(x.post&&x.replies.length&&x.replies.every(Boolean)&&x.keywords.length);if(x.source.kind==="external_conversation"){assert.match(x.source.blob,/^[0-9a-f]{40}$/);assert.equal(x.source.permission,"owner_reported");assert.ok(x.source.record);}}
 });
@@ -88,4 +88,38 @@ test("V5 friendliness does not override explicit direct or thoughtful style or l
   const legacy={...a,outputSchemaVersion:1};
   assert.deepEqual(buildHumanV5Prompts(legacy),buildFastV4Prompts(legacy));
  }
+});
+
+test("V5.2 abstains on broad-only hits, favors coherent examples, and excludes flagged rows",()=>{
+ for(const text of ["买","工作","流量","项目","work","money","room","일"]){
+  assert.deepEqual(selectReplyV5Examples(args(text)),[],text);
+ }
+ for(const [text,topic] of [["流量套餐每个月还送通话分钟","tech"],["昨天健身房训练练腿","fitness"],["I bought a new camera for video","tech"],["我买了电影票，想看新上映的电影","entertainment"]]){
+  const result=selectReplyV5Examples(args(text));
+  assert.ok(result.length,text);
+  assert.ok(result.every(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.topic===topic&&!x.retrievalDisabled)),text);
+ }
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.retrievalDisabled).length,9);
+ assert.deepEqual(selectReplyV5Examples(args("Hazelnut coffee anyone else?")),[]);
+});
+test("V5.2 retrieves support/celebration examples instead of vent jokes in all four languages",()=>{
+ for(const [text,lang,mood] of [
+ ["第一志愿面试被拒了，好难受","zh","support"],
+ ["收到offer了，终于等到了","zh","celebration"],
+ ["got rejected after the interview, pretty disappointed","en","support"],
+ ["finally got my job offer","en","celebration"],
+ ["面接落ちた、かなりへこんでる","ja","support"],
+ ["やっと内定もらった！","ja","celebration"],
+ ["면접 탈락해서 속상하다","ko","support"],
+ ["드디어 최종 합격했어요","ko","celebration"]
+ ]){
+  const result=selectReplyV5Examples(args(text,lang));
+  assert.ok(result.length,text);
+  assert.ok(result.every(s=>REPLY_V5_EXAMPLES.some(x=>x.post===s.post&&x.language===lang&&x.scene===mood)),text);
+  assert.match(buildHumanV5Prompts(args(text,lang)).system,/three genuinely different conversational moves/);
+ }
+});
+test("sensitive context anywhere in an accepted long post suppresses retrieval",()=>{
+ const content="AI code bug ".repeat(710)+"my friend died yesterday";
+ assert.deepEqual(selectReplyV5Examples(args(content)),[]);
 });
