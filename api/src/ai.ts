@@ -7,7 +7,8 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
-import { buildLiveProductionV3Prompts } from "../../prompts/prompt-v3-live-parity.js";
+import { buildProductionV55NoCorpusPrompts } from "../../prompts/prompt-v5-no-corpus.js";
+import { rerankV5DefaultStyle } from "../../prompts/reply-v5-quality.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
@@ -103,7 +104,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildLiveProductionV3Prompts:buildPrompts;
+  const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildProductionV55NoCorpusPrompts:buildPrompts;
   const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
@@ -131,6 +132,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     // Validate the full shared contract for legacy and managed providers and
     // persist a wire representation accepted by both released client parsers.
     result.raw = serializeModelOutput(result.raw);
+      result.raw = rerankV5DefaultStyle(result.raw,env,input.outputSchemaVersion);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
