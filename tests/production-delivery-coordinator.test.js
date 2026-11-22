@@ -231,7 +231,8 @@ test('an unrelated old provider uncertainty never blocks a newly reserved reques
  })});
  assert.equal(await c.generateReplies(fresh),'should-not-execute');
  assert.equal(generated,1,'different Reply must use its own request ID and server quota');
- assert.equal(data.pendingAiDelivery,null,'new request only clears its own local pending state');
+ assert.equal(data.pendingAiDelivery?.input.requestId,'old','new request clears only its own record and preserves the uncertain old request');
+ assert.deepEqual(data.pendingAiDeliveries.map(row=>row.input.requestId),['old']);
 });
 
 

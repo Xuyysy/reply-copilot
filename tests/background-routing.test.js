@@ -5,7 +5,13 @@ import { validOutput } from "./helpers.js";
 const values = { replyCopilotAccountToken: "local-test-token" };
 const local = {
   async get(key) { return typeof key === "string" ? { [key]: values[key] } : Object.fromEntries(key.map((item) => [item, values[item]])); },
-  async set() { throw new Error("Local usage storage unavailable"); },
+  async set(patch) {
+    // Durable pending records are required before AI. Only optional
+    // post-ACK local history/usage persistence is simulated to fail.
+    if ('completedAiDeliveries' in patch || 'replyHistory' in patch || 'localUsageEvents' in patch)
+      throw new Error("Local usage storage unavailable");
+    Object.assign(values,patch);
+  },
   async remove() {},
 };
 const event = () => ({ addListener(listener) { this.listener = listener; } });
