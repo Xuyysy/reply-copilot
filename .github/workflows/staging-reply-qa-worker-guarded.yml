@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
     inputs:
       candidate:
-        description: Select exact Staging V4, V5, V5.1 or V5.2 candidate (never Production)
+        description: Select exact Staging V4 through V5.3 candidate (never Production)
         type: choice
-        options: ["v4", "v5", "v5.1", "v5.2"]
+        options: ["v4", "v5", "v5.1", "v5.2", "v5.3"]
         default: "v4"
         required: true
       source_sha:
@@ -101,6 +101,15 @@ jobs:
               test "$EXPECTED" = "a78318e8-aeab-4147-a4f4-54a8ef4f93e7"
               if [[ "$MODE" == "deploy" ]]; then
                 test "$EXPECTED_DEPLOYMENT" = "6c811259-165e-4e2a-a635-114b0970966b"
+              fi ;;
+            v5.3)
+              case "$MODE:$CONFIRMATION" in
+                check:CHECK_V53_ONLY|upload:UPLOAD_STAGING_V53_VERSION_ONLY|deploy:DEPLOY_STAGING_V53_WORKER) ;;
+                *) echo 'Missing exact V5.3 release confirmation'; exit 1 ;;
+              esac
+              test "$EXPECTED" = "9fb255d7-b580-4f74-8305-e4e5954c53eb"
+              if [[ "$MODE" == "deploy" ]]; then
+                test "$EXPECTED_DEPLOYMENT" = "d6188337-fc52-44b7-9dcc-4f14f807d140"
               fi ;;
             *) echo 'Unknown candidate'; exit 1 ;;
           esac
@@ -222,6 +231,35 @@ jobs:
               current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/experiment/staging-v52-retrieval-20261122" --jq '.object.sha')
               test "$current" = "$SOURCE_SHA" || { echo 'Staging V5.2 PR branch SHA changed; stop'; exit 1; }
             fi
+          elif [[ "$CANDIDATE" == "v5.3" ]]; then
+            test "$SOURCE_SHA" = "ed5f5d602d9c1d100589bc338ff38acb013bec29"
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN_ID" > "$RUNNER_TEMP/source-ci.json"
+            jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .head_sha == $sha and .head_repository.full_name == $repo
+              and .head_branch == "experiment/staging-v53-natural-openings-20261122" and .event == "push"
+              and .status == "completed" and .conclusion == "success"
+              and .path == ".github/workflows/ci.yml"
+            ' "$RUNNER_TEMP/source-ci.json" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/pulls/234" > "$RUNNER_TEMP/staging-v53-pr.json"
+            jq -e --arg sha "$SOURCE_SHA" --arg repo "$GITHUB_REPOSITORY" '
+              .head.sha == $sha and .head.repo.full_name == $repo
+              and .head.ref == "experiment/staging-v53-natural-openings-20261122"
+              and .base.ref == "experiment/staging-v52-retrieval-20261122"
+              and .base.sha == "d811d4b85d6c84f20c8afecf364d6f83fd558473"
+              and .state == "open" and .draft == true and .changed_files == 3
+            ' "$RUNNER_TEMP/staging-v53-pr.json" > /dev/null
+            gh api "repos/$GITHUB_REPOSITORY/pulls/234/files?per_page=100" > "$RUNNER_TEMP/staging-v53-files.json"
+            jq -e '
+              ([.[].filename] | sort) == ([
+                "docs/experiments/reply-v5-human-examples-20261122.md",
+                "prompts/prompt-v5-human.js",
+                "tests/reply-v5-human.test.js"
+              ] | sort) and all(.[]; .status == "modified")
+            ' "$RUNNER_TEMP/staging-v53-files.json" > /dev/null
+            if [[ "$MODE" == "deploy" ]]; then
+              current=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/experiment/staging-v53-natural-openings-20261122" --jq '.object.sha')
+              test "$current" = "$SOURCE_SHA" || { echo 'Staging V5.3 PR branch SHA changed; stop'; exit 1; }
+            fi
           else
             exit 1
           fi
@@ -280,7 +318,7 @@ jobs:
           assert bindings['DB']['type']=='d1' and bindings['DB']['id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
           assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in bindings
           assert 'EMAIL_LOGIN_ENABLED' not in bindings
-          if os.environ.get('CANDIDATE') in ('v5','v5.1','v5.2'):
+          if os.environ.get('CANDIDATE') in ('v5','v5.1','v5.2','v5.3'):
             assert 'STAGING_REPLY_PROMPT_VERSION' not in bindings, 'V5 requires absent prompt override; do not change settings'
           config=json.load(open('api/wrangler.jsonc'))['env']['staging']['vars']
           for k,v in config.items():
@@ -324,7 +362,7 @@ jobs:
           plain={b["name"]:b["text"] for b in bindings if b["type"]=="plain_text"}
           assert all(isinstance(v,str) for v in plain.values())
           assert all(plain.get(k)==v for k,v in st["vars"].items()), "Declared vars drifted"
-          if os.environ.get("CANDIDATE") in ("v5","v5.1","v5.2"):
+          if os.environ.get("CANDIDATE") in ("v5","v5.1","v5.2","v5.3"):
               assert "STAGING_REPLY_PROMPT_VERSION" not in plain and "STAGING_REPLY_PROMPT_VERSION" not in st["vars"], "V5 requires absent prompt override"
           # Only known Dashboard-managed non-secret keys may be mirrored.
           # QA flags may be preserved if present, never created here.
