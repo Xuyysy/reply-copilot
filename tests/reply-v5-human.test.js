@@ -139,3 +139,19 @@ test("V5.3 discourages habitual agreement openings without banning natural agree
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v4"},a),baseline);
  }
 });
+
+test("V5.3 prefers actual conversation over filler and safely uses existing selected history",()=>{
+ const history=[{style:"natural",reply:"确实，模型越来越快了。"},{style:"thoughtful",reply:"确实，我昨天买了这款电脑。"}];
+ for(const text of ["AI code has another bug","quantum entanglement","大家有没有推荐的咖啡豆？"]){
+  const a={...args(text),recentHistory:history};
+  const output=buildHumanV5Prompts(a),baseline=buildFastV4Prompts(a);
+  assert.ok(output.system.startsWith(baseline.system));
+  assert.match(output.system,/Answer a genuine question directly/);
+  assert.match(output.system,/avoid wrapping it in advice, a life lesson, or an engagement question/);
+  assert.match(output.system,/avoid repeatedly using the same opener, ending, or sentence frame/);
+  assert.match(output.system,/never carry over their facts, claims, or implied relationships/);
+  assert.ok(output.user.startsWith(baseline.user));
+  assert.ok(output.user.includes(history[0].reply));
+  assert.ok(output.user.includes(history[1].reply));
+ }
+});
