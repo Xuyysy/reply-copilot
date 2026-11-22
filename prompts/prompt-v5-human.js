@@ -42,12 +42,17 @@ export function selectReplyV5Examples(args){
   const t=norm(text), mood=scene(t);
   const ranked=REPLY_V5_EXAMPLES.filter(x=>x.language===lang).map(x=>{
     const n=x.keywords.filter(key=>matches(t,key)).length;
-    return {x,n,score:n*4+(x.scene===mood?2:0)+(x.source.kind==="external_conversation"?1:0)};
+    // Prioritize a real conversation only when the scene or multiple keywords support it.
+    const real=x.source.kind==="external_conversation";
+    const sameScene=x.scene===mood;
+    return {x,n,score:n*4+(sameScene?3:0)+(real&&(sameScene||n>=2)?3:0)};
   }).filter(x=>x.n>0).sort((a,b)=>b.score-a.score||a.x.id.localeCompare(b.x.id,"en"));
   let out=[],seen=new Set();
   for(const {x} of ranked){
     if(out.length===V5_MAX_EXAMPLES)break;
     if(seen.has(x.post)||norm(x.post)===t.trim())continue;
+    // Reject structural delimiters, URLs, or embedded instruction-like content.
+    if([x.post,...x.replies].some(s=>/[<>@]|https?:\/\//iu.test(s)||injection.test(s)))continue;
     // Respect nonmatching / unknown context by omitting it, never inject randomly.
     const item={post:x.post,replies:x.replies};
     if(byteLength(JSON.stringify([...out,item]))>V5_EXAMPLE_MAX_BYTES)continue;

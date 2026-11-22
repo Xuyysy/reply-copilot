@@ -1572,5 +1572,663 @@ export const REPLY_V5_EXAMPLES = [
       "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
       "review": "editorial_candidate"
     }
+  },
+  {
+    "id": "lccc-toy-train-271-turn-0",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "照片",
+      "内存",
+      "存储",
+      "128g"
+    ],
+    "post": "哈哈跟我一样我把照片全存空间里了，我觉得下次得买128g了",
+    "replies": [
+      "对吧，照片太占内存了"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/271/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-291-turn-0",
+    "language": "zh",
+    "topic": "gaming",
+    "scene": "complaint",
+    "keywords": [
+      "线下",
+      "赛事",
+      "比赛",
+      "门店"
+    ],
+    "post": "这个线下比赛到底怎么回事，让我们去线下门店，门店工作人员却对赛事一无所知，真是醉了",
+    "replies": [
+      "你去过线下门店了吗？"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/291/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-573-turn-0",
+    "language": "zh",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "天气",
+      "长袖",
+      "降温",
+      "外套"
+    ],
+    "post": "我的妈呀居然穿长袖了呀！！我还热成狗",
+    "replies": [
+      "晚上长袖外面还要加外套"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/573/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-574-turn-0",
+    "language": "zh",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "电影",
+      "上映",
+      "影片"
+    ],
+    "post": "926好像很多电影上映哇",
+    "replies": [
+      "是呀，新影片集中的放映期……"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/574/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-902-turn-0",
+    "language": "zh",
+    "topic": "gaming",
+    "scene": "observation",
+    "keywords": [
+      "安卓",
+      "游戏",
+      "通关",
+      "收费"
+    ],
+    "post": "安卓也要收费啊，我买了一次，通关卸了。出遗忘海岸又买了一次，通关卸了。出艾达的梦又买了一次，通关，不敢再卸了",
+    "replies": [
+      "后面两个好玩吗"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/902/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-891-turn-0",
+    "language": "zh",
+    "topic": "shopping",
+    "scene": "humor",
+    "keywords": [
+      "电视",
+      "乐视",
+      "薯片"
+    ],
+    "post": "加油吧。别让我们失望。家里好几台乐视电视呢，我可不想以后没电视看。对了，等你的车好了，我要买一台。",
+    "replies": [
+      "你家开录像厅的吗。还好几台乐视电视！你确定是电视而不是薯片？"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/891/turn/0",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-65-turn-5",
+    "language": "zh",
+    "topic": "money",
+    "scene": "complaint",
+    "keywords": [
+      "扣钱",
+      "自动续费",
+      "订阅",
+      "会员"
+    ],
+    "post": "我现在特别怕事偷偷的扣了我的钱",
+    "replies": [
+      "嗯嗯，对哈，这点没想到，系统自动续费"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/65/turn/5",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-141-turn-2",
+    "language": "zh",
+    "topic": "work",
+    "scene": "complaint",
+    "keywords": [
+      "加班",
+      "夜班",
+      "下班",
+      "工作"
+    ],
+    "post": "我刚洗了个澡。昨晚加班了，今天还没去呢",
+    "replies": [
+      "我去！那你还用去么？都这个点了，去了直接是夜班啦"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/141/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-145-turn-2",
+    "language": "zh",
+    "topic": "food",
+    "scene": "observation",
+    "keywords": [
+      "萝卜",
+      "兔子",
+      "胡萝卜"
+    ],
+    "post": "早上的白萝卜不好吃，晚上的胡萝卜好吃",
+    "replies": [
+      "原来兔子也会挑萝卜吃，才知道！"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/145/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-218-turn-3",
+    "language": "zh",
+    "topic": "money",
+    "scene": "humor",
+    "keywords": [
+      "有钱",
+      "赚钱",
+      "爱钱",
+      "工资"
+    ],
+    "post": "对吧，今天我爱钱，明天钱不爱我",
+    "replies": [
+      "哈哈哈哪有钱一直爱你的"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/218/turn/3",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-285-turn-1",
+    "language": "zh",
+    "topic": "life",
+    "scene": "question",
+    "keywords": [
+      "公猫",
+      "猫",
+      "捡到",
+      "养猫"
+    ],
+    "post": "我家那只是公猫怎么下崽今天回家的时候路边捡到的",
+    "replies": [
+      "你要养着么"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/285/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-404-turn-2",
+    "language": "zh",
+    "topic": "life",
+    "scene": "humor",
+    "keywords": [
+      "狗狗",
+      "宠物",
+      "账号",
+      "回复"
+    ],
+    "post": "嗯？？？我被狗狗回复了？？？喜极而泣",
+    "replies": [
+      "主人智商下线登错号儿了"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/404/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-459-turn-2",
+    "language": "zh",
+    "topic": "fitness",
+    "scene": "humor",
+    "keywords": [
+      "运动",
+      "健身",
+      "不运动",
+      "训练"
+    ],
+    "post": "决定不运动了这样就解决了问题",
+    "replies": [
+      "哈哈哈哈干得漂亮"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/459/turn/2",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-683-turn-7",
+    "language": "zh",
+    "topic": "tech",
+    "scene": "observation",
+    "keywords": [
+      "流量",
+      "通话",
+      "套餐",
+      "话费"
+    ],
+    "post": "十八块钱，2300兆流量，300分钟通话，基本也就够了",
+    "replies": [
+      "这么便宜"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/683/turn/7",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-776-turn-1",
+    "language": "zh",
+    "topic": "study",
+    "scene": "complaint",
+    "keywords": [
+      "寒假",
+      "元旦",
+      "放假"
+    ],
+    "post": "凡是元旦放假回家的寒假放假必定晚",
+    "replies": [
+      "能回家就行〜"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/776/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-887-turn-4",
+    "language": "zh",
+    "topic": "work",
+    "scene": "complaint",
+    "keywords": [
+      "加班",
+      "五一",
+      "假期",
+      "公司"
+    ],
+    "post": "啥公司五一还加班呢！一点都不人性",
+    "replies": [
+      "就是没得意思"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/887/turn/4",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-978-turn-1",
+    "language": "zh",
+    "topic": "shopping",
+    "scene": "humor",
+    "keywords": [
+      "邮局",
+      "箱子",
+      "打包",
+      "快递"
+    ],
+    "post": "我当时先买的东西，后来发现邮局小号箱子装不下，只能用中号的了",
+    "replies": [
+      "那应该再买点吃的塞满"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/978/turn/1",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "lccc-toy-train-212-turn-5",
+    "language": "zh",
+    "topic": "life",
+    "scene": "observation",
+    "keywords": [
+      "柚子",
+      "种子",
+      "种植",
+      "盆栽"
+    ],
+    "post": "吃柚子剩下的种子，不是故意买的",
+    "replies": [
+      "这也成？？？我也要种。"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "CDial-GPT toy_data",
+      "blob": "aeee83e2be5ae94de6e5b32287834de1776adf66",
+      "record": "train/212/turn/5",
+      "permission": "owner_reported",
+      "transform": "remove token separators",
+      "review": "editorial_candidate"
+    }
+  },
+  {
+    "id": "uo-record-343",
+    "language": "en",
+    "topic": "creator",
+    "scene": "question",
+    "keywords": [
+      "twitter",
+      "account",
+      "followers",
+      "following"
+    ],
+    "post": "What do consider to be a large twitter account?",
+    "replies": [
+      "How can one person keep up with all those people. I am nowhere near that and I am lost most of the time!!!"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/343",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 7.666666666666667,
+      "annotation_confidence": 79
+    }
+  },
+  {
+    "id": "uo-record-1232",
+    "language": "en",
+    "topic": "tech",
+    "scene": "question",
+    "keywords": [
+      "phone",
+      "broken",
+      "repair"
+    ],
+    "post": "How do I tell my mum my phone is broken",
+    "replies": [
+      "\"Mum, my phone is broken.\""
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1232",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 25,
+      "annotation_confidence": 85
+    }
+  },
+  {
+    "id": "uo-record-2357",
+    "language": "en",
+    "topic": "work",
+    "scene": "observation",
+    "keywords": [
+      "work",
+      "quit",
+      "job",
+      "summer"
+    ],
+    "post": "Last day of work EVER tomorrow. And by \"work,\" I mean Best Buy, and by \"ever,\" I mean \"until the summer.\"",
+    "replies": [
+      "you quit? Or are they letting you go"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/2357",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 33.666666666666664,
+      "annotation_confidence": 72.33333333333333
+    }
+  },
+  {
+    "id": "uo-record-2397",
+    "language": "en",
+    "topic": "relationships",
+    "scene": "humor",
+    "keywords": [
+      "ex",
+      "ghost",
+      "haunting"
+    ],
+    "post": "my ex's ghost is following me(not on twitter)",
+    "replies": [
+      "Good job she is your ex then as otherwise you would have a permanent haunting problemo!"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/2397",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 34.666666666666664,
+      "annotation_confidence": 76.66666666666667
+    }
+  },
+  {
+    "id": "uo-record-1500",
+    "language": "en",
+    "topic": "entertainment",
+    "scene": "complaint",
+    "keywords": [
+      "guitar",
+      "tune",
+      "music"
+    ],
+    "post": "GUITAR NOT STAY IN TUNE SO NO WORK WAT DO",
+    "replies": [
+      "Take a walk, grab a latte, take guitar to be tuned... Return to work, be productive... ?????"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1500",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 35,
+      "annotation_confidence": 62
+    }
+  },
+  {
+    "id": "uo-record-1974",
+    "language": "en",
+    "topic": "entertainment",
+    "scene": "observation",
+    "keywords": [
+      "film",
+      "movie",
+      "blockbuster"
+    ],
+    "post": "Straight B-L-O-C-K-B-YOU-S-T-E-R! That is what Rowdy Rathore is!! Next 100-crore film? All chances!",
+    "replies": [
+      "no way!!! if that is what you think you should definitely watch the original."
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1974",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 26.6,
+      "annotation_confidence": 75.4
+    }
+  },
+  {
+    "id": "uo-record-1137",
+    "language": "en",
+    "topic": "money",
+    "scene": "complaint",
+    "keywords": [
+      "teachers",
+      "students",
+      "school",
+      "classroom"
+    ],
+    "post": "The amount of money teachers have to spend out of their pocket, for things needed in their class rooms, is freaking nuts.",
+    "replies": [
+      "the amount of money that is wasted by students that teachers pay for is unbelivable."
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1137",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 29.333333333333332,
+      "annotation_confidence": 97
+    }
+  },
+  {
+    "id": "uo-record-1450",
+    "language": "en",
+    "topic": "food",
+    "scene": "complaint",
+    "keywords": [
+      "fork",
+      "noodle",
+      "spoon",
+      "lunch"
+    ],
+    "post": "Forgot to bring a fork to work, it is so demoralising eating a pot noodle with a tea spoon pensive face",
+    "replies": [
+      "its demoralising eating pot noodle when ya sober"
+    ],
+    "source": {
+      "kind": "external_conversation",
+      "dataset": "unintended-offense-tweets",
+      "blob": "4303b89c734c38549e25642c11003a188d872d11",
+      "record": "csv-record/1450",
+      "permission": "owner_reported",
+      "transform": "strip handles/URLs, normalize whitespace and ampersand entity",
+      "review": "editorial_candidate",
+      "annotated_offensiveness": 23.333333333333332,
+      "annotation_confidence": 84
+    }
   }
 ];

@@ -8,7 +8,7 @@ import { selectStagingReplyPrompts } from "../prompts/staging-reply-prompt-selec
 const args=(text,language="auto")=>({postContext:{text},voiceProfile:{language},outputSchemaVersion:2});
 test("V5 sample provenance, four languages, distinct IDs and bounded records",()=>{
  assert.equal(new Set(REPLY_V5_EXAMPLES.map(x=>x.id)).size,REPLY_V5_EXAMPLES.length);
- assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,17);
+ assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation").length,43);
  assert.equal(REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="synthetic").length,53);
  for(const lang of ["zh","en","ja","ko"])assert.ok(REPLY_V5_EXAMPLES.some(x=>x.language===lang));
  for(const x of REPLY_V5_EXAMPLES){assert.ok(x.post&&x.replies.length&&x.replies.every(Boolean)&&x.keywords.length);if(x.source.kind==="external_conversation"){assert.match(x.source.blob,/^[0-9a-f]{40}$/);assert.equal(x.source.permission,"owner_reported");assert.ok(x.source.record);}}
@@ -43,4 +43,19 @@ test("V5 opt-in Staging only, V4 remains default and V1 unchanged",()=>{
  const legacy={...a,outputSchemaVersion:1};
  assert.deepEqual(selectStagingReplyPrompts({ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:"v5"},legacy),buildPrompts(legacy));
  assert.deepEqual(buildHumanV5Prompts(args("quantum entanglement")),buildFastV4Prompts(args("quantum entanglement")));
+});
+
+test("real conversation retrieval favors a relevant real pair without increasing prompt budget",()=>{
+ for(const text of ["会员自动续费又扣钱了","五一假期还要加班","phone broken, how do I tell my parents?"]){
+  const a=args(text),selected=selectReplyV5Examples(a);
+  assert.ok(selected.some(s=>REPLY_V5_EXAMPLES.some(x=>x.source.kind==="external_conversation"&&x.post===s.post)),text);
+  assert.ok(selected.length<=2&&new TextEncoder().encode(JSON.stringify(selected)).length<=V5_EXAMPLE_MAX_BYTES);
+ }
+});
+test("corpus avoids duplicate posts and has bounded same-language examples",()=>{
+ assert.equal(new Set(REPLY_V5_EXAMPLES.map(x=>x.post)).size,REPLY_V5_EXAMPLES.length);
+ for(const x of REPLY_V5_EXAMPLES.filter(x=>x.source.kind==="external_conversation")){
+   assert.ok(x.replies.length===1);
+   assert.ok(x.post.length<=200&&x.replies[0].length<=110);
+ }
 });
