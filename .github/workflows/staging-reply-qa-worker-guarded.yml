@@ -116,6 +116,7 @@ jobs:
           assert 'PASSWORD_FREE_TINY_CPU_ENABLED' not in st['vars']
           assert 'STAGING_QA_SUBSCRIPTION_FIVE' not in st['vars']
           assert 'STAGING_QA_SUBSCRIPTION_USER_ID' not in st['vars']
+          assert 'STAGING_QA_SUBSCRIPTION_USERNAME' not in st['vars']
           print('PASS Staging-only config and default-off password mode')
           PY
       - name: Check exact currently deployed Staging version and D1 binding
