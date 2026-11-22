@@ -18,3 +18,6 @@ Before switching defaults: independent same-model blind V4/V5 evaluation with he
 
 ## Second tranche
 More independently selected contextual conversations from the same pinned source blobs. Source offsets include adjacent-turn positions where applicable. Prefer external examples over synthetic only when keywords and scene provide evidence. No runtime external fetching. All records remain experimental editorial candidates; no claim of independent human review or measured improvement. Further expansion requires quality screening, especially modern tech/AI and authentic Japanese/Korean data.
+
+## Conservative post-generation preference
+After the existing shared serializer accepts the model output, explicitly opted-in Staging V5 may promote an already-generated non-humor candidate when the original default is an exact stock phrase or a very specific boilerplate pattern. No rewriting, candidate deletion, score change, extra provider request, new response fields, rejection, or replay mutation. V4 and Production remain byte-identical at this seam. This is a heuristic, not an AI detector or a measured quality gain. Quote and skip are unchanged. Run node --test tests/reply-v5-quality.test.js along with the retrieval tests.

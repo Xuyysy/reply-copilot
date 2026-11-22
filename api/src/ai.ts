@@ -7,6 +7,7 @@ import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
 import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
 import { selectStagingReplyPrompts } from "../../prompts/staging-reply-prompt-selector.js";
+import { rerankV5DefaultStyle } from "../../prompts/reply-v5-quality.js";
 import { requestDeepSeek, validateDeepSeekResult } from "./deepseek-client.js";
 import { executeAiGeneration } from "./ai-generation-flow.js";
 
@@ -129,6 +130,9 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     // Validate the full shared contract for legacy and managed providers and
     // persist a wire representation accepted by both released client parsers.
     result.raw = serializeModelOutput(result.raw);
+    // V5 experiment only: choose an existing candidate before persistence;
+    // replays keep the original stored response verbatim.
+    result.raw = rerankV5DefaultStyle(result.raw, env);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
