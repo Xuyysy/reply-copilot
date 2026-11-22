@@ -126,7 +126,8 @@ test('new post starts without waiting for an old hung client request',async()=>{
  // The old promise is still unresolved when the new post already succeeds;
  // no wall-clock threshold or CI scheduling assumption is required.
  assert.deepEqual(calls,[['generate','old'],['generate','new']],'different Reply must not wait for old network recovery');
- assert.equal(data.pendingAiDelivery,null,'the new request must settle and clear its own local pending record');
+ assert.equal(data.pendingAiDelivery?.input.requestId,'old','the new request must clear only its own record, preserving the older pending A');
+ assert.deepEqual(data.pendingAiDeliveries.map(row=>row.input.requestId),['old']);
  await assert.rejects(old,e=>e.code==='GENERATION_RECOVERY_REQUIRED');
 });
 test('fast switch A -> B -> A serializes same-ID retry without blocking B or starting another A provider call',async()=>{
@@ -231,4 +232,105 @@ test('an unrelated old provider uncertainty never blocks a newly reserved reques
  assert.equal(await c.generateReplies(fresh),'should-not-execute');
  assert.equal(generated,1,'different Reply must use its own request ID and server quota');
  assert.equal(data.pendingAiDelivery,null,'new request only clears its own local pending state');
+});
+
+
+test('Staging fast-switch A B C out of order preserves unresolved old requests and never loses ACK receipts',async()=>{
+ const data={},gate={};const enters={};const started={};
+ const storage={get:async keys=>structuredClone(Array.isArray(keys)?Object.fromEntries(keys.map(k=>[k,data[k]])):{[keys]:data[keys]}),
+   set:async values=>Object.assign(data,structuredClone(values))};
+ const options={fastPostSwitch:true,waitTimeoutMs:5000,storage,getAccountId:async()=> 'owner',
+   createClient:()=>({generateReplies:async input=>{
+     if(input.requestId==='C')return 'result-C';
+     if(!gate[input.requestId]){
+       gate[input.requestId]={};
+       gate[input.requestId].started=new Promise(r=>enters[input.requestId]=r);
+       gate[input.requestId].waiting=new Promise(r=>gate[input.requestId].release=r);
+       enters[input.requestId]();
+     }
+     await gate[input.requestId].waiting;return 'result-'+input.requestId;
+   }})};
+ const coordinator=new DeliveryCoordinator(options);
+ const a=coordinator.generateReplies(makeInput('A'));
+ // A must reach the provider before B starts.
+ for(let i=0;i<30&&!gate.A;i++)await new Promise(r=>setTimeout(r,0));
+ assert.ok(gate.A);
+ const b=coordinator.generateReplies(makeInput('B'));
+ for(let i=0;i<30&&!gate.B;i++)await new Promise(r=>setTimeout(r,0));
+ assert.ok(gate.B);
+ const c=coordinator.generateReplies(makeInput('C'));
+ assert.equal(await c,'result-C');
+ assert.deepEqual((await coordinator.listPending()).map(x=>x.requestId),['A','B']);
+ const restarted=new DeliveryCoordinator(options);
+ assert.deepEqual((await restarted.listPending()).map(x=>x.requestId),['A','B'],'restart preserves both immutable requestId envelopes');
+ gate.B.release();assert.equal(await b,'result-B');
+ assert.deepEqual((await restarted.listPending()).map(x=>x.requestId),['A']);
+ gate.A.release();assert.equal(await a,'result-A');
+ assert.deepEqual((await restarted.listPending()).map(x=>x.requestId),[]);
+ assert.deepEqual(new Set(data.completedAiDeliveries.map(x=>x.input.requestId)),new Set(['A','B','C']));
+});
+
+test('Staging A ACK uncertainty, B completed, restart and explicit A recovery avoids a second provider call',async()=>{
+ const data={},generated=[],acks=[];
+ const storage={get:async keys=>structuredClone(Array.isArray(keys)?Object.fromEntries(keys.map(k=>[k,data[k]])):{[keys]:data[keys]}),
+   set:async patch=>Object.assign(data,structuredClone(patch))};
+ const options={fastPostSwitch:true,waitTimeoutMs:1000,storage,getAccountId:async()=> 'owner',
+   createClient:()=>({
+     generateReplies:async input=>{generated.push(input.requestId);if(input.requestId==='A')throw Object.assign(Error('ACK lost'),{code:'DELIVERY_CONFIRMATION_PENDING'});return 'result-'+input.requestId;},
+     recoverGeneration:async id=>({state:'ready',requestId:id,raw:'result-'+id}),
+     receiveDelivery:async response=>{acks.push(response.requestId);return response.raw;}
+   })};
+ const c=new DeliveryCoordinator(options);
+ await assert.rejects(c.generateReplies(makeInput('A')),e=>e.code==='DELIVERY_CONFIRMATION_PENDING');
+ assert.equal(await c.generateReplies(makeInput('B')),'result-B');
+ assert.deepEqual(data.pendingAiDeliveries.map(x=>x.input.requestId),['A']);
+ const restarted=new DeliveryCoordinator(options);
+ assert.deepEqual((await restarted.listPending()).map(x=>x.requestId),['A']);
+ const recovered=await restarted.recoverPending({requestId:'A'});
+ assert.equal(recovered.raw,'result-A');assert.equal(recovered.requestId,'A');
+ assert.deepEqual(acks,['A']);
+ assert.deepEqual(generated,['A','B'],'never regenerate the uncertain paid A request');
+ assert.deepEqual(await restarted.listPending(),[]);
+ assert.equal(await restarted.generateReplies(makeInput('A')),'result-A','cached completion is idempotent');
+ assert.deepEqual(generated,['A','B']);
+});
+
+test('Staging multi-pending recovery is account isolated and expired entries are purged',async()=>{
+ const data={};let owner='owner-A',now=1000000;const generated=[];
+ const options={fastPostSwitch:true,clock:()=>now,storage:{
+   get:async keys=>structuredClone(Array.isArray(keys)?Object.fromEntries(keys.map(k=>[k,data[k]])):{[keys]:data[keys]}),
+   set:async patch=>Object.assign(data,structuredClone(patch))
+ },getAccountId:async()=>owner,createClient:()=>({
+   generateReplies:async input=>{generated.push(owner+':'+input.requestId);throw Object.assign(Error('network'),{code:'NETWORK_ERROR'});}
+ })};
+ const c=new DeliveryCoordinator(options);
+ await assert.rejects(c.generateReplies(makeInput('secret-A')),e=>e.code==='NETWORK_ERROR');
+ assert.deepEqual((await c.listPending()).map(x=>x.requestId),['secret-A']);
+ owner='owner-B';
+ assert.deepEqual(await c.listPending(),[],'a new account cannot see A input');
+ await assert.rejects(c.generateReplies(makeInput('secret-B')),e=>e.code==='NETWORK_ERROR');
+ assert.deepEqual((await c.listPending()).map(x=>x.requestId),['secret-B']);
+ owner='owner-A';assert.deepEqual((await c.listPending()).map(x=>x.requestId),['secret-A']);
+ now+=21*60*1000;
+ assert.deepEqual(await c.listPending(),[],'old recovery entries have bounded retention');
+ assert.deepEqual(generated,['owner-A:secret-A','owner-B:secret-B']);
+});
+
+test('Staging fast-switch limits pending index and fails closed when storage is unavailable',async()=>{
+ const data={};const starts=[];
+ const storage={get:async keys=>structuredClone(Array.isArray(keys)?Object.fromEntries(keys.map(k=>[k,data[k]])):{[keys]:data[keys]}),
+   set:async patch=>Object.assign(data,structuredClone(patch))};
+ const c=new DeliveryCoordinator({fastPostSwitch:true,waitTimeoutMs:70,storage,getAccountId:async()=> 'account',
+   createClient:()=>({generateReplies:async input=>{starts.push(input.requestId);return new Promise(()=>{});}})});
+ const running=Array.from({length:8},(_,n)=>c.generateReplies(makeInput('pending-'+n)));
+ for(let i=0;i<40&&starts.length!==8;i++)await new Promise(r=>setTimeout(r,0));
+ assert.equal(starts.length,8);
+ await assert.rejects(c.generateReplies(makeInput('pending-overflow')),e=>e.code==='GENERATION_RECOVERY_REQUIRED');
+ assert.equal(starts.length,8,'a ninth provider call cannot start without a durable recovery record');
+ assert.equal(data.pendingAiDeliveries.length,8);
+ await Promise.allSettled(running);
+ const missing=new DeliveryCoordinator({fastPostSwitch:true,storage:{
+   get:async()=>({}),set:async()=>{throw Error('storage quota or disk unavailable');}
+ },getAccountId:async()=> 'account',createClient:()=>({generateReplies:async()=>{throw Error('provider must not run');}})});
+ await assert.rejects(missing.generateReplies(makeInput('untracked')),e=>e.code==='RECOVERY_STORAGE_UNAVAILABLE');
 });
