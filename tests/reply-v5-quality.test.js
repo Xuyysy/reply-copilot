@@ -8,7 +8,9 @@ const payload={recommendation:"reply",defaultStyle:"natural",language:"zh",repli
 const raw=JSON.stringify(payload);
 test("V5 only adjusts defaultStyle for high-confidence boilerplate; no text/schema changes",()=>{
  const result=JSON.parse(rerankV5DefaultStyle(serializeModelOutput(raw),v5));
- assert.deepEqual(result,{...payload,defaultStyle:"thoughtful"});
+ const baseline=JSON.parse(serializeModelOutput(raw));
+ assert.deepEqual(result,{...baseline,defaultStyle:"thoughtful",default_style:"thoughtful",best_reply_style:"thoughtful"});
+ assert.deepEqual(JSON.parse(rerankV5DefaultStyle(raw,v5)),{...payload,defaultStyle:"thoughtful"});
  assert.equal(serializeModelOutput(JSON.stringify(result)),JSON.stringify(result));
  assert.equal(replyV5TemplatePenalty("今天真是累死了"),0);
  assert.equal(replyV5TemplatePenalty("确实如此，不过要看使用场景"),0);
@@ -39,4 +41,14 @@ test("unset flag on the V5 release candidate only activates the Staging preferen
  assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"staging"}),rerankV5DefaultStyle(raw,v5));
  assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"production"}),raw);
  for(const flag of ["v3","legacy","typo",""])assert.equal(rerankV5DefaultStyle(raw,{ENVIRONMENT:"staging",STAGING_REPLY_PROMPT_VERSION:flag}),raw);
+});
+
+test("V5 preserves canonical output fields, score, legacy aliases and replay serialization",()=>{
+ const input=serializeModelOutput(JSON.stringify({...payload,score:83}));
+ const output=rerankV5DefaultStyle(input,v5);
+ const before=JSON.parse(input),after=JSON.parse(output);
+ assert.deepEqual(Object.keys(after),Object.keys(before));
+ assert.deepEqual(after,{...before,defaultStyle:"thoughtful",default_style:"thoughtful",best_reply_style:"thoughtful"});
+ assert.equal(serializeModelOutput(output),output);
+ assert.equal(rerankV5DefaultStyle(output,v5),output);
 });

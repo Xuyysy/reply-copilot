@@ -31,6 +31,11 @@ export function rerankV5DefaultStyle(raw,env){
   // model choice when there is doubt, including a potentially forced joke.
   const other=REPLY_STYLES.filter(s=>s!==parsed.defaultStyle&&s!=="light_humor").find(s=>replyV5TemplatePenalty(parsed.replies[s])===0);
   if(!other)return raw;
-  return JSON.stringify({...parsed,defaultStyle:other});
+  // The shared wire serializer emits all three compatibility aliases.
+  // Keep existing aliases synchronized without adding or removing fields.
+  const next={...parsed,defaultStyle:other};
+  for(const key of ["default_style","best_reply_style"])
+    if(Object.hasOwn(next,key))next[key]=other;
+  return JSON.stringify(next);
  } catch {return raw;}
 }
