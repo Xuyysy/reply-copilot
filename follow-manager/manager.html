@@ -24,18 +24,10 @@
       <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖拽 X 官方关注归档文件到这里">
         <span class="drop-icon" aria-hidden="true">⇧</span>
         <strong>把 follower.js 和 following.js 拖到这里</strong>
-        <p class="muted small">也可以点击按钮选择两个文件；支持拖拽或选择同类的多个 part 分片。</p>
+        <p class="muted small">也可以点击下方按钮选择文件，支持一次选齐或分次补选多个 part 分片。</p>
         <button id="choose-files" class="secondary" type="button">选择归档文件</button>
       </div>
       <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="选择粉丝与关注归档文件">
-      <div class="file-grid">
-        <label class="field">或者单独选择粉丝名单（follower.js）
-          <input id="follower-files" type="file" accept=".js" multiple aria-describedby="file-tip">
-        </label>
-        <label class="field">或者单独选择关注名单（following.js）
-          <input id="following-files" type="file" accept=".js" multiple aria-describedby="file-tip">
-        </label>
-      </div>
       <div class="selected-files" aria-live="polite" aria-label="已选文件">
         <span id="selected-follower">粉丝文件：未选择</span>
         <span id="selected-following">关注文件：未选择</span>

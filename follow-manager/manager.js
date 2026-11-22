@@ -24,14 +24,11 @@ function refreshSelection() {
   describeSelection("following");
 }
 
-// Both the dropzone and browse controls use the same validation and selections.
-async function acceptFiles(fileList, expectedKind = null) {
+// Both dropzone and the single file picker share the same validation and selections.
+async function acceptFiles(fileList) {
   if ($("import-button").disabled) return;
   try {
     const groups = await groupArchiveFiles(fileList);
-    if (expectedKind && groups[expectedKind === "follower" ? "following" : "follower"].length) {
-      throw new Error("文件类型与选择框不匹配。请将粉丝文件放入粉丝框，关注文件放入关注框。");
-    }
     for (const kind of ["follower", "following"]) {
       if (groups[kind].length) selectedFiles[kind] = groups[kind];
     }
@@ -49,13 +46,6 @@ $("archive-picker").addEventListener("change", event => {
   event.target.value = "";
   if (files.length) void acceptFiles(files);
 });
-for (const [kind, inputId] of [["follower","follower-files"], ["following","following-files"]]) {
-  $(inputId).addEventListener("change", event => {
-    const files = [...event.target.files];
-    event.target.value = "";
-    if (files.length) void acceptFiles(files, kind);
-  });
-}
 $("clear-selection").addEventListener("click", () => {
   selectedFiles.follower = [];
   selectedFiles.following = [];

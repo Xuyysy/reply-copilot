@@ -19,8 +19,7 @@ test("offline follow manager ships inside every extension build and opens from n
   assert.match(page, /id="clear-selection"/);
   assert.match(page, /id="selected-follower"/);
   assert.match(page, /id="selected-following"/);
-  assert.match(page, /id="follower-files"/);
-  assert.match(page, /id="following-files"/);
+  assert.doesNotMatch(page, /id="follower-files"|id="following-files"|class="file-grid"/);
   assert.match(page, /id="same-account"/);
   assert.match(page, /id="delete-saved"/);
   assert.match(page, /id="export-csv"/);
@@ -62,8 +61,8 @@ test("drag and browse share the same safe in-memory file selection pipeline", ()
   assert.match(js, /dropzone\.addEventListener\("drop"/);
   assert.match(js, /dropzone\.addEventListener\("dragover"/);
   assert.match(js, /"archive-picker"\)\.addEventListener\("change"/);
-  assert.match(js, /"follower-files".*"following-files"/);
-  assert.match(js, /async function acceptFiles\(fileList, expectedKind = null\)/);
+  assert.doesNotMatch(js, /"follower-files"|"following-files"|expectedKind/);
+  assert.match(js, /async function acceptFiles\(fileList\)/);
   assert.match(js, /const groups = await groupArchiveFiles\(fileList\)/);
   assert.match(js, /readGroup\(selectedFiles\.follower, "follower"\)/);
   assert.match(js, /readGroup\(selectedFiles\.following, "following"\)/);
