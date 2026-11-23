@@ -36,6 +36,7 @@
       <button id="internal-start" type="button" class="primary">开始快速同步</button>
       <button id="internal-cancel" type="button" class="secondary" disabled>停止</button>
       <button id="internal-load" type="button" class="secondary">查看上次结果</button>
+      <button id="internal-reset" type="button" class="secondary">清除未完成进度</button>
       <button id="internal-clear" type="button" class="danger">清除本地记录</button>
     </div>
     <div id="internal-loading" class="follow-loading" role="status" aria-live="polite" hidden>
@@ -50,7 +51,7 @@
       <div><span>关注我的人</span><strong id="internal-followers-count">—</strong><span id="internal-followers-state">未开始</span></div>
     </div>
     <p id="internal-status" class="feedback" role="status" aria-live="polite">准备就绪。</p>
-    <p class="muted small follow-footnote">同步会打开一个不抢占当前页面的临时 X 标签页。遇到限流、登录异常或接口变更立即停止。结果仅保存在本机；大量账号可能需要更长时间。</p>
+    <p class="muted small follow-footnote">同步会使用不抢占当前页面的临时 X 标签页。每批最多读取约 3,000 人，完整名单可分多次继续，每类本地最多保留 30,000 人。进度保存在本机，遇到限流或接口错误会停止。</p>
   </section>
   <section class="panel" id="internal-results" hidden aria-labelledby="internal-results-heading">
     <div class="heading-line">

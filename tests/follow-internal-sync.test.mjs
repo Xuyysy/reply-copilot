@@ -41,7 +41,7 @@ test("internal timeline page parses user entries, dedupes IDs and retains bottom
   const p=helpers();
   const result=p.parsePage(data([entry("ALICE","100"),entry("bob","200"),entry("alice","100"),cursor("next:1")]));
   assert.deepEqual(JSON.parse(JSON.stringify(result)),{
-    users:[{handle:"alice",id:"100"},{handle:"bob",id:"200"}],nextCursor:"next:1"
+    users:[{handle:"alice",id:"100"},{handle:"bob",id:"200"}],nextCursor:"next:1",hasEntries:true
   });
   const end=p.parsePage(data([entry("carol","300")]));
   assert.equal(end.nextCursor,null);
@@ -78,7 +78,11 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(ui,/chrome\.tabs\.remove/);
   assert.match(ui,/XRH_INTERNAL_START/);
   assert.match(ui,/XRH_INTERNAL_CANCEL/);
-  assert.ok(ui.includes("const completeRecord=observedEnds ? await saveInternalSnapshot(data) : null;"));
+  assert.ok(ui.includes("const completeRecord=await saveInternalSnapshot(data);"));
+  assert.ok(ui.includes("readCheckpoint("));
+  assert.ok(ui.includes("queueCheckpoint("));
+  assert.ok(ui.includes('job.checkpoint.stages.following'));
+  assert.ok(ui.includes('"internal-reset").addEventListener'));
   assert.match(ui,/source:"internal_sync"/);
   assert.doesNotMatch(ui,/chrome\.cookies|auth_token|fetch\s*\(|https:\/\/api-staging|D1|AccountClient/);
   assert.match(read("follow-manager/internal-sync-store.js"),/xrh-follow-internal-v1/);
@@ -153,7 +157,13 @@ test("same-origin read-only internal sync returns usernames without forwarding p
   assert.equal(h.requests.length,2);
   for(const {url,options} of h.requests){
     assert.equal(new URL(url).origin,"https://x.com");
-    assert.equal(options.method,"GET");
+    assert.equal(options.method,url.includes("/UserByScreenName?")?"GET":"POST");
+    if(options.method==="POST") {
+      const body=JSON.parse(options.body);
+      assert.equal(body.variables.withGrokTranslatedBio,true);
+      assert.equal(body.variables.userId,"1000");
+      assert.equal(options.headers["content-type"],"application/json");
+    }
     assert.equal(options.credentials,"include");
     assert.equal(options.headers["x-csrf-token"],"csrf-test-value");
   }
@@ -190,6 +200,54 @@ test("uses query IDs already observed on the active X page when available",async
   const done=await completed(h);
   assert.equal(done.reason,"complete");
   assert.ok(h.requests[0].url.includes("/ObservedUserQueryId123/UserByScreenName?"));
-  assert.ok(h.requests[1].url.includes("/ObservedFollowQuery123/Following?"));
+  assert.ok(h.requests[1].url.includes("/ObservedFollowQuery123/Following"));
   assert.equal(h.requests.some(x=>x.url.includes("example.com")),false);
+});
+
+test("internal parser also accepts modern core.screen_name user shape",()=>{
+  const p=helpers();
+  const modern={data:{user:{result:{
+    __typename:"User",rest_id:"1945678999123456789",core:{screen_name:"NEW_HANDLE"}
+  }}}};
+  assert.equal(p.parseProfile(modern).handle,"new_handle");
+  const nested=data([{entryId:"module-item",content:{item:{
+    itemContent:{user_results:{result:{__typename:"User",rest_id:"1111",
+      core:{screen_name:"nested_user"}}}}
+  }}}]);
+  assert.deepEqual(Array.from(p.parsePage(nested).users.map(x=>x.handle)),["nested_user"]);
+});
+
+test("internal checkpoint lets a new run start from the saved cursor without duplicating users",async()=>{
+  const h=webClientHarness();
+  const saved={handles:["alice"],ids:{alice:"2000"},verification:{alice:true},
+    cursor:"saved-cursor",pages:32,reason:"paused",userId:"1000"};
+  assert.equal(h.send({type:"XRH_INTERNAL_START",scanId:UUID,kind:"following",owner:"owner",
+    resume:saved}).ok,true);
+  const done=await completed(h);
+  assert.equal(done.reason,"complete");
+  assert.deepEqual(Array.from(done.handles),["alice","bob"]);
+  assert.equal(done.pages,33);
+  const body=JSON.parse(h.requests[1].options.body);
+  assert.equal(body.variables.cursor,"saved-cursor");
+});
+
+test("internal missing query and rate-limit errors stop without uncontrolled retries",async()=>{
+  for(const [status,reason] of [[404,"query_not_found"],[400,"invalid_request"],[429,"rate_limited"]]){
+    const h=webClientHarness({status});
+    assert.equal(h.send({type:"XRH_INTERNAL_START",scanId:UUID,kind:"following",owner:"owner"}).ok,true);
+    const done=await completed(h);
+    assert.equal(done.reason,reason);
+    assert.equal(h.requests.length,1);
+  }
+});
+
+test("staging-only internal page explains bounded batches and reset control",()=>{
+  const html=read("follow-manager/internal-sync.html");
+  const script=read("content/follow-internal-scanner.js");
+  assert.ok(html.includes('id="internal-reset"'));
+  assert.ok(html.includes("每批最多读取约 3,000 人"));
+  assert.ok(script.includes('const MAX_USERS = 30000'));
+  assert.ok(script.includes('const MAX_BATCH_ADDED = 3000'));
+  assert.ok(script.includes('const CHECKPOINT_EVERY = 8'));
+  assert.ok(script.includes('method:isList ? "POST" : "GET"'));
 });

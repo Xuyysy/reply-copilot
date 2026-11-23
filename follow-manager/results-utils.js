@@ -1,6 +1,6 @@
 // Pure local model helpers for relationship list filtering and history.
 // Unknown verification is distinct from confirmed non-blue-verified.
-export const MAX_USERS_PER_KIND = 3000;
+export const MAX_USERS_PER_KIND = 30000;
 const VALID_HANDLE = /^[a-z0-9_]{1,15}$/;
 const VALID_ID = /^[1-9]\d{0,19}$/;
 export function verificationFor(snapshot, handle) {

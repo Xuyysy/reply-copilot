@@ -6,7 +6,7 @@
   const VALID_ID = /^[1-9]\d{0,19}$/;
   function userInfo(result) {
     const user = result?.__typename === "User" ? result : result?.result || result;
-    const handle = user?.legacy?.screen_name;
+    const handle = user?.core?.screen_name || user?.legacy?.screen_name;
     const id = user?.rest_id;
     if (typeof handle !== "string" || !VALID_HANDLE.test(handle) ||
         typeof id !== "string" || !VALID_ID.test(id)) return null;
@@ -36,6 +36,7 @@
     const entries = [];
     for (const instruction of instructions) {
       if (Array.isArray(instruction?.entries)) entries.push(...instruction.entries);
+      if (Array.isArray(instruction?.moduleItems)) entries.push(...instruction.moduleItems);
       if (instruction?.entry) entries.push(instruction.entry);
     }
     const users = [];
@@ -51,14 +52,16 @@
         bottomCursor = value;
       }
       const pieces = [c.itemContent, c.content?.itemContent,
-        ...(Array.isArray(c.items) ? c.items.map(x => x?.item?.itemContent || x?.itemContent) : [])];
+        c.item?.itemContent, c.item?.content?.itemContent,
+        ...(Array.isArray(c.items) ? c.items.map(x => x?.item?.itemContent ||
+          x?.item?.content?.itemContent || x?.itemContent || x?.content?.itemContent) : [])];
       for (const piece of pieces) {
         if (!piece) continue;
         const found = userInfo(piece.user_results?.result || piece.user_results);
         if (found && !seen.has(found.id)) { users.push(found); seen.add(found.id); }
       }
     }
-    return {users, nextCursor:bottomCursor};
+    return {users, nextCursor:bottomCursor,hasEntries:entries.length>0};
   }
   globalThis.ReplyCopilotInternalFollowParser = Object.freeze({parseProfile,parsePage});
 })();

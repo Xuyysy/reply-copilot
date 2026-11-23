@@ -4,25 +4,35 @@ import {saveInternalSnapshot, readInternalSnapshot, removeInternalSnapshot,
   from "./internal-sync-store.js";
 import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent}
   from "./results-utils.js";
+import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,resumable}
+  from "./internal-sync-state.js";
 
 const $ = id => document.getElementById(id);
 const KINDS = ["mutual","notFollowingBack","iHaveNotFollowedBack"];
 // Following and followers are read sequentially from a temporary inactive X tab.
 const PAGE_SIZE = 50;
-const MAX_HANDLES = 3000;
+const MAX_HANDLES = MAX_INTERNAL_HANDLES;
 const LAST_OWNER_KEY = "xrh-follow-internal-last-owner";
-const CHECKPOINT_MS = 30 * 60 * 1000;
+// Each explicit batch can stop and be continued from a locally stored cursor.
 const REASON = {
   complete:"已同步完成",
-  limit:"达到同步上限，本次数据不完整",
-  timeout:"同步用时较长，部分结果未获取",
+  paused:"已保存当前批次，点击「继续同步」获取下一批",
+  limit:"达到本地最大保存数量 30,000 人；结果仍可能不完整",
+  timeout:"同步超时，当前进度已保存",
   cursor_loop:"X 返回了重复的分页位置，本次停止",
   rate_limited:"X 暂时限制了请求，请稍后再试",
   login_required:"X 登录状态已失效，请重新登录",
   account_mismatch:"当前登录的 X 账号不匹配",
   page_changed:"X 页面已离开当前账号列表",
-  schema:"X 的网页接口已变化，请切换其他导入方式",
+  schema:"X 返回了无法识别的数据格式",
+  schema_timeline:"X 返回的名单结构不完整，本次未判定同步结束",
+  query_not_found:"X 当前查询地址不可用（HTTP 404），可能是接口版本变更",
+  invalid_request:"X 不接受当前查询参数（HTTP 400/422），可能是接口版本变更",
+  invalid_json:"X 返回了非 JSON 内容",
+  graphql_error:"X 返回了 GraphQL 查询错误，可能是接口或权限发生变化",
+  http_error:"X 服务暂时返回错误，请稍后再试",
   network:"无法连接 X，请检查网络",
+  stalled:"分页没有新增数据，已保留当前进度",
   cancelled:"已停止",
   empty:"没有读到账号，无法判断列表是否完整",
 };
@@ -71,6 +81,7 @@ function setBusy(busy) {
   $("internal-cancel").disabled = !busy;
   $("internal-load").disabled = busy;
   $("internal-clear").disabled = busy;
+  $("internal-reset").disabled = busy;
   $("internal-owner").disabled = busy;
   $("internal-loading").hidden = !busy;
   if (busy) $("internal-loading-title").textContent = "正在整理关注关系…";
@@ -88,25 +99,38 @@ function validateSnapshot(value) {
     typeof value.reasons.followers === "string";
 }
 
+function queueCheckpoint(job,kind,stage) {
+  if(!validStage(stage) || job.owner!==job.checkpoint?.owner) return;
+  job.checkpoint=withStage(job.checkpoint,job.owner,kind,stage);
+  // Order writes; a late progress event must not resurrect an old checkpoint
+  // after a successful full snapshot transaction removes it.
+  const copy=job.checkpoint;
+  job.writes=job.writes.then(()=>saveInternalCheckpoint(copy))
+    .catch(error=>{job.writeError=error || new Error("保存进度失败。");});
+}
 chrome.runtime.onMessage.addListener((message,sender) => {
-  const job = running;
-  if (!job || !job.pending || sender.id !== chrome.runtime.id || sender.tab?.id !== job.tabId ||
-      message?.scanId !== job.scanId || message?.kind !== job.kind) return;
-  if (message.type === "XRH_INTERNAL_PROGRESS") {
-    if (!Number.isSafeInteger(message.count) || message.count < 0 || message.count > MAX_HANDLES) return;
-    setStatus(job.kind,message.count,"正在同步第 " + (message.pages || "?") + " 页…");
-    $("internal-loading-title").textContent = "正在整理「" + stageName(job.kind) + "」";
-    feedback("正在同步「" + stageName(job.kind) + "」：已找到 " + message.count + " 个账号。");
-  } else if (message.type === "XRH_INTERNAL_DONE") {
-    if (!validHandles(message.handles) || !validVerification(message.verification) ||
-        !validIds(message.ids) || typeof message.reason !== "string" ||
-        !Object.hasOwn(REASON,message.reason)) {
-      job.pending.reject(new Error("同步结果格式不符合安全要求，已拒绝导入。"));
+  const job=running;
+  if(!job || !job.pending || sender.id!==chrome.runtime.id ||
+      sender.tab?.id!==job.tabId || message?.scanId!==job.scanId ||
+      message?.kind!==job.kind) return;
+  if(message.type==="XRH_INTERNAL_PROGRESS") {
+    if(!Number.isSafeInteger(message.count) || message.count<0 ||
+       message.count>MAX_HANDLES) return;
+    setStatus(job.kind,message.count,"已读取第 "+(message.pages||"?")+" 页…");
+    $("internal-loading-title").textContent="正在整理「"+stageName(job.kind)+"」";
+    feedback("「"+stageName(job.kind)+"」已读取 "+message.count+" 人，保存进度后可继续。");
+    if(message.checkpoint && validStage(message.checkpoint)) {
+      queueCheckpoint(job,job.kind,message.checkpoint);
+    }
+  } else if(message.type==="XRH_INTERNAL_DONE") {
+    if(!validStage(message) || !Object.hasOwn(REASON,message.reason)) {
+      job.pending.reject(new Error("X 返回了无效的账号数据，本次未写入完整快照。"));
       return;
     }
     job.pending.resolve({
-      handles:[...new Set(message.handles)],reason:message.reason,
-      verification:message.verification || {},ids:message.ids || {}
+      handles:message.handles,reason:message.reason,cursor:message.cursor,
+      verification:message.verification||{},ids:message.ids||{},
+      pages:message.pages||0,userId:message.userId
     });
   }
 });
@@ -130,7 +154,7 @@ async function waitReady(job) {
   }
   throw new Error("无法连接 X 的快速同步功能，请确认 X 已登录后重试。");
 }
-async function stage(job,kind,first) {
+async function stage(job,kind,first,resume=null) {
   job.kind = kind;
   job.scanId = crypto.randomUUID();
   job.pending = null;
@@ -144,7 +168,7 @@ async function stage(job,kind,first) {
   }
   await waitReady(job);
   if (job.cancelled) throw new Error("已停止分析。");
-  setStatus(kind,0,"正在读取数据…");
+  setStatus(kind,resume?.handles?.length ?? null,resume ? "从上次分页位置继续…" : "正在读取数据…");
   const scanId = job.scanId;
   return new Promise((resolve,reject) => {
     let settled = false;
@@ -164,6 +188,7 @@ async function stage(job,kind,first) {
     };
     chrome.tabs.sendMessage(job.tabId,{
       type:"XRH_INTERNAL_START", scanId, owner:job.owner, kind,
+      ...(resume ? {resume} : {}),
     }).then(response => {
       if (!response?.ok) finish(new Error(response?.error || "无法开始同步 X 页面。"));
     }).catch(error => finish(new Error("暂时无法连接 X 数据页面：" + (error?.message || "未知错误"))));
@@ -251,90 +276,105 @@ function renderSnapshot(data,localSaved=false) {
   renderList();
 }
 async function start() {
-  if (running) return;
+  if(running) return;
   let account;
-  try { account = owner(); } catch(error) { fail(error); return; }
-  if (!$("internal-consent").checked) {
+  try {account=owner();} catch(error){fail(error);return;}
+  if(!$("internal-consent").checked) {
     feedback("请先确认同步的是自己的 X 账号。",true);
     return;
   }
-  try {localStorage.setItem(LAST_OWNER_KEY,account);} catch {}
-  const job = {owner:account,tabId:null,cancelled:false,kind:null,scanId:null,pending:null,startedAt:Date.now(),timer:null};
-  running = job;
+  try {localStorage.setItem(LAST_OWNER_KEY,account);} catch{}
+  const job={owner:account,tabId:null,cancelled:false,kind:null,scanId:null,
+    pending:null,startedAt:Date.now(),timer:null,writes:Promise.resolve(),
+    writeError:null,checkpoint:null};
+  running=job;
   setBusy(true);
   updateElapsed(job);
-  job.timer = setInterval(() => { if (running === job) updateElapsed(job); }, 1000);
-  setStatus("following",null,"等待开始");
-  setStatus("followers",null,"等待开始");
-  // Keep the last complete result visible while refreshing. An interrupted
-  // update must never wipe a useful local snapshot.
-  if (!snapshot || snapshot.owner !== account) {
-    $("internal-results").hidden = true;
-    snapshot=null;
-    relationships=null;
+  job.timer=setInterval(()=>{if(running===job)updateElapsed(job);},1000);
+  // Do not clear the last complete snapshot while updating.
+  if(!snapshot || snapshot.owner!==account) {
+    $("internal-results").hidden=true;
+    snapshot=null;relationships=null;
   }
   try {
-    // An inactive tab preserves the user's current page. It still exists in
-    // Chrome's tab strip and can be throttled/frozen by the browser.
-    const tab = await chrome.tabs.create({url:"https://x.com/"+account+"/following",active:false});
-    if (!Number.isSafeInteger(tab?.id)) throw new Error("Chrome 无法创建后台数据标签页。");
-    job.tabId = tab.id;
-    const pending = await readInternalCheckpoint(account);
-    const reusable = pending?.kind === "following" && pending?.reason === "complete" &&
-      validHandles(pending.handles) && validVerification(pending.verification) &&
-      validIds(pending.ids) &&
-      Number.isFinite(Date.parse(pending.savedAt)) &&
-      Date.now() - Date.parse(pending.savedAt) >= 0 &&
-      Date.now() - Date.parse(pending.savedAt) < CHECKPOINT_MS;
-    const following = reusable ?
-      {handles:pending.handles,verification:pending.verification||{},ids:pending.ids||{},
-        reason:pending.reason} :
-      await stage(job,"following",true);
-    if (reusable) {
-      setStatus("following",following.handles.length,"已恢复上次完成的第一轮");
-      feedback("已恢复之前完成的关注名单，继续同步粉丝，不重复读取第一轮。");
-    } else if (following.reason === "complete") {
-      await saveInternalCheckpoint({
-        owner:account,kind:"following",savedAt:new Date().toISOString(),
-        handles:following.handles,verification:following.verification,
-        ids:following.ids,reason:following.reason
-      });
+    const cached=readCheckpoint(await readInternalCheckpoint(account),account);
+    job.checkpoint=cached||{owner:account,stages:{},savedAt:new Date().toISOString()};
+    let following=job.checkpoint.stages.following;
+    let followers=job.checkpoint.stages.followers;
+    const needFollowing=following?.reason!=="complete";
+    if(!needFollowing && validStage(following)) {
+      setStatus("following",following.handles.length,"上次已完成，无需重复同步");
+    } else {
+      // New refreshes must not accidentally mix in an incompatible old stage.
+      if(following && !resumable(following)) {
+        job.checkpoint={owner:account,stages:{},savedAt:new Date().toISOString()};
+        following=null;followers=null;
+      }
     }
-    if (job.cancelled || following.reason === "cancelled") throw new Error("已停止分析。");
-    setStatus("following",following.handles.length,REASON[following.reason]);
-    if (["empty","page_changed","login_required","account_mismatch","rate_limited","schema","network","cursor_loop"].includes(following.reason)) {
-      throw new Error("我关注的人： " + REASON[following.reason] + "。原有结果未被覆盖。");
+    const firstKind=needFollowing ? "following" : "followers";
+    const tab=await chrome.tabs.create({url:"https://x.com/"+account+"/"+firstKind,active:false});
+    if(!Number.isSafeInteger(tab?.id))throw new Error("Chrome 无法打开临时 X 数据标签。");
+    job.tabId=tab.id;
+    if(needFollowing) {
+      following=await stage(job,"following",true,resumable(following)?following:null);
+      await job.writes;
+      queueCheckpoint(job,"following",following);
+      await job.writes;
+      if(job.writeError)throw job.writeError;
+      setStatus("following",following.handles.length || null,REASON[following.reason]);
+      if(following.reason!=="complete") {
+        $("internal-start").textContent="继续同步";
+        feedback("我关注的人： "+(REASON[following.reason]||"本次未完成")+
+          "，已保存 "+following.handles.length+" 人。下次可继续；旧结果未覆盖。",true);
+        return;
+      }
+      // Never carry a stale followers stage into a fresh following stage.
+      if(!cached?.stages?.following || cached.stages.following.reason!=="complete")
+        followers=null;
     }
-    const followers = await stage(job,"followers",false);
-    if (job.cancelled || followers.reason === "cancelled") throw new Error("已停止分析。");
-    setStatus("followers",followers.handles.length,REASON[followers.reason]);
-    if (["empty","page_changed","login_required","account_mismatch","rate_limited","schema","network","cursor_loop"].includes(followers.reason)) {
-      throw new Error("关注我的人： " + REASON[followers.reason] + "。原有结果未被覆盖。");
+    if(job.cancelled) {feedback("已停止，已保留本次进度。");return;}
+    if(followers?.reason!=="complete") {
+      followers=await stage(job,"followers",!needFollowing,resumable(followers)?followers:null);
+      await job.writes;
+      queueCheckpoint(job,"followers",followers);
+      await job.writes;
+      if(job.writeError)throw job.writeError;
+      setStatus("followers",followers.handles.length || null,REASON[followers.reason]);
+      if(followers.reason!=="complete") {
+        $("internal-start").textContent="继续同步";
+        feedback("关注我的人： "+(REASON[followers.reason]||"本次未完成")+
+          "，已保存 "+followers.handles.length+" 人。点击继续从当前分页位置读取，不重复第一轮。",true);
+        return;
+      }
+    } else {
+      setStatus("followers",followers.handles.length,"之前已完成");
     }
-    const data = {
-      owner:account,source:"internal_sync", importedAt:new Date().toISOString(),
+    if(!following || following.reason!=="complete" || !followers || followers.reason!=="complete")
+      throw new Error("两组名单尚未完整，未生成互关结果。");
+    const data={
+      owner:account,source:"internal_sync",importedAt:new Date().toISOString(),
       following:following.handles,followers:followers.handles,
       verification:{...following.verification,...followers.verification},
       ids:{...following.ids,...followers.ids},
-      reasons:{following:following.reason,followers:followers.reason},
+      reasons:{following:"complete",followers:"complete"}
     };
-    const observedEnds = following.reason === "complete" && followers.reason === "complete";
-    const completeRecord=observedEnds ? await saveInternalSnapshot(data) : null;
-    renderSnapshot(completeRecord || data,observedEnds);
-    localStorage.setItem(LAST_OWNER_KEY,account);
-    feedback(observedEnds ?
-      "已整理完成，并在本机保存。结果基于本次获取到的账号。" :
-      "已显示本次部分结果，原来保存的记录未被覆盖。",
-      !observedEnds);
-  } catch (error) { fail(error); }
+    await job.writes;
+    if(job.writeError)throw job.writeError;
+    const completeRecord=await saveInternalSnapshot(data);
+    job.checkpoint=null;
+    renderSnapshot(completeRecord,true);
+    $("internal-start").textContent="更新关注关系";
+    feedback("两组名单均已同步完成，本地完整记录已更新。");
+  } catch(error) {fail(error);}
   finally {
     clearInterval(job.timer);
     updateElapsed(job);
     await closeTemporaryTab(job);
-    if (running === job) running = null;
+    if(running===job)running=null;
     setBusy(false);
   }
 }
+
 function cancel() {
   if (!running) return;
   const job = running;
@@ -343,7 +383,14 @@ function cancel() {
   if (job.tabId && job.scanId) {
     void chrome.tabs.sendMessage(job.tabId,{type:"XRH_INTERNAL_CANCEL",scanId:job.scanId}).catch(()=>{});
   }
-  job.pending?.reject(new Error("已停止，本次没有覆盖之前的记录。"));
+  // Give the page a chance to report its last valid cursor and persist it.
+  // Fall back if X already navigated away.
+  if(job.pending) {
+    const pending=job.pending;
+    setTimeout(()=>{
+      if(job.pending===pending) pending.reject(new Error("已停止，已保存此前的同步进度。"));
+    },3500);
+  }
 }
 $("internal-start").addEventListener("click",() => { void start(); });
 $("internal-cancel").addEventListener("click",cancel);
@@ -357,6 +404,18 @@ $("internal-load").addEventListener("click",async() => {
     localStorage.setItem(LAST_OWNER_KEY,account);
     feedback("已读取 @" + account + " 上次保存在本机的结果。");
   } catch (error) { fail(error); }
+});
+$("internal-reset").addEventListener("click",async() => {
+  if(running) return;
+  try {
+    const account=owner();
+    if(!window.confirm("清除 @" + account + " 的未完成同步进度并重新开始？已保存的完整名单不会删除。")) return;
+    await clearInternalCheckpoint(account);
+    $("internal-start").textContent="重新同步";
+    setStatus("following",null,"进度已重置");
+    setStatus("followers",null,"进度已重置");
+    feedback("已清除未完成的同步进度，历史完整结果仍在。");
+  } catch(error) {fail(error);}
 });
 $("internal-clear").addEventListener("click",async() => {
   try {
@@ -407,24 +466,30 @@ $("internal-export").addEventListener("click",() => {
 async function restoreLastResult(account) {
   try {
     const existing=await readInternalSnapshot(account);
-    const pending=await readInternalCheckpoint(account);
-    if (running || $("internal-owner").value.trim().replace(/^@/,"").toLowerCase() !== account) return;
-    const resume=pending?.kind === "following" && pending?.reason === "complete" &&
-      Number.isFinite(Date.parse(pending.savedAt)) &&
-      Date.now()-Date.parse(pending.savedAt) >= 0 &&
-      Date.now()-Date.parse(pending.savedAt) < CHECKPOINT_MS;
-    if (existing) {
+    const pending=readCheckpoint(await readInternalCheckpoint(account),account);
+    if(running || $("internal-owner").value.trim().replace(/^@/,"").toLowerCase()!==account) return;
+    if(existing) {
       renderSnapshot(existing,true);
       setStatus("following",existing.following.length,"上次完整记录");
       setStatus("followers",existing.followers.length,"上次完整记录");
     }
-    if (resume) $("internal-start").textContent="继续上次未完成的同步";
-    feedback(resume ?
-      "上次已完成关注名单，点击继续将只读取剩余的粉丝名单。" :
-      existing ? "已自动载入 @" + account + " 上次完整结果；需要最新数据再点击更新。" :
-      "暂无此账号的本地记录，可以开始分析。");
+    if(pending?.stages) {
+      const a=pending.stages.following;
+      const b=pending.stages.followers;
+      const stageToContinue=a?.reason!=="complete" ? a : b;
+      if(a) setStatus("following",a.handles.length,a.reason==="complete"?"本轮已完成":"已保存进度");
+      if(b) setStatus("followers",b.handles.length,b.reason==="complete"?"本轮已完成":"已保存进度");
+      $("internal-start").textContent="继续同步";
+      feedback("上次同步进度已恢复：关注 "+(a?.handles?.length||0)+" 人、粉丝 "+
+        (b?.handles?.length||0)+" 人。点击继续后从已保存的分页位置读取。");
+    } else {
+      $("internal-start").textContent=existing?"更新关注关系":"开始快速同步";
+      feedback(existing ? "已显示 @" + account + " 上次完整结果；需要最新数据再点击更新。" :
+        "暂无本地记录，可以开始同步。");
+    }
   } catch(error) {fail(error);}
 }
+
 $("internal-owner").addEventListener("change",()=>{
   if (running) return;
   try {
