@@ -65,3 +65,16 @@
 - **未改扩展 manifest、权限、Worker/Pages/D1/Production/支付；无 Chrome 商店发布**。
 
 Staging 真机重点验证非活动标签页可否滚动（特别是在屏幕关闭、最小化窗口、多个标签页打开时）、是否意外抢焦点/自动关闭、进度与经过时间一致性、取消、少数据情况下的页底判断、网络受限与账号不匹配时对已有快照的保护。
+
+## 内部网页接口快速同步（新增 Staging 测试模式，2026-11-23）
+
+用户明确要求在已实现的官方归档导入和只读 DOM 页面扫描之外，新增一个可以在 Staging 实测的 **X 网页内部 GraphQL 关注关系同步模式**；不使用 X 收费开发者 API。参考开源 [huangsen365/x-follow-checker](https://github.com/huangsen365/x-follow-checker) 的分页游标处理思路，项目自己的解析、鉴权边界、前端 UI、存储、测试均独立实现，并非复制原仓库业务代码。
+
+- 导航：`follow-manager/manager.html` 新增单独的「快速同步（测试）」入口，进入 `follow-manager/internal-sync.html`。三条模式（网页 DOM、内部接口、官方归档）并存，方便在同一 X 账号下对比人数、耗时和结果。
+- 用户必须主动输入当前登录 X 的用户名、勾选确认本人账号后启动。与 DOM 模式一样，扩展页创建临时 `chrome.tabs.create({active:false})` X 标签页，不抢占焦点；依次打开 `/{owner}/following`、`/{owner}/followers`，进度按页展示，真实计时。完成/错误/取消/关闭扩展页时尝试清理临时页。
+- 已注入的内容脚本 `content/follow-internal-helpers.js` 和 `content/follow-internal-scanner.js` 仅在该模式收到插件的 `XRH_INTERNAL_START` 消息时运行。使用 X 网站现有登录态，只有同源 `https://x.com/i/api/graphql/*` **GET** 请求；从当前页用户导航校验当前账户确为目标账户，`UserByScreenName` 得到 ID，逐页读取 Following / Followers，解析可识别的用户名和精确字符串 ID。**此处是非公开 Web API，不是正式向第三方开放的免费 API；接口 query ID 和特征参数可能随时失效。**
+- 不请求 Chrome `cookies` 或额外 X host 权限；只在 X 页面上下文从 `document.cookie` 中取非 HttpOnly 的 **ct0 CSRF Token**，只传给 X 自身的请求头；不读取 `auth_token` 的值，不向扩展 UI/Worker/Cloudflare 传递任何 Cookie/Token，不持久化、不打印。X 网页自身的登录 Cookie 由浏览器按同源规则携带。若用户设备未暴露 `ct0` 或接口行为发生改变，会显示登录/接口错误，并停止，不绕过限制。
+- 只读，不点赞/关注/取消关注；按用户 ID 去重，单类最多 3000 人、160 页、最长 5 分钟；分页请求间隔约 1.8 秒以限制频率。401/403、429、404、网络/接口结构变化、重复游标、超时、页面变化均停止或标记不完整；不尝试规避限流。不记录原始 JSON/CSRF 数据。
+- UI 显示分页进度、两组人数、真实已用时间、停止、三个关系分类、按用户名筛选、50/页、个人主页链接与 CSV；两轮都明确读完才保存到独立 IndexedDB `xrh-follow-internal-v1`，否则结果仅限本次展示、不能覆盖以前保存的快照。原 DOM `xrh-follow-web-v1`、归档数字 ID 存储均保持不变。
+- **限制：** 本方法可能违反 X 的自动访问规则，带来账号限制风险；即使无收费 API 成本也不等于被平台授权。仅 Staging 试验使用，公开商业化发布前必须单独评估合规与 Chrome Web Store 规则。实际数据与速度、账号会话和 X 接口响应均需要用户真人 Chrome 实测，不可由 CI 证明。
+- **项目隔离：** 不修改现有 AI 回复/200 次免费额度/支付/Cloudflare Worker/Pages/D1 等业务代码，禁止自动发布到 Production 或 Chrome Web Store，不执行远端 D1 SQL。

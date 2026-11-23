@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>互关助手 · 快速同步测试</title>
+  <link rel="stylesheet" href="../content/design-tokens.css">
+  <link rel="stylesheet" href="manager.css">
+  <link rel="stylesheet" href="web-scan.css">
+  <link rel="stylesheet" href="internal-sync.css">
+</head>
+<body>
+<main class="container">
+  <header class="page-heading">
+    <img src="../icons/icon-48.png" width="44" height="44" alt="">
+    <div>
+      <p class="eyebrow">X REPLY HELPER · 互关助手</p>
+      <h1>快速同步 <span class="experimental">测试模式</span></h1>
+      <p class="muted">免数据归档 · 使用当前 X 登录状态 · 本地保存结果</p>
+    </div>
+  </header>
+  <section class="panel follow-main" aria-labelledby="internal-heading">
+    <div class="heading-line">
+      <h2 id="internal-heading">同步我的关注关系</h2>
+      <span class="tag">只读</span>
+    </div>
+    <p class="intro">通过 X 网页内部接口读取自己的关注与粉丝列表，不需要付费开发者 API。该接口不是 X 官方对第三方开放的稳定服务，可能变更、限流或限制账号访问；建议先在 Staging 测试。</p>
+    <label class="field" for="internal-owner">当前登录的 X 用户名
+      <input id="internal-owner" maxlength="16" autocomplete="off" placeholder="@yourhandle">
+    </label>
+    <label class="confirmation">
+      <input type="checkbox" id="internal-consent">
+      我确认同步的是自己的 X 账号，并同意使用此测试方式读取关注关系。
+    </label>
+    <div class="actions">
+      <button id="internal-start" type="button" class="primary">开始快速同步</button>
+      <button id="internal-cancel" type="button" class="secondary" disabled>停止</button>
+      <button id="internal-load" type="button" class="secondary">查看上次结果</button>
+      <button id="internal-clear" type="button" class="danger">清除本地记录</button>
+    </div>
+    <div id="internal-loading" class="follow-loading" role="status" aria-live="polite" hidden>
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <div class="loading-description">
+        <strong id="internal-loading-title">正在同步关注关系…</strong>
+        <span id="internal-elapsed" class="elapsed">已用时间 00:00</span>
+      </div>
+    </div>
+    <div class="scan-progress" aria-live="polite">
+      <div><span>我关注的人</span><strong id="internal-following-count">—</strong><span id="internal-following-state">未开始</span></div>
+      <div><span>关注我的人</span><strong id="internal-followers-count">—</strong><span id="internal-followers-state">未开始</span></div>
+    </div>
+    <p id="internal-status" class="feedback" role="status" aria-live="polite">准备就绪。</p>
+    <p class="muted small follow-footnote">同步会打开一个不抢占当前页面的临时 X 标签页。遇到限流、登录异常或接口变更立即停止。结果仅保存在本机；大量账号可能需要更长时间。</p>
+  </section>
+  <section class="panel" id="internal-results" hidden aria-labelledby="internal-results-heading">
+    <div class="heading-line">
+      <h2 id="internal-results-heading">关注关系</h2>
+      <span id="internal-result-badge" class="tag">本机记录</span>
+    </div>
+    <p class="notice">结果是获取时的快照，可能不是实时关系。若请求中途停止或达到上限，数据可能不完整，不能据此认定对方没有回关。</p>
+    <p id="internal-snapshot-meta" class="muted small"></p>
+    <div class="stats">
+      <div><strong id="internal-mutual">0</strong><span>互相关注</span></div>
+      <div><strong id="internal-not-following-back">0</strong><span>可能没回关我</span></div>
+      <div><strong id="internal-i-not-followed-back">0</strong><span>我可能没回关</span></div>
+    </div>
+    <nav class="tabs" aria-label="关注关系分类">
+      <button class="tab" type="button" data-internal-kind="mutual" aria-pressed="true">互相关注</button>
+      <button class="tab" type="button" data-internal-kind="notFollowingBack" aria-pressed="false">可能没回关我</button>
+      <button class="tab" type="button" data-internal-kind="iHaveNotFollowedBack" aria-pressed="false">我可能没回关</button>
+    </nav>
+    <div class="list-tools">
+      <label class="field">搜索用户名<input id="internal-filter" type="search" placeholder="输入 @用户名"></label>
+      <button id="internal-export" type="button" class="secondary">导出 CSV</button>
+    </div>
+    <p id="internal-result-count" class="muted small" role="status"></p>
+    <div id="internal-result-list" class="result-list" role="list"></div>
+    <div class="pagination">
+      <button id="internal-prev" type="button" class="secondary">上一页</button>
+      <span id="internal-page-info">1 / 1</span>
+      <button id="internal-next" type="button" class="secondary">下一页</button>
+    </div>
+  </section>
+  <p class="back-link"><a href="manager.html">← 返回互关助手</a></p>
+  <footer>这是仅供测试的可选同步方式，不使用 X 的付费开发者 API，也不上传 Cookie、Token 或关注名单。</footer>
+</main>
+<script type="module" src="internal-sync-ui.js"></script>
+</body>
+</html>

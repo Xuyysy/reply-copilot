@@ -78,3 +78,10 @@ footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 .web-scan-cta{display:inline-flex;align-items:center;justify-content:space-between;gap:18px;min-height:41px;padding:10px 16px;background:var(--xrh-brand);color:white;text-decoration:none;font-size:12px;font-weight:750;border-radius:10px}
 .web-scan-cta:hover{background:var(--xrh-brand-strong)}
 .web-scan-cta:focus-visible{outline:3px solid var(--xrh-brand);outline-offset:2px}
+
+/* Optional internal X web-client mode. Kept distinct from DOM and archives. */
+.internal-sync-entry{border-color:var(--xrh-line);background:var(--xrh-surface-soft)}
+.internal-sync-entry .heading-line h2{margin:0;font-size:16px}
+.internal-sync-entry>p{font-size:12px;line-height:1.75;color:var(--xrh-muted)}
+.internal-sync-cta{display:inline-flex;align-items:center;justify-content:space-between;gap:16px;min-height:39px;padding:9px 15px;border:1px solid var(--xrh-pro-line);border-radius:10px;background:var(--xrh-surface);color:var(--xrh-brand-text);font-size:12px;font-weight:700;text-decoration:none}
+.internal-sync-cta:hover{border-color:var(--xrh-brand);background:var(--xrh-pro-surface)}

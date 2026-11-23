@@ -1,0 +1,6 @@
+/* Separate optional X web-client mode, consistent with the Follow Manager. */
+#internal-results .stats strong{font-size:24px}
+#internal-results .stats span{line-height:1.5}
+#internal-consent{accent-color:var(--xrh-brand)}
+#internal-results .notice{line-height:1.65}
+@media (max-width:480px){#internal-start{width:100%}}

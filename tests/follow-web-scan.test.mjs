@@ -66,8 +66,9 @@ test("DOM web scanning is explicitly read-only, bounded and independent of AI or
   const logic=read("content/follow-dom-helpers.js");
   const ui=read("follow-manager/web-scan-ui.js");
   const manifest=JSON.parse(read("manifest.json"));
-  assert.deepEqual(manifest.content_scripts[0].js.slice(-2),[
-    "content/follow-dom-helpers.js","content/follow-web-scanner.js"
+  assert.deepEqual(manifest.content_scripts[0].js.slice(-4),[
+    "content/follow-dom-helpers.js","content/follow-web-scanner.js",
+    "content/follow-internal-helpers.js","content/follow-internal-scanner.js"
   ]);
   assert.equal(manifest.permissions.includes("cookies"),false);
   assert.equal(manifest.permissions.includes("scripting"),false);
