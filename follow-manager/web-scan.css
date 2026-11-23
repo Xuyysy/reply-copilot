@@ -1,0 +1,13 @@
+/* DOM scan experiment inherits the existing Follow Manager design system. */
+.experimental{display:inline-block;vertical-align:middle;margin-left:7px;padding:5px 8px;border-radius:999px;background:var(--xrh-pro-surface);border:1px solid var(--xrh-pro-line);color:var(--xrh-brand-text);font-size:10px;font-weight:700;letter-spacing:0}
+.scan-progress{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:17px}
+.scan-progress>div{min-width:0;display:flex;flex-direction:column;gap:6px;border:1px solid var(--xrh-line);border-radius:12px;padding:14px;background:var(--xrh-surface-soft)}
+.scan-progress>div>span:first-child{font-size:12px;font-weight:650;color:var(--xrh-ink)}
+.scan-progress>div>strong{font-size:25px;font-variant-numeric:tabular-nums}
+.scan-progress>div>span:last-child{font-size:11px;color:var(--xrh-muted);line-height:1.5;overflow-wrap:anywhere}
+.back-link{margin:0 0 20px}
+.back-link a{display:inline-flex;align-items:center;min-height:35px;padding:5px 0;font-size:12px;font-weight:650}
+#web-results .stats strong{font-size:24px}
+#web-results .stats span{line-height:1.5}
+@media(max-width:450px){.scan-progress{gap:7px}.scan-progress>div{padding:11px}h1{font-size:23px}.experimental{margin-top:5px}}
+@media(prefers-reduced-motion:reduce){.scan-progress{scroll-behavior:auto}}

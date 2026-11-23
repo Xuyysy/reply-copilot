@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>网页扫描 · X Reply Helper 互关助手</title>
+  <link rel="stylesheet" href="../content/design-tokens.css">
+  <link rel="stylesheet" href="manager.css">
+  <link rel="stylesheet" href="web-scan.css">
+</head>
+<body>
+<main class="container">
+  <header class="page-heading">
+    <img src="../icons/icon-48.png" width="44" height="44" alt="">
+    <div>
+      <p class="eyebrow">X REPLY HELPER · 互关助手</p>
+      <h1>网页扫描 <span class="experimental">Staging 实验版</span></h1>
+      <p class="muted">不用申请数据归档 · 不使用收费 X API · 只读网页</p>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="scan-heading">
+    <div class="heading-line"><h2 id="scan-heading">扫描自己的关注关系</h2><span class="tag">仅用户主动触发</span></div>
+    <p>输入当前登录 X 的用户名，点击开始后会依次打开该账号的「正在关注」和「粉丝」页面，按正常页面加载的内容收集用户名。扫描期间请保持新打开的 X 标签页在前台，不要手动滚动或切换账号。</p>
+    <label class="field" for="web-owner">X 用户名
+      <input id="web-owner" maxlength="16" autocomplete="off" placeholder="例如 @yourhandle">
+    </label>
+    <label class="confirmation"><input type="checkbox" id="web-consent">
+      我确认要扫描的是自己的 X 账号，了解自动滚动可能受到 X 规则限制、也可能遗漏未加载的账号。
+    </label>
+    <div class="actions">
+      <button id="web-start" class="primary" type="button">开始网页扫描</button>
+      <button id="web-cancel" class="secondary" type="button" disabled>停止扫描</button>
+      <button id="web-load" class="secondary" type="button">读取本地结果</button>
+      <button id="web-clear" class="danger" type="button">删除本地结果</button>
+    </div>
+    <p class="muted small">每类最多扫描 3,000 个可见账号，单轮最多约 4 分钟；不会读取 Cookie、调用 X 内部接口、自动关注或取关。只有两轮都观察到列表底部时才会保存本地快照，但仍不能证明名单完整。</p>
+    <div class="scan-progress" aria-live="polite">
+      <div><span>正在关注</span><strong id="web-following-count">—</strong><span id="web-following-state">未开始</span></div>
+      <div><span>粉丝</span><strong id="web-followers-count">—</strong><span id="web-followers-state">未开始</span></div>
+    </div>
+    <p id="web-status" class="feedback" role="status" aria-live="polite">准备就绪。</p>
+  </section>
+
+  <section class="panel" id="web-results" hidden aria-labelledby="web-results-heading">
+    <div class="heading-line"><h2 id="web-results-heading">本地扫描结果</h2><span class="tag" id="web-result-badge">网页观察快照</span></div>
+    <p class="notice">这些数值只基于扫描期间网页实际加载的用户。即使扫描滚动到底部，也不能证明获取了全部关注或粉丝；「疑似未回关」尤其不能作为确定结论。</p>
+    <p id="web-snapshot-meta" class="muted small"></p>
+    <div class="stats">
+      <div><strong id="web-mutual">0</strong><span>观察到双方互关</span></div>
+      <div><strong id="web-not-following-back">0</strong><span>疑似没回关我</span></div>
+      <div><strong id="web-i-not-followed-back">0</strong><span>疑似我没回关</span></div>
+    </div>
+    <nav class="tabs" aria-label="网页扫描结果分类">
+      <button class="tab" type="button" data-web-kind="mutual" aria-pressed="true">双方都出现</button>
+      <button class="tab" type="button" data-web-kind="notFollowingBack" aria-pressed="false">疑似没回关</button>
+      <button class="tab" type="button" data-web-kind="iHaveNotFollowedBack" aria-pressed="false">疑似我没回关</button>
+    </nav>
+    <div class="list-tools">
+      <label class="field">搜索用户名<input id="web-filter" type="search" placeholder="输入 @用户名"></label>
+      <button id="web-export" class="secondary" type="button">导出当前列表 CSV</button>
+    </div>
+    <p id="web-result-count" role="status" class="muted small"></p>
+    <div id="web-result-list" class="result-list" role="list"></div>
+    <div class="pagination">
+      <button id="web-prev" type="button" class="secondary">上一页</button>
+      <span id="web-page-info">1 / 1</span>
+      <button id="web-next" type="button" class="secondary">下一页</button>
+    </div>
+  </section>
+  <p class="back-link"><a href="manager.html">← 返回官方归档导入</a></p>
+  <footer>这是网页 DOM 扫描的 Staging 实验功能，不等于 X 官方提供的数据同步；实际平台风险和扫描完整度尚需浏览器验收。</footer>
+</main>
+<script type="module" src="web-scan-ui.js"></script>
+</body>
+</html>

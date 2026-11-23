@@ -70,3 +70,11 @@ footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 .archive-dropzone .picker-actions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px}
 .archive-dropzone button.primary{background:var(--xrh-brand);border-color:var(--xrh-brand);color:#fff}
 .archive-dropzone .picker-actions [hidden]{display:none!important}
+
+/* Browser DOM scan experiment: a separate opt-in path; archive import stays intact. */
+.web-scan-entry{border-color:var(--xrh-pro-line);background:linear-gradient(140deg,var(--xrh-pro-surface),var(--xrh-surface) 78%)}
+.web-scan-entry .heading-line h2{margin:0;font-size:16px}
+.web-scan-entry>p{color:var(--xrh-muted);font-size:12px;line-height:1.7}
+.web-scan-cta{display:inline-flex;align-items:center;justify-content:space-between;gap:18px;min-height:41px;padding:10px 16px;background:var(--xrh-brand);color:white;text-decoration:none;font-size:12px;font-weight:750;border-radius:10px}
+.web-scan-cta:hover{background:var(--xrh-brand-strong)}
+.web-scan-cta:focus-visible{outline:3px solid var(--xrh-brand);outline-offset:2px}
