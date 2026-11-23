@@ -99,7 +99,7 @@ chrome.runtime.onMessage.addListener((message,sender) => {
 async function waitReady(job) {
   const start = Date.now();
   while (Date.now() - start < 45_000) {
-    if (job.cancelled) throw new Error("已停止网页扫描。");
+    if (job.cancelled) throw new Error("已停止分析。");
     try {
       const check = await chrome.tabs.sendMessage(job.tabId,{type:"XRH_FOLLOW_WEB_PING"});
       if (check?.ok && check.route?.owner === job.owner && check.route.kind === job.kind) return;
@@ -123,12 +123,12 @@ async function stage(job,kind,first) {
     });
   }
   await waitReady(job);
-  if (job.cancelled) throw new Error("已停止网页扫描。");
+  if (job.cancelled) throw new Error("已停止分析。");
   setStatus(kind,0,"开始读取网页…");
   const scanId = job.scanId;
   return new Promise((resolve,reject) => {
     let settled = false;
-    const timeout = setTimeout(() => finish(new Error("网页扫描未在规定时间内结束，已停止等待。")),
+    const timeout = setTimeout(() => finish(new Error("处理时间较长，已停止本次分析。")),
       5 * 60 * 1000);
     function finish(error,value) {
       if (settled) return;
@@ -146,7 +146,7 @@ async function stage(job,kind,first) {
       type:"XRH_FOLLOW_WEB_START", scanId, owner:job.owner, kind,
     }).then(response => {
       if (!response?.ok) finish(new Error(response?.error || "无法开始扫描 X 页面。"));
-    }).catch(error => finish(new Error("无法连接 X 页面扫描器：" + (error?.message || "未知错误"))));
+    }).catch(error => finish(new Error("暂时无法连接 X 数据页面：" + (error?.message || "未知错误"))));
   });
 }
 function renderList() {
@@ -185,7 +185,7 @@ function renderList() {
   $("web-export").disabled = items.length === 0;
 }
 function renderSnapshot(data,localSaved=false) {
-  if (!validateSnapshot(data)) throw new Error("本地网页扫描数据格式不正确。");
+  if (!validateSnapshot(data)) throw new Error("本地数据格式不正确。");
   snapshot = data;
   relationships = classifyRelationships(data.followers,data.following);
   $("web-results").hidden = false;
@@ -229,13 +229,13 @@ async function start() {
     if (!Number.isSafeInteger(tab?.id)) throw new Error("Chrome 无法创建后台数据标签页。");
     job.tabId = tab.id;
     const following = await stage(job,"following",true);
-    if (job.cancelled || following.reason === "cancelled") throw new Error("已停止网页扫描。");
+    if (job.cancelled || following.reason === "cancelled") throw new Error("已停止分析。");
     setStatus("following",following.handles.length,REASON[following.reason]);
     if (["empty","page_changed","page_unavailable","page_error"].includes(following.reason)) {
       throw new Error("我关注的人： " + REASON[following.reason] + "。原有结果未被覆盖。");
     }
     const followers = await stage(job,"followers",false);
-    if (job.cancelled || followers.reason === "cancelled") throw new Error("已停止网页扫描。");
+    if (job.cancelled || followers.reason === "cancelled") throw new Error("已停止分析。");
     setStatus("followers",followers.handles.length,REASON[followers.reason]);
     if (["empty","page_changed","page_unavailable","page_error"].includes(followers.reason)) {
       throw new Error("关注我的人： " + REASON[followers.reason] + "。原有结果未被覆盖。");
@@ -277,7 +277,7 @@ $("web-load").addEventListener("click",async() => {
   try {
     const account = owner();
     const data = await readWebSnapshot(account);
-    if (!data) {feedback("本机没有 @" + account + " 的网页扫描快照。");return;}
+    if (!data) {feedback("本机没有 @" + account + " 的历史结果。");return;}
     if (data.owner !== account) throw new Error("本地快照账号不匹配。");
     renderSnapshot(data,true);
     feedback("已读取 @" + account + " 上次保存在本机的结果。");
@@ -286,12 +286,12 @@ $("web-load").addEventListener("click",async() => {
 $("web-clear").addEventListener("click",async() => {
   try {
     const account = owner();
-    if (!window.confirm("删除本机保存的 @" + account + " 网页扫描快照？归档导入数据不会受影响。")) return;
+    if (!window.confirm("删除本机保存的 @" + account + " 互关记录？其他导入数据不受影响。")) return;
     await removeWebSnapshot(account);
     if (snapshot?.owner === account) {
       snapshot = null; relationships = null; $("web-results").hidden = true;
     }
-    feedback("已删除 @" + account + " 的本地网页扫描快照。");
+    feedback("已删除 @" + account + " 的本地互关记录。");
   } catch (error) { fail(error); }
 });
 for (const button of document.querySelectorAll("[data-web-kind]")) {
