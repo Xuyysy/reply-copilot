@@ -89,7 +89,7 @@ test("DOM web scanning is explicitly read-only, bounded and independent of AI or
   assert.doesNotMatch(ui,/active:true/);
   assert.ok(ui.includes("elapsedLabel(ms)"));
   assert.ok(ui.includes("job.timer = setInterval"));
-  assert.match(ui,/if \(observedEnds\) await saveWebSnapshot/);
+  assert.ok(ui.includes("const completeRecord=observedEnds ? await saveWebSnapshot(data) : null;"));
   assert.match(ui,/结果可能不完整/);
 });
 

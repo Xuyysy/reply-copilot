@@ -78,7 +78,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(ui,/chrome\.tabs\.remove/);
   assert.match(ui,/XRH_INTERNAL_START/);
   assert.match(ui,/XRH_INTERNAL_CANCEL/);
-  assert.match(ui,/if \(observedEnds\) await saveInternalSnapshot/);
+  assert.ok(ui.includes("const completeRecord=observedEnds ? await saveInternalSnapshot(data) : null;"));
   assert.match(ui,/source:"internal_sync"/);
   assert.doesNotMatch(ui,/chrome\.cookies|auth_token|fetch\s*\(|https:\/\/api-staging|D1|AccountClient/);
   assert.match(read("follow-manager/internal-sync-store.js"),/xrh-follow-internal-v1/);
