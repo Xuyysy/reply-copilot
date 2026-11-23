@@ -81,13 +81,13 @@ test("DOM web scanning is explicitly read-only, bounded and independent of AI or
   assert.match(scan,/MAX_USERS = 3000/);
   assert.match(scan,/XRH_FOLLOW_WEB_CANCEL/);
   assert.match(scan,/currentAccount && currentAccount !== owner/);
-  assert.match(ui,/chrome\\.tabs\\.create/);
-  assert.match(ui,/chrome\\.tabs\\.update/);
-  assert.match(ui,/chrome\\.tabs\\.remove/);
+  assert.ok(ui.includes("chrome.tabs.create"));
+  assert.ok(ui.includes("chrome.tabs.update"));
+  assert.ok(ui.includes("chrome.tabs.remove"));
   assert.match(ui,/active:false/);
   assert.doesNotMatch(ui,/active:true/);
-  assert.match(ui,/elapsedLabel\\(ms\\)/);
-  assert.match(ui,/job\\.timer = setInterval/);
+  assert.ok(ui.includes("elapsedLabel(ms)"));
+  assert.ok(ui.includes("job.timer = setInterval"));
   assert.match(ui,/if \(observedEnds\) await saveWebSnapshot/);
   assert.match(ui,/结果可能不完整/);
 });
