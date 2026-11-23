@@ -20,7 +20,7 @@ test("offline follow manager ships inside every extension build and opens from n
     "Follow Manager must appear below the account and credits card and before quick reply settings");
   assert.equal((html.match(/id="nav-follow-manager"/g)||[]).length, 1);
   assert.match(html, /class="follow-manager-pill">免费工具/);
-  assert.match(html, /名单仅在本机分析/);
+  assert.match(html, /数据仅在本机整理/);
   assert.match(html, /class="button secondary follow-manager-action"/);
   const sidebarCss = read("sidepanel/sidepanel.css");
   assert.match(sidebarCss, /\.follow-manager-entry \.follow-manager-action/);
