@@ -85,3 +85,10 @@ footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 .internal-sync-entry>p{font-size:12px;line-height:1.75;color:var(--xrh-muted)}
 .internal-sync-cta{display:inline-flex;align-items:center;justify-content:space-between;gap:16px;min-height:39px;padding:9px 15px;border:1px solid var(--xrh-pro-line);border-radius:10px;background:var(--xrh-surface);color:var(--xrh-brand-text);font-size:12px;font-weight:700;text-decoration:none}
 .internal-sync-cta:hover{border-color:var(--xrh-brand);background:var(--xrh-pro-surface)}
+
+/* Result list filters: clearly distinguish confirmed blue V from unknown. */
+.list-tools .verified-selector{flex:0 0 175px;max-width:175px}
+.verified-selector select{width:100%;min-height:41px;border:1px solid var(--xrh-line);border-radius:9px;background:var(--xrh-surface);color:var(--xrh-ink);padding:9px 10px;font:inherit;font-weight:600}
+.blue-v-chip{display:inline-flex;align-items:center;margin-left:8px;padding:3px 7px;border-radius:999px;background:rgba(29,155,240,.12);color:#1d9bf0;font-weight:750;font-size:10px;white-space:nowrap}
+.snapshot-changes{font-size:12px;border:1px solid var(--xrh-pro-line);border-radius:10px;padding:10px 13px;background:var(--xrh-pro-surface);line-height:1.6}
+@media(max-width:600px){.list-tools .verified-selector{flex:auto;max-width:none;width:100%}}

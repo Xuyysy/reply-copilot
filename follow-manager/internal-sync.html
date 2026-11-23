@@ -59,6 +59,7 @@
     </div>
     <p class="notice">结果是获取时的快照，可能不是实时关系。若请求中途停止或达到上限，数据可能不完整，不能据此认定对方没有回关。</p>
     <p id="internal-snapshot-meta" class="muted small"></p>
+    <p id="internal-changes" class="snapshot-changes" hidden></p>
     <div class="stats">
       <div><strong id="internal-mutual">0</strong><span>互相关注</span></div>
       <div><strong id="internal-not-following-back">0</strong><span>可能没回关我</span></div>
@@ -71,6 +72,14 @@
     </nav>
     <div class="list-tools">
       <label class="field">搜索用户名<input id="internal-filter" type="search" placeholder="输入 @用户名"></label>
+      <label class="field verified-selector">认证状态
+        <select id="internal-verified" aria-label="按蓝 V 认证状态筛选">
+          <option value="all">全部账号</option>
+          <option value="blue">仅看蓝 V</option>
+          <option value="not-blue">确认非蓝 V</option>
+          <option value="unknown">认证状态未知</option>
+        </select>
+      </label>
       <button id="internal-export" type="button" class="secondary">导出 CSV</button>
     </div>
     <p id="internal-result-count" class="muted small" role="status"></p>

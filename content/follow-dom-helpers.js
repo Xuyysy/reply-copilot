@@ -39,14 +39,26 @@
     }
     return null;
   }
-  function collect(doc, target) {
+  function blueBadge(cell, doc) {
+    // Check ONLY a name-area verification icon. Generic verified icons can
+    // also be gold/grey; require the known blue icon color to avoid false labels.
+    const icon=cell.querySelector?.('[data-testid="User-Name"] [data-testid="icon-verified"]');
+    if (!icon) return null;
+    const css=doc?.defaultView?.getComputedStyle?.(icon);
+    const color=(css?.color || css?.fill || icon.getAttribute?.("fill") || "").toLowerCase().replace(/\s+/g,"");
+    return /^(?:rgb\(29,155,240\)|rgb\(29,161,242\)|#1d9bf0|#1da1f2)$/.test(color) ? true : null;
+  }
+  function collect(doc, target, verification) {
     for (const cell of cells(doc)) {
       if (typeof cell.getBoundingClientRect === "function") {
         const rect = cell.getBoundingClientRect();
         if (rect.height <= 0 || rect.bottom < 0 || rect.top > (doc.defaultView?.innerHeight ?? 1000)) continue;
       }
       const handle = parseCell(cell);
-      if (handle && target.size < 3000) target.add(handle);
+      if (handle && target.size < 3000) {
+        target.add(handle);
+        if (verification && blueBadge(cell,doc) === true) verification[handle]=true;
+      }
     }
     return target.size;
   }
@@ -59,5 +71,5 @@
       iHaveNotFollowedBack: [...a].filter(handle => !b.has(handle))
     };
   }
-  globalThis.ReplyCopilotFollowDom = Object.freeze({normalize,route,loggedInHandle,cells,parseCell,collect,compare});
+  globalThis.ReplyCopilotFollowDom = Object.freeze({normalize,route,loggedInHandle,cells,parseCell,blueBadge,collect,compare});
 })();

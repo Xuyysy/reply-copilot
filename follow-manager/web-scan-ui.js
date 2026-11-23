@@ -1,11 +1,17 @@
 import {normalizeHandle, classifyRelationships} from "./archive.js";
-import {saveWebSnapshot, readWebSnapshot, removeWebSnapshot} from "./web-scan-store.js";
+import {saveWebSnapshot, readWebSnapshot, removeWebSnapshot,
+  saveWebCheckpoint,readWebCheckpoint,clearWebCheckpoint}
+  from "./web-scan-store.js";
+import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent}
+  from "./results-utils.js";
 
 const $ = id => document.getElementById(id);
 const KINDS = ["mutual","notFollowingBack","iHaveNotFollowedBack"];
 // Following and followers are read sequentially from a temporary inactive X tab.
 const PAGE_SIZE = 50;
 const MAX_HANDLES = 3000;
+const LAST_OWNER_KEY = "xrh-follow-web-last-owner";
+const CHECKPOINT_MS = 30 * 60 * 1000;
 const REASON = {
   bottom_observed:"本轮已完成，覆盖范围未验证",
   limit:"达到单轮上限，结果可能不完整",
@@ -73,6 +79,7 @@ function validateSnapshot(value) {
   return value && typeof value === "object" &&
     typeof value.owner === "string" && /^[a-z0-9_]{1,15}$/.test(value.owner) &&
     validHandles(value.followers) && validHandles(value.following) &&
+    validVerification(value.verification) && validIds(value.ids) &&
     value.reasons && typeof value.reasons.following === "string" &&
     typeof value.reasons.followers === "string";
 }
@@ -87,12 +94,16 @@ chrome.runtime.onMessage.addListener((message,sender) => {
     $("web-loading-title").textContent = "正在整理「" + stageName(job.kind) + "」";
     feedback("已读取 " + message.count + " 个「" + stageName(job.kind) + "」账号，正在继续…");
   } else if (message.type === "XRH_FOLLOW_WEB_DONE") {
-    if (!validHandles(message.handles) || typeof message.reason !== "string" ||
+    if (!validHandles(message.handles) || !validVerification(message.verification) ||
+        !validIds(message.ids) || typeof message.reason !== "string" ||
         !Object.hasOwn(REASON,message.reason)) {
       job.pending.reject(new Error("扫描结果格式不符合安全要求，已拒绝导入。"));
       return;
     }
-    job.pending.resolve({handles:[...new Set(message.handles)],reason:message.reason});
+    job.pending.resolve({
+      handles:[...new Set(message.handles)],reason:message.reason,
+      verification:message.verification || {},ids:message.ids || {}
+    });
   }
 });
 
@@ -152,7 +163,8 @@ async function stage(job,kind,first) {
 function renderList() {
   if (!relationships) return;
   const search = $("web-filter").value.trim().replace(/^@/,"").toLowerCase();
-  const items = relationships[selectedKind].filter(handle => handle.includes(search));
+  const items = selectAccounts(relationships[selectedKind],search,
+    $("web-verified").value,snapshot);
   const pageCount = Math.max(1,Math.ceil(items.length / PAGE_SIZE));
   currentPage = Math.max(0,Math.min(currentPage,pageCount-1));
   const fragment = document.createDocumentFragment();
@@ -167,6 +179,13 @@ function renderList() {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "打开 X 主页 ↗";
+    if (verificationFor(snapshot,handle) === true) {
+      const badge=document.createElement("span");
+      badge.className="blue-v-chip";
+      badge.textContent="✓ 蓝 V";
+      badge.title="X 同步时确认的蓝色认证标识";
+      label.append(badge);
+    }
     row.append(label,link);
     fragment.append(row);
   }
@@ -188,6 +207,17 @@ function renderSnapshot(data,localSaved=false) {
   if (!validateSnapshot(data)) throw new Error("本地数据格式不正确。");
   snapshot = data;
   relationships = classifyRelationships(data.followers,data.following);
+  const change=compareSnapshots(data,data.history?.[0]);
+  const changes=$("web-changes");
+  if (change) {
+    changes.hidden=false;
+    changes.textContent="与上次完整记录相比：新增粉丝 " + change.newFollowers +
+      " 人、减少 " + change.missingFollowers + " 人。"+
+      (change.byStableId ? "按账号 ID 比较。" : "按用户名估算，改名或漏加载也可能产生差异。");
+  } else {
+    changes.hidden=true;
+    changes.textContent="";
+  }
   $("web-results").hidden = false;
   $("web-mutual").textContent = relationships.mutual.length.toLocaleString("zh-CN");
   $("web-not-following-back").textContent = relationships.notFollowingBack.length.toLocaleString("zh-CN");
@@ -199,10 +229,13 @@ function renderSnapshot(data,localSaved=false) {
   $("web-snapshot-meta").textContent = "@" + data.owner + " · " + time +
     " · 我关注 " + data.following.length + " 人 · 关注我的人 " + data.followers.length +
     " 人 · " + (localSaved ? "已保存到本机" : "本次结果") +
-    (ended ? "" : " · 本次数据可能不完整");
+    (ended ? "" : " · 本次数据可能不完整") +
+    (localSaved && !snapshotIsCurrent(data) ? " · 超过 24 小时，建议按需刷新" : "");
   selectedKind = "mutual";
   currentPage = 0;
   $("web-filter").value = "";
+  $("web-verified").value="all";
+  $("web-start").textContent="更新关注关系";
   for (const button of document.querySelectorAll("[data-web-kind]")) {
     button.setAttribute("aria-pressed",String(button.dataset.webKind === selectedKind));
   }
@@ -212,6 +245,7 @@ async function start() {
   if (running) return;
   let account;
   try { account = owner(); } catch(error) { fail(error); return; }
+  try {localStorage.setItem(LAST_OWNER_KEY,account);} catch {}
   const job = {owner:account,tabId:null,cancelled:false,kind:null,scanId:null,pending:null,startedAt:Date.now(),timer:null};
   running = job;
   setBusy(true);
@@ -219,16 +253,40 @@ async function start() {
   job.timer = setInterval(() => { if (running === job) updateElapsed(job); }, 1000);
   setStatus("following",null,"等待开始");
   setStatus("followers",null,"等待开始");
-  $("web-results").hidden = true;
-  snapshot = null;
-  relationships = null;
+  // Keep the last complete result visible while refreshing. An interrupted
+  // update must never wipe a useful local snapshot.
+  if (!snapshot || snapshot.owner !== account) {
+    $("web-results").hidden = true;
+    snapshot=null;
+    relationships=null;
+  }
   try {
     // An inactive tab preserves the user's current page. It still exists in
     // Chrome's tab strip and can be throttled/frozen by the browser.
     const tab = await chrome.tabs.create({url:"https://x.com/"+account+"/following",active:false});
     if (!Number.isSafeInteger(tab?.id)) throw new Error("Chrome 无法创建后台数据标签页。");
     job.tabId = tab.id;
-    const following = await stage(job,"following",true);
+    const pending = await readWebCheckpoint(account);
+    const reusable = pending?.kind === "following" && pending?.reason === "bottom_observed" &&
+      validHandles(pending.handles) && validVerification(pending.verification) &&
+      validIds(pending.ids) &&
+      Number.isFinite(Date.parse(pending.savedAt)) &&
+      Date.now() - Date.parse(pending.savedAt) >= 0 &&
+      Date.now() - Date.parse(pending.savedAt) < CHECKPOINT_MS;
+    const following = reusable ?
+      {handles:pending.handles,verification:pending.verification||{},ids:pending.ids||{},
+        reason:pending.reason} :
+      await stage(job,"following",true);
+    if (reusable) {
+      setStatus("following",following.handles.length,"已恢复上次完成的第一轮");
+      feedback("已恢复之前完成的关注名单，继续同步粉丝，不重复读取第一轮。");
+    } else if (following.reason === "bottom_observed") {
+      await saveWebCheckpoint({
+        owner:account,kind:"following",savedAt:new Date().toISOString(),
+        handles:following.handles,verification:following.verification,
+        ids:following.ids,reason:following.reason
+      });
+    }
     if (job.cancelled || following.reason === "cancelled") throw new Error("已停止分析。");
     setStatus("following",following.handles.length,REASON[following.reason]);
     if (["empty","page_changed","page_unavailable","page_error"].includes(following.reason)) {
@@ -243,11 +301,14 @@ async function start() {
     const data = {
       owner:account,source:"dom_scan", importedAt:new Date().toISOString(),
       following:following.handles,followers:followers.handles,
+      verification:{...following.verification,...followers.verification},
+      ids:{...following.ids,...followers.ids},
       reasons:{following:following.reason,followers:followers.reason},
     };
     const observedEnds = following.reason === "bottom_observed" && followers.reason === "bottom_observed";
-    if (observedEnds) await saveWebSnapshot(data);
-    renderSnapshot(data,observedEnds);
+    const completeRecord=observedEnds ? await saveWebSnapshot(data) : null;
+    renderSnapshot(completeRecord || data,observedEnds);
+    localStorage.setItem(LAST_OWNER_KEY,account);
     feedback(observedEnds ?
       "已整理完成，并在本机保存。结果基于本次获取到的账号。" :
       "已显示本次部分结果，原来保存的记录未被覆盖。",
@@ -280,6 +341,7 @@ $("web-load").addEventListener("click",async() => {
     if (!data) {feedback("本机没有 @" + account + " 的历史结果。");return;}
     if (data.owner !== account) throw new Error("本地快照账号不匹配。");
     renderSnapshot(data,true);
+    localStorage.setItem(LAST_OWNER_KEY,account);
     feedback("已读取 @" + account + " 上次保存在本机的结果。");
   } catch (error) { fail(error); }
 });
@@ -288,6 +350,7 @@ $("web-clear").addEventListener("click",async() => {
     const account = owner();
     if (!window.confirm("删除本机保存的 @" + account + " 互关记录？其他导入数据不受影响。")) return;
     await removeWebSnapshot(account);
+    if (localStorage.getItem(LAST_OWNER_KEY) === account) localStorage.removeItem(LAST_OWNER_KEY);
     if (snapshot?.owner === account) {
       snapshot = null; relationships = null; $("web-results").hidden = true;
     }
@@ -305,16 +368,20 @@ for (const button of document.querySelectorAll("[data-web-kind]")) {
     renderList();
   });
 }
+$("web-verified").addEventListener("change",()=>{currentPage=0;renderList();});
 $("web-filter").addEventListener("input",() => {currentPage=0;renderList();});
 $("web-prev").addEventListener("click",() => {currentPage--;renderList();});
 $("web-next").addEventListener("click",() => {currentPage++;renderList();});
 $("web-export").addEventListener("click",() => {
   if (!snapshot || !relationships) return;
   const term = $("web-filter").value.trim().replace(/^@/,"").toLowerCase();
-  const items = relationships[selectedKind].filter(x => x.includes(term));
+  const items = selectAccounts(relationships[selectedKind],term,
+    $("web-verified").value,snapshot);
   if (!items.length) return;
-  const csv = "\uFEFFhandle,profile_url,category,source,coverage\r\n" +
-    items.map(x => [x,"https://x.com/"+x,selectedKind,"dom_scan","unverified"].join(",")).join("\r\n") + "\r\n";
+  const csv = "\uFEFFhandle,profile_url,category,source,coverage,blue_verified\r\n" +
+    items.map(x => [x,"https://x.com/"+x,selectedKind,"dom_scan","unverified",
+      verificationFor(snapshot,x) === null ? "unknown" : String(verificationFor(snapshot,x))].join(","))
+      .join("\r\n") + "\r\n";
   const url = URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   const link = document.createElement("a");
   link.href = url;
@@ -324,6 +391,43 @@ $("web-export").addEventListener("click",() => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url),3000);
 });
+async function restoreLastResult(account) {
+  try {
+    const existing=await readWebSnapshot(account);
+    const pending=await readWebCheckpoint(account);
+    if (running || $("web-owner").value.trim().replace(/^@/,"").toLowerCase() !== account) return;
+    const resume=pending?.kind === "following" && pending?.reason === "bottom_observed" &&
+      Number.isFinite(Date.parse(pending.savedAt)) &&
+      Date.now()-Date.parse(pending.savedAt) >= 0 &&
+      Date.now()-Date.parse(pending.savedAt) < CHECKPOINT_MS;
+    if (existing) {
+      renderSnapshot(existing,true);
+      setStatus("following",existing.following.length,"上次完整记录");
+      setStatus("followers",existing.followers.length,"上次完整记录");
+    }
+    if (resume) $("web-start").textContent="继续上次未完成的同步";
+    feedback(resume ?
+      "上次已完成关注名单，点击继续将只读取剩余的粉丝名单。" :
+      existing ? "已自动载入 @" + account + " 上次完整结果；需要最新数据再点击更新。" :
+      "暂无此账号的本地记录，可以开始分析。");
+  } catch(error) {fail(error);}
+}
+$("web-owner").addEventListener("change",()=>{
+  if (running) return;
+  try {
+    const account=owner();
+    $("web-results").hidden=true;
+    snapshot=null;relationships=null;
+    if (account) void restoreLastResult(account);
+  } catch(error) {fail(error);}
+});
+try {
+  const last=localStorage.getItem(LAST_OWNER_KEY);
+  if (last && /^[a-z0-9_]{1,15}$/.test(last)) {
+    $("web-owner").value="@"+last;
+    void restoreLastResult(last);
+  }
+} catch {}
 window.addEventListener("beforeunload",() => {
   const job = running;
   if (!job) return;

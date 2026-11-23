@@ -50,6 +50,7 @@
     <div class="heading-line"><h2 id="web-results-heading">关注关系</h2><span class="tag" id="web-result-badge">本地结果</span></div>
     <p class="notice">结果基于本次读取到的账号，可能不包含全部粉丝或关注者。未出现在列表里不一定代表没有回关。</p>
     <p id="web-snapshot-meta" class="muted small"></p>
+    <p id="web-changes" class="snapshot-changes" hidden></p>
     <div class="stats">
       <div><strong id="web-mutual">0</strong><span>互相关注</span></div>
       <div><strong id="web-not-following-back">0</strong><span>可能没回关我</span></div>
@@ -62,6 +63,14 @@
     </nav>
     <div class="list-tools">
       <label class="field">查找账号<input id="web-filter" type="search" placeholder="输入 @用户名"></label>
+      <label class="field verified-selector">认证状态
+        <select id="web-verified" aria-label="按蓝 V 认证状态筛选">
+          <option value="all">全部账号</option>
+          <option value="blue">仅看蓝 V</option>
+          <option value="not-blue">确认非蓝 V</option>
+          <option value="unknown">认证状态未知</option>
+        </select>
+      </label>
       <button id="web-export" class="secondary" type="button">导出 CSV</button>
     </div>
     <p id="web-result-count" role="status" class="muted small"></p>

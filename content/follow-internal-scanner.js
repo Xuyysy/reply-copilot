@@ -147,6 +147,8 @@
     let reason = "schema";
     const handles = [];
     const ids = new Set();
+    const verification=Object.create(null);
+    const accountIds=Object.create(null);
     try {
       validateSelf(session);
       const profile = parser.parseProfile(await request("UserByScreenName",
@@ -166,6 +168,8 @@
           if (ids.has(u.id)) continue;
           ids.add(u.id);
           handles.push(u.handle);
+          accountIds[u.handle]=u.id;
+          if (typeof u.blueVerified === "boolean") verification[u.handle]=u.blueVerified;
           if (handles.length >= MAX_USERS) break;
         }
         session.pages=page;
@@ -190,7 +194,7 @@
       if (active === session) active = null;
       // Only usernames leave this X tab. Do not transfer user session headers.
       send({type:"XRH_INTERNAL_DONE",scanId:session.scanId,kind:session.kind,reason,
-        handles,pages:seenCursorsCount(session)});
+        handles,verification,ids:accountIds,pages:seenCursorsCount(session)});
     }
   }
   // Page count is already reported with progress. Terminal message is the source

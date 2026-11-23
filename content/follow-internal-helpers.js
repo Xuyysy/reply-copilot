@@ -8,9 +8,17 @@
     const user = result?.__typename === "User" ? result : result?.result || result;
     const handle = user?.legacy?.screen_name;
     const id = user?.rest_id;
-    return typeof handle === "string" && VALID_HANDLE.test(handle) &&
-      typeof id === "string" && VALID_ID.test(id)
-      ? {handle:handle.toLowerCase(), id} : null;
+    if (typeof handle !== "string" || !VALID_HANDLE.test(handle) ||
+        typeof id !== "string" || !VALID_ID.test(id)) return null;
+    const verifiedType=user?.verified_type || user?.legacy?.verified_type;
+    // Blue is distinct from gold business and grey government verification.
+    // Never infer blue from legacy.verified or a generic badge.
+    const blue=typeof user?.is_blue_verified === "boolean" ?
+      (user.is_blue_verified && !["Business","Government"].includes(verifiedType)) : null;
+    return {
+      handle:handle.toLowerCase(),id,
+      ...(blue === null ? {} : {blueVerified:blue})
+    };
   }
   function parseProfile(payload) {
     const raw = payload?.data?.user?.result;

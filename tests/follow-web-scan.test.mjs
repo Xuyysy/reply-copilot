@@ -121,7 +121,8 @@ test("DOM scanner safe per-handle links and no server upload paths",()=>{
   assert.match(ui,/link\.rel = "noopener noreferrer"/);
   assert.doesNotMatch(ui,/chrome\.runtime\.sendMessage\(\{type:"REPLY_COPILOT_GENERATE"|AccountClient|QuotaService|HostedAIClient|D1|api-staging/);
   const store=read("follow-manager/web-scan-store.js");
-  assert.match(store,/indexedDB\.open/);
+  assert.match(store,/createFollowStore/);
+  assert.match(read("follow-manager/follow-snapshot-store.js"),/indexedDB\.open/);
   assert.doesNotMatch(store,/fetch\(|chrome\.storage|XMLHttpRequest/);
 });
 

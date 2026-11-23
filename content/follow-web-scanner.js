@@ -26,7 +26,7 @@
   function report(session, done, reason) {
     send({type:done ? "XRH_FOLLOW_WEB_DONE" : "XRH_FOLLOW_WEB_PROGRESS",
       scanId:session.scanId, kind:session.kind, count:session.handles.size,
-      ...(done ? {handles:[...session.handles], reason} : {})});
+      ...(done ? {handles:[...session.handles], verification:session.verification, reason} : {})});
   }
   async function run(session) {
     const started = Date.now();
@@ -45,7 +45,7 @@
           await sleep(INTERVAL_MS);
           continue;
         }
-        api.collect(document, session.handles);
+        api.collect(document, session.handles, session.verification);
         if (session.handles.size >= MAX_USERS) { reason = "limit"; break; }
         const now = Date.now();
         if (now - lastReported >= 2400) {
@@ -106,7 +106,7 @@
       return;
     }
     if (active) { respond({ok:false,error:"此 X 标签页已有扫描任务。"}); return; }
-    const session = {owner, kind, scanId:message.scanId, handles:new Set(), cancelled:false};
+    const session = {owner, kind, scanId:message.scanId, handles:new Set(),verification:Object.create(null),cancelled:false};
     active = session;
     respond({ok:true});
     void run(session);
