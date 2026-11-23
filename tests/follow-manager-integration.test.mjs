@@ -10,6 +10,22 @@ test("offline follow manager ships inside every extension build and opens from n
   const build = read("scripts/build.js");
   const page = read("follow-manager/manager.html");
   assert.match(html, /id="nav-follow-manager"/);
+  const momentumPosition = html.indexOf('id="momentum-control"');
+  const accountHeadingPosition = html.indexOf('<h2>账户与额度</h2>');
+  const accountCardPosition = html.indexOf('class="dashboard-card account-card"');
+  const followPosition = html.indexOf('class="dashboard-card follow-manager-entry"');
+  const quickSettingsPosition = html.indexOf('class="dashboard-card quick-settings"');
+  assert.ok(momentumPosition < accountHeadingPosition && accountHeadingPosition < accountCardPosition);
+  assert.ok(accountCardPosition < followPosition && followPosition < quickSettingsPosition,
+    "Follow Manager must appear below the account and credits card and before quick reply settings");
+  assert.equal((html.match(/id="nav-follow-manager"/g)||[]).length, 1);
+  assert.match(html, /class="follow-manager-pill">免费工具/);
+  assert.match(html, /名单仅在本机分析/);
+  assert.match(html, /class="button secondary follow-manager-action"/);
+  const sidebarCss = read("sidepanel/sidepanel.css");
+  assert.match(sidebarCss, /\.follow-manager-entry \.follow-manager-action/);
+  assert.match(sidebarCss, /\.follow-manager-head/);
+
   assert.match(js, /chrome\.tabs\.create\(\{url:chrome\.runtime\.getURL\('follow-manager\/manager\.html'\)\}\)/);
   assert.match(build, /"follow-manager"/);
   assert.match(page, /content\/design-tokens\.css/);

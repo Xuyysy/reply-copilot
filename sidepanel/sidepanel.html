@@ -5,7 +5,7 @@
   <header class="app-header"><img class="brand-icon" src="../icons/icon-48.png" alt=""><div><h1>x-Reply-Helper</h1><p>AI 创作者控制中心</p></div><button id="settings" class="icon-button" aria-label="设置" title="设置">⚙</button></header>
   <main>
     <div id="momentum-control" class="dashboard-card pro-control"></div>
-    <section class="dashboard-card follow-manager-entry" aria-labelledby="follow-manager-title"><div><h2 id="follow-manager-title">互关助手</h2><p class="muted-note">导入 X 官方归档，免费查看互关和未回关名单。数据留在本机。</p></div><button id="nav-follow-manager" type="button" class="button secondary">查看关注关系</button></section>
+
     <section id="dashboard">
       <div class="dashboard-heading"><h2>账户与额度</h2><button id="account-refresh" class="text-button">刷新</button></div>
       <div class="dashboard-card account-card"><strong id="account-name">正在读取账户…</strong><p id="binding-feedback" role="status" class="muted-note"></p><p id="account-summary">余额由官网服务确认</p><div id="subscription-quota" class="subscription-quota hidden" role="region" aria-label="每日订阅额度">
@@ -21,6 +21,25 @@
     <button id="subscription-overage-action" type="button" class="button secondary hidden">购买永久额度包</button>
   </div>
 </div><div id="quota-row" class="quota-row hidden"><div><strong id="quota-total">—</strong><span id="quota-total-label">总剩余</span></div><div><strong id="quota-free">—</strong><span>免费</span></div><div><strong id="quota-paid">—</strong><span>付费</span></div></div><div id="account-buttons" class="dashboard-actions"><button id="connect-register" class="button">免费注册并连接</button><button id="connect-login" class="button secondary">已有账号登录</button><button id="check-binding" class="button secondary hidden">查看绑定状态</button></div></div>
+      <section class="dashboard-card follow-manager-entry" aria-labelledby="follow-manager-title">
+        <div class="follow-manager-head">
+          <span class="follow-manager-symbol" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2"/><path d="m16 12 2 2 4-4"/>
+            </svg>
+          </span>
+          <div class="follow-manager-heading">
+            <h2 id="follow-manager-title">互关助手</h2>
+            <span class="follow-manager-kicker">关注关系 · 离线分析</span>
+          </div>
+          <span class="follow-manager-pill">免费工具</span>
+        </div>
+        <p class="follow-manager-description">导入 X 官方数据归档，轻松找出互关与未回关账号。名单仅在本机分析。</p>
+        <button id="nav-follow-manager" type="button" class="button secondary follow-manager-action">
+          <span>查看关注关系</span>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+        </button>
+      </section>
       <details class="dashboard-card quick-settings" open><summary>快捷回复设置</summary><label class="setting-row">默认风格<select id="quick-style"><option value="natural">自然</option><option value="light_humor">幽默</option><option value="thoughtful">观点</option></select></label><label class="setting-row">回复语言<select id="quick-language"><option value="auto">自动识别（跟随原帖）</option><option value="zh">中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></label><label class="setting-row">回复长度<select id="quick-length"><option value="short">简短</option><option value="medium">适中</option><option value="adaptive">自适应</option></select></label><label class="setting-row">幽默程度<select id="quick-humor"><option value="low">低</option><option value="medium">中</option><option value="high">高</option></select></label><label class="setting-row">自动生成建议<input id="quick-auto" type="checkbox" role="switch"></label><p id="quick-save-status" class="muted-note" role="status"></p></details>
       <details class="dashboard-card usage-card"><summary>本地使用统计 <span>仅统计本机操作</span></summary><div class="usage-card-content"><div class="quota-row"><div><strong id="stat-week">0</strong><span>近 7 天生成</span></div><div><strong id="stat-all">0</strong><span>累计生成</span></div><div><strong id="stat-copy">0</strong><span>已复制建议</span></div></div><p class="muted-note">仅统计本机事件，不代表服务端扣费或实际发送。</p></div></details>
       <details class="dashboard-card supported-flow"><summary>如何使用回复助手</summary><p>在 X 帖子下点击「回复」，使用回复悬浮窗生成与编辑建议。侧栏只负责账户、设置和互动势能，不会在后台生成回复。</p></details>
