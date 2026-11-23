@@ -77,7 +77,7 @@ test("both scan pages have blue V filter, historical change summary, and old-dat
     assert.ok(script.includes('badge.className="blue-v-chip"'));
     assert.ok(script.includes("source:"));
     assert.match(script,/blue_verified/);
-    assert.ok(script.includes("snapshot.owner !== account"));
+    assert.match(script,/snapshot\.owner\s*!==\s*account/);
     assert.equal(script.includes("chrome.cookies") || script.includes("document.cookie"),false);
   }
 });
