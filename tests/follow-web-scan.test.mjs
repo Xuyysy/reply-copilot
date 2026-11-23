@@ -84,7 +84,7 @@ test("DOM web scanning is explicitly read-only, bounded and independent of AI or
   assert.match(ui,/chrome\.tabs\.create/);
   assert.match(ui,/chrome\.tabs\.update/);
   assert.match(ui,/if \(observedEnds\) await saveWebSnapshot/);
-  assert.match(ui,/疑似没回关/);
+  assert.match(ui,/不保证名单完整/);
 });
 
 test("DOM scanner page is voluntary, conservative and separate from archive import",()=>{
