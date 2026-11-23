@@ -70,7 +70,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(page,/id="internal-following-count"/);
   assert.match(page,/id="internal-followers-count"/);
   assert.match(page,/id="internal-export"/);
-  assert.match(page,/使用 X 网页内部接口/);
+  assert.match(page,/通过 X 网页内部接口/);
   assert.doesNotMatch(page,/<script[^>]+src="https?:\/\//);
   const ui=read("follow-manager/internal-sync-ui.js");
   assert.match(ui,/chrome\.tabs\.create/);
@@ -89,7 +89,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(scanner,/const raw = \/\(\?:\^\|;\)/);
 });
 
-function webClientHarness({signedIn="owner",status=200}={}) {
+function webClientHarness({signedIn="owner",status=200,observedQueries=[]}={}) {
   const messages=[];
   const requests=[];
   let listener;
@@ -118,7 +118,10 @@ function webClientHarness({signedIn="owner",status=200}={}) {
   }
   const context=vm.createContext({
     location,document,chrome,URLSearchParams,AbortController,
-    setTimeout,clearTimeout,fetch:fetchMock,console,
+    setTimeout,clearTimeout,fetch:fetchMock,console,URL,
+    performance:{getEntriesByType(kind) {
+      return kind === "resource" ? observedQueries.map(name=>({name})) : [];
+    }},
   });
   vm.runInContext(read("content/follow-dom-helpers.js"),context,{timeout:1000});
   vm.runInContext(read("content/follow-internal-helpers.js"),context,{timeout:1000});
@@ -175,4 +178,18 @@ test("429 rate limit stops immediately, reports partial state and does not auto-
   assert.equal(done.reason,"rate_limited");
   assert.equal(h.requests.length,1);
   assert.equal(done.handles.length,0);
+});
+
+test("uses query IDs already observed on the active X page when available",async()=>{
+  const h=webClientHarness({observedQueries:[
+    "https://x.com/i/api/graphql/ObservedUserQueryId123/UserByScreenName?abc=1",
+    "https://x.com/i/api/graphql/ObservedFollowQuery123/Following?abc=2",
+    "https://example.com/i/api/graphql/BadThirdPartyQuery/Following"
+  ]});
+  assert.equal(h.send({type:"XRH_INTERNAL_START",scanId:UUID,kind:"following",owner:"owner"}).ok,true);
+  const done=await completed(h);
+  assert.equal(done.reason,"complete");
+  assert.ok(h.requests[0].url.includes("/ObservedUserQueryId123/UserByScreenName?"));
+  assert.ok(h.requests[1].url.includes("/ObservedFollowQuery123/Following?"));
+  assert.equal(h.requests.some(x=>x.url.includes("example.com")),false);
 });

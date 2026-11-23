@@ -35,6 +35,14 @@
     hidden_profile_subscriptions_enabled:true,
     subscriptions_verification_info_is_identity_verified_enabled:true,
     highlights_tweets_tab_ui_enabled:true,
+    creator_subscriptions_tweet_preview_api_enabled:true,
+    creator_subscriptions_quote_tweet_preview_api_enabled:false,
+    tweet_awards_web_tipping_enabled:false,
+    freedom_of_speech_not_reach_fetch_enabled:true,
+    tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled:true,
+    longform_notetweets_inline_media_enabled:true,
+    subscriptions_verification_info_verified_since_enabled:true,
+    subscriptions_feature_can_gift_premium:true,
     standardized_nudges_misinfo:true,
     rweb_video_timestamps_enabled:true
   });
@@ -59,14 +67,31 @@
     if (!raw || raw.length > 512) return null;
     try { return decodeURIComponent(raw); } catch { return raw; }
   }
-  function buildUrl(operation, variables) {
+  function currentQueryId(operation) {
     if (!Object.hasOwn(QUERIES,operation)) throw new Error("schema");
+    // Prefer query IDs the signed-in X page already used. Reading same-origin
+    // performance entries makes no additional requests and avoids fetching
+    // executable bundles or reading hidden application state.
+    try {
+      const entries = typeof performance !== "undefined" &&
+        typeof performance.getEntriesByType === "function" ?
+        performance.getEntriesByType("resource") : [];
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const observed = new URL(entries[i].name);
+        if (observed.origin !== location.origin) continue;
+        const match = /^\/i\/api\/graphql\/([A-Za-z0-9_-]{8,100})\/([A-Za-z0-9_]+)$/.exec(observed.pathname);
+        if (match && match[2] === operation) return match[1];
+      }
+    } catch {}
+    return QUERIES[operation];
+  }
+  function buildUrl(operation, variables) {
     const params = new URLSearchParams({
       variables:JSON.stringify(variables),
       features:JSON.stringify(FEATURES),
       fieldToggles:JSON.stringify({withAuxiliaryUserLabels:false})
     });
-    return location.origin + "/i/api/graphql/" + QUERIES[operation] + "/" + operation + "?" + params;
+    return location.origin + "/i/api/graphql/" + currentQueryId(operation) + "/" + operation + "?" + params;
   }
   function validateSelf(session) {
     if (!matches(session.owner,session.kind)) throw new Error("page_changed");
