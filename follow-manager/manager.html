@@ -16,24 +16,30 @@
 
   <section class="panel" aria-labelledby="import-heading">
     <div class="heading-line"><h2 id="import-heading">导入关注数据</h2><span class="tag">不读取 Cookie · 不调用 X API</span></div>
-    <p>先到 <a href="https://x.com/settings/download_your_data" target="_blank" rel="noopener noreferrer">X 申请个人数据归档</a>，下载 ZIP 并解压。从 <code>data/</code> 文件夹选择对应的 <code>follower.js</code> 与 <code>following.js</code>。如果同类文件有多个 part 分片，请全部选中。</p>
+    <p>先到 <a href="https://x.com/settings/download_your_data" target="_blank" rel="noopener noreferrer">X 申请个人数据归档</a>，下载 ZIP 并解压。直接选择或拖入解压后的整个文件夹；插件自动定位 <code>data/follower.js</code>、<code>data/following.js</code> 及分片。</p>
     <form id="archive-form">
       <label class="field">归档所属 X 用户名
         <input id="owner" name="owner" placeholder="例如 @yourhandle" autocomplete="off" maxlength="16" required>
       </label>
-      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖拽 X 官方关注归档文件到这里">
+      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖入 X 解压后的整个归档文件夹">
         <span class="drop-icon" aria-hidden="true">⇧</span>
-        <strong>把 follower.js 和 following.js 拖到这里</strong>
-        <p class="muted small">也可以点击下方按钮选择文件，支持一次选齐或分次补选多个 part 分片。</p>
-        <button id="choose-files" class="secondary" type="button">选择归档文件</button>
+        <strong>将解压后的 X 归档文件夹拖到这里</strong>
+        <p class="muted small">只查找关注关系文件，不遍历图片或视频目录；也可以直接选择整个文件夹。</p>
+        <div class="picker-actions">
+          <button id="choose-folder" class="primary" type="button">选择整个文件夹</button>
+          <button id="choose-files" class="secondary" type="button">手动选择 JS 文件</button>
+          <button id="choose-folder-fallback" class="secondary" type="button" hidden>兼容选择文件夹（可能较慢）</button>
+          <button id="cancel-scan" class="secondary" type="button" hidden>取消扫描</button>
+        </div>
       </div>
-      <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="选择粉丝与关注归档文件">
+      <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="手动选择粉丝与关注归档文件">
+      <input id="archive-folder-picker" type="file" webkitdirectory multiple hidden aria-label="兼容选择 X 归档文件夹">
       <div class="selected-files" aria-live="polite" aria-label="已选文件">
         <span id="selected-follower">粉丝文件：未选择</span>
         <span id="selected-following">关注文件：未选择</span>
         <button id="clear-selection" class="text-action" type="button">清空待导入文件</button>
       </div>
-      <p class="muted small" id="file-tip">拖拽和点击选择均只在浏览器本地读取解压后的 .js 文件，不上传服务器；不支持直接导入 ZIP。每个文件限 32 MB，每组最多 25 万个账号。</p>
+      <p class="muted small" id="file-tip">文件夹扫描只枚举归档根目录与 data 目录的文件名，只有 follower/following 的 .js 会读取内容；不上传服务器，不支持直接导入 ZIP。每文件最多 32 MB、单组最多 128 MB，名单每组最多 25 万账号。</p>
       <label class="confirmation"><input type="checkbox" id="same-account" required> 我确认两组文件来自同一份、同一个 X 账号的官方归档。</label>
       <div class="actions">
         <button class="primary" id="import-button" type="submit">导入并分析</button>

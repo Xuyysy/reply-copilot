@@ -65,3 +65,8 @@ footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 .selected-files span{overflow-wrap:anywhere}
 .text-action{padding:4px 0;background:transparent;color:var(--xrh-brand-text);text-decoration:underline}
 @media(prefers-reduced-motion:reduce){.archive-dropzone{transition:none}}
+
+/* Folder picker is primary; keep a compact manual-files escape hatch. */
+.archive-dropzone .picker-actions{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:8px}
+.archive-dropzone button.primary{background:var(--xrh-brand);border-color:var(--xrh-brand);color:#fff}
+.archive-dropzone .picker-actions [hidden]{display:none!important}

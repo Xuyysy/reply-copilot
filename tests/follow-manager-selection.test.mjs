@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {detectArchiveKind, groupArchiveFiles} from "../follow-manager/file-selection.js";
+import {detectArchiveKind, groupArchiveFiles, appendArchiveFiles} from "../follow-manager/file-selection.js";
 import {MAX_ARCHIVE_BYTES} from "../follow-manager/archive.js";
 
 function fakeFile(name, content, size = Buffer.byteLength(content)) {
@@ -53,4 +53,23 @@ test("rejects ZIPs, non-official JS, large files, excessive files and empty sele
 test("a mixed drop with bad files fails atomically instead of silently selecting a partial group", async () => {
   const valid=archive("follower"), invalid=fakeFile("following.js", "not an X archive");
   await assert.rejects(() => groupArchiveFiles([valid,invalid]), /无法识别/);
+});
+
+test("manual selection adds multiple parts across clicks without discarding earlier parts", async () => {
+  const f0=archive("follower"),f1=archive("follower",1),g0=archive("following");
+  const first=await appendArchiveFiles({follower:[],following:[]},[f0,g0]);
+  const second=await appendArchiveFiles(first,[f1]);
+  assert.deepEqual(second,{follower:[f0,f1],following:[g0]});
+});
+
+test("new part0 replaces only that category and retains the opposite category", async () => {
+  const f0=archive("follower"),f1=archive("follower",1),g0=archive("following");
+  const initial=await appendArchiveFiles({follower:[f0,f1],following:[g0]},[archive("follower")]);
+  assert.equal(initial.follower.length,1);
+  assert.deepEqual(initial.following,[g0]);
+});
+
+test("duplicate parts in one selection are rejected atomically", async () => {
+  await assert.rejects(()=>groupArchiveFiles([archive("follower",1),archive("follower",1)]),/重复/);
+  await assert.rejects(()=>appendArchiveFiles({follower:[],following:[]},[archive("follower",1),archive("follower",1)]),/重复/);
 });

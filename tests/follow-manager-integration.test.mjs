@@ -14,6 +14,10 @@ test("offline follow manager ships inside every extension build and opens from n
   assert.match(build, /"follow-manager"/);
   assert.match(page, /content\/design-tokens\.css/);
   assert.match(page, /id="archive-dropzone"/);
+  assert.match(page, /id="choose-folder"/);
+  assert.match(page, /id="choose-folder-fallback"/);
+  assert.match(page, /id="archive-folder-picker"[^>]+webkitdirectory/);
+  assert.match(page, /id="cancel-scan"/);
   assert.match(page, /id="choose-files"/);
   assert.match(page, /id="archive-picker"[^>]+multiple/);
   assert.match(page, /id="clear-selection"/);
@@ -33,7 +37,7 @@ test("the MVP never obtains X session secrets or sends followers to an API", () 
   assert.equal(manifest.permissions.includes("scripting"), false);
   assert.equal(manifest.host_permissions.some(p => /x\.com|twitter\.com/.test(p)), false);
   for (const path of [
-    "follow-manager/archive.js", "follow-manager/store.js", "follow-manager/manager.js", "follow-manager/file-selection.js"
+    "follow-manager/archive.js", "follow-manager/store.js", "follow-manager/manager.js", "follow-manager/file-selection.js", "follow-manager/directory-import.js"
   ]) {
     const file = read(path);
     assert.doesNotMatch(file, /chrome\.cookies|document\.cookie|auth_token|x-csrf-token|graphql|XMLHttpRequest|fetch\s*\(|sendBeacon|eval\s*\(|new Function/);
@@ -63,9 +67,13 @@ test("drag and browse share the same safe in-memory file selection pipeline", ()
   assert.match(js, /"archive-picker"\)\.addEventListener\("change"/);
   assert.doesNotMatch(js, /"follower-files"|"following-files"|expectedKind/);
   assert.match(js, /async function acceptFiles\(fileList\)/);
-  assert.match(js, /const groups = await groupArchiveFiles\(fileList\)/);
+  assert.match(js, /appendArchiveFiles\(selectedFiles, fileList\)/);
+  assert.match(js, /collectArchiveFilesFromDirectory\(entry/);
+  assert.match(js, /window\.showDirectoryPicker/);
+  assert.match(js, /webkitGetAsEntry/);
   assert.match(js, /readGroup\(selectedFiles\.follower, "follower"\)/);
   assert.match(js, /readGroup\(selectedFiles\.following, "following"\)/);
   assert.doesNotMatch(js, /new DataTransfer|\.innerHTML\s*=|\.upload\(/);
   assert.match(page, /不支持直接导入 ZIP/);
+  assert.match(page, /只查找关注关系文件/);
 });

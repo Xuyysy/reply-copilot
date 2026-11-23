@@ -1,6 +1,7 @@
 import {MAX_ARCHIVE_BYTES, MAX_ARCHIVE_USERS, normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships, profileUrl} from "./archive.js";
 import {readSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
-import {groupArchiveFiles} from "./file-selection.js";
+import {groupArchiveFiles, appendArchiveFiles} from "./file-selection.js";
+import {collectArchiveFilesFromDirectory, MAX_DIRECTORY_ENTRIES} from "./directory-import.js";
 
 const $ = id => document.getElementById(id);
 const PAGE_SIZE = 50;
@@ -24,28 +25,111 @@ function refreshSelection() {
   describeSelection("following");
 }
 
-// Both dropzone and the single file picker share the same validation and selections.
-async function acceptFiles(fileList) {
-  if ($("import-button").disabled) return;
+// Folder import is the primary path. Manual JS selection is an optional fallback.
+let directoryScan = null;
+function scanControls(active) {
+  for (const id of ["choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button"]) {
+    $(id).disabled = active;
+  }
+  $("cancel-scan").hidden = !active;
+}
+async function acceptDirectory(entry) {
+  if (directoryScan || $("import-button").disabled) return;
+  const controller = new AbortController();
+  directoryScan = controller;
+  scanControls(true);
+  feedback("正在定位 data 文件夹并查找粉丝、关注文件；不会读取媒体、私信或上传数据…");
   try {
-    const groups = await groupArchiveFiles(fileList);
-    for (const kind of ["follower", "following"]) {
-      if (groups[kind].length) selectedFiles[kind] = groups[kind];
+    const files = await collectArchiveFilesFromDirectory(entry, {
+      signal:controller.signal,
+      onProgress:({scanned, found}) => feedback("正在扫描关注文件目录：" + scanned + " 项，找到 " + found + " 个候选文件…")
+    });
+    const groups = await groupArchiveFiles(files);
+    if (!groups.follower.length || !groups.following.length) {
+      throw new Error("文件夹缺少粉丝或关注名单，请确认选中的是完整的 X 归档及所有分片。");
     }
+    if (controller.signal.aborted) throw new Error("已取消文件夹扫描。");
+    selectedFiles.follower = groups.follower;
+    selectedFiles.following = groups.following;
     refreshSelection();
-    const pending = ["follower", "following"].filter(kind => !selectedFiles[kind].length);
-    feedback(pending.length ?
-      "已识别导入文件，还需要选择" + (pending.includes("follower") ? "粉丝" : "关注") + "名单。":
-      "已选择两组归档文件，确认属于同一份账号归档后点击「导入并分析」。单独替换某一组时，另一组沿用之前已选文件。");
+    feedback("已从文件夹找到粉丝 " + groups.follower.length + " 个分片、关注 " +
+      groups.following.length + " 个分片。只读取了文件头用于识别；确认账号后点击「导入并分析」。");
+  } catch (error) { reportError(error); }
+  finally {
+    directoryScan = null;
+    scanControls(false);
+  }
+}
+
+async function acceptFiles(fileList) {
+  if (directoryScan || $("import-button").disabled) return;
+  try {
+    const next = await appendArchiveFiles(selectedFiles, fileList);
+    selectedFiles.follower = next.follower;
+    selectedFiles.following = next.following;
+    refreshSelection();
+    const missing = ["follower", "following"].filter(kind => !selectedFiles[kind].length);
+    feedback(missing.length ?
+      "已添加文件，请继续补选" + (missing.includes("follower") ? "粉丝" : "关注") + "名单。" :
+      "已选择两组文件。允许分次添加 part 分片；选择新的 part0 会重置对应类别，避免混入旧归档。");
   } catch (error) { reportError(error); }
 }
 
+$("choose-folder").addEventListener("click", async () => {
+  if (directoryScan) return;
+  if (typeof window.showDirectoryPicker !== "function") {
+    $("choose-folder-fallback").hidden = false;
+    feedback("此 Chrome 无法使用快速目录选择。请点击「兼容选择文件夹」，或直接拖入解压后的文件夹。");
+    return;
+  }
+  let directory;
+  try {
+    // Must run directly from the click to retain transient user activation.
+    directory = await window.showDirectoryPicker({mode:"read"});
+  } catch (error) {
+    if (error?.name === "AbortError") return;
+    $("choose-folder-fallback").hidden = false;
+    feedback("Chrome 未能打开快速目录选择；请用「兼容选择文件夹」或直接拖拽。", true);
+    return;
+  }
+  await acceptDirectory(directory);
+});
+$("choose-folder-fallback").addEventListener("click", () => $("archive-folder-picker").click());
+$("archive-folder-picker").addEventListener("change", event => {
+  const all = [...event.target.files];
+  event.target.value = "";
+  // webkitdirectory is only a fallback: it eagerly enumerates the selected
+  // directory in Chrome, so reject unreasonably large catalogs.
+  if (all.length > MAX_DIRECTORY_ENTRIES) {
+    feedback("兼容目录选择包含过多项目。请改为拖拽整个文件夹，以免浏览器处理全部媒体目录。", true);
+    return;
+  }
+  const candidates = all.filter(file => {
+    const parts = (file.webkitRelativePath || "").split("/");
+    return parts.length >= 2 && parts[parts.length - 2].toLowerCase() === "data" &&
+      /^(?:follower|following)(?:[._-][a-z0-9._-]+)?\.js$/i.test(file.name);
+  });
+  if (!candidates.length) { feedback("未找到 data/follower.js 或 data/following.js。", true); return; }
+  void acceptDirectoryFromFiles(candidates);
+});
+async function acceptDirectoryFromFiles(files) {
+  if (directoryScan || $("import-button").disabled) return;
+  try {
+    const groups = await groupArchiveFiles(files);
+    if (!groups.follower.length || !groups.following.length) throw new Error("文件夹缺少粉丝或关注名单。");
+    selectedFiles.follower = groups.follower;
+    selectedFiles.following = groups.following;
+    refreshSelection();
+    feedback("已从文件夹定位两组名单。确认账号后点击「导入并分析」。");
+  } catch (error) { reportError(error); }
+}
 $("choose-files").addEventListener("click", () => $("archive-picker").click());
 $("archive-picker").addEventListener("change", event => {
   const files = [...event.target.files];
   event.target.value = "";
   if (files.length) void acceptFiles(files);
 });
+$("cancel-scan").addEventListener("click", () => directoryScan?.abort());
 $("clear-selection").addEventListener("click", () => {
   selectedFiles.follower = [];
   selectedFiles.following = [];
@@ -79,8 +163,38 @@ dropzone.addEventListener("drop", event => {
   event.preventDefault();
   dragDepth = 0;
   dropzone.classList.remove("is-dragging");
-  const files = [...(event.dataTransfer?.files || [])];
-  void acceptFiles(files);
+  if (directoryScan) return;
+  const transfer = event.dataTransfer;
+  const items = [...(transfer?.items || [])].filter(item => item.kind === "file");
+  // The legacy entry must be captured synchronously inside the drop event.
+  const entries = items.map(item => item.webkitGetAsEntry?.()).filter(Boolean);
+  const folders = entries.filter(entry => entry.isDirectory);
+  if (folders.length) {
+    if (entries.length !== 1 || folders.length !== 1) {
+      feedback("请一次只拖入一个完整的归档文件夹。", true);
+      return;
+    }
+    void acceptDirectory(folders[0]);
+    return;
+  }
+  if (!entries.length && items.some(item => typeof item.getAsFileSystemHandle === "function")) {
+    // Modern handles must also be requested before the drop event returns.
+    const pending = items.map(item => item.getAsFileSystemHandle());
+    void Promise.all(pending).then(handles => {
+      const directories = handles.filter(handle => handle?.kind === "directory");
+      if (directories.length) {
+        if (handles.length !== 1 || directories.length !== 1) {
+          feedback("请一次只拖入一个完整的归档文件夹。", true);
+          return;
+        }
+        void acceptDirectory(directories[0]);
+      } else {
+        void acceptFiles([...(transfer?.files || [])]);
+      }
+    }).catch(reportError);
+    return;
+  }
+  void acceptFiles([...(transfer?.files || [])]);
 });
 refreshSelection();
 
