@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>网页扫描 · X Reply Helper 互关助手</title>
+  <title>互关助手 · X Reply Helper</title>
   <link rel="stylesheet" href="../content/design-tokens.css">
   <link rel="stylesheet" href="manager.css">
   <link rel="stylesheet" href="web-scan.css">
@@ -13,52 +13,56 @@
   <header class="page-heading">
     <img src="../icons/icon-48.png" width="44" height="44" alt="">
     <div>
-      <p class="eyebrow">X REPLY HELPER · 互关助手</p>
-      <h1>网页扫描 <span class="experimental">Staging 实验版</span></h1>
-      <p class="muted">不用申请数据归档 · 不使用收费 X API · 只读网页</p>
+      <p class="eyebrow">X REPLY HELPER</p>
+      <h1>互关助手</h1>
+      <p class="muted">轻松了解你的 X 关注关系</p>
     </div>
   </header>
 
-  <section class="panel" aria-labelledby="scan-heading">
-    <div class="heading-line"><h2 id="scan-heading">扫描自己的关注关系</h2><span class="tag">仅用户主动触发</span></div>
-    <p>输入当前登录 X 的用户名，点击开始后会依次打开该账号的「正在关注」和「粉丝」页面，按正常页面加载的内容收集用户名。扫描期间请保持新打开的 X 标签页在前台，不要手动滚动或切换账号。</p>
+  <section class="panel follow-main" aria-labelledby="scan-heading">
+    <div class="heading-line"><h2 id="scan-heading">查看我的关注关系</h2><span class="tag">本地分析</span></div>
+    <p class="intro">看看谁和你互相关注，了解哪些账号可能还没有回关。输入当前登录的 X 用户名，点击开始即可。</p>
     <label class="field" for="web-owner">X 用户名
       <input id="web-owner" maxlength="16" autocomplete="off" placeholder="例如 @yourhandle">
     </label>
-    <label class="confirmation"><input type="checkbox" id="web-consent">
-      我确认要扫描的是自己的 X 账号，了解自动滚动可能受到 X 规则限制、也可能遗漏未加载的账号。
-    </label>
     <div class="actions">
-      <button id="web-start" class="primary" type="button">开始网页扫描</button>
-      <button id="web-cancel" class="secondary" type="button" disabled>停止扫描</button>
-      <button id="web-load" class="secondary" type="button">读取本地结果</button>
-      <button id="web-clear" class="danger" type="button">删除本地结果</button>
+      <button id="web-start" class="primary" type="button">开始分析关注关系</button>
+      <button id="web-cancel" class="secondary" type="button" disabled>停止</button>
+      <button id="web-load" class="secondary" type="button">查看上次结果</button>
+      <button id="web-clear" class="danger" type="button">清除本地记录</button>
     </div>
-    <p class="muted small">每类最多扫描 3,000 个可见账号，单轮最多约 4 分钟；不会读取 Cookie、调用 X 内部接口、自动关注或取关。只有两轮都观察到列表底部时才会保存本地快照，但仍不能证明名单完整。</p>
+    <div id="web-loading" class="follow-loading" role="status" aria-live="polite" hidden>
+      <span class="loading-spinner" aria-hidden="true"></span>
+      <div class="loading-description">
+        <strong id="web-loading-title">正在整理关注关系…</strong>
+        <span id="web-elapsed" class="elapsed" aria-label="分析已用时间">已用时间 00:00</span>
+      </div>
+    </div>
     <div class="scan-progress" aria-live="polite">
-      <div><span>正在关注</span><strong id="web-following-count">—</strong><span id="web-following-state">未开始</span></div>
-      <div><span>粉丝</span><strong id="web-followers-count">—</strong><span id="web-followers-state">未开始</span></div>
+      <div><span>我关注的人</span><strong id="web-following-count">—</strong><span id="web-following-state">等待开始</span></div>
+      <div><span>关注我的人</span><strong id="web-followers-count">—</strong><span id="web-followers-state">等待开始</span></div>
     </div>
     <p id="web-status" class="feedback" role="status" aria-live="polite">准备就绪。</p>
+    <p class="muted small follow-footnote">分析在后台进行，你可以留在这里查看进度。结果来自 X 实际加载的账号，可能有遗漏。</p>
   </section>
 
   <section class="panel" id="web-results" hidden aria-labelledby="web-results-heading">
-    <div class="heading-line"><h2 id="web-results-heading">本地扫描结果</h2><span class="tag" id="web-result-badge">网页观察快照</span></div>
-    <p class="notice">这些数值只基于扫描期间网页实际加载的用户。即使扫描滚动到底部，也不能证明获取了全部关注或粉丝；「疑似未回关」尤其不能作为确定结论。</p>
+    <div class="heading-line"><h2 id="web-results-heading">关注关系</h2><span class="tag" id="web-result-badge">本地结果</span></div>
+    <p class="notice">结果基于本次读取到的账号，可能不包含全部粉丝或关注者。未出现在列表里不一定代表没有回关。</p>
     <p id="web-snapshot-meta" class="muted small"></p>
     <div class="stats">
-      <div><strong id="web-mutual">0</strong><span>观察到双方互关</span></div>
-      <div><strong id="web-not-following-back">0</strong><span>疑似没回关我</span></div>
-      <div><strong id="web-i-not-followed-back">0</strong><span>疑似我没回关</span></div>
+      <div><strong id="web-mutual">0</strong><span>互相关注</span></div>
+      <div><strong id="web-not-following-back">0</strong><span>可能没回关我</span></div>
+      <div><strong id="web-i-not-followed-back">0</strong><span>我可能没回关</span></div>
     </div>
-    <nav class="tabs" aria-label="网页扫描结果分类">
-      <button class="tab" type="button" data-web-kind="mutual" aria-pressed="true">双方都出现</button>
-      <button class="tab" type="button" data-web-kind="notFollowingBack" aria-pressed="false">疑似没回关</button>
-      <button class="tab" type="button" data-web-kind="iHaveNotFollowedBack" aria-pressed="false">疑似我没回关</button>
+    <nav class="tabs" aria-label="关注关系分类">
+      <button class="tab" type="button" data-web-kind="mutual" aria-pressed="true">互相关注</button>
+      <button class="tab" type="button" data-web-kind="notFollowingBack" aria-pressed="false">可能没回关我</button>
+      <button class="tab" type="button" data-web-kind="iHaveNotFollowedBack" aria-pressed="false">我可能没回关</button>
     </nav>
     <div class="list-tools">
-      <label class="field">搜索用户名<input id="web-filter" type="search" placeholder="输入 @用户名"></label>
-      <button id="web-export" class="secondary" type="button">导出当前列表 CSV</button>
+      <label class="field">查找账号<input id="web-filter" type="search" placeholder="输入 @用户名"></label>
+      <button id="web-export" class="secondary" type="button">导出 CSV</button>
     </div>
     <p id="web-result-count" role="status" class="muted small"></p>
     <div id="web-result-list" class="result-list" role="list"></div>
@@ -68,8 +72,8 @@
       <button id="web-next" type="button" class="secondary">下一页</button>
     </div>
   </section>
-  <p class="back-link"><a href="manager.html">← 返回官方归档导入</a></p>
-  <footer>这是网页 DOM 扫描的 Staging 实验功能，不等于 X 官方提供的数据同步；实际平台风险和扫描完整度尚需浏览器验收。</footer>
+  <p class="back-link"><a href="manager.html">← 其他导入方式</a></p>
+  <footer>账号关系仅在本机整理，不会上传到 X Reply Helper 服务器。</footer>
 </main>
 <script type="module" src="web-scan-ui.js"></script>
 </body>

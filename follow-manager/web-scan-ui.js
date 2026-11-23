@@ -3,18 +3,18 @@ import {saveWebSnapshot, readWebSnapshot, removeWebSnapshot} from "./web-scan-st
 
 const $ = id => document.getElementById(id);
 const KINDS = ["mutual","notFollowingBack","iHaveNotFollowedBack"];
-const STAGES = ["following","followers"];
+// Following and followers are read sequentially from a temporary inactive X tab.
 const PAGE_SIZE = 50;
 const MAX_HANDLES = 3000;
 const REASON = {
-  bottom_observed:"已观察到列表底部（完整性未验证）",
-  limit:"达到人数或循环上限，结果不完整",
-  timeout:"扫描超时，结果不完整",
-  page_changed:"页面已跳转，扫描中断",
-  page_unavailable:"网页关注列表无法加载",
-  page_error:"网页扫描出错",
-  cancelled:"用户已停止",
-  empty:"未读取到用户卡片，请检查登录和页面",
+  bottom_observed:"本轮已完成，覆盖范围未验证",
+  limit:"达到单轮上限，结果可能不完整",
+  timeout:"本轮用时较长，未能完成",
+  page_changed:"后台 X 页面已离开列表",
+  page_unavailable:"暂时无法读取 X 关注列表",
+  page_error:"整理数据时遇到错误",
+  cancelled:"已停止",
+  empty:"没有找到账号，请检查 X 是否登录",
 };
 let running = null;
 let snapshot = null;
@@ -28,7 +28,20 @@ function feedback(text, error=false) {
   $("web-status").classList.toggle("error",error);
 }
 function fail(error) {
-  feedback(error instanceof Error ? error.message : "扫描失败，请检查 X 页面并重试。",true);
+  feedback(error instanceof Error ? error.message : "分析未能完成，请检查 X 是否已登录后重试。",true);
+}
+function elapsedLabel(ms) {
+  const total = Math.max(0,Math.floor(ms / 1000));
+  return "已用时间 " + String(Math.floor(total / 60)).padStart(2,"0") + ":" + String(total % 60).padStart(2,"0");
+}
+function updateElapsed(job) {
+  $("web-elapsed").textContent = elapsedLabel(Date.now() - job.startedAt);
+}
+async function closeTemporaryTab(job) {
+  if (!Number.isSafeInteger(job.tabId)) return;
+  const tabId = job.tabId;
+  job.tabId = null;
+  try { await chrome.tabs.remove(tabId); } catch {}
 }
 function owner() {
   const value = normalizeHandle($("web-owner").value);
@@ -49,6 +62,8 @@ function setBusy(busy) {
   $("web-load").disabled = busy;
   $("web-clear").disabled = busy;
   $("web-owner").disabled = busy;
+  $("web-loading").hidden = !busy;
+  if (busy) $("web-loading-title").textContent = "正在整理关注关系…";
 }
 function validHandles(handles) {
   return Array.isArray(handles) && handles.length <= MAX_HANDLES &&
@@ -68,8 +83,9 @@ chrome.runtime.onMessage.addListener((message,sender) => {
       message?.scanId !== job.scanId || message?.kind !== job.kind) return;
   if (message.type === "XRH_FOLLOW_WEB_PROGRESS") {
     if (!Number.isSafeInteger(message.count) || message.count < 0 || message.count > MAX_HANDLES) return;
-    setStatus(job.kind,message.count,"正在从 X 网页收集可见账号…");
-    feedback("正在扫描「" + stageName(job.kind) + "」，已发现 " + message.count + " 个账号。请保持 X 标签页在前台。");
+    setStatus(job.kind,message.count,"正在整理…");
+    $("web-loading-title").textContent = "正在整理「" + stageName(job.kind) + "」";
+    feedback("已读取 " + message.count + " 个「" + stageName(job.kind) + "」账号，正在继续…");
   } else if (message.type === "XRH_FOLLOW_WEB_DONE") {
     if (!validHandles(message.handles) || typeof message.reason !== "string" ||
         !Object.hasOwn(REASON,message.reason)) {
@@ -92,18 +108,18 @@ async function waitReady(job) {
     }
     await sleep(950);
   }
-  throw new Error("无法在 X 页面连接扫描器。请确认已登录 X 并刷新页面后重试。");
+  throw new Error("无法连接 X 的后台列表。请确认已登录 X，稍后重试。");
 }
 async function stage(job,kind,first) {
   job.kind = kind;
   job.scanId = crypto.randomUUID();
   job.pending = null;
-  setStatus(kind,null,"正在打开 X 关注列表…");
-  feedback("正在打开「" + stageName(kind) + "」页面，请保持 X 标签页在前台。");
+  setStatus(kind,null,"正在准备…");
+  $("web-loading-title").textContent = "正在整理「" + stageName(kind) + "」";
+  feedback("正在后台读取「" + stageName(kind) + "」的数据…");
   if (!first) {
     await chrome.tabs.update(job.tabId,{
       url:"https://x.com/" + job.owner + "/" + kind,
-      active:true,
     });
   }
   await waitReady(job);
@@ -162,7 +178,7 @@ function renderList() {
   }
   $("web-result-list").replaceChildren(fragment);
   $("web-result-count").textContent = "当前分类共 " + items.length + " 条观察记录" +
-    (search ? "（已筛选）" : "（不保证名单完整）");
+    (search ? "（已筛选）" : "（结果可能不完整）");
   $("web-page-info").textContent = (currentPage+1) + " / " + pageCount;
   $("web-prev").disabled = currentPage === 0;
   $("web-next").disabled = currentPage === pageCount - 1;
@@ -179,12 +195,11 @@ function renderSnapshot(data,localSaved=false) {
   const imported = new Date(data.importedAt);
   const time = Number.isFinite(imported.getTime()) ? imported.toLocaleString("zh-CN") : "时间未知";
   const ended = data.reasons.following === "bottom_observed" && data.reasons.followers === "bottom_observed";
-  $("web-result-badge").textContent = ended ? "观察到页底 · 未验证完整" : "部分结果 · 未保存";
+  $("web-result-badge").textContent = ended ? "本次分析完成" : "部分结果";
   $("web-snapshot-meta").textContent = "@" + data.owner + " · " + time +
-    " · 扫描关注 " + data.following.length + " 人 · 扫描粉丝 " + data.followers.length +
-    " 人 · " + (localSaved ? "本机保存快照" : "本次观察结果") +
-    " · 关注页：" + (REASON[data.reasons.following] || "未知") +
-    "；粉丝页：" + (REASON[data.reasons.followers] || "未知");
+    " · 我关注 " + data.following.length + " 人 · 关注我的人 " + data.followers.length +
+    " 人 · " + (localSaved ? "已保存到本机" : "本次结果") +
+    (ended ? "" : " · 本次数据可能不完整");
   selectedKind = "mutual";
   currentPage = 0;
   $("web-filter").value = "";
@@ -197,33 +212,33 @@ async function start() {
   if (running) return;
   let account;
   try { account = owner(); } catch(error) { fail(error); return; }
-  if (!$("web-consent").checked) {
-    feedback("请先确认扫描的是自己的 X 账号，并阅读网页扫描风险说明。",true);
-    return;
-  }
-  const job = {owner:account,tabId:null,cancelled:false,kind:null,scanId:null,pending:null};
+  const job = {owner:account,tabId:null,cancelled:false,kind:null,scanId:null,pending:null,startedAt:Date.now(),timer:null};
   running = job;
   setBusy(true);
+  updateElapsed(job);
+  job.timer = setInterval(() => { if (running === job) updateElapsed(job); }, 1000);
   setStatus("following",null,"等待开始");
   setStatus("followers",null,"等待开始");
   $("web-results").hidden = true;
   snapshot = null;
   relationships = null;
   try {
-    const tab = await chrome.tabs.create({url:"https://x.com/"+account+"/following",active:true});
-    if (!Number.isSafeInteger(tab?.id)) throw new Error("浏览器未能创建 X 扫描标签页。");
+    // An inactive tab preserves the user's current page. It still exists in
+    // Chrome's tab strip and can be throttled/frozen by the browser.
+    const tab = await chrome.tabs.create({url:"https://x.com/"+account+"/following",active:false});
+    if (!Number.isSafeInteger(tab?.id)) throw new Error("Chrome 无法创建后台数据标签页。");
     job.tabId = tab.id;
     const following = await stage(job,"following",true);
     if (job.cancelled || following.reason === "cancelled") throw new Error("已停止网页扫描。");
     setStatus("following",following.handles.length,REASON[following.reason]);
     if (["empty","page_changed","page_unavailable","page_error"].includes(following.reason)) {
-      throw new Error("关注页未能完成扫描：" + REASON[following.reason] + "。已停止，没有保存快照。");
+      throw new Error("我关注的人： " + REASON[following.reason] + "。原有结果未被覆盖。");
     }
     const followers = await stage(job,"followers",false);
     if (job.cancelled || followers.reason === "cancelled") throw new Error("已停止网页扫描。");
     setStatus("followers",followers.handles.length,REASON[followers.reason]);
     if (["empty","page_changed","page_unavailable","page_error"].includes(followers.reason)) {
-      throw new Error("粉丝页未能完成扫描：" + REASON[followers.reason] + "。已停止，没有保存快照。");
+      throw new Error("关注我的人： " + REASON[followers.reason] + "。原有结果未被覆盖。");
     }
     const data = {
       owner:account,source:"dom_scan", importedAt:new Date().toISOString(),
@@ -234,11 +249,14 @@ async function start() {
     if (observedEnds) await saveWebSnapshot(data);
     renderSnapshot(data,observedEnds);
     feedback(observedEnds ?
-      "两轮扫描都观察到页面底部，已保存本地观察快照。请注意：仍不能证明扫描了全部账号。" :
-      "至少一轮扫描达到时间/数量上限。本次仅显示可能不完整的结果，没有覆盖已保存的快照。",
+      "已整理完成，并在本机保存。结果基于本次获取到的账号。" :
+      "已显示本次部分结果，原来保存的记录未被覆盖。",
       !observedEnds);
   } catch (error) { fail(error); }
   finally {
+    clearInterval(job.timer);
+    updateElapsed(job);
+    await closeTemporaryTab(job);
     if (running === job) running = null;
     setBusy(false);
   }
@@ -247,11 +265,11 @@ function cancel() {
   if (!running) return;
   const job = running;
   job.cancelled = true;
-  feedback("正在停止扫描…");
+  feedback("正在停止分析…");
   if (job.tabId && job.scanId) {
     void chrome.tabs.sendMessage(job.tabId,{type:"XRH_FOLLOW_WEB_CANCEL",scanId:job.scanId}).catch(()=>{});
   }
-  job.pending?.reject(new Error("已停止网页扫描，未保存此次扫描结果。"));
+  job.pending?.reject(new Error("已停止，本次没有覆盖之前的记录。"));
 }
 $("web-start").addEventListener("click",() => { void start(); });
 $("web-cancel").addEventListener("click",cancel);
@@ -262,7 +280,7 @@ $("web-load").addEventListener("click",async() => {
     if (!data) {feedback("本机没有 @" + account + " 的网页扫描快照。");return;}
     if (data.owner !== account) throw new Error("本地快照账号不匹配。");
     renderSnapshot(data,true);
-    feedback("已读取 @" + account + " 的本地网页观察快照（非实时、完整性未验证）。");
+    feedback("已读取 @" + account + " 上次保存在本机的结果。");
   } catch (error) { fail(error); }
 });
 $("web-clear").addEventListener("click",async() => {
@@ -306,4 +324,9 @@ $("web-export").addEventListener("click",() => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url),3000);
 });
-window.addEventListener("beforeunload",cancel);
+window.addEventListener("beforeunload",() => {
+  const job = running;
+  if (!job) return;
+  cancel();
+  if (Number.isSafeInteger(job.tabId)) void chrome.tabs.remove(job.tabId).catch(()=>{});
+});

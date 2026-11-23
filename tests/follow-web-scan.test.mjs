@@ -81,23 +81,34 @@ test("DOM web scanning is explicitly read-only, bounded and independent of AI or
   assert.match(scan,/MAX_USERS = 3000/);
   assert.match(scan,/XRH_FOLLOW_WEB_CANCEL/);
   assert.match(scan,/currentAccount && currentAccount !== owner/);
-  assert.match(ui,/chrome\.tabs\.create/);
-  assert.match(ui,/chrome\.tabs\.update/);
+  assert.match(ui,/chrome\\.tabs\\.create/);
+  assert.match(ui,/chrome\\.tabs\\.update/);
+  assert.match(ui,/chrome\\.tabs\\.remove/);
+  assert.match(ui,/active:false/);
+  assert.doesNotMatch(ui,/active:true/);
+  assert.match(ui,/elapsedLabel\\(ms\\)/);
+  assert.match(ui,/job\\.timer = setInterval/);
   assert.match(ui,/if \(observedEnds\) await saveWebSnapshot/);
-  assert.match(ui,/不保证名单完整/);
+  assert.match(ui,/结果可能不完整/);
 });
 
 test("DOM scanner page is voluntary, conservative and separate from archive import",()=>{
   const manager=read("follow-manager/manager.html");
   const page=read("follow-manager/web-scan.html");
   assert.match(manager,/href="web-scan\.html"/);
+  assert.match(manager,/一键查看关注关系/);
+  assert.doesNotMatch(manager,/体验网页扫描|Staging 实验版/);
   assert.match(manager,/id="archive-dropzone"/);
-  assert.match(page,/id="web-consent"/);
+  assert.doesNotMatch(page,/id="web-consent"/);
+  assert.match(page,/<h1>互关助手<\/h1>/);
+  assert.match(page,/id="web-elapsed"/);
+  assert.match(page,/id="web-loading"/);
+  assert.doesNotMatch(page,/网页扫描|实验版|Staging|风险|收费 X API/);
   assert.match(page,/id="web-cancel"/);
   assert.match(page,/id="web-following-count"/);
   assert.match(page,/id="web-followers-count"/);
-  assert.match(page,/疑似没回关/);
-  assert.match(page,/不使用收费 X API/);
+  assert.match(page,/可能没回关我/);
+  assert.match(page,/结果来自 X 实际加载的账号，可能有遗漏/);
   assert.match(page,/web-scan-ui\.js/);
   assert.match(page,/href="manager\.html"/);
   assert.doesNotMatch(page,/<script[^>]+src="https?:\/\//);
@@ -111,4 +122,20 @@ test("DOM scanner safe per-handle links and no server upload paths",()=>{
   const store=read("follow-manager/web-scan-store.js");
   assert.match(store,/indexedDB\.open/);
   assert.doesNotMatch(store,/fetch\(|chrome\.storage|XMLHttpRequest/);
+});
+
+test("background scan keeps the user on the assistant, tracks elapsed time, and cleans its own tab", () => {
+  const ui = read("follow-manager/web-scan-ui.js");
+  const page = read("follow-manager/web-scan.html");
+  assert.match(ui, /chrome\.tabs\.create\(\{url:[^}]+active:false\}\)/);
+  assert.match(ui, /chrome\.tabs\.update\(job\.tabId,\{[\s\S]*?url:/);
+  assert.doesNotMatch(ui, /active:true/);
+  assert.match(ui, /await closeTemporaryTab\(job\)/);
+  assert.match(ui, /clearInterval\(job\.timer\)/);
+  assert.match(ui, /job\.timer = setInterval/);
+  assert.match(page, /id="web-following-count"/);
+  assert.match(page, /id="web-followers-count"/);
+  assert.match(page, /id="web-elapsed"/);
+  assert.match(page, /结果.*可能有遗漏/);
+  assert.doesNotMatch(page, /web-consent|Staging 实验版|网页扫描|风险限制/);
 });

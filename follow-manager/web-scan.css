@@ -11,3 +11,19 @@
 #web-results .stats span{line-height:1.5}
 @media(max-width:450px){.scan-progress{gap:7px}.scan-progress>div{padding:11px}h1{font-size:23px}.experimental{margin-top:5px}}
 @media(prefers-reduced-motion:reduce){.scan-progress{scroll-behavior:auto}}
+
+/* Clear, customer-facing follow assistant with real elapsed time and live counts. */
+.follow-main{border-color:var(--xrh-pro-line);box-shadow:var(--xrh-shadow)}
+.follow-main .intro{font-size:13px;line-height:1.75;color:var(--xrh-muted);margin-top:8px}
+.follow-main .heading-line h2{font-size:18px;letter-spacing:-.02em}
+.follow-main .actions{margin-top:16px}
+.follow-main .actions .primary{min-height:42px;padding-inline:21px}
+.follow-loading{display:flex;gap:12px;align-items:center;margin:17px 0 0;padding:14px 16px;border:1px solid var(--xrh-pro-line);border-radius:13px;background:var(--xrh-pro-surface)}
+.follow-loading[hidden]{display:none!important}
+.loading-spinner{width:23px;height:23px;border:3px solid var(--xrh-pro-line);border-top-color:var(--xrh-brand);border-radius:50%;animation:follow-rotate .9s linear infinite;flex:0 0 auto}
+@keyframes follow-rotate{to{transform:rotate(360deg)}}
+.loading-description{display:flex;flex-direction:column;gap:3px;min-width:0}
+.loading-description strong{font-size:13px}
+.elapsed{font-size:11px;color:var(--xrh-muted);font-variant-numeric:tabular-nums}
+.follow-footnote{margin:11px 0 0!important;line-height:1.55!important}
+@media(prefers-reduced-motion:reduce){.loading-spinner{animation:none;border-color:var(--xrh-brand)}}
