@@ -1,3 +1,4 @@
+import {extensionSupportFeatures,adminSupportFeatures} from "./support-features";
 import {adminCreator} from './creator-momentum';
 import {publicBoltAvailability,createBoltUpgradeQuote,createBoltOrder,listBoltOrders,getBoltOrder,refreshBoltOrder,listBoltSubscriptionBlockers,expireBoltOrders,cancelBoltOrder} from './boltutil/routes';
 import {boltWebhook} from './boltutil/settle';
@@ -129,6 +130,9 @@ export default {
       if (request.method === "POST" && path === "/v1/auth/reset-password") return await resetPassword(request,env);
       if (request.method === "GET" && path === "/v1/auth/csrf") return await csrf(request, env);
       if (request.method === "POST" && path === "/v1/auth/logout") return await logout(request, env);
+       if (request.method === "GET" && path === "/v1/extension/support-features") return await extensionSupportFeatures(request,env);
+       const supportUser=/^\/v1\/admin\/users\/([a-zA-Z0-9_-]{1,100})\/support-features$/.exec(path);
+       if(supportUser&&["GET","POST"].includes(request.method))return await adminSupportFeatures(request,env,supportUser[1]);
       if (request.method === "GET" && path === "/v1/extension/bootstrap") return await extensionBootstrap(request,env);
       if (request.method === "GET" && path === "/v1/me") return await me(request, env);
       if (request.method === "GET" && path === "/v1/entitlements") return await entitlements(request, env);

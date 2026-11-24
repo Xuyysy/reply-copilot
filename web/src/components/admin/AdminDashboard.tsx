@@ -1,3 +1,4 @@
+import SupportDiagnosticsPanel from "./SupportDiagnosticsPanel";
 import CreatorFeaturesPanel from './CreatorFeaturesPanel';
 import SubscriptionAdminPanel from './SubscriptionAdminPanel';
 import AdminUsageLedger from './AdminUsageLedger';
@@ -506,6 +507,7 @@ export default function AdminDashboard() {
                 },
               })}>{t("保存备注", "Save note")}</Button>
             </section>
+            <SupportDiagnosticsPanel key={"support-"+detail.user.id} userId={detail.user.id} language={language} write={write}/>
             <UserDetailHistory key={detail.user.id} detail={detail} language={language} />
           </div>
         )}

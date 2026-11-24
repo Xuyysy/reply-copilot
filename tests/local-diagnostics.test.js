@@ -57,3 +57,40 @@ test("diagnostics are opt-in and restricted to the existing side panel",async()=
   assert.match(panel,/navigator\.clipboard\.writeText\(JSON\.stringify\(diagnosticReport/);
   assert.match(page,/id="diagnostic-panel"/);
 });
+
+
+test("diagnostic advice is specific and does not confuse missing access with denial",async()=>{
+ const {diagnosticAdvice}=await import("../sidepanel/diagnostics.js");
+ const r=await collectDiagnostics({chromeApi:fixture({response:probe}).api,preferences:{showFloatingWindow:true}});
+ assert.match(diagnosticAdvice(r),/布局未适配/);
+ assert.match(diagnosticAdvice({...r,floatingEnabled:false}),/显示回复悬浮框/);
+ assert.match(diagnosticAdvice({...r,probe:{...r.probe,windowState:"not_visible"}}),/重置悬浮框位置/);
+});
+test("remote diagnostic grant requires exact true and unexpired time",async()=>{
+ const {validGrant,fetchDiagnosticGrant}=await import("../sidepanel/diagnostic-access.js");
+ const data={schema:1,features:{localDiagnostics:{enabled:true,expiresAt:Date.now()+60000}}};
+ assert.ok(validGrant(data));assert.equal(validGrant(data,data.features.localDiagnostics.expiresAt),null);
+ assert.equal(validGrant({schema:1,features:{localDiagnostics:{enabled:"true",expiresAt:Date.now()+60000}}}),null);
+ const paths=[];
+ const client={token:async()=>"local-token",request:async(path,options)=>{paths.push([path,options]);return data}};
+ assert.ok(await fetchDiagnosticGrant(client));
+ assert.deepEqual(paths,[["/v1/extension/support-features",{expectedToken:"local-token"}]]);
+ assert.equal(await fetchDiagnosticGrant({...client,request:async()=>{throw Error("unavailable")}}),null);
+ let reads=0;
+ assert.equal(await fetchDiagnosticGrant({...client,token:async()=>++reads===1?"old":"new"}),null);
+ assert.equal(await fetchDiagnosticGrant({...client,token:async()=>""}),null);
+});
+test("targeted support uses dedicated authenticated routes and auditable admin writes",async()=>{
+ const server=await readFile(new URL("../api/src/support-features.ts",import.meta.url),"utf8");
+ const page=await readFile(new URL("../sidepanel/sidepanel.html",import.meta.url),"utf8");
+ const panel=await readFile(new URL("../sidepanel/sidepanel.js",import.meta.url),"utf8");
+ const route=await readFile(new URL("../api/src/index.ts",import.meta.url),"utf8");
+ assert.match(server,/session\.kind!=="extension"/);
+ assert.match(server,/readGrant\(env,session\.user_id\)/);
+ assert.match(server,/requireAdminSession\(request,env,write\)/);
+ assert.match(server,/commitOperation\(env,op,statements/);
+ assert.match(route,/\/v1\/extension\/support-features/);
+ assert.match(page,/id="diagnostic-panel" hidden/);
+ assert.match(panel,/if\(diagnosticBusy\|\|!hasDiagnosticAccess\(\)\)return/);
+ assert.match(panel,/if\(revision!==diagnosticRevision\|\|!hasDiagnosticAccess\(\)\)return/);
+});

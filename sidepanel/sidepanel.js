@@ -2,7 +2,8 @@ import {StorageService,BEHAVIOR_PREFERENCES_KEY,PENDING_REQUEST_KEY} from '../se
 import {VoiceProfileService} from '../services/voice-profile-service.js';
 import {UsageService} from '../services/usage-service.js';
 import {AccountClient} from '../services/account-client.js';
-import {collectDiagnostics,diagnosticRows} from './diagnostics.js';
+import {collectDiagnostics,diagnosticRows,diagnosticAdvice} from './diagnostics.js';
+import {fetchDiagnosticGrant} from './diagnostic-access.js';
 
 const storage=new StorageService(),profiles=new VoiceProfileService(),usage=new UsageService(),accountClient=new AccountClient();
 const $=id=>document.getElementById(id);
@@ -12,6 +13,7 @@ let wasPending=false;
 let diagnosticAccount='unknown';
 let diagnosticReport=null;
 let diagnosticBusy=false;
+let diagnosticGrant=null,diagnosticRevision=0,diagnosticPending=null,diagnosticExpiryTimer=null,lastGrantCheck=0;
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -26,6 +28,7 @@ chrome.runtime.onMessage.addListener((message,sender)=>{
 function openMomentumDetails(){momentumControl.expand();void chrome.storage.session.remove('openMomentumDetails').catch(()=>{});}
 chrome.storage.onChanged.addListener((changes,area)=>{
   if(area==='session'&&changes.openMomentumDetails?.newValue===true)openMomentumDetails();
+  if(area==='local'&&changes.replyCopilotAccountToken){invalidateDiagnosticAccess();void refreshDiagnosticAccess(true);}
   if(area==='local'&&[BEHAVIOR_PREFERENCES_KEY,'voiceProfile','replyCopilotAccountToken','localUsageEvents'].some(key=>key in changes))void refreshDashboard();
 });
 void chrome.storage.session.get('openMomentumDetails').then(state=>{if(state.openMomentumDetails===true)openMomentumDetails();}).catch(()=>{});
@@ -161,14 +164,48 @@ void refreshDashboard();
 void momentumControl.refresh({ensure:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void momentumControl.refresh({ensure:true});});
 
+function invalidateDiagnosticAccess(){
+  diagnosticRevision++;diagnosticGrant=null;diagnosticPending=null;diagnosticReport=null;lastGrantCheck=0;
+  clearTimeout(diagnosticExpiryTimer);
+  $('diagnostic-panel').hidden=true;$('diagnostic-panel').open=false;
+  $('diagnostic-results').replaceChildren();$('diagnostic-copy').disabled=true;
+  $('diagnostic-status').textContent='尚未检查。';
+}
+function hasDiagnosticAccess(){return diagnosticGrant?.expiresAt>Date.now();}
+async function refreshDiagnosticAccess(force=false){
+  if(diagnosticPending)return diagnosticPending;
+  if(!force&&Date.now()-lastGrantCheck<60_000)return hasDiagnosticAccess();
+  const revision=++diagnosticRevision;
+  lastGrantCheck=Date.now();
+  const pending=(async()=>{
+    const grant=await fetchDiagnosticGrant(accountClient);
+    if(revision!==diagnosticRevision)return false;
+    if(!grant){invalidateDiagnosticAccess();lastGrantCheck=Date.now();return false;}
+    diagnosticGrant=grant;
+    $('diagnostic-panel').hidden=false;
+    clearTimeout(diagnosticExpiryTimer);
+    diagnosticExpiryTimer=setTimeout(invalidateDiagnosticAccess,Math.max(0,Math.min(grant.expiresAt-Date.now(),2147483647)));
+    return true;
+  })();
+  diagnosticPending=pending;
+  try{return await pending;}finally{if(diagnosticPending===pending)diagnosticPending=null;}
+}
+void refreshDiagnosticAccess(true);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshDiagnosticAccess();});
+window.addEventListener('focus',()=>void refreshDiagnosticAccess());
+setInterval(()=>{if(document.visibilityState==='visible')void refreshDiagnosticAccess(true);},5*60_000);
+
 async function runDiagnostics(){
-  if(diagnosticBusy)return;
+  if(diagnosticBusy||!hasDiagnosticAccess())return;
   diagnosticBusy=true;diagnosticReport=null;
   $('diagnostic-run').disabled=true;$('diagnostic-copy').disabled=true;
   $('diagnostic-status').textContent='正在检查当前标签页…';
   try{
+    if(!await refreshDiagnosticAccess(true))return;
+    const revision=diagnosticRevision;
     const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
     const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount});
+    if(revision!==diagnosticRevision||!hasDiagnosticAccess())return;
     const fragment=document.createDocumentFragment();
     for(const [label,value] of diagnosticRows(report)){
       const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
@@ -177,13 +214,13 @@ async function runDiagnostics(){
     $('diagnostic-results').replaceChildren(fragment);
     diagnosticReport=report;
     $('diagnostic-copy').disabled=false;
-    $('diagnostic-status').textContent=report.contentScript==='running'?'检查完成。若悬浮窗未出现，请点击一条文字帖的回复按钮后再检查。':'请在 X 标签页刷新页面，再点击回复并重新检查。';
+    $('diagnostic-status').textContent=diagnosticAdvice(report);
   }catch{$('diagnostic-results').replaceChildren();$('diagnostic-status').textContent='检查失败，请重试。';}
   finally{diagnosticBusy=false;$('diagnostic-run').disabled=false;}
 }
 $('diagnostic-run').addEventListener('click',()=>void runDiagnostics());
 $('diagnostic-copy').addEventListener('click',async()=>{
-  if(!diagnosticReport)return;
+  if(!diagnosticReport||!hasDiagnosticAccess())return;
   try{await navigator.clipboard.writeText(JSON.stringify(diagnosticReport,null,2));$('diagnostic-status').textContent='已复制诊断报告，可手动发给客服。';}
   catch{$('diagnostic-status').textContent='复制失败，请重新点击。';}
 });
