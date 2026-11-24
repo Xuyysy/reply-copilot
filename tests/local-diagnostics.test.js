@@ -94,3 +94,12 @@ test("targeted support uses dedicated authenticated routes and auditable admin w
  assert.match(panel,/if\(diagnosticBusy\|\|!hasDiagnosticAccess\(\)\)return/);
  assert.match(panel,/if\(revision!==diagnosticRevision\|\|!hasDiagnosticAccess\(\)\)return/);
 });
+
+test("staging local preview is explicit and does not represent a server grant",async()=>{
+ const panel=await readFile(new URL("../sidepanel/sidepanel.js",import.meta.url),"utf8");
+ const build=await readFile(new URL("../scripts/build.js",import.meta.url),"utf8");
+ assert.match(panel,/if\(RUNTIME_CONFIG\.channel==='staging'\)\{/);
+ assert.match(panel,/report\.mode='staging_preview'/);
+ assert.match(panel,/previewExpiresAt=0/);
+ assert.match(build,/if \(channel === "staging"\) cpSync\(path\.join\(root, "staging"\)/);
+});

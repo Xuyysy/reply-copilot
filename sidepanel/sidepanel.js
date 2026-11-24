@@ -4,6 +4,7 @@ import {UsageService} from '../services/usage-service.js';
 import {AccountClient} from '../services/account-client.js';
 import {collectDiagnostics,diagnosticRows,diagnosticAdvice} from './diagnostics.js';
 import {fetchDiagnosticGrant} from './diagnostic-access.js';
+import {RUNTIME_CONFIG} from '../config/runtime.js';
 
 const storage=new StorageService(),profiles=new VoiceProfileService(),usage=new UsageService(),accountClient=new AccountClient();
 const $=id=>document.getElementById(id);
@@ -14,6 +15,7 @@ let diagnosticAccount='unknown';
 let diagnosticReport=null;
 let diagnosticBusy=false;
 let diagnosticGrant=null,diagnosticRevision=0,diagnosticPending=null,diagnosticExpiryTimer=null,lastGrantCheck=0;
+let previewExpiresAt=0;
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -165,14 +167,17 @@ void momentumControl.refresh({ensure:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void momentumControl.refresh({ensure:true});});
 
 function invalidateDiagnosticAccess(){
-  diagnosticRevision++;diagnosticGrant=null;diagnosticPending=null;diagnosticReport=null;lastGrantCheck=0;
+  diagnosticRevision++;diagnosticGrant=null;diagnosticPending=null;diagnosticReport=null;lastGrantCheck=0;previewExpiresAt=0;
+  document.getElementById('diagnostic-preview-note')?.remove();
   clearTimeout(diagnosticExpiryTimer);
   $('diagnostic-panel').hidden=true;$('diagnostic-panel').open=false;
   $('diagnostic-results').replaceChildren();$('diagnostic-copy').disabled=true;
   $('diagnostic-status').textContent='尚未检查。';
 }
-function hasDiagnosticAccess(){return diagnosticGrant?.expiresAt>Date.now();}
+function isDiagnosticPreview(){return RUNTIME_CONFIG.channel==='staging'&&previewExpiresAt>Date.now();}
+function hasDiagnosticAccess(){return isDiagnosticPreview()||diagnosticGrant?.expiresAt>Date.now();}
 async function refreshDiagnosticAccess(force=false){
+  if(isDiagnosticPreview())return true;
   if(diagnosticPending)return diagnosticPending;
   if(!force&&Date.now()-lastGrantCheck<60_000)return hasDiagnosticAccess();
   const revision=++diagnosticRevision;
@@ -206,6 +211,7 @@ async function runDiagnostics(){
     const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
     const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount});
     if(revision!==diagnosticRevision||!hasDiagnosticAccess())return;
+    if(isDiagnosticPreview())report.mode='staging_preview';
     const fragment=document.createDocumentFragment();
     for(const [label,value] of diagnosticRows(report)){
       const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
@@ -224,3 +230,21 @@ $('diagnostic-copy').addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(JSON.stringify(diagnosticReport,null,2));$('diagnostic-status').textContent='已复制诊断报告，可手动发给客服。';}
   catch{$('diagnostic-status').textContent='复制失败，请重新点击。';}
 });
+
+if(RUNTIME_CONFIG.channel==='staging'){
+  void import('../staging/diagnostic-preview.js').then(({mountDiagnosticPreview})=>{
+    mountDiagnosticPreview({
+      start(){
+        invalidateDiagnosticAccess();
+        previewExpiresAt=Date.now()+30*60_000;
+        const panel=$('diagnostic-panel');
+        panel.hidden=false;panel.open=true;
+        const note=document.createElement('p');note.id='diagnostic-preview-note';note.className='muted-note';
+        note.textContent='Staging 本机预览：未验证后台授权。关闭侧栏、切换账户或30分钟后结束。';
+        panel.querySelector('summary').after(note);
+        diagnosticExpiryTimer=setTimeout(invalidateDiagnosticAccess,30*60_000);
+      },
+      stop(){invalidateDiagnosticAccess();void refreshDiagnosticAccess(true);}
+    });
+  }).catch(()=>{});
+}
