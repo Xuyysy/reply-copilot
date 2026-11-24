@@ -50,25 +50,46 @@ export function resumable(stage) {
     stage.cursor.length>0 && stage.handles.length<MAX_INTERNAL_HANDLES;
 }
 
-// A user-initiated refresh can span ordinary local work budgets without
-// needing a new click. Never continue after a service/permission error,
-// cancellation, a cursor loop, storage limit, or a non-advancing checkpoint.
-export async function runStageBatches({initial=null,run,persist,cancelled=()=>false,
-    deadline=Date.now()+45*60*1000,now=Date.now,maxBatches=20}) {
-  let result=initial, previous=resumable(initial)?initial:null;
-  const seen=new Set(previous?.cursor?[previous.cursor]:[]);
-  for(let i=0;i<maxBatches;i++){
-    if(cancelled() || now()>=deadline) return result;
-    result=await run(previous,i);
-    if(!validStage(result)) throw new Error("同步返回的数据无效。");
+// A pending checkpoint is independently viewable even after its cursor expires.
+export function viewCheckpoint(value,owner) {
+  const time=Date.parse(value?.savedAt);
+  return Number.isFinite(time) ? readCheckpoint(value,owner,time) : null;
+}
+export function checkpointResult(checkpoint) {
+  const a=checkpoint?.stages?.following,b=checkpoint?.stages?.followers;
+  if(!a?.handles?.length && !b?.handles?.length &&
+     !(a?.reason==="complete" && b?.reason==="complete"))return null;
+  if(a?.userId && b?.userId && a.userId!==b.userId)return null;
+  return {owner:checkpoint.owner,source:"internal_sync",importedAt:checkpoint.savedAt,
+    following:a?.handles||[],followers:b?.handles||[],
+    verification:{...a?.verification,...b?.verification},ids:{...a?.ids,...b?.ids},
+    reasons:{following:a?.reason||"not_started",followers:b?.reason||"not_started"}};
+}
+// One user click: at most one short batch of each unfinished list.
+// Only an ordinary local pause or completion permits advancing to the other
+// list. Service failures, cancellation and repeated cursors stop the round.
+export async function runIncrementalRound({initial,run,persist,cancelled=()=>false}) {
+  const stages={...initial};
+  let reason="complete";
+  for(const kind of ["following","followers"]){
+    if(cancelled())return {stages,reason:"cancelled"};
+    const previous=stages[kind];
+    if(previous?.reason==="complete")continue;
+    if(previous?.handles?.length && !resumable(previous))
+      return {stages,reason:"reset_required"};
+    let result=await run(kind,resumable(previous)?previous:null);
+    if(!validStage(result))throw new Error("同步返回的数据无效。");
     if(result.reason==="paused" && (!resumable(result) ||
-       (previous && result.pages<=previous.pages) || seen.has(result.cursor))){
+       (previous && (result.pages<=previous.pages || result.cursor===previous.cursor))))
       result={...result,reason:"stalled"};
-    }
-    await persist(result);
-    if(result.reason!=="paused" || cancelled() || now()>=deadline) return result;
-    seen.add(result.cursor);
-    previous=result;
+    const other=stages[kind==="following"?"followers":"following"];
+    if(result.userId && other?.userId && result.userId!==other.userId)
+      return {stages,reason:"account_mismatch"};
+    stages[kind]=result;
+    await persist(kind,result);
+    if(cancelled())return {stages,reason:"cancelled"};
+    if(!["complete","paused"].includes(result.reason))return {stages,reason:result.reason};
+    if(result.reason==="paused")reason="paused";
   }
-  return result;
+  return {stages,reason};
 }

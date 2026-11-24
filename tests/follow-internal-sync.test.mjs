@@ -82,7 +82,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.ok(ui.includes("readCheckpoint("));
   assert.ok(ui.includes("queueCheckpoint("));
   assert.ok(ui.includes('job.checkpoint.stages.following'));
-  assert.ok(ui.includes('runStageBatches({'));
+  assert.ok(ui.includes('runIncrementalRound({'));
   assert.ok(ui.includes('localStorage.getItem(CONSENT_KEY)'));
   assert.ok(ui.includes('"internal-reset").addEventListener'));
   assert.match(ui,/source:"internal_sync"/);
@@ -252,6 +252,7 @@ test("staging-only internal page explains bounded batches and reset control",()=
   assert.ok(!html.includes("scan-progress"));
   assert.ok(script.includes('const MAX_USERS = 30000'));
   assert.ok(script.includes('const MAX_BATCH_ADDED = 3000'));
-  assert.ok(script.includes('const CHECKPOINT_EVERY = 8'));
+  assert.ok(script.includes('const CHECKPOINT_EVERY = 2'));
+  assert.ok(script.includes('const MAX_PAGES = 6'));
   assert.ok(script.includes('method:isList ? "POST" : "GET"'));
 });

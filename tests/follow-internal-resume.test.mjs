@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {MAX_INTERNAL_HANDLES,RESUME_TTL_MS,validStage,readCheckpoint,withStage,resumable,runStageBatches}
+import {MAX_INTERNAL_HANDLES,RESUME_TTL_MS,validStage,readCheckpoint,withStage,resumable,viewCheckpoint,checkpointResult,runIncrementalRound}
   from "../follow-manager/internal-sync-state.js";
 
 function stage(n=3,reason="paused",cursor="cursor-4") {
@@ -43,31 +43,38 @@ test("failure does not imply completion and a resumed list retains previous hand
   assert.ok(readCheckpoint(checkpoint,"owner"));
 });
 
-test("one explicit sync advances ordinary local batches and stops on actual limit or error",async()=>{
-  const first={...stage(3000),pages:120,cursor:"c1"};
-  const second={...stage(3250),pages:130,cursor:"c2"};
-  const done={...stage(3300,"complete",null),pages:140};
-  const sequence=[second,done],calls=[],saved=[];
-  const result=await runStageBatches({initial:first,run:async(previous)=>{calls.push(previous.cursor);return sequence.shift()},
-    persist:async v=>saved.push(v.reason)});
-  assert.equal(result.reason,"complete");
-  assert.deepEqual(calls,["c1","c2"]);
-  assert.deepEqual(saved,["paused","complete"]);
-  for(const reason of ["rate_limited","login_required","query_not_found","cancelled","limit","network"]){
-    let n=0;
-    const end=await runStageBatches({initial:first,run:async()=>{n++;return {...first,reason}},persist:async()=>{}});
-    assert.equal(end.reason,reason);
-    assert.equal(n,1);
-  }
+
+test("one click fetches one batch per unfinished list, saves partial results and continues later",async()=>{
+  const first={...stage(3250),pages:130,cursor:"next-following"};
+  const followers={...stage(50),pages:6,cursor:"next-followers"};
+  const second={...stage(3350),pages:136,cursor:"next-following-2"};
+  const seen=[],saved=[];
+  const round=await runIncrementalRound({initial:{following:first},run:async(kind,resume)=>{
+    seen.push([kind,resume?.cursor]);return kind==="following"?second:followers;
+  },persist:async(kind,result)=>saved.push([kind,result.handles.length])});
+  assert.deepEqual(seen,[["following","next-following"],["followers",undefined]]);
+  assert.deepEqual(saved,[["following",3350],["followers",50]]);
+  assert.equal(round.reason,"paused");
+  let checkpoint=null;
+  for(const [kind,v] of Object.entries(round.stages))checkpoint=withStage(checkpoint,"owner",kind,v);
+  const partial=checkpointResult(checkpoint);
+  assert.equal(partial.following.length,3350);
+  assert.equal(partial.followers.length,50);
+  assert.equal(partial.reasons.followers,"paused");
+  const expired={...checkpoint,savedAt:new Date(Date.now()-RESUME_TTL_MS-1000).toISOString()};
+  assert.equal(readCheckpoint(expired,"owner"),null);
+  assert.equal(checkpointResult(viewCheckpoint(expired,"owner")).following.length,3350);
+  const calls=[];
+  await runIncrementalRound({initial:round.stages,run:async(kind,resume)=>{
+    calls.push(resume.cursor);return {...resume,reason:"complete",cursor:null};
+  },persist:async()=>{}});
+  assert.deepEqual(calls,["next-following-2","next-followers"]);
 });
-test("one-click continuation rejects repeated cursor and obeys stop/deadline",async()=>{
-  const initial={...stage(3250),pages:130,cursor:"same"};
-  let n=0;
-  const end=await runStageBatches({initial,run:async()=>{n++;return {...initial,pages:131}},persist:async()=>{}});
-  assert.equal(end.reason,"stalled");
-  assert.equal(n,1);
-  const cancelled=await runStageBatches({initial,cancelled:()=>true,run:async()=>{throw Error("unexpected")},persist:async()=>{}});
-  assert.equal(cancelled,initial);
-  const timed=await runStageBatches({initial,deadline:10,now:()=>11,run:async()=>{throw Error("unexpected")},persist:async()=>{}});
-  assert.equal(timed,initial);
+test("round stops on limits/errors and never loops a cursor",async()=>{
+  const initial={following:{...stage(),pages:14,cursor:"same"}};
+  for(const reason of ["rate_limited","login_required","query_not_found","cancelled","limit","network","paused"]){
+    let n=0;
+    const result=await runIncrementalRound({initial,run:async()=>{n++;return {...initial.following,reason,pages:15}},persist:async()=>{}});
+    assert.equal(result.reason,reason==="paused"?"stalled":reason);assert.equal(n,1);
+  }
 });

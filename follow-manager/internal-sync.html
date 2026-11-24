@@ -56,7 +56,8 @@
       <h2 id="internal-results-heading">关注关系</h2>
       <span id="internal-result-badge" class="tag">本机记录</span>
     </div>
-    <p class="notice">结果是获取时的快照，可能不是实时关系。若请求中途停止或达到上限，数据可能不完整，不能据此认定对方没有回关。</p>
+    <p id="internal-coverage-note" class="notice">结果来自已获取的账号，可能不完整。</p>
+    <button id="internal-history-toggle" type="button" class="secondary" hidden>查看上次完整结果</button>
     <p id="internal-snapshot-meta" class="muted small"></p>
     <p id="internal-changes" class="snapshot-changes" hidden></p>
     <div class="stats">
@@ -90,7 +91,7 @@
     </div>
   </section>
   <p class="back-link"><a href="manager.html">← 返回互关助手</a></p>
-  <footer>数据保存在本机。首次同步耗时取决于账号规模；遇到平台限制会停止并保存进度。</footer>
+  <footer>每次仅同步一小批账号，结果保存在本机，下次可继续补齐。遇到平台限制会停止。</footer>
 </main>
 <script type="module" src="internal-sync-ui.js"></script>
 </body>

@@ -50,10 +50,10 @@
   // of truncating the entire list or automatically bypassing a rate limit.
   const MAX_USERS = 30000;
   const MAX_BATCH_ADDED = 3000;
-  const MAX_PAGES = 120;
-  const MAX_MS = 4 * 60 * 1000;
+  const MAX_PAGES = 6;
+  const MAX_MS = 18 * 1000;
   const PAGE_DELAY_MS = 1800;
-  const CHECKPOINT_EVERY = 8;
+  const CHECKPOINT_EVERY = 2;
   let active = null;
   const send = payload => {
     try { void chrome.runtime.sendMessage(payload).catch(() => {}); } catch {}
