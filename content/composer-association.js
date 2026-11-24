@@ -268,9 +268,15 @@
         (node.disabled||node.readOnly||node.getAttribute('aria-disabled')==='true'||
          node.getAttribute('aria-readonly')==='true'||!node.getAttribute('aria-label')||
          node.closest('[inert],[data-slot="embedded-tweet-frame"]')||node.closest('article'));
+      const routeQuoteNodes=post.modernLayout&&post.quoteOnly?
+        [...dialog.querySelectorAll(MODERN_FRAME+' '+MODERN_BODY)].filter(n=>beforeEditor(n,node,dialog)):[];
+      const routeQuoteText=routeQuoteNodes.length===1?normalized(api.postExtractor.readOriginalText(routeQuoteNodes[0])):'';
+      const quoteRoutePreview=post.quoteOnly&&candidates.length===0&&routeQuoteText&&
+        routeQuoteText===normalized(post.quotedText)&&!quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,routeQuoteText));
+      const ownRoutePreview=!post.quoteOnly&&candidates.length===1&&primary?.article===null&&
+        primary?.id===null&&sameContext(post,primary.text);
       const linkless=post.modernLayout&&post.replyRouteVerified&&routeId===post.statusId&&
-        !routeConflict&&!quarantinedContextMatch&&!post.quoteOnly&&
-        candidates.length===1&&primary?.article===null&&primary?.id===null&&sameContext(post,primary.text);
+        !routeConflict&&!quarantinedContextMatch&&(ownRoutePreview||quoteRoutePreview);
       const modernMatch=!post.modernLayout?null:
         editorUnsafe||routeConflict||candidates.some(c=>c.id&&c.id!==post.statusId)||candidates.length>1?false:
         post.replyRouteVerified&&routeId!==post.statusId?null:
@@ -313,8 +319,8 @@
       return {node,dialog,modal:Boolean(dialog),focused:node===document.activeElement,
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
-        contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)),
-        contextTextMatches:Boolean(primary&&sameContext(post,text)),
+        contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)||routeQuoteText),
+        contextTextMatches:Boolean(primary&&sameContext(post,text)||quoteRoutePreview),
         contextMatches,contextDetail};
     });
     const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(selector)].some(visible));

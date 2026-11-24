@@ -92,8 +92,8 @@
     }
     // A focal post can carry a hidden canonical permalink inside its
     // article; exclude embedded quote and ordinary content links.
-    for(const a of article.querySelectorAll('a[aria-hidden="true"][href*="/status/"]')){
-      if(a.closest('article')!==article||a.closest(MODERN_FRAME))continue;
+    for(const a of article.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"]')){
+      if(a.closest('article')!==article||a.closest(MODERN_FRAME)||a.closest(MODERN_BODY)||isQuoteContent(a,article))continue;
       add(a.getAttribute('href'));
     }
     return {identity:!invalid&&ids.size===1?ids.values().next().value:null,

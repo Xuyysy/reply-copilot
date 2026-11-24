@@ -519,7 +519,7 @@
         if(mutationTouchesReply(records))scheduleLocate();
       }else locate();
     });
-    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly']});
+    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly','inert','aria-disabled','aria-readonly']});
     locate();
   }
   async function prepareCurrent(requestId) {
@@ -536,6 +536,7 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
+      if(current.post.modernLayout&&matchedComposer(current.post).editor!==current.editor)return;
       current.preferences = response.preferences; current.initializing = false;
       diagnosticTap('mark','prepare','settings_received');
       if (current.preferences.showFloatingWindow) {
