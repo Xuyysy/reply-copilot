@@ -93,3 +93,17 @@ test("drag and browse share the same safe in-memory file selection pipeline", ()
   assert.match(page, /不支持直接导入 ZIP/);
   assert.match(page, /只查找关注关系文件/);
 });
+
+test("archive-only dashboard restores local results and exposes only the two one-sided lists",()=>{
+  const page=read("follow-manager/manager.html"),js=read("follow-manager/manager.js");
+  assert.deepEqual(Array.from(page.matchAll(/data-kind="([^"]+)"/g),m=>m[1]),["notFollowingBack","iHaveNotFollowedBack"]);
+  assert.ok(page.includes('id="open-import"'));
+  assert.ok(page.includes('id="page-size"'));
+  assert.ok(!page.includes("web-scan.html")&&!page.includes("internal-sync.html"));
+  assert.ok(js.includes("void restoreLocalResult()"));
+  assert.ok(js.includes("await readLatestSnapshot()"));
+  assert.ok(js.includes('$(\"import-panel\").hidden=true'));
+  assert.ok(js.includes("await saveSnapshot(snapshot);\n    showSnapshot(snapshot);"));
+  const manifest=JSON.parse(read("manifest.json"));
+  assert.ok(manifest.content_scripts.every(c=>c.js.every(p=>!p.startsWith("content/follow-"))));
+});

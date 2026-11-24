@@ -64,11 +64,7 @@
         "content/composer-association.js",
         "content/momentum-presenter.js",
         "content/inline-assistant.js",
-        "content/content-script.js",
-        "content/follow-dom-helpers.js",
-        "content/follow-web-scanner.js",
-        "content/follow-internal-helpers.js",
-        "content/follow-internal-scanner.js"
+        "content/content-script.js"
       ],
       "run_at": "document_idle"
     }

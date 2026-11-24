@@ -42,3 +42,29 @@ export function saveSnapshot(snapshot) {
 export function removeSnapshot(owner) {
   return run(owner, "readwrite", (store, key) => store.delete(key));
 }
+
+// Pick the newest existing archive without an IndexedDB schema migration.
+// Cursor traversal retains at most one winning snapshot, not all accounts.
+export function readLatestSnapshot() {
+  return openDatabase().then(async db=>{
+    try {
+      return await new Promise((resolve,reject)=>{
+        const tx=db.transaction(STORE,"readonly");
+        const req=tx.objectStore(STORE).openCursor();
+        let best=null;
+        req.onsuccess=()=>{
+          const cursor=req.result;
+          if(!cursor)return;
+          const record=cursor.value;
+          if(record && typeof record.owner==="string" && Array.isArray(record.followers) &&
+             Array.isArray(record.following) &&
+             (!best || String(record.importedAt||"")>String(best.importedAt||"")))best=record;
+          cursor.continue();
+        };
+        tx.oncomplete=()=>resolve(best);
+        tx.onerror=()=>reject(tx.error||new Error("无法读取本地记录。"));
+        tx.onabort=()=>reject(tx.error||new Error("本地读取已中止。"));
+      });
+    } finally {db.close();}
+  });
+}

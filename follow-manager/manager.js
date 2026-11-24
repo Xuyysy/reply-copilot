@@ -1,11 +1,14 @@
 import {MAX_ARCHIVE_BYTES, MAX_ARCHIVE_USERS, normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships, profileUrl} from "./archive.js";
-import {readSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
+import {readSnapshot, readLatestSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
 import {groupArchiveFiles, appendArchiveFiles} from "./file-selection.js";
 import {collectArchiveFilesFromDirectory, MAX_DIRECTORY_ENTRIES} from "./directory-import.js";
 
 const $ = id => document.getElementById(id);
-const PAGE_SIZE = 50;
-const kinds = ["notFollowingBack", "iHaveNotFollowedBack", "mutual"];
+let pageSize = 50;
+const kinds = ["notFollowingBack", "iHaveNotFollowedBack"];
+const LAST_OWNER_KEY = "xrh-follow-archive-last-owner";
+let restoring = true;
+let importing = false;
 let current = null;
 let relationships = null;
 let selectedKind = "notFollowingBack";
@@ -28,10 +31,30 @@ function refreshSelection() {
 // Folder import is the primary path. Manual JS selection is an optional fallback.
 let directoryScan = null;
 function scanControls(active) {
-  for (const id of ["choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button"]) {
-    $(id).disabled = active;
+  const busy=active || importing || restoring;
+  for (const id of ["choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button", "owner", "same-account", "load-saved", "delete-saved", "close-import", "open-import"]) {
+    $(id).disabled = busy;
   }
   $("cancel-scan").hidden = !active;
+}
+function clearSelection() {
+  selectedFiles.follower=[];
+  selectedFiles.following=[];
+  $("same-account").checked=false;
+  refreshSelection();
+}
+function openImport() {
+  clearSelection();
+  $("import-panel").hidden=false;
+  $("close-import").hidden=!current;
+  // Keep the last successfully imported result accessible until replacement succeeds.
+  $("import-panel").scrollIntoView({block:"start",behavior:"auto"});
+}
+function rememberOwner(owner) {
+  try {localStorage.setItem(LAST_OWNER_KEY,owner);} catch {}
+}
+function clearRememberedOwner(owner) {
+  try {if(localStorage.getItem(LAST_OWNER_KEY)===owner)localStorage.removeItem(LAST_OWNER_KEY);} catch {}
 }
 async function acceptDirectory(entry) {
   if (directoryScan || $("import-button").disabled) return;
@@ -51,6 +74,7 @@ async function acceptDirectory(entry) {
     if (controller.signal.aborted) throw new Error("已取消文件夹扫描。");
     selectedFiles.follower = groups.follower;
     selectedFiles.following = groups.following;
+    $("same-account").checked=false;
     refreshSelection();
     feedback("已从文件夹找到粉丝 " + groups.follower.length + " 个分片、关注 " +
       groups.following.length + " 个分片。只读取了文件头用于识别；确认账号后点击「导入并分析」。");
@@ -67,6 +91,7 @@ async function acceptFiles(fileList) {
     const next = await appendArchiveFiles(selectedFiles, fileList);
     selectedFiles.follower = next.follower;
     selectedFiles.following = next.following;
+    $("same-account").checked=false;
     refreshSelection();
     const missing = ["follower", "following"].filter(kind => !selectedFiles[kind].length);
     feedback(missing.length ?
@@ -119,6 +144,7 @@ async function acceptDirectoryFromFiles(files) {
     if (!groups.follower.length || !groups.following.length) throw new Error("文件夹缺少粉丝或关注名单。");
     selectedFiles.follower = groups.follower;
     selectedFiles.following = groups.following;
+    $("same-account").checked=false;
     refreshSelection();
     feedback("已从文件夹定位两组名单。确认账号后点击「导入并分析」。");
   } catch (error) { reportError(error); }
@@ -131,9 +157,7 @@ $("archive-picker").addEventListener("change", event => {
 });
 $("cancel-scan").addEventListener("click", () => directoryScan?.abort());
 $("clear-selection").addEventListener("click", () => {
-  selectedFiles.follower = [];
-  selectedFiles.following = [];
-  refreshSelection();
+  clearSelection();
   feedback("已清空待导入文件；之前保存的本地快照不受影响。");
 });
 
@@ -223,22 +247,28 @@ function renderList() {
   if (!current || !relationships) return;
   const ids = filteredIds();
   const count = ids.length;
-  const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(count / pageSize));
   page = Math.max(0, Math.min(page, pages - 1));
   const fragment = document.createDocumentFragment();
-  const visible = ids.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  for (const id of visible) {
+  const visible = ids.slice(page * pageSize, (page + 1) * pageSize);
+  for (const [index,id] of visible.entries()) {
     const row = document.createElement("div");
     row.className = "result-row";
     row.setAttribute("role", "listitem");
+    const identity=document.createElement("div");
+    identity.className="result-identity";
+    const position=document.createElement("span");
+    position.className="result-index";
+    position.textContent=String(page*pageSize+index+1);
     const name = document.createElement("strong");
-    name.textContent = "用户 ID " + id;
+    name.textContent = id;
+    identity.append(position,name);
     const link = document.createElement("a");
     link.href = profileUrl(id);
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "打开 X 主页 ↗";
-    row.append(name, link);
+    row.append(identity, link);
     fragment.append(row);
   }
   if (!visible.length) {
@@ -258,6 +288,11 @@ function renderList() {
 function showSnapshot(snapshot) {
   current = snapshot;
   relationships = classifyRelationships(snapshot.followers, snapshot.following);
+  $("owner").value="@"+snapshot.owner;
+  rememberOwner(snapshot.owner);
+  $("import-panel").hidden=true;
+  $("close-import").hidden=false;
+  clearSelection();
   $("results-panel").hidden = false;
   $("snapshot-owner").textContent = "@" + snapshot.owner;
   const imported = new Date(snapshot.importedAt);
@@ -265,7 +300,6 @@ function showSnapshot(snapshot) {
     " · 粉丝 " + snapshot.followers.length.toLocaleString("zh-CN") +
     " · 正在关注 " + snapshot.following.length.toLocaleString("zh-CN") +
     " · 归档生成时间可能早于导入时间";
-  $("count-mutual").textContent = relationships.mutual.length.toLocaleString("zh-CN");
   $("count-not-following-back").textContent = relationships.notFollowingBack.length.toLocaleString("zh-CN");
   $("count-i-have-not-followed-back").textContent = relationships.iHaveNotFollowedBack.length.toLocaleString("zh-CN");
   $("filter-id").value = "";
@@ -290,7 +324,8 @@ $("archive-form").addEventListener("submit", async event => {
   event.preventDefault();
   const button = $("import-button");
   if (button.disabled) return;
-  button.disabled = true;
+  importing=true;
+  scanControls(false);
   feedback("正在本地读取并分析归档，不会上传文件…");
   try {
     const owner = ownerValue();
@@ -308,7 +343,7 @@ $("archive-form").addEventListener("submit", async event => {
     feedback("已安全导入 @" + owner + " 的本地快照。合并分片：粉丝 " + followers.partCount +
       "，关注 " + following.partCount + "；去除重复 ID " + (followers.duplicates + following.duplicates) + " 个。");
   } catch (error) { reportError(error); }
-  finally { button.disabled = false; }
+  finally { importing=false;scanControls(false); }
 });
 
 $("load-saved").addEventListener("click", async () => {
@@ -326,11 +361,15 @@ $("delete-saved").addEventListener("click", async () => {
     const owner = ownerValue();
     if (!window.confirm("确认删除 @" + owner + " 在本机保存的粉丝和关注关系数据？")) return;
     await removeSnapshot(owner);
+    clearRememberedOwner(owner);
     if (current?.owner === owner) {
       current = null;
       relationships = null;
       $("results-panel").hidden = true;
       $("result-list").replaceChildren();
+      $("import-panel").hidden=false;
+      $("close-import").hidden=true;
+      clearSelection();
     }
     feedback("已清除 @" + owner + " 的本地快照。");
   } catch (error) { reportError(error); }
@@ -340,6 +379,9 @@ for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => { if (kinds.includes(button.dataset.kind)) chooseVisible(button.dataset.kind); });
 }
 $("filter-id").addEventListener("input", () => { page = 0; renderList(); });
+$("page-size").addEventListener("change",()=>{pageSize=Number($("page-size").value);page=0;renderList();});
+$("open-import").addEventListener("click",openImport);
+$("close-import").addEventListener("click",()=>{if(current){clearSelection();$("owner").value="@"+current.owner;$("import-panel").hidden=true;}});
 $("page-prev").addEventListener("click", () => { page--; renderList(); });
 $("page-next").addEventListener("click", () => { page++; renderList(); });
 $("export-csv").addEventListener("click", () => {
@@ -357,3 +399,18 @@ $("export-csv").addEventListener("click", () => {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 3000);
 });
+
+async function restoreLocalResult() {
+  scanControls(false);
+  feedback("正在读取本地结果…");
+  try {
+    let preferred;
+    try {preferred=localStorage.getItem(LAST_OWNER_KEY);} catch {}
+    let saved=preferred && /^[a-z0-9_]{1,15}$/.test(preferred)?await readSnapshot(preferred):null;
+    if(!saved)saved=await readLatestSnapshot();
+    if(saved)showSnapshot(saved);
+    else feedback("选择归档文件夹，即可开始分析。");
+  } catch(error) { reportError(error); }
+  finally { restoring=false;scanControls(false); }
+}
+void restoreLocalResult();
