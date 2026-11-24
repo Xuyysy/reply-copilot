@@ -95,7 +95,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(scanner,/const raw = \/\(\?:\^\|;\)/);
 });
 
-function webClientHarness({signedIn="owner",status=200,observedQueries=[],listEntries}={}) {
+function webClientHarness({signedIn="owner",status=200,listStatus=200,observedQueries=[],listEntries}={}) {
   const messages=[];
   const requests=[];
   let listener;
@@ -120,6 +120,7 @@ function webClientHarness({signedIn="owner",status=200,observedQueries=[],listEn
     if(url.includes("/UserByScreenName?")) return {
       status:200,ok:true,async json(){return {data:{user:{result:user("owner","1000")}}};}
     };
+    if(listStatus!==200)return {status:listStatus,ok:false};
     return {status:200,ok:true,async json(){return data(listEntries||[entry("alice","2000"),entry("bob","3000")]);}};
   }
   const context=vm.createContext({
@@ -291,4 +292,17 @@ test("existing list query transports only observed relationship metadata in the 
   const done=await completed(h);
   assert.deepEqual(JSON.parse(JSON.stringify(done.perspectives)),{"2000":{following:true,followedBy:false}});
   assert.equal(h.requests.length,2);
+});
+
+test("404 identifies failed operation without retrying or exporting request details",async()=>{
+  for(const [options,operation,count] of [[{status:404},"UserByScreenName",1],[{listStatus:404},"Following",2]]) {
+    const h=webClientHarness(options);
+    assert.equal(h.send({type:"XRH_INTERNAL_START",scanId:UUID,kind:"following",owner:"owner"}).ok,true);
+    const done=await completed(h);
+    assert.equal(done.reason,"query_not_found");
+    assert.equal(done.failureOperation,operation);
+    assert.equal(h.requests.length,count);
+    assert.ok(!JSON.stringify(done).includes("csrf-test-value"));
+    assert.ok(!JSON.stringify(done).includes("https://"));
+  }
 });

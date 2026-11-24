@@ -52,6 +52,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 function feedback(text, error=false) {
   $("internal-status").textContent = text;
   $("internal-status").classList.toggle("error",error);
+  $("internal-alternative").hidden=true;
 }
 function fail(error) {
   feedback(error instanceof Error ? error.message : "分析未能完成，请检查 X 是否已登录后重试。",true);
@@ -138,7 +139,8 @@ chrome.runtime.onMessage.addListener((message,sender) => {
     job.pending.resolve({
       handles:message.handles,reason:message.reason,cursor:message.cursor,
       verification:message.verification||{},ids:message.ids||{},perspectives:message.perspectives||{},
-      pages:message.pages||0,userId:message.userId
+      pages:message.pages||0,userId:message.userId,
+      ...(message.reason==="query_not_found" && ["UserByScreenName","Following","Followers"].includes(message.failureOperation) ? {failureOperation:message.failureOperation} : {})
     });
   }
 });
@@ -345,6 +347,12 @@ async function start() {
       $("internal-start").textContent="继续同步";
       feedback(round.reason==="paused"?"本次增量结果已保存。下次继续同步会补充更多账号。":
         (REASON[round.reason]||"本次未完成")+"。已保留可用进度和历史结果。",round.reason!=="paused"&&round.reason!=="cancelled");
+      if(round.reason==="query_not_found") {
+        const failed=[following,followers].find(x=>x?.reason==="query_not_found");
+        const label={UserByScreenName:"账号信息",Following:"关注名单",Followers:"粉丝名单"}[failed?.failureOperation];
+        feedback((label ? label+"（"+failed.failureOperation+"）" : "X 查询")+"返回 HTTP 404，已停止本次同步。原有记录和进度未删除。",true);
+        $("internal-alternative").hidden=false;
+      }
       return;
     }
     const data={

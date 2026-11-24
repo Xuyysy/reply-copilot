@@ -141,7 +141,12 @@
     }
     if (response.status === 401 || response.status === 403) throw new Error("login_required");
     if (response.status === 429) throw new Error("rate_limited");
-    if (response.status === 404) throw new Error("query_not_found");
+    if (response.status === 404) {
+      // Local diagnostics only: do not send URLs, query IDs, headers, bodies,
+      // cookies or account data as diagnostic fields. Do not retry a 404.
+      session.failureOperation=operation;
+      throw new Error("query_not_found");
+    }
     if (response.status === 400 || response.status === 422) throw new Error("invalid_request");
     if (!response.ok) throw new Error("http_error");
     let payload;
@@ -251,7 +256,7 @@
       if(session.userId) data.userId=session.userId;
       // The private CSRF header and X cookies never cross the tab boundary.
       send({type:"XRH_INTERNAL_DONE",scanId:session.scanId,kind:session.kind,
-        ...data});
+        ...data,...(reason==="query_not_found" && session.failureOperation ? {failureOperation:session.failureOperation} : {})});
     }
   }
   function validResume(state) {
