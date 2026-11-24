@@ -2,12 +2,22 @@ import {StorageService,BEHAVIOR_PREFERENCES_KEY,PENDING_REQUEST_KEY} from '../se
 import {VoiceProfileService} from '../services/voice-profile-service.js';
 import {UsageService} from '../services/usage-service.js';
 import {AccountClient} from '../services/account-client.js';
+import {collectDiagnostics,diagnosticRows,diagnosticAdvice,armReproduction,finishReproduction,cancelReproduction,classifyFailure} from './diagnostics.js';
+import {fetchDiagnosticGrant} from './diagnostic-access.js';
+import {RUNTIME_CONFIG} from '../config/runtime.js';
 
 const storage=new StorageService(),profiles=new VoiceProfileService(),usage=new UsageService(),accountClient=new AccountClient();
 const $=id=>document.getElementById(id);
 let accountPoll=null;
 let manualBindingCheck=false;
 let wasPending=false;
+let diagnosticAccount='unknown';
+let diagnosticReport=null;
+let diagnosticBusy=false;
+let diagnosticGrant=null,diagnosticRevision=0,diagnosticPending=null,diagnosticExpiryTimer=null,lastGrantCheck=0;
+let previewExpiresAt=0;
+let diagnosticCapture=null,diagnosticCaptureTimer=null;
+function clearCapture(){const capture=diagnosticCapture;diagnosticCapture=null;clearTimeout(diagnosticCaptureTimer);$('diagnostic-arm').disabled=false;$('diagnostic-finish').disabled=true;$('diagnostic-cancel').disabled=true;return capture;}
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -22,6 +32,7 @@ chrome.runtime.onMessage.addListener((message,sender)=>{
 function openMomentumDetails(){momentumControl.expand();void chrome.storage.session.remove('openMomentumDetails').catch(()=>{});}
 chrome.storage.onChanged.addListener((changes,area)=>{
   if(area==='session'&&changes.openMomentumDetails?.newValue===true)openMomentumDetails();
+  if(area==='local'&&changes.replyCopilotAccountToken){invalidateDiagnosticAccess();void refreshDiagnosticAccess(true);}
   if(area==='local'&&[BEHAVIOR_PREFERENCES_KEY,'voiceProfile','replyCopilotAccountToken','localUsageEvents'].some(key=>key in changes))void refreshDashboard();
 });
 void chrome.storage.session.get('openMomentumDetails').then(state=>{if(state.openMomentumDetails===true)openMomentumDetails();}).catch(()=>{});
@@ -36,6 +47,7 @@ async function refreshDashboard(){
   $('quick-style').value=behavior.defaultReplyMode;$('quick-auto').checked=behavior.autoGenerateOnReply;
   $('quick-language').value=profile.language;$('quick-length').value=profile.replyLength;$('quick-humor').value=profile.humorLevel;
   const status=account?.ok?account.status:'auth_unavailable';
+  diagnosticAccount=account?.pending?'pending':status;
   $('quota-row').classList.toggle('hidden',!account?.quota||account.source!=='server');
   $('account-buttons').classList.toggle('hidden',!['guest','auth_expired','auth_unavailable'].includes(status)&&!account?.pending);
   $('connect-register').classList.toggle('hidden',status!=='guest'||account?.pending);
@@ -155,3 +167,153 @@ void chrome.storage.session.remove(PENDING_REQUEST_KEY).catch(()=>{});
 void refreshDashboard();
 void momentumControl.refresh({ensure:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void momentumControl.refresh({ensure:true});});
+
+function invalidateDiagnosticAccess(){
+  void cancelReproduction(clearCapture());
+  diagnosticRevision++;diagnosticGrant=null;diagnosticPending=null;diagnosticReport=null;lastGrantCheck=0;previewExpiresAt=0;
+  document.getElementById('diagnostic-preview-note')?.remove();
+  clearTimeout(diagnosticExpiryTimer);
+  $('diagnostic-panel').hidden=true;$('diagnostic-panel').open=false;
+  $('diagnostic-results').replaceChildren();$('diagnostic-copy').disabled=true;
+  $('diagnostic-status').textContent='尚未检查。';
+}
+function isDiagnosticPreview(){return RUNTIME_CONFIG.channel==='staging'&&previewExpiresAt>Date.now();}
+function hasDiagnosticAccess(){return isDiagnosticPreview()||diagnosticGrant?.expiresAt>Date.now();}
+async function refreshDiagnosticAccess(force=false){
+  if(isDiagnosticPreview())return true;
+  if(diagnosticPending)return diagnosticPending;
+  if(!force&&Date.now()-lastGrantCheck<60_000)return hasDiagnosticAccess();
+  const revision=++diagnosticRevision;
+  lastGrantCheck=Date.now();
+  const pending=(async()=>{
+    const grant=await fetchDiagnosticGrant(accountClient);
+    if(revision!==diagnosticRevision)return false;
+    if(!grant){invalidateDiagnosticAccess();lastGrantCheck=Date.now();return false;}
+    diagnosticGrant=grant;
+    $('diagnostic-panel').hidden=false;
+    clearTimeout(diagnosticExpiryTimer);
+    diagnosticExpiryTimer=setTimeout(invalidateDiagnosticAccess,Math.max(0,Math.min(grant.expiresAt-Date.now(),2147483647)));
+    return true;
+  })();
+  diagnosticPending=pending;
+  try{return await pending;}finally{if(diagnosticPending===pending)diagnosticPending=null;}
+}
+void refreshDiagnosticAccess(true);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void refreshDiagnosticAccess();});
+window.addEventListener('focus',()=>void refreshDiagnosticAccess());
+setInterval(()=>{if(document.visibilityState==='visible')void refreshDiagnosticAccess(true);},5*60_000);
+
+async function runDiagnostics(){
+  if(diagnosticBusy||!hasDiagnosticAccess())return;
+  if(diagnosticCapture){$('diagnostic-status').textContent='正在录制，请先完成复现或取消录制。';return;}
+  diagnosticBusy=true;diagnosticReport=null;
+  $('diagnostic-run').disabled=true;$('diagnostic-copy').disabled=true;
+  $('diagnostic-status').textContent='正在检查当前标签页…';
+  try{
+    if(!await refreshDiagnosticAccess(true))return;
+    const revision=diagnosticRevision;
+    const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
+    const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount});
+    if(revision!==diagnosticRevision||!hasDiagnosticAccess())return;
+    if(isDiagnosticPreview())report.mode='staging_preview';
+    presentDiagnosticReport(report);
+  }catch{$('diagnostic-results').replaceChildren();$('diagnostic-status').textContent='检查失败，请重试。';}
+  finally{diagnosticBusy=false;$('diagnostic-run').disabled=false;}
+}
+
+const findingLabels={
+ wrong_tab:'请切换到 X 页面',manifest_host_not_matched:'当前域名不在插件注入范围',content_script_unreachable:'页面脚本无响应',floating_disabled:'悬浮窗设置已关闭',
+ capture_lost:'录制期间页面可能已刷新或切换',no_click_captured:'没有捕获到点击',click_shape_unavailable:'点击结构不可用',
+ reply_control_unrecognized:'回复入口未匹配现有识别规则',post_container_unrecognized:'原帖容器未识别',post_identity_unverified:'原帖身份无法确认',
+ post_text_missing:'没有可识别的原帖文本',activation_not_completed:'未完成回复点击关联',
+ inline_editor_candidate:'发现疑似内联回复编辑器',nonstandard_editor_candidate:'发现疑似非标准编辑器',native_dialog_candidate:'发现原生弹窗结构',
+ association_not_bound:'回复编辑器未成功关联',prepare_failed:'插件准备失败',window_not_mounted:'悬浮窗未挂载',
+ window_render_issue:'悬浮窗可能被隐藏、遮挡或超出视口',stylesheet_not_loaded_during_capture:'采样时未检测到样式表加载',
+ generation_failed:'已请求生成但失败',generation_pending_at_capture_end:'录制结束时生成尚未完成',
+ account_not_ready_during_capture:'复现时账户状态未就绪',window_mounted_during_capture:'录制期间悬浮窗已挂载',reproduction_needed:'请进行一次复现录制'};
+function presentDiagnosticReport(report){
+  report.finding=classifyFailure(report);
+  report.channel=RUNTIME_CONFIG.channel;
+  if(isDiagnosticPreview())report.mode='staging_preview';
+  const fragment=document.createDocumentFragment();
+  for(const [label,value] of diagnosticRows(report)){
+    const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
+    dt.textContent=label;dd.textContent=label==='复现结果'&&report.reproduction?.state==='complete'?(findingLabels[report.finding]||value):value;row.append(dt,dd);fragment.append(row);
+  }
+  $('diagnostic-results').replaceChildren(fragment);
+  diagnosticReport=report;$('diagnostic-copy').disabled=false;
+  $('diagnostic-status').textContent=report.reproduction?
+    (findingLabels[report.finding]||'复现已结束')+'。请复制报告发给客服；诊断提示不等同于确认根因。':diagnosticAdvice(report);
+}
+async function startDiagnosticCapture(){
+  if(diagnosticBusy||diagnosticCapture||!hasDiagnosticAccess())return;
+  diagnosticBusy=true;diagnosticReport=null;$('diagnostic-copy').disabled=true;$('diagnostic-arm').disabled=true;$('diagnostic-run').disabled=true;
+  $('diagnostic-results').replaceChildren();$('diagnostic-status').textContent='正在准备复现录制…';
+  try{
+    if(!await refreshDiagnosticAccess(true))return;
+    const revision=diagnosticRevision;
+    const capture=await armReproduction();
+    if(revision!==diagnosticRevision||!hasDiagnosticAccess()){void cancelReproduction(capture);return;}
+    if(!capture){
+      const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
+      const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount});
+      if(revision===diagnosticRevision&&hasDiagnosticAccess())presentDiagnosticReport({...report,reproduction:{state:'lost'}});
+      return;
+    }
+    diagnosticCapture=capture;$('diagnostic-finish').disabled=false;$('diagnostic-cancel').disabled=false;
+    $('diagnostic-status').textContent='请在当前 X 页面只点击一次出问题帖子的回复按钮，不要输入或发布。保持页面不刷新，约12秒后点击「完成复现」。';
+    diagnosticCaptureTimer=setTimeout(()=>{
+      if(diagnosticCapture!==capture)return;
+      void cancelReproduction(clearCapture());$('diagnostic-status').textContent='录制已超时，请重新开始复现。';
+    },85000);
+  }catch{$('diagnostic-status').textContent='无法开始录制，请保持 X 页面打开并重试。';}
+  finally{diagnosticBusy=false;$('diagnostic-arm').disabled=Boolean(diagnosticCapture);$('diagnostic-run').disabled=false;}
+}
+async function endDiagnosticCapture(){
+  if(diagnosticBusy||!diagnosticCapture||!hasDiagnosticAccess())return;
+  diagnosticBusy=true;$('diagnostic-finish').disabled=true;$('diagnostic-run').disabled=true;
+  const capture=diagnosticCapture;
+  try{
+    if(!await refreshDiagnosticAccess(true))return;
+    const revision=diagnosticRevision;
+    if(diagnosticCapture!==capture)return;
+    const reproduction=await finishReproduction(capture);
+    if(revision!==diagnosticRevision||diagnosticCapture!==capture||!hasDiagnosticAccess())return;
+    if(reproduction.state==='recording'){$('diagnostic-status').textContent='仍在采样，请在点击回复约12秒后完成复现。';return;}
+    clearCapture();
+    const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
+    const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount,tabId:capture.tabId});
+    if(revision!==diagnosticRevision||!hasDiagnosticAccess())return;
+    presentDiagnosticReport({...report,reproduction});
+  }catch{$('diagnostic-status').textContent='读取录制结果失败，请重试。';}
+  finally{diagnosticBusy=false;$('diagnostic-finish').disabled=!diagnosticCapture;$('diagnostic-run').disabled=false;}
+}
+$('diagnostic-arm').addEventListener('click',()=>void startDiagnosticCapture());
+$('diagnostic-finish').addEventListener('click',()=>void endDiagnosticCapture());
+$('diagnostic-cancel').addEventListener('click',()=>{void cancelReproduction(clearCapture());$('diagnostic-status').textContent='已取消复现。';});
+window.addEventListener('pagehide',()=>{void cancelReproduction(diagnosticCapture);});
+
+$('diagnostic-run').addEventListener('click',()=>void runDiagnostics());
+$('diagnostic-copy').addEventListener('click',async()=>{
+  if(!diagnosticReport||!hasDiagnosticAccess())return;
+  try{await navigator.clipboard.writeText(JSON.stringify(diagnosticReport,null,2));$('diagnostic-status').textContent='已复制诊断报告，可手动发给客服。';}
+  catch{$('diagnostic-status').textContent='复制失败，请重新点击。';}
+});
+
+if(RUNTIME_CONFIG.channel==='staging'){
+  void import('../staging/diagnostic-preview.js').then(({mountDiagnosticPreview})=>{
+    mountDiagnosticPreview({
+      start(){
+        invalidateDiagnosticAccess();
+        previewExpiresAt=Date.now()+30*60_000;
+        const panel=$('diagnostic-panel');
+        panel.hidden=false;panel.open=true;
+        const note=document.createElement('p');note.id='diagnostic-preview-note';note.className='muted-note';
+        note.textContent='Staging 本机预览：未验证后台授权。关闭侧栏、切换账户或30分钟后结束。';
+        panel.querySelector('summary').after(note);
+        diagnosticExpiryTimer=setTimeout(invalidateDiagnosticAccess,30*60_000);
+      },
+      stop(){invalidateDiagnosticAccess();void refreshDiagnosticAccess(true);}
+    });
+  }).catch(()=>{});
+}
