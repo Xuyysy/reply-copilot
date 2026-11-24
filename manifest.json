@@ -64,6 +64,7 @@
         "content/composer-association.js",
         "content/momentum-presenter.js",
         "content/inline-assistant.js",
+        "content/layout-diagnostics.js",
         "content/content-script.js"
       ],
       "run_at": "document_idle"

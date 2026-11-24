@@ -43,7 +43,15 @@
   // Local-only, text-free troubleshooting for disappearing reply windows.
   // No post text, URL, account data or telemetry is captured.
   const associationEvents=[];
+  const layoutApi=api.layoutDiagnostics;
+  const recorder=layoutApi?.createRecorder(()=>diagnosticSnapshot());
+  function diagnosticSnapshot(){
+    const host=active?.assistant?.host||lingeringHost;
+    return {layout:layoutApi.layout(),render:layoutApi.render(host,active?.assistant?.host?'active':lingeringHost?'lingering':'none')};
+  }
+  function diagnosticTap(method,...args){try{recorder?.[method](...args);}catch{}}
   function traceAssociation(stage,reason){
+    diagnosticTap('mark',stage,reason);
     if(associationEvents.at(-1)?.stage===stage&&associationEvents.at(-1)?.reason===reason)return;
     associationEvents.push({stage,reason,at:Math.round(performance.now())});
     if(associationEvents.length>20)associationEvents.shift();
@@ -62,6 +70,7 @@
   function stopInvalidContext() {
     if (!contextAlive) return;
     contextAlive = false;
+    recorder?.reset();
     clearLingeringHost();
     momentumEntry?.remove();
     try { active?.observer?.disconnect(); } catch {}
@@ -196,6 +205,7 @@
   function matchedComposer(post) {
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+    diagnosticTap('facts',facts);
     const result=active.association.evaluate(facts);
     if(result.state==='waiting')traceAssociation('waiting',result.reason);
     if (result.state==='rejected') {
@@ -289,6 +299,7 @@
     const current = active;
     try {
       // Independent reads start together; both remain mandatory before AI.
+      diagnosticTap('mark','prepare','settings_requested');
       const precheckStart = performance.now();
       const accountPending = safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" });
       const response = await safeSend({ type: "REPLY_COPILOT_GET_BEHAVIOR" });
@@ -296,6 +307,7 @@
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
       current.preferences = response.preferences; current.initializing = false;
+      diagnosticTap('mark','prepare','settings_received');
       if (current.preferences.showFloatingWindow) {
         current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
         traceAssociation('window',current.assistant?.host?.isConnected?'mounted':'mount_missing');
@@ -304,6 +316,7 @@
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       current.trace?.addDurations({precheck:performance.now()-precheckStart});
       current.trace?.mark("precheck_complete");
+      diagnosticTap('mark','account',account?.status==='credits_available'?'credits_available':'account_not_ready');
       if (account?.status === "credits_available") {
         if(stagingGateNext){
           const sample=stagingGateNext;stagingGateNext=null;
@@ -436,6 +449,7 @@
     if (!current || current.requestId !== requestId || current.cancelled || current.generating || current.generated || current.momentumGate) return;
     if (!['credits_available'].includes(current.accountStatus)) { void refreshAccount(current); return; }
     if (!current.editor?.isConnected || matchedComposer(current.post).editor!==current.editor) { current.assistant?.setStatus("无法准确匹配原帖和回复框，请打开侧栏继续。"); return; }
+    diagnosticTap('mark','generation','requested');
     current.generating = true; current.assistant?.showLoading();
     try {
       current.trace?.mark("background_dispatch");
@@ -445,6 +459,7 @@
       if (!contextAlive) return;
       if (!active || active.requestId !== requestId || active.cancelled || !active.editor?.isConnected) return;
       if (!response?.ok) throw Object.assign(new Error(response?.error || "生成失败，请打开侧边栏重试。"), { code: response?.code || "" });
+      diagnosticTap('mark','generation','succeeded');
       current.generated = true; current.generating = false; current.result = response.result;
       current.retrySameRequestId = false;
       current.assistant?.setAccountLabel(response.accountLabel);
@@ -459,6 +474,7 @@
       completeTrace(current,"incomplete");
       refreshMomentum(current,{arm:true});
     } catch (error) {
+      diagnosticTap('mark','generation','failed');
       completeTrace(current,"failed");
       current.generating = false;
       current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN","GENERATION_RECOVERY_REQUIRED"].includes(error?.code);
@@ -620,6 +636,16 @@
   // URLs, IDs, account information, DOM fragments or raw errors.
   function onRuntimeMessage(message,sender,sendResponse) {
     if (!hasRuntimeContext()) return false;
+    if(['REPLY_COPILOT_DIAGNOSTIC_ARM','REPLY_COPILOT_DIAGNOSTIC_FINISH','REPLY_COPILOT_DIAGNOSTIC_CANCEL'].includes(message?.type)){
+      if(sender?.id!==chrome.runtime.id||sender?.url!==chrome.runtime.getURL('sidepanel/sidepanel.html'))return false;
+      if(!recorder||typeof message.captureId!=='string'||!/^[a-f0-9-]{36}$/.test(message.captureId)){sendResponse({ok:false});return false;}
+      try{
+        if(message.type==='REPLY_COPILOT_DIAGNOSTIC_ARM'){recorder.start(message.captureId);sendResponse({ok:true});}
+        else if(message.type==='REPLY_COPILOT_DIAGNOSTIC_CANCEL'){recorder.cancel(message.captureId);sendResponse({ok:true});}
+        else sendResponse({ok:true,reproduction:recorder.finish(message.captureId)});
+      }catch{sendResponse({ok:false});}
+      return false;
+    }
     if(message?.type==='REPLY_COPILOT_LOCAL_DIAGNOSTICS'){
       if(sender?.id!==chrome.runtime.id||sender?.url!==chrome.runtime.getURL('sidepanel/sidepanel.html'))return false;
       try{
@@ -631,9 +657,10 @@
             rect.right>0&&rect.bottom>0&&rect.left<innerWidth&&rect.top<innerHeight?'visible':'not_visible';
         }
         const baseline=api.composerAssociation.baseline(document);
+        let extra={};try{if(layoutApi)extra=diagnosticSnapshot();}catch{}
         sendResponse({ok:true,schema:1,replyControlPresent:Boolean(document.querySelector('article [data-testid="reply"]')),
           visibleEditors:Math.min(100,baseline.visibleEditorCount),replyDialogs:Math.min(100,baseline.baselineModalCount),
-          windowState,events:associationEvents.slice(-12).map(({stage,reason})=>({stage,reason}))});
+          windowState,events:associationEvents.slice(-12).map(({stage,reason})=>({stage,reason})),...extra});
       }catch{sendResponse({ok:false,schema:1});}
       return false;
     }
@@ -658,6 +685,7 @@
       if(event.key==='Escape')rejectAssociation('cancelled_by_user');
       return;
     }
+    diagnosticTap('gesture',event,'activation');
     const control=api.replyDetector.findReplyControl(event.target);
     if (recoveryRequired) recoverAfterQuiescence();
     // X's composer has its own Reply/submit controls, but a media viewer
@@ -699,6 +727,7 @@
   function onDocumentClick(event) {
     const clickAt = performance.now();
     if (!hasRuntimeContext() || !event.isTrusted) return;
+    diagnosticTap('gesture',event,'click');
     const control=api.replyDetector.findReplyControl(event.target);
     if (control?.closest('[role="dialog"]') && !control.closest('article')) return;
     if (!control || control.closest('[data-zane-reply-copilot]')) return;

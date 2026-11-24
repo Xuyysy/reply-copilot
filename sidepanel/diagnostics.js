@@ -1,3 +1,4 @@
+import {sanitizeLayout,sanitizeRender,sanitizeReproduction,environment,classifyFailure} from './layout-report.js';
 // On-demand local diagnosis only. Do not include arbitrary strings from tabs,
 // account objects or exceptions in a shareable support report.
 const ACCOUNT=new Set(["credits_available","credits_exhausted","frozen","guest","auth_expired","auth_unavailable","pending","unknown"]);
@@ -13,7 +14,8 @@ export function sanitizeProbe(probe){
   if(probe?.ok!==true||probe.schema!==1)return null;
   return {replyControlPresent:flag(probe.replyControlPresent),visibleEditors:count(probe.visibleEditors),
     replyDialogs:count(probe.replyDialogs),windowState:enumValue(WINDOWS,probe.windowState),
-    events:Array.isArray(probe.events)?probe.events.slice(-12).map(e=>({stage:enumValue(STAGES,e?.stage),reason:enumValue(REASONS,e?.reason)})):[]};
+    events:Array.isArray(probe.events)?probe.events.slice(-12).map(e=>({stage:enumValue(STAGES,e?.stage),reason:enumValue(REASONS,e?.reason)})):[],
+    layout:sanitizeLayout(probe.layout),render:sanitizeRender(probe.render)};
 }
 function classifyPage(tab){
   if(!tab)return "no_tab";
@@ -21,20 +23,21 @@ function classifyPage(tab){
   try{const u=new URL(tab.url);return u.protocol==="https:"&&["x.com","twitter.com","www.x.com","www.twitter.com"].includes(u.hostname)?"x":"other";}
   catch{return "unknown";}
 }
-async function boundedProbe(chromeApi,id){
+async function boundedProbe(chromeApi,id,message={type:"REPLY_COPILOT_LOCAL_DIAGNOSTICS"}){
   let timer;
   try{
-    return await Promise.race([chromeApi.tabs.sendMessage(id,{type:"REPLY_COPILOT_LOCAL_DIAGNOSTICS"},{frameId:0}),
+    return await Promise.race([chromeApi.tabs.sendMessage(id,message,{frameId:0}),
       new Promise(resolve=>{timer=setTimeout(()=>resolve(null),2000);})]);
   }catch{return null;}finally{clearTimeout(timer);}
 }
-export async function collectDiagnostics({chromeApi=globalThis.chrome,userAgent="",preferences={},accountStatus="unknown"}={}){
-  const report={schema:1,extensionVersion:version(chromeApi.runtime.getManifest().version),
+export async function collectDiagnostics({chromeApi=globalThis.chrome,userAgent="",preferences={},accountStatus="unknown",tabId=null}={}){
+  const report={schema:1,diagnosticRevision:2,extensionVersion:version(chromeApi.runtime.getManifest().version),
     browserVersion:version(/(?:Chrome|Chromium)\/(\d+(?:\.\d+){0,3})/.exec(userAgent)?.[1]),
     accountStatus:enumValue(ACCOUNT,accountStatus),floatingEnabled:flag(preferences.showFloatingWindow),
     autoGenerate:flag(preferences.autoGenerateOnReply),page:"unknown",siteAccess:"unknown",contentScript:"unknown",probe:null};
   try{
-    const [tab]=await chromeApi.tabs.query({active:true,currentWindow:true});
+    const tab=Number.isInteger(tabId)?await chromeApi.tabs.get(tabId).catch(()=>null):(await chromeApi.tabs.query({active:true,currentWindow:true}))[0];
+    report.environment=environment(userAgent,tab,chromeApi.runtime.getManifest());
     report.page=classifyPage(tab);
     if(!Number.isInteger(tab?.id)||report.page==="other")return report;
     // Host access can be withheld. Unknown tab URL is NOT proof of denial.
@@ -59,6 +62,8 @@ export function diagnosticRows(r){
     ["标准回复按钮",p?.replyControlPresent===true?"已找到":p?.replyControlPresent===false?"未找到标准按钮（可能为不同布局）":"未检查"],
     ["可见编辑框 / 回复弹窗",p?String(p.visibleEditors??"未知")+" / "+String(p.replyDialogs??"未知"):"未检查"],
     ["悬浮窗当前状态",p?({visible:"已显示",not_visible:"已挂载但不可见",absent:"未显示",unknown:"未知"})[p.windowState]:"未检查"],
+    ["页面结构",p?.layout?`${p.layout.pageType} / ${p.layout.dialogStandardEditors??"?"} 个标准弹窗编辑器`:"未检查"],
+    ["复现结果",r.reproduction?.state==="complete"?r.finding||"已录制":r.reproduction?.state==="no_click"?"未捕获点击":r.reproduction?.state==="lost"?"录制已丢失，请重试":"尚未录制"],
     ["最近一次事件",p?.events.length?(REASON_LABELS[p.events.at(-1).reason]||p.events.at(-1).reason):"暂无（请在 X 点击回复后重新检查）"]
   ];
 }
@@ -79,3 +84,20 @@ export function diagnosticAdvice(r){
  if(reason==="prepare_failed")return "插件准备失败，请刷新 X 后重试，并复制报告给客服。";
  return "请先点击普通文字帖的回复按钮，再次检查；若仍不出现，请复制报告给客服。";
 }
+
+export async function armReproduction(chromeApi=globalThis.chrome){
+ const tab=(await chromeApi.tabs.query({active:true,currentWindow:true}))[0];
+ if(!Number.isInteger(tab?.id)||classifyPage(tab)==='other')return null;
+ const captureId=crypto.randomUUID();
+ const r=await boundedProbe(chromeApi,tab.id,{type:'REPLY_COPILOT_DIAGNOSTIC_ARM',captureId});
+ return r?.ok===true?{tabId:tab.id,captureId}:null;
+}
+export async function cancelReproduction(capture,chromeApi=globalThis.chrome){
+ if(capture)await boundedProbe(chromeApi,capture.tabId,{type:'REPLY_COPILOT_DIAGNOSTIC_CANCEL',captureId:capture.captureId});
+}
+export async function finishReproduction(capture,chromeApi=globalThis.chrome){
+ if(!capture)return {state:'lost'};
+ const r=await boundedProbe(chromeApi,capture.tabId,{type:'REPLY_COPILOT_DIAGNOSTIC_FINISH',captureId:capture.captureId});
+ return sanitizeReproduction(r?.ok===true?r.reproduction:{state:'lost'},[...STAGES,'prepare','account','generation'],[...REASONS,'settings_requested','settings_received','credits_available','account_not_ready','requested','succeeded','failed']);
+}
+export {classifyFailure};
