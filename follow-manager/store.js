@@ -1,3 +1,4 @@
+import {mergeVerification} from "./verification.js";
 // Only the extension's own origin can open this IndexedDB. No backend sync.
 const DATABASE = "xrh-follow-manager-v1";
 const STORE = "snapshots";
@@ -36,8 +37,32 @@ async function run(owner, mode, operation) {
 export function readSnapshot(owner) {
   return run(owner, "readonly", (store, key) => store.get(key));
 }
+// Read/merge/write in one transaction to preserve labels across archive updates.
+async function updateRecord(owner,transform) {
+  const db=await openDatabase();
+  try {
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(STORE,"readwrite"),store=tx.objectStore(STORE);
+      let result,problem;
+      tx.oncomplete=()=>resolve(result);
+      tx.onabort=()=>reject(problem||tx.error||new Error("本地记录写入失败。"));
+      tx.onerror=()=>reject(tx.error||new Error("本地记录写入失败。"));
+      store.get(owner).onsuccess=event=>{
+        try {result=transform(event.target.result);store.put(result);}
+        catch(error){problem=error;tx.abort();}
+      };
+    });
+  }finally{db.close();}
+}
 export function saveSnapshot(snapshot) {
-  return run(snapshot.owner, "readwrite", store => store.put(snapshot));
+  return updateRecord(snapshot.owner,previous=>({...snapshot,
+    verification:mergeVerification({...snapshot,verification:previous?.verification},null)}));
+}
+export function saveVerification(owner,importedAt,changes) {
+  return updateRecord(owner,record=>{
+    if(!record||record.importedAt!==importedAt)throw new Error("归档记录已变化，请重新打开后操作。");
+    return {...record,verification:mergeVerification(record,changes)};
+  });
 }
 export function removeSnapshot(owner) {
   return run(owner, "readwrite", (store, key) => store.delete(key));

@@ -1,5 +1,6 @@
 import {MAX_ARCHIVE_BYTES, MAX_ARCHIVE_USERS, normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships, profileUrl} from "./archive.js";
-import {readSnapshot, readLatestSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
+import {readSnapshot, readLatestSnapshot, saveSnapshot, removeSnapshot, saveVerification} from "./store.js";
+import {verificationFor,filterAccounts,parseVerificationCSV} from "./verification.js";
 import {groupArchiveFiles, appendArchiveFiles} from "./file-selection.js";
 import {collectArchiveFilesFromDirectory, MAX_DIRECTORY_ENTRIES} from "./directory-import.js";
 
@@ -9,6 +10,7 @@ const kinds = ["notFollowingBack", "iHaveNotFollowedBack"];
 const LAST_OWNER_KEY = "xrh-follow-archive-last-owner";
 let restoring = true;
 let importing = false;
+let verificationBusy = false;
 let current = null;
 let relationships = null;
 let selectedKind = "notFollowingBack";
@@ -31,11 +33,13 @@ function refreshSelection() {
 // Folder import is the primary path. Manual JS selection is an optional fallback.
 let directoryScan = null;
 function scanControls(active) {
-  const busy=active || importing || restoring;
+  const busy=active || importing || restoring || verificationBusy;
   for (const id of ["choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button", "owner", "same-account", "load-saved", "delete-saved", "close-import", "open-import"]) {
     $(id).disabled = busy;
   }
   $("cancel-scan").hidden = !active;
+  $("import-verification").disabled=busy;
+  for(const el of document.querySelectorAll(".verification-actions select"))el.disabled=busy;
 }
 function clearSelection() {
   selectedFiles.follower=[];
@@ -241,7 +245,7 @@ function chooseVisible(kind) {
 function filteredIds() {
   const text = $("filter-id").value.trim();
   const ids = relationships?.[selectedKind] || [];
-  return text ? ids.filter(id => id.includes(text)) : ids;
+  return filterAccounts(ids,text,$("filter-verification").value,current);
 }
 function renderList() {
   if (!current || !relationships) return;
@@ -268,18 +272,38 @@ function renderList() {
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "打开 X 主页 ↗";
-    row.append(identity, link);
+    const actions=document.createElement("div");
+    actions.className="verification-actions";
+    const value=verificationFor(current,id);
+    if(value===true){
+      const badge=document.createElement("span");
+      badge.className="blue-v-label";
+      badge.textContent="✓ 蓝 V";
+      badge.title="本地认证标记，非实时状态";
+      identity.append(badge);
+    }
+    const select=document.createElement("select");
+    select.setAttribute("aria-label","账号 "+id+" 的本地认证标记");
+    for(const [key,label] of [["unknown","认证未知"],["true","标记蓝 V"],["false","标记非蓝 V"]]){
+      const option=document.createElement("option");
+      option.value=key;option.textContent=label;select.append(option);
+    }
+    select.value=value===null?"unknown":String(value);
+    select.disabled=verificationBusy||importing||restoring||!!directoryScan;
+    select.addEventListener("change",()=>{void updateVerification({[id]:select.value==="unknown"?null:select.value==="true"});});
+    actions.append(select,link);
+    row.append(identity,actions);
     fragment.append(row);
   }
   if (!visible.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "此分类没有匹配的账号。";
+    empty.textContent = $("filter-verification").value==="blue"?"暂无已标记的蓝 V 账号，可补充本地认证数据。":"此分类没有匹配的账号。";
     fragment.append(empty);
   }
   $("result-list").replaceChildren(fragment);
   $("result-count").textContent = "此分类共 " + count.toLocaleString("zh-CN") + " 个账号" +
-    ($("filter-id").value.trim() ? "（已按数字 ID 筛选）" : "（按归档顺序展示）");
+    ($("filter-id").value.trim() || $("filter-verification").value!=="all" ? "（已筛选）" : "（按归档顺序展示）");
   $("page-info").textContent = (page + 1) + " / " + pages;
   $("page-prev").disabled = page === 0;
   $("page-next").disabled = page >= pages - 1;
@@ -303,6 +327,8 @@ function showSnapshot(snapshot) {
   $("count-not-following-back").textContent = relationships.notFollowingBack.length.toLocaleString("zh-CN");
   $("count-i-have-not-followed-back").textContent = relationships.iHaveNotFollowedBack.length.toLocaleString("zh-CN");
   $("filter-id").value = "";
+  $("filter-verification").value="all";
+  $("verification-feedback").textContent="";
   chooseVisible("notFollowingBack");
 }
 async function readGroup(fileList, kind) {
@@ -338,8 +364,8 @@ $("archive-form").addEventListener("submit", async event => {
       throw new Error("账号列表超过支持上限。");
     }
     const snapshot = {owner, importedAt:new Date().toISOString(), followers:followers.ids, following:following.ids};
-    await saveSnapshot(snapshot);
-    showSnapshot(snapshot);
+    const saved=await saveSnapshot(snapshot);
+    showSnapshot(saved);
     feedback("已安全导入 @" + owner + " 的本地快照。合并分片：粉丝 " + followers.partCount +
       "，关注 " + following.partCount + "；去除重复 ID " + (followers.duplicates + following.duplicates) + " 个。");
   } catch (error) { reportError(error); }
@@ -379,6 +405,7 @@ for (const button of document.querySelectorAll(".tab")) {
   button.addEventListener("click", () => { if (kinds.includes(button.dataset.kind)) chooseVisible(button.dataset.kind); });
 }
 $("filter-id").addEventListener("input", () => { page = 0; renderList(); });
+$("filter-verification").addEventListener("change",()=>{page=0;renderList();});
 $("page-size").addEventListener("change",()=>{pageSize=Number($("page-size").value);page=0;renderList();});
 $("open-import").addEventListener("click",openImport);
 $("close-import").addEventListener("click",()=>{if(current){clearSelection();$("owner").value="@"+current.owner;$("import-panel").hidden=true;}});
@@ -388,8 +415,8 @@ $("export-csv").addEventListener("click", () => {
   if (!current || !relationships) return;
   const ids = filteredIds();
   if (!ids.length) return;
-  const csv = "\uFEFFaccount_id,profile_url,category\r\n" + ids.map(id =>
-    id + "," + profileUrl(id) + "," + selectedKind).join("\r\n") + "\r\n";
+  const csv = "\uFEFFaccount_id,profile_url,category,blue_verified\r\n" + ids.map(id =>
+    id + "," + profileUrl(id) + "," + selectedKind + "," + (verificationFor(current,id)===null?"unknown":String(verificationFor(current,id)))).join("\r\n") + "\r\n";
   const url = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"}));
   const link = document.createElement("a");
   link.href = url;
@@ -414,3 +441,31 @@ async function restoreLocalResult() {
   finally { restoring=false;scanControls(false); }
 }
 void restoreLocalResult();
+
+function verificationFeedback(message,error=false){
+  $("verification-feedback").textContent=message;
+  $("verification-feedback").classList.toggle("error",error);
+}
+async function updateVerification(changes,expected=current) {
+  if(!expected || current!==expected || verificationBusy || importing || restoring || directoryScan)return;
+  verificationBusy=true;
+  scanControls(false);
+  try {
+    const saved=await saveVerification(expected.owner,expected.importedAt,changes);
+    if(current===expected)current=saved;
+    verificationFeedback("本地认证标记已保存。");
+  }catch(error){verificationFeedback(error.message||"保存认证标记失败。",true);}
+  finally{verificationBusy=false;scanControls(false);renderList();}
+}
+$("import-verification").addEventListener("click",()=>$("verification-file").click());
+$("verification-file").addEventListener("change",async event=>{
+  const file=event.target.files[0],expected=current;
+  event.target.value="";
+  if(!file||!expected)return;
+  try{
+    if(file.size>16*1024*1024)throw new Error("认证 CSV 不能超过 16 MB。");
+    const changes=parseVerificationCSV(await file.text());
+    if(current!==expected)throw new Error("当前归档已切换，请重新选择认证文件。");
+    await updateVerification(changes,expected);
+  }catch(error){verificationFeedback(error.message||"认证文件读取失败。",true);}
+});

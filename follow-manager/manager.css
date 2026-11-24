@@ -98,3 +98,11 @@ footer{font-size:12px;line-height:1.7;text-align:center;padding:10px}
 .result-row a{padding:6px 10px;border-radius:7px;border:1px solid var(--xrh-line);text-decoration:none;font-weight:650}
 .result-row a:hover{border-color:var(--xrh-brand)}
 @media(max-width:600px){.import-steps{grid-template-columns:1fr}.stat-tab{padding:12px}.stat-tab strong{font-size:25px}.stat-tab small{font-size:10px}.list-tools .page-size-field{flex:auto}.result-identity{gap:5px}.result-index{min-width:20px}.result-row a{padding:5px}}
+
+.list-tools .verification-filter{flex:0 0 142px}
+.verification-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.verification-actions select{font:inherit;font-size:11px;color:var(--xrh-muted);background:var(--xrh-surface);border:1px solid var(--xrh-line);border-radius:7px;padding:6px;max-width:130px}
+.blue-v-label{font-size:11px;font-weight:700;color:#1d9bf0;white-space:nowrap}
+.verification-details p{margin:7px 0}
+#verification-feedback:empty{display:none}
+@media(max-width:600px){.list-tools .verification-filter{flex:auto}.result-row{flex-wrap:wrap}.verification-actions{width:100%;justify-content:flex-end}}
