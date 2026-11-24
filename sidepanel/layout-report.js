@@ -13,7 +13,24 @@ function node(o){return o&&typeof o==='object'?{tag:enumOf(o.tag,tag),role:enumO
  slot:enumOf(o.slot,['none','other','embedded-tweet-frame']),
  ...fields(o,['permalinkWrapper','baseUiPortal','readOnly','disabled','insideInert'],bool)}:null;}
 function post(o){return {...fields(o,['article','tweetContainer','identityVerified','mainTextPresent','quoteTextPresent','modernAdapter','modernIdentityConflict','modernWrapperPresent'],bool),...fields(o,['textNodes','timeNodes','statusLinks','mediaNodes','modernBodyNodes','modernCanonicalLinks','modernQuoteFrames'],int)};}
-function gesture(o){return o&&typeof o==='object'?{target:node(o.target),nearestControl:node(o.nearestControl),ancestors:arr(o.ancestors,8,node),rule:enumOf(o.rule,['testid','label','engagement','unrecognized']),...fields(o,['replyTestIdAncestor','outerRecognized','insideDialog'],bool),post:post(o.post)}:null;}
+const structuralAttrs=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard'];
+const structuralClasses=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content'];
+const knownOnly=(values,allow)=>[...new Set(arr(values,allow.length,v=>allow.includes(v)?v:null).filter(Boolean))];
+const linkKinds=['none','fragment','status','status_media','compose','single_segment','x_other','external','other'];
+function structuralNode(o){return o&&typeof o==='object'?{
+ parentIndex:int(o.parentIndex,47),tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),
+ engagementAction:enumOf(o.engagementAction,['none','other','reply','retweet','like','bookmark','share','generic']),
+ slot:enumOf(o.slot,['none','other','embedded-tweet-frame']),
+ flags:knownOnly(o.flags,structuralAttrs),classes:knownOnly(o.classes,structuralClasses),
+ labelKind:enumOf(o.labelKind,['none','reply','reply_context','reply_count','post','close','search','other']),
+ hrefKind:enumOf(o.hrefKind,linkKinds),dataHrefKind:enumOf(o.dataHrefKind,linkKinds),
+ ...fields(o,['childCount','otherAttributeCount','classCount'],int),
+ ...fields(o,['editable','focused','openShadow','hasTextChild','insideInert'],bool)}:null;}
+function tree(o){return o&&typeof o==='object'?{nodes:arr(o.nodes,48,structuralNode),truncated:bool(o.truncated)}:null;}
+function detail(o){return {label:enumOf(o?.label,['300ms','1500ms','finish']),atMs:int(o?.atMs,60000),
+ dialogTrees:arr(o?.dialogTrees,2,tree),focusPath:arr(o?.focusPath,12,structuralNode),
+ editorPaths:arr(o?.editorPaths,3,p=>arr(p,8,structuralNode))};}
+function gesture(o){return o&&typeof o==='object'?{target:node(o.target),nearestControl:node(o.nearestControl),ancestors:arr(o.ancestors,8,node),rule:enumOf(o.rule,['testid','label','engagement','unrecognized']),...fields(o,['replyTestIdAncestor','outerRecognized','insideDialog'],bool),post:post(o.post),controlPath:arr(o.controlPath,12,structuralNode),composedPath:arr(o.composedPath,12,structuralNode),postTree:tree(o.postTree)}:null;}
 // Conservative layout classification. The new root/bundle marker alone or
 // a lone textarea is not proof. Mixed snapshots preserve both signatures.
 export function classifyLayout(o){
@@ -34,6 +51,9 @@ export function sanitizeLayout(o){
   ...fields(o,['articles','tweetContainers','standardReplyControls','standardEditors','roleDialogs','nativeDialogs','editableCandidates','inlineCandidates','nonstandardCandidates','dialogStandardEditors'],int),
   modernAppMarker:bool(o.modernAppMarker),modernBundlePresent:bool(o.modernBundlePresent),
   ...fields(o,['modernReplyControls','textareaCandidates','modernPostWrappers','modernBodyNodes','modernCanonicalLinks','modernQuoteFrames','baseUiPortals','legacyBodyNodes','dialogTextareaCandidates'],int),
+  ...fields(o,['documentFocused','pageVisible','hasReplyRouteParameter'],bool),
+  readyState:enumOf(o.readyState,['loading','interactive','complete']),
+  ...fields(o,['forms','openShadowHosts','translateMarkers'],int),
   dialogs:arr(o.dialogs,3,d=>({node:node(d?.node),
     ...fields(d,['ariaModal','insideBaseUiPortal','focusedInside'],bool),
     ...fields(d,['articles','modernBodyNodes','modernWrappers','modernCanonicalLinks','modernQuoteFrames','legacyBodyNodes','standardEditors','textareaEditors','editors'],int)})),
@@ -51,9 +71,13 @@ export function sanitizeReproduction(o,stage,reason){
  const state=enumOf(o?.state,['lost','recording','no_click','complete']);
  if(state!=='complete'&&state!=='no_click')return {state};
  return {state,gesture:gesture(o.gesture),click:gesture(o.click),
-  samples:arr(o.samples,8,s=>({label:enumOf(s?.label,['armed','before','after_click','300ms','1500ms','4500ms','9500ms','12000ms']),atMs:int(s?.atMs,60000),layout:sanitizeLayout(s?.layout),render:sanitizeRender(s?.render)})),
-  marks:arr(o.marks,40,m=>({stage:enumOf(m?.stage,stage),reason:enumOf(m?.reason,reason),atMs:int(m?.atMs,60000)})),
-  facts:arr(o.facts,12,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
+  samples:arr(o.samples,11,s=>({label:enumOf(s?.label,['armed','before','after_click','300ms','1500ms','4500ms','9500ms','12000ms','20000ms','30000ms','finish']),atMs:int(s?.atMs,60000),layout:sanitizeLayout(s?.layout),render:sanitizeRender(s?.render)})),
+  details:arr(o.details,3,detail),
+  clickCaptured:bool(o.clickCaptured),clickRelation:o.clickRelation?fields(o.clickRelation,['sameNode','sameArticle','sameControl'],bool):null,
+  additionalClicks:int(o.additionalClicks),recordedMs:int(o.recordedMs,60000),
+  marksTruncated:bool(o.marksTruncated),factsTruncated:bool(o.factsTruncated),
+  marks:arr(o.marks,64,m=>({stage:enumOf(m?.stage,stage),reason:enumOf(m?.reason,reason),atMs:int(m?.atMs,60000)})),
+  facts:arr(o.facts,20,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
    editors:arr(f?.value?.editors,5,e=>({editor:node(e?.editor),
     contextDetail:enumOf(e?.contextDetail,['verified_context','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
     ...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
@@ -77,6 +101,7 @@ export function classifyFailure(r){
  if(rep?.state==='no_click')return 'no_click_captured';
  if(rep?.state!=='complete')return 'reproduction_needed';
  const g=rep.click||rep.gesture;
+ if(rep.clickCaptured===false&&!rep.marks?.some(m=>m.stage==='activated'))return 'no_click_captured';
  if(!g)return 'click_shape_unavailable';
  if(g.rule==='unrecognized')return 'reply_control_unrecognized';
  if(g.post.article===false)return 'post_container_unrecognized';
@@ -101,5 +126,11 @@ export function classifyFailure(r){
  if(has('generation','failed'))return 'generation_failed';
  if(has('generation','requested')&&!has('generation','succeeded'))return 'generation_pending_at_capture_end';
  if(has('account','account_not_ready'))return 'account_not_ready_during_capture';
+ if(has('fill','verified'))return 'fill_verified';
+ if(has('fill','draft_protected'))return 'fill_draft_protected';
+ if(has('fill','not_safe_to_focus'))return 'fill_safety_blocked';
+ if(has('fill','not_accepted'))return 'fill_not_accepted';
+ if(has('fill','readback_mismatch')||has('fill','user_modified'))return 'fill_readback_mismatch';
+ if(has('fill','recommendation_skip'))return 'generation_recommended_skip';
  return 'window_mounted_during_capture';
 }

@@ -243,7 +243,7 @@ function invalidateDiagnosticAccess(){
   document.getElementById('diagnostic-preview-note')?.remove();
   clearTimeout(diagnosticExpiryTimer);
   $('diagnostic-panel').hidden=true;$('diagnostic-panel').open=false;
-  $('diagnostic-results').replaceChildren();$('diagnostic-copy').disabled=true;
+  $('diagnostic-results').replaceChildren();$('diagnostic-copy').disabled=true;$('diagnostic-export').disabled=true;
   $('diagnostic-status').textContent='尚未检查。';
 }
 function isDiagnosticPreview(){return RUNTIME_CONFIG.channel==='staging'&&previewExpiresAt>Date.now();}
@@ -276,7 +276,7 @@ async function runDiagnostics(){
   if(diagnosticBusy||!hasDiagnosticAccess())return;
   if(diagnosticCapture){$('diagnostic-status').textContent='正在录制，请先完成复现或取消录制。';return;}
   diagnosticBusy=true;diagnosticReport=null;
-  $('diagnostic-run').disabled=true;$('diagnostic-copy').disabled=true;
+  $('diagnostic-run').disabled=true;$('diagnostic-copy').disabled=true;$('diagnostic-export').disabled=true;
   $('diagnostic-status').textContent='正在检查当前标签页…';
   try{
     if(!await refreshDiagnosticAccess(true))return;
@@ -298,7 +298,7 @@ const findingLabels={
  inline_editor_candidate:'发现疑似内联回复编辑器',nonstandard_editor_candidate:'发现疑似非标准编辑器',native_dialog_candidate:'发现原生弹窗结构',
  association_not_bound:'回复编辑器未成功关联',prepare_failed:'插件准备失败',window_not_mounted:'悬浮窗未挂载',
  window_render_issue:'悬浮窗可能被隐藏、遮挡或超出视口',stylesheet_not_loaded_during_capture:'采样时未检测到样式表加载',
- generation_failed:'已请求生成但失败',generation_pending_at_capture_end:'录制结束时生成尚未完成',
+ fill_verified:'建议已自动填入并核验',fill_draft_protected:'检测到已有草稿，已保护',fill_safety_blocked:'填入未通过安全检查',fill_not_accepted:'X 编辑器未接受填入',fill_readback_mismatch:'填入后内容变化，需检查草稿',generation_recommended_skip:'AI 建议跳过，未填入',generation_failed:'已请求生成但失败',generation_pending_at_capture_end:'录制结束时生成尚未完成',
  account_not_ready_during_capture:'复现时账户状态未就绪',window_mounted_during_capture:'录制期间悬浮窗已挂载',reproduction_needed:'请进行一次复现录制'};
 function presentDiagnosticReport(report){
   report.finding=classifyFailure(report);
@@ -310,13 +310,13 @@ function presentDiagnosticReport(report){
     dt.textContent=label;dd.textContent=label==='复现结果'&&report.reproduction?.state==='complete'?(findingLabels[report.finding]||value):value;row.append(dt,dd);fragment.append(row);
   }
   $('diagnostic-results').replaceChildren(fragment);
-  diagnosticReport=report;$('diagnostic-copy').disabled=false;
+  diagnosticReport=report;$('diagnostic-copy').disabled=false;$('diagnostic-export').disabled=false;
   $('diagnostic-status').textContent=report.reproduction?
     (findingLabels[report.finding]||'复现已结束')+'。请复制报告发给客服；诊断提示不等同于确认根因。':diagnosticAdvice(report);
 }
 async function startDiagnosticCapture(){
   if(diagnosticBusy||diagnosticCapture||!hasDiagnosticAccess())return;
-  diagnosticBusy=true;diagnosticReport=null;$('diagnostic-copy').disabled=true;$('diagnostic-arm').disabled=true;$('diagnostic-run').disabled=true;
+  diagnosticBusy=true;diagnosticReport=null;$('diagnostic-copy').disabled=true;$('diagnostic-export').disabled=true;$('diagnostic-arm').disabled=true;$('diagnostic-run').disabled=true;
   $('diagnostic-results').replaceChildren();$('diagnostic-status').textContent='正在准备复现录制…';
   try{
     if(!await refreshDiagnosticAccess(true))return;
@@ -330,7 +330,7 @@ async function startDiagnosticCapture(){
       return;
     }
     diagnosticCapture=capture;$('diagnostic-finish').disabled=false;$('diagnostic-cancel').disabled=false;
-    $('diagnostic-status').textContent='请在当前 X 页面只点击一次出问题帖子的回复按钮，不要输入或发布。保持页面不刷新，约12秒后点击「完成复现」。';
+    $('diagnostic-status').textContent='请在当前 X 页面只点击一次出问题帖子的回复按钮，不要输入或发布。保持页面不刷新，约12秒后即可完成；如生成仍在进行，可等到30秒再完成复现。';
     diagnosticCaptureTimer=setTimeout(()=>{
       if(diagnosticCapture!==capture)return;
       void cancelReproduction(clearCapture());$('diagnostic-status').textContent='录制已超时，请重新开始复现。';
@@ -367,6 +367,21 @@ $('diagnostic-copy').addEventListener('click',async()=>{
   if(!diagnosticReport||!hasDiagnosticAccess())return;
   try{await navigator.clipboard.writeText(JSON.stringify(diagnosticReport,null,2));$('diagnostic-status').textContent='已复制诊断报告，可手动发给客服。';}
   catch{$('diagnostic-status').textContent='复制失败，请重新点击。';}
+});
+
+// Explicit local file export uses the same sanitized report and support
+// access gate as Copy. No downloads permission, network, or automatic upload.
+$('diagnostic-export').addEventListener('click',()=>{
+  if(!diagnosticReport||!hasDiagnosticAccess())return;
+  let url=null,link=null;
+  try{
+    const blob=new Blob([JSON.stringify(diagnosticReport,null,2)],{type:'application/json'});
+    url=URL.createObjectURL(blob);link=document.createElement('a');
+    link.href=url;link.download='x-reply-helper-diagnostic.json';
+    document.body.append(link);link.click();
+    $('diagnostic-status').textContent='已请求保存本地 JSON 报告，请手动发送给客服。';
+  }catch{$('diagnostic-status').textContent='保存失败，请尝试复制报告。';}
+  finally{link?.remove();if(url)setTimeout(()=>URL.revokeObjectURL(url),1000);}
 });
 
 if(RUNTIME_CONFIG.channel==='staging'){

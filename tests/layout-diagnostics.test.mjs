@@ -61,6 +61,17 @@ test('real Chrome records unrecognized nested controls, new editor layout and sa
  const ml=d.layout(),mg=d.gestureShape(modern.querySelector('button'));
  out.push(ml.modernAppMarker&&ml.modernReplyControls===1&&ml.modernPostWrappers===1&&ml.dialogTextareaCandidates===1&&ml.dialogs[0].modernCanonicalLinks===1&&ml.dialogs[0].textareaEditors===1&&mg.rule==='engagement'&&mg.post.modernAdapter&&mg.post.identityVerified);
  out.push(!JSON.stringify({ml,mg}).includes('private')&&!JSON.stringify({ml,mg}).includes('987654321'));
+ out.push(mg.postTree.nodes.some(x=>x.dataHrefKind==='status')&&mg.postTree.nodes.some(x=>x.engagementAction==='reply')&&mg.controlPath.length>0);
+ recorder.start('detailed');
+ const button=modern.querySelector('button');
+ recorder.gesture({isTrusted:true,target:button,type:'pointerdown'},'activation');
+ recorder.gesture({isTrusted:true,target:button,type:'click'},'click');
+ const started=time;
+ for(const [id,t] of [...timers].sort((a,b)=>a[1].at-b[1].at)){if(t.at>started+20000)continue;time=t.at;timers.delete(id);t.fn();}
+ recorder.mark('fill','verified');
+ const detailed=recorder.finish('detailed');
+ out.push(detailed.state==='complete'&&detailed.recordedMs>=20000&&detailed.clickRelation.sameControl&&detailed.details.length===3&&detailed.details[2].focusPath[0].tag==='textarea'&&detailed.marks.some(m=>m.reason==='verified'));
+ out.push(!JSON.stringify(detailed).includes('private')&&!JSON.stringify(detailed).includes('987654321'));
  document.querySelector('#result').textContent=JSON.stringify(out);
  };
  const html='<!doctype html><html lang="en"><body><article id="post"><a href="https://x.com/private-name/status/987654321">time</a><div data-testid="tweetText">private text</div><button id="reply" data-testid="reply"><span role="button" data-testid="unknown-private-id" aria-label="private@example.test">icon</span></button></article><output id="result"></output><script>'+code+'</script><script>('+fixture.toString()+')()</script></body></html>';
@@ -69,7 +80,7 @@ test('real Chrome records unrecognized nested controls, new editor layout and sa
  const result=spawnSync(browser,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+path.join(dir,'profile'),'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:25000,maxBuffer:2*1024*1024});
  assert.equal(result.status,0,result.stderr);
  const matches=result.stdout.match(/<output id="result">(\[[^\]]+\])<\/output>/);
- assert.ok(matches,result.stdout.slice(-500));const checks=JSON.parse(matches[1]);assert.equal(checks.length,10);assert.ok(checks.every(Boolean),JSON.stringify(checks));
+ assert.ok(matches,result.stdout.slice(-500));const checks=JSON.parse(matches[1]);assert.equal(checks.length,13);assert.ok(checks.every(Boolean),JSON.stringify(checks));
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
 
@@ -91,4 +102,27 @@ test('V3 layout classification requires multiple modern signals, supports mixed 
  const r=sanitizeReproduction({state:'complete',facts:[{value:{editors:[{editor:{tag:'textarea',engagementAction:privateValue,value:privateValue},contextDetail:privateValue}]}}]},[],[]);
  assert.equal(r.facts[0].value.editors[0].contextDetail,'unknown');
  assert.doesNotMatch(JSON.stringify({l,r}),/private-user-4928484829/);
+});
+
+
+test('deep structural evidence is bounded and independently redacted at export boundary',()=>{
+ const secret='private-id-4928484829';
+ const bad={parentIndex:999,tag:secret,role:secret,testId:secret,engagementAction:secret,slot:secret,flags:['aria-label',secret],classes:['whitespace-pre-wrap',secret],hrefKind:secret,dataHrefKind:secret,labelKind:secret,html:secret,value:secret};
+ const tree={nodes:Array.from({length:100},()=>bad),truncated:true};
+ const raw={state:'complete',click:{postTree:tree,controlPath:Array(30).fill(bad),composedPath:[bad]},details:Array.from({length:5},()=>({label:'finish',dialogTrees:[tree,tree,tree],focusPath:[bad],editorPaths:[[bad]]})),marks:[{stage:'fill',reason:'verified',atMs:20000}]};
+ const r=sanitizeReproduction(raw,['fill'],['verified']);
+ assert.equal(r.click.postTree.nodes.length,48);
+ assert.equal(r.click.controlPath.length,12);
+ assert.equal(r.details.length,3);
+ assert.equal(r.details[0].dialogTrees.length,2);
+ assert.deepEqual(r.click.postTree.nodes[0].flags,['aria-label']);
+ assert.equal(r.click.postTree.nodes[0].parentIndex,null);
+ assert.doesNotMatch(JSON.stringify(r),/private-id-4928484829/);
+});
+test('V3 findings distinguish mounted-only, generation and verified fill',()=>{
+ const base={page:'x',contentScript:'running',floatingEnabled:true,reproduction:{state:'complete',clickCaptured:true,click:{rule:'engagement',post:{article:true,identityVerified:true,mainTextPresent:true}},samples:[],marks:[{stage:'activated',reason:'trusted_reply_click'},{stage:'bound',reason:'new_focused_reply_editor'},{stage:'window',reason:'mounted'},{stage:'generation',reason:'succeeded'}]}};
+ assert.equal(classifyFailure(base),'window_mounted_during_capture');
+ for(const [reason,finding] of [['verified','fill_verified'],['draft_protected','fill_draft_protected'],['not_safe_to_focus','fill_safety_blocked'],['not_accepted','fill_not_accepted'],['readback_mismatch','fill_readback_mismatch']]){
+  assert.equal(classifyFailure({...base,reproduction:{...base.reproduction,marks:[...base.reproduction.marks,{stage:'fill',reason}]}}),finding);
+ }
 });

@@ -100,6 +100,6 @@ export async function cancelReproduction(capture,chromeApi=globalThis.chrome){
 export async function finishReproduction(capture,chromeApi=globalThis.chrome){
  if(!capture)return {state:'lost'};
  const r=await boundedProbe(chromeApi,capture.tabId,{type:'REPLY_COPILOT_DIAGNOSTIC_FINISH',captureId:capture.captureId});
- return sanitizeReproduction(r?.ok===true?r.reproduction:{state:'lost'},[...STAGES,'prepare','account','generation'],[...REASONS,'settings_requested','settings_received','credits_available','account_not_ready','requested','succeeded','failed']);
+ return sanitizeReproduction(r?.ok===true?r.reproduction:{state:'lost'},[...STAGES,'prepare','account','generation','fill'],[...REASONS,'settings_requested','settings_received','credits_available','account_not_ready','requested','succeeded','failed','recommendation_skip','candidate_unavailable','duplicate_attempt','duplicate_candidate','draft_protected','not_safe_to_focus','started','not_accepted','session_changed','user_modified','readback_mismatch','verified','NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN','GENERATION_RECOVERY_REQUIRED','other_generation_error']);
 }
 export {classifyFailure};

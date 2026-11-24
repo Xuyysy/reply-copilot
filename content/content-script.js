@@ -607,39 +607,49 @@
   }
   async function autoFillCurrent(current, requestId, style) {
     const candidate = current.result?.replies?.[style];
-    if (current.result?.recommendation === "skip" || typeof candidate !== "string" || !candidate.trim() || current.attemptedInput.has(requestId)) return;
+    if (current.result?.recommendation === "skip" || typeof candidate !== "string" || !candidate.trim() || current.attemptedInput.has(requestId)) {
+      diagnosticTap('mark','fill',current.result?.recommendation==='skip'?'recommendation_skip':current.attemptedInput.has(requestId)?'duplicate_attempt':'candidate_unavailable');
+      return;
+    }
     const normalized = candidate.trim();
     if (normalized.length % 2 === 0 && normalized.slice(0, normalized.length / 2) === normalized.slice(normalized.length / 2)) {
+      diagnosticTap('mark','fill','duplicate_candidate');
       current.assistant?.setStatus("AI 建议本身含有重复文字，请换一种表达；这条未填入回复框。");
       return;
     }
     if (current.initialComposerText || current.userTouchedComposer || api.composerAdapter.hasContent(current.editor)) {
+      diagnosticTap('mark','fill','draft_protected');
       current.assistant?.setStatus("回复框已有内容，已保留原文；可以复制建议后自行调整。");
       return;
     }
     current.attemptedInput.add(requestId);
     const valid = () => contextAlive && document.visibilityState === "visible" && document.hasFocus() && active === current && current.requestId === requestId && !current.cancelled && current.editor?.isConnected && !current.userTouchedComposer && !api.composerAdapter.hasContent(current.editor) && matchedComposer(current.post).editor === current.editor;
     if (!valid() || document.activeElement !== current.editor || !api.composerAdapter.focusEmpty(current.editor)) {
+      diagnosticTap('mark','fill','not_safe_to_focus');
       current.assistant?.setStatus("回复框已变化，已保留现有内容；可以复制建议后粘贴。");
       return;
     }
     current.applyingReply = true;
     current.trace?.mark("insert_started");
+    diagnosticTap('mark','fill','started');
     const inserted = api.composerAdapter.insertOnce(current.editor, requestId, candidate, valid);
     current.applyingReply = false;
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
-    if (!inserted) { current.assistant?.setStatus("X 回复框未接受自动填入，可复制建议后粘贴。"); return; }
+    if (!inserted) { diagnosticTap('mark','fill','not_accepted'); current.assistant?.setStatus("X 回复框未接受自动填入，可复制建议后粘贴。"); return; }
     await new Promise((resolve) => setTimeout(resolve, 80));
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
     if (current.userTouchedComposer) {
+      diagnosticTap('mark','fill','user_modified');
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
     if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
       // A translator can mutate one editor. Fence THIS request, not all future posts.
       // insertOnce prevents duplicate insertion for the same requestId.
+      diagnosticTap('mark','fill','readback_mismatch');
       current.assistant?.setStatus("本条回复框与建议文字不一致，可复制建议；下一条帖子可继续尝试。");
       return;
     }
+    diagnosticTap('mark','fill','verified');
     current.trace?.mark("editor_verified");
     completeTrace(current,"success");
     current.appliedText = candidate.trim(); current.appliedStyle = style;
@@ -683,20 +693,24 @@
     }
     current.applyingReply=true;
     current.trace?.mark("insert_started");
+    diagnosticTap('mark','fill','started');
     const inserted=api.composerAdapter.insertOnce(editor,requestId,reply,
       ()=>valid()&&document.activeElement===editor);
     current.applyingReply=false;
     if(active!==current||current.cancelled)return;
     if(!inserted){
+      diagnosticTap('mark','fill','not_accepted');
       current.assistant?.setStatus("X 未接受此次单次填入，请复制建议，不要反复尝试。");
       return;
     }
     await new Promise(resolve=>setTimeout(resolve,80));
     if(active!==current||current.cancelled)return;
     if(!editor.isConnected||api.composerAdapter.readText(editor)!==reply.trim()){
+      diagnosticTap('mark','fill','readback_mismatch');
       current.assistant?.setStatus("回复框已变化，请核对草稿，避免重复填入。");
       return;
     }
+    diagnosticTap('mark','fill','verified');
     current.trace?.mark("editor_verified");
     if(causalAuto)completeTrace(current,"success");
     current.appliedText=reply.trim();current.appliedStyle=style;
@@ -768,7 +782,7 @@
       current.assistant?.showResult(response.result.replies, selectedStyle);
       current.trace?.mark("candidates_shown");
       void safeSend({ type: "REPLY_COPILOT_ACCOUNT_STATE" }).then((state) => { if (active === current && state?.ok) { current.accountStatus = state.status; current.assistant?.setAccountLabel(state.quota?.totalRemaining != null ? `剩余 ${state.quota.totalRemaining} 次` : response.accountLabel); } });
-      if (response.result.recommendation === "skip") current.assistant?.setStatus(`建议先跳过：${response.result.reason}`);
+      if (response.result.recommendation === "skip") { diagnosticTap('mark','fill','recommendation_skip'); current.assistant?.setStatus(`建议先跳过：${response.result.reason}`); }
       else if(copyOnly) {
         if(current.causalQuoteAuto) {
           const applied=await confirmQuoteCopyOnlyFill(current,{
@@ -791,7 +805,11 @@
       completeTrace(current,"incomplete");
       refreshMomentum(current,{arm:true});
     } catch (error) {
-      if(active===current&&current.requestId===requestId)diagnosticTap('mark','generation','failed');
+      if(active===current&&current.requestId===requestId){
+        diagnosticTap('mark','generation','failed');
+        const safeCode=['NETWORK_ERROR','DELIVERY_CONFIRMATION_PENDING','GENERATION_IN_PROGRESS','GENERATION_STATUS_UNKNOWN','GENERATION_RECOVERY_REQUIRED'].includes(error?.code)?error.code:'other_generation_error';
+        diagnosticTap('mark','generation',safeCode);
+      }
       completeTrace(current,"failed");
       current.generating = false;
       current.retrySameRequestId = ["DELIVERY_CONFIRMATION_PENDING","NETWORK_ERROR","GENERATION_IN_PROGRESS","GENERATION_STATUS_UNKNOWN","GENERATION_RECOVERY_REQUIRED"].includes(error?.code);

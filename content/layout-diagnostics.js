@@ -34,6 +34,82 @@
       disabled:node.localName==='textarea'?node.disabled===true:null,
       insideInert:Boolean(near(node,'[inert]'))};
   }
+  // Structural evidence is deliberately data-free. Only fixed semantic
+  // flags, enums, bounded counts and tree-local parent indexes are retained.
+  // No arbitrary class/attribute names, values, DOM text, IDs, URL strings,
+  // exact coordinates, input contents or selection contents.
+  const STRUCT_ATTRS=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard'];
+  const STRUCT_CLASSES=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content'];
+  function linkKind(raw){
+    if(!raw)return 'none';
+    if(raw.startsWith('#'))return 'fragment';
+    try{
+      const u=new URL(raw,document.baseURI||location.href);
+      if(u.protocol!=='https:')return 'other';
+      if(!['x.com','twitter.com','www.x.com','www.twitter.com'].includes(u.hostname))return 'external';
+      if(/^\/[^/]+\/status\/\d+\/?$/.test(u.pathname))return 'status';
+      if(/^\/[^/]+\/status\/\d+\/(?:photo|video)(?:\/|$)/.test(u.pathname))return 'status_media';
+      if(u.pathname.startsWith('/compose/'))return 'compose';
+      if(/^\/[^/]+\/?$/.test(u.pathname))return 'single_segment';
+      return 'x_other';
+    }catch{return 'other';}
+  }
+  function labelKind(node){
+    // Exact or coarse semantic categories only, never export the label.
+    const label=attr(node,'aria-label').normalize('NFKC').trim().toLowerCase();
+    if(!label)return 'none';
+    if(/^(reply|回复|回覆|返信|답글|responder|répondre|antworten)$/.test(label))return 'reply';
+    if(/^(replying to|回复给|回复对象)(?:\s|[:：]|$)/.test(label))return 'reply_context';
+    if(/^(reply|回复)\s+\d/.test(label)||/^\d[\d,.]*\s+repl(?:y|ies)(?:\b|$)/.test(label))return 'reply_count';
+    if(/^(post|tweet|发布|发帖|ポスト)$/.test(label))return 'post';
+    if(/^(close|关闭|cancel|取消)$/.test(label))return 'close';
+    if(/^(search|搜索|検索)$/.test(label))return 'search';
+    return 'other';
+  }
+  function structuralNode(node,parentIndex){
+    const d=describe(node);
+    return {parentIndex,tag:d.tag,role:d.role,testId:d.testId,engagementAction:d.engagementAction,slot:d.slot,
+      flags:STRUCT_ATTRS.filter(k=>node.hasAttribute?.(k)),
+      classes:STRUCT_CLASSES.filter(k=>node.classList?.contains(k)),
+      labelKind:labelKind(node),hrefKind:linkKind(attr(node,'href')),dataHrefKind:linkKind(attr(node,'data-href')),
+      childCount:Math.min(100,node.children?.length||0),
+      otherAttributeCount:Math.min(100,Math.max(0,(node.attributes?.length||0)-STRUCT_ATTRS.filter(k=>node.hasAttribute?.(k)).length)),
+      classCount:Math.min(100,node.classList?.length||0),
+      editable:d.editable,focused:node===document.activeElement,
+      openShadow:Boolean(node.shadowRoot),
+      hasTextChild:Array.from(node.childNodes||[]).slice(0,30).some(x=>x.nodeType===3&&Boolean(x.nodeValue?.trim())),
+      insideInert:d.insideInert};
+  }
+  function structureTree(root){
+    if(!root||root.nodeType!==1)return null;
+    const result=[],queue=[{node:root,parentIndex:null,depth:0}];
+    let truncated=false;
+    for(let i=0;i<queue.length&&result.length<48;i++){
+      const {node,parentIndex,depth}=queue[i],index=result.length;
+      result.push(structuralNode(node,parentIndex));
+      const children=node.children||[];
+      if(depth>=7){if(children.length)truncated=true;continue;}
+      for(const child of children){
+        if(queue.length>=48){truncated=true;break;}
+        queue.push({node:child,parentIndex:index,depth:depth+1});
+      }
+    }
+    return {nodes:result,truncated};
+  }
+  function ancestry(node,max=12){
+    const out=[];
+    for(let x=node;x&&x.nodeType===1&&out.length<max;x=x.parentElement||x.getRootNode?.().host||null)
+      out.push(structuralNode(x,null));
+    return out;
+  }
+  function detailSnapshot(){
+    const dialogs=nodes(document,'[role="dialog"],dialog[open]').filter(vis).slice(0,2);
+    const focus=document.activeElement;
+    const focused=focus?.nodeType===1&&focus!==document.body?focus:null;
+    return {dialogTrees:dialogs.map(structureTree),focusPath:ancestry(focused),
+      // Only a representative editor/ancestor, not the entire feed or page.
+      editorPaths:nodes(document,EDITABLE).filter(vis).slice(0,3).map(e=>ancestry(e,8))};
+  }
   function route(){
     const p=location.pathname;
     if(p==='/home'||p==='/')return 'home';
@@ -68,11 +144,16 @@
       if(x!==nearest&&api.replyDetector?.isReplyControl?.(x))outerRecognized=true;
     }
     const testIdNode=near(target,'[data-testid="reply"]');
+    const source=recognized||nearest||target;
+    const root=near(source,MODERN_WRAPPER)||near(source,'article')||source?.parentElement;
+    const composed=typeof event?.composedPath==='function'?event.composedPath():[];
+    const path=composed.filter(x=>x?.nodeType===1).slice(0,12).map(x=>structuralNode(x,null));
     return {target:describe(target),nearestControl:describe(nearest),ancestors,
       rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':attr(recognized,'data-engagement-action')==='reply'?'engagement':'label'):'unrecognized',
       replyTestIdAncestor:Boolean(testIdNode),outerRecognized,
       insideDialog:Boolean(near(target,'[role="dialog"],dialog')),
-      post:postShape(recognized||nearest||target)};
+      post:postShape(source),controlPath:ancestry(source),composedPath:path,
+      postTree:structureTree(root)};
   }
   // Fixed selector counts only: no URLs, hash/version strings, raw HTML,
   // script source, arbitrary attribute values or post/editor text exported.
@@ -115,6 +196,12 @@
       legacyBodyNodes:n(document,'[data-testid="tweetText"]'),
       dialogTextareaCandidates:nv(document,'[role="dialog"] textarea,dialog[open] textarea'),
       dialogs:dialogShapes(),
+      documentFocused:document.hasFocus?.()===true,
+      pageVisible:document.visibilityState==='visible',
+      readyState:['loading','interactive','complete'].includes(document.readyState)?document.readyState:'unknown',
+      hasReplyRouteParameter:(()=>{try{return new URL(location.href).searchParams.has('in_reply_to');}catch{return false;}})(),
+      forms:n(document,'form'),openShadowHosts:nodes(document,'article, [role="dialog"], dialog[open]').filter(x=>Boolean(x.shadowRoot)).length,
+      translateMarkers:n(document,'.immersive-translate-translation,.immersive-translate-target-translation-block-wrapper,.immersive-translate-target-translation-inline-wrapper,[data-immersive-translate-translation]'),
       roleDialogs:nv(document,'[role="dialog"]'),nativeDialogs:nv(document,'dialog[open]'),
       editableCandidates:editors.length,inlineCandidates:editors.filter(x=>!near(x,'[role="dialog"],dialog')).length,
       nonstandardCandidates:editors.filter(x=>!x.matches(STANDARD)).length,
@@ -147,31 +234,53 @@
     let run=null;
     const age=()=>run?.startedAt==null?0:Math.min(60000,Math.max(0,Math.round(now()-run.startedAt)));
     function reset(){if(run){for(const t of run.timers)clear(t);run=null;}}
-    function sample(label){if(!run||run.finished)return;try{run.samples.push({label,atMs:age(),...snapshot()});}catch{run.sampleErrors++;}}
+    function sample(label,force=false){
+      if(!run||(run.finished&&!force))return;
+      try{run.samples.push({label,atMs:age(),...snapshot()});}catch{run.sampleErrors++;}
+    }
+    function detail(label){
+      if(!run||run.details.length>=3)return;
+      try{run.details.push({label,atMs:age(),...detailSnapshot()});}catch{run.sampleErrors++;}
+    }
     function start(id){
-      reset();run={id,startedAt:null,gesture:null,click:null,marks:[],samples:[],facts:[],timers:[],sampleErrors:0,finished:false};
+      reset();run={id,startedAt:null,gesture:null,click:null,marks:[],samples:[],details:[],facts:[],timers:[],sampleErrors:0,finished:false,gestureTarget:null,clickRelation:null,additionalClicks:0,marksTruncated:false,factsTruncated:false};
       run.timers.push(later(reset,90000));sample('armed');return true;
     }
     function gesture(event,phase){
       if(!run||run.finished||!event.isTrusted||near(event.target,'[data-zane-reply-copilot]'))return;
       if(phase==='activation'&&event.type==='keydown'&&!['Enter',' '].includes(event.key))return;
       if(run.startedAt===null){
-        run.startedAt=now();try{run.gesture=gestureShape(event.target,event);}catch{run.sampleErrors++;}
+        run.startedAt=now();run.gestureTarget=event.target;
+        try{run.gesture=gestureShape(event.target,event);}catch{run.sampleErrors++;}
         sample('before');
-        for(const [ms,label] of [[0,'after_click'],[300,'300ms'],[1500,'1500ms'],[4500,'4500ms'],[9500,'9500ms'],[12000,'12000ms']]){
-          run.timers.push(later(()=>{sample(label);if(ms===12000&&run)run.finished=true;},ms));
+        for(const [ms,label] of [[0,'after_click'],[300,'300ms'],[1500,'1500ms'],[4500,'4500ms'],[9500,'9500ms'],[12000,'12000ms'],[20000,'20000ms'],[30000,'30000ms']]){
+          run.timers.push(later(()=>{sample(label);if(ms===300||ms===1500)detail(label);
+            if(ms===30000&&run)run.finished=true;},ms));
         }
       }
-      if(phase==='click'&&!run.click&&age()<=2000){try{run.click=gestureShape(event.target,event);}catch{run.sampleErrors++;}}
+      if(phase==='click'){
+        if(!run.click&&age()<=2000){
+          try{
+            const first=run.gestureTarget,current=event.target;
+            const a=near(first,'article'),b=near(current,'article');
+            const c=near(first,CONTROL),d=near(current,CONTROL);
+            run.clickRelation={sameNode:first===current,sameArticle:Boolean(a&&a===b),sameControl:Boolean(c&&c===d)};
+            run.click=gestureShape(current,event);
+          }catch{run.sampleErrors++;}
+          finally{run.gestureTarget=null;}
+        }else run.additionalClicks=Math.min(100,run.additionalClicks+1);
+      }
     }
     function mark(stage,reason){
-      if(!run||run.startedAt===null||run.finished||run.marks.length>=40)return;
+      if(!run||run.startedAt===null||run.finished)return;
+      if(run.marks.length>=64){run.marksTruncated=true;return;}
       const previous=run.marks.at(-1);
       if(previous?.stage===stage&&previous?.reason===reason)return;
       run.marks.push({stage,reason,atMs:age()});
     }
     function facts(value){
-      if(!run||run.startedAt===null||run.finished||run.facts.length>=12)return;
+      if(!run||run.startedAt===null||run.finished)return;
+      if(run.facts.length>=20){run.factsTruncated=true;return;}
       const f={routeAllowed:value.routeAllowed===true,sourceUnchanged:value.sourceUnchanged===true,
         candidates:Math.min(100,value.editors.length),dialogs:Math.min(100,value.visibleDialogCount),
         editors:value.editors.slice(0,5).map(e=>({modal:e.modal===true,focused:e.focused===true,empty:e.empty===true,
@@ -186,8 +295,11 @@
     function finish(id){
       if(!run||run.id!==id)return {state:'lost'};
       if(run.startedAt!==null&&!run.finished&&age()<12000)return {state:'recording'};
+      if(run.startedAt!==null){sample('finish',true);detail('finish');}
       const report={state:run.startedAt===null?'no_click':'complete',gesture:run.gesture,click:run.click,
-        samples:run.samples,marks:run.marks,facts:run.facts,sampleErrors:run.sampleErrors};
+        samples:run.samples,details:run.details,marks:run.marks,facts:run.facts,sampleErrors:run.sampleErrors,
+        clickCaptured:Boolean(run.click),clickRelation:run.clickRelation,additionalClicks:run.additionalClicks,
+        marksTruncated:run.marksTruncated,factsTruncated:run.factsTruncated,recordedMs:age()};
       reset();return report;
     }
     return {start,gesture,mark,facts,finish,cancel(id){if(run?.id===id)reset();},reset};
