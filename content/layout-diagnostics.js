@@ -149,7 +149,7 @@
     const composed=typeof event?.composedPath==='function'?event.composedPath():[];
     const path=composed.filter(x=>x?.nodeType===1).slice(0,12).map(x=>structuralNode(x,null));
     return {target:describe(target),nearestControl:describe(nearest),ancestors,
-      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':attr(recognized,'data-engagement-action')==='reply'?'engagement':'label'):'unrecognized',
+      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':(attr(recognized,'data-engagement-action')==='reply'||attr(near(recognized,'[data-engagement-action]'),'data-engagement-action')==='reply')?'engagement':'label'):'unrecognized',
       replyTestIdAncestor:Boolean(testIdNode),outerRecognized,
       insideDialog:Boolean(near(target,'[role="dialog"],dialog')),
       post:postShape(source),controlPath:ancestry(source),composedPath:path,

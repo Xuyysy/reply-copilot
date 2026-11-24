@@ -32,10 +32,18 @@
     // Do not treat submit buttons or unrelated engagement actions as Reply.
     // In the rebuilt UI the marker lives on a wrapping div, while the
     // actual click is an anchor (possibly through SVG/span descendants).
-    const owner=element.closest?.('[data-engagement-action]');
-    const action=element.getAttribute("data-engagement-action")||owner?.getAttribute?.("data-engagement-action");
+    const article=element.closest?.("article");
+    const modern=globalThis.ZaneReplyCopilotContent?.postExtractor?.isModernPost?.(article)===true;
+    const ownAction=element.getAttribute("data-engagement-action");
+    // Keep 0.3.15 legacy/hybrid behavior exactly, even when a surrounding
+    // modern page exposes engagement attributes on unrelated ancestors.
+    if(!modern&&ownAction) {
+      return ownAction==="reply" && Boolean(article) &&
+        !article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]');
+    }
+    const owner=modern?element.closest?.('[data-engagement-action]'):null;
+    const action=modern&&(ownAction||owner?.getAttribute?.("data-engagement-action"));
     if(action) {
-      const article=element.closest?.("article");
       if(action!=="reply"||!article||
          (owner&&owner.closest?.('article')!==article)||
          element.closest?.('[data-slot="embedded-tweet-frame"],[data-testid="quoteTweet"],[data-testid="card.wrapper"]')||

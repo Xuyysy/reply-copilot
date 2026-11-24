@@ -519,7 +519,9 @@
         if(mutationTouchesReply(records))scheduleLocate();
       }else locate();
     });
-    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly','inert','aria-disabled','aria-readonly']});
+    const observedAttributes=['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly'];
+    if(post.modernLayout)observedAttributes.push('inert','aria-disabled','aria-readonly');
+    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:observedAttributes});
     locate();
   }
   async function prepareCurrent(requestId) {

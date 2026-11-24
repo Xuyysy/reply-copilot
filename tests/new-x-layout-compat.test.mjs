@@ -61,6 +61,15 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       document.body.append(wrapper);
       const action=wrapper.querySelector('a'),outer=wrapper.querySelector('article'),source=p.extractPost(outer);
       checks.realNestedLink=r.findReplyControl(wrapper.querySelector('#replyIcon'))===action&&r.replyTargetId(action)===source.statusId;
+      // A legacy article on a mixed page must still use its original
+      // testid/label behavior, not the modern ancestor/route rules.
+      const legacyAction=document.createElement('div');legacyAction.setAttribute('data-engagement-action','like');
+      legacyAction.innerHTML='<button aria-label="Reply">legacy localized label</button><a data-engagement-action="reply" href="/old-compose">legacy own action</a><button data-testid="reply">legacy testid</button><a href="/compose/post?in_reply_to=101">unmarked legacy anchor</a>';
+      legacy.append(legacyAction);
+      checks.legacyMixedLabel=r.isReplyControl(legacyAction.children[0]);
+      checks.legacyOwnAction=r.isReplyControl(legacyAction.children[1]);
+      checks.legacyTestIdWins=r.isReplyControl(legacyAction.children[2]);
+      checks.legacyNoAncestorInference=!r.isReplyControl(legacyAction.children[3]);
       action.href='https://example.com/compose/post?in_reply_to=808';checks.externalAction=!r.isReplyControl(action);
       action.href='/compose/post?in_reply_to=808&in_reply_to=808';checks.duplicateAction=!r.isReplyControl(action);
       action.href='/compose/post?in_reply_to=808&quote=999';checks.quoteAction=!r.isReplyControl(action);
@@ -119,7 +128,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,46);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,50);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });

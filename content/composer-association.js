@@ -264,16 +264,16 @@
       const routeId=post.modernLayout&&post.replyRouteVerified?
         api.replyDetector.replyRouteId(currentUrl,initialUrl):null;
       const routeConflict=Boolean(post.modernLayout&&linklessPreviewConflict(dialog,node,post,initialUrl));
-      const editorUnsafe=node.localName==='textarea'&&
+      const editorUnsafe=post.modernLayout&&node.localName==='textarea'&&
         (node.disabled||node.readOnly||node.getAttribute('aria-disabled')==='true'||
          node.getAttribute('aria-readonly')==='true'||!node.getAttribute('aria-label')||
          node.closest('[inert],[data-slot="embedded-tweet-frame"]')||node.closest('article'));
       const routeQuoteNodes=post.modernLayout&&post.quoteOnly?
         [...dialog.querySelectorAll(MODERN_FRAME+' '+MODERN_BODY)].filter(n=>beforeEditor(n,node,dialog)):[];
       const routeQuoteText=routeQuoteNodes.length===1?normalized(api.postExtractor.readOriginalText(routeQuoteNodes[0])):'';
-      const quoteRoutePreview=post.quoteOnly&&candidates.length===0&&routeQuoteText&&
+      const quoteRoutePreview=post.modernLayout&&post.quoteOnly&&candidates.length===0&&routeQuoteText&&
         routeQuoteText===normalized(post.quotedText)&&!quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,routeQuoteText));
-      const ownRoutePreview=!post.quoteOnly&&candidates.length===1&&primary?.article===null&&
+      const ownRoutePreview=post.modernLayout&&!post.quoteOnly&&candidates.length===1&&primary?.article===null&&
         primary?.id===null&&sameContext(post,primary.text);
       const linkless=post.modernLayout&&post.replyRouteVerified&&routeId===post.statusId&&
         !routeConflict&&!quarantinedContextMatch&&(ownRoutePreview||quoteRoutePreview);
