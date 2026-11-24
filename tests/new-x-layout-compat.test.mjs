@@ -18,11 +18,14 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       const legacy=$('legacy'),modern=$('modern');
       const old=p.extractPost(legacy),post=p.extractPost(modern);
       checks.legacy=old.ok&&old.statusId==='101'&&old.sourceText==='Legacy body'&&!old.modernLayout&&r.isReplyControl($('oldreply'));
+      const hybrid=p.extractPost($('hybrid'));
+      checks.hybridLegacy=hybrid.ok&&hybrid.statusId==='102'&&!hybrid.modernLayout&&hybrid.sourceText==='Hybrid legacy';
       checks.modern=post.ok&&post.statusId==='202'&&post.sourceText==='New body'&&post.modernLayout===true&&r.isReplyControl($('newreply'));
       checks.otherAction=!r.isReplyControl($('like'));
       checks.quoteNotSource=!p.extractPost($('quoted')).ok;
       checks.focal=p.extractPost($('focal')).statusId==='303';
       checks.conflict=!p.extractPost($('conflict')).ok;
+      checks.siblingConflict=!p.extractPost($('siblingConflict')).ok;
       checks.untrustedLink=!p.extractPost($('bad')).ok;
       checks.ambiguousText=!p.extractPost($('ambiguous')).ok;
       const base=a.baseline(document,post);
@@ -54,11 +57,13 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       ed.value='';checks.stale=!c.insertOnce(ed,'stale','wrong',()=>false)&&ed.value==='';
       $('result').textContent=JSON.stringify(checks);
     };
-    const html='<!doctype html><html data-app-version="fixture"><body>'+
+    const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
       '<article id="legacy" data-testid="tweet"><a href="https://x.com/old/status/101"><time>now</time></a><div data-testid="tweetText">Legacy body</div><button id="oldreply" data-testid="reply">Reply</button></article>'+
-      '<div role="link" data-href="https://x.com/new/status/202"><article id="modern"><div dir="auto" class="whitespace-pre-wrap">New body</div><button id="newreply" data-engagement-action="reply">2</button><button id="like" data-engagement-action="like" aria-label="Reply">Like</button><div data-slot="embedded-tweet-frame"><div role="link" data-href="https://x.com/quote/status/909"><article id="quoted"><div dir="auto" class="whitespace-pre-wrap">quoted</div></article></div></div></article></div>'+
+      '<article id="hybrid"><a href="https://x.com/old/status/102"><time>now</time></a><div data-testid="tweetText">Hybrid legacy</div></article>'+
+      '<div role="link" data-href="/new/status/202"><article id="modern"><div dir="auto" class="whitespace-pre-wrap">New body</div><button id="newreply" data-engagement-action="reply">2</button><button id="like" data-engagement-action="like" aria-label="Reply">Like</button><div data-slot="embedded-tweet-frame"><div role="link" data-href="https://x.com/quote/status/909"><article id="quoted"><div dir="auto" class="whitespace-pre-wrap">quoted</div></article></div></div></article></div>'+
       '<article id="focal"><a aria-hidden="true" href="https://x.com/new/status/303"></a><div dir="auto" class="whitespace-pre-wrap">Focal</div></article>'+
       '<div role="link" data-href="https://x.com/new/status/404"><article id="conflict"><a aria-hidden="true" href="https://x.com/new/status/405"></a><div dir="auto" class="whitespace-pre-wrap">Conflict</div></article></div>'+
+      '<div role="link" data-href="/new/status/501"><a aria-hidden="true" href="/new/status/502"></a><article id="siblingConflict"><div dir="auto" class="whitespace-pre-wrap">Sibling conflict</div></article></div>'+
       '<div role="link" data-href="https://example.com/new/status/606"><article id="bad"><div dir="auto" class="whitespace-pre-wrap">External</div></article></div>'+
       '<div role="link" data-href="https://x.com/new/status/707"><article id="ambiguous"><div dir="auto" class="whitespace-pre-wrap">A</div><div dir="auto" class="whitespace-pre-wrap">B</div></article></div>'+
       '<output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>';
@@ -68,7 +73,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,20);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,24);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });

@@ -10,12 +10,13 @@ const role=['none','other','button','link','group','dialog','textbox','article',
 const testId=['none','other','reply','tweet','tweetText','tweetTextarea_0','tweetTextarea_1','tweetButton','tweetButtonInline','User-Name','cellInnerDiv','primaryColumn','layers','sheetDialog','confirmationSheetDialog','toolBar','tweetPhoto','videoPlayer','videoComponent','quoteTweet','card.wrapper','like','retweet','unretweet','unlike','bookmark','caret'];
 function node(o){return o&&typeof o==='object'?{tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),ariaLabelPresent:bool(o.ariaLabelPresent),editable:bool(o.editable)}:null;}
 function post(o){return {...fields(o,['article','tweetContainer','identityVerified','mainTextPresent','quoteTextPresent'],bool),...fields(o,['textNodes','timeNodes','statusLinks','mediaNodes'],int)};}
-function gesture(o){return o&&typeof o==='object'?{target:node(o.target),nearestControl:node(o.nearestControl),ancestors:arr(o.ancestors,8,node),rule:enumOf(o.rule,['testid','label','unrecognized']),...fields(o,['replyTestIdAncestor','outerRecognized','insideDialog'],bool),post:post(o.post)}:null;}
+function gesture(o){return o&&typeof o==='object'?{target:node(o.target),nearestControl:node(o.nearestControl),ancestors:arr(o.ancestors,8,node),rule:enumOf(o.rule,['testid','label','engagement','unrecognized']),...fields(o,['replyTestIdAncestor','outerRecognized','insideDialog'],bool),post:post(o.post)}:null;}
 export function sanitizeLayout(o){
  if(!o||typeof o!=='object')return null;
  return {pageType:enumOf(o.pageType,['home','post_detail','search','compose','profile','media','other']),language:enumOf(o.language,['zh','en','ja','ko','es','fr','de','it','pt','ru','ar','id','vi','th','tr','hi','pl','nl','uk','other']),
   ...fields(o,['viewportWidth','viewportHeight'],v=>int(v,10000)),
   ...fields(o,['articles','tweetContainers','standardReplyControls','standardEditors','roleDialogs','nativeDialogs','editableCandidates','inlineCandidates','nonstandardCandidates','dialogStandardEditors'],int),
+  modernAppMarker:bool(o.modernAppMarker),modernReplyControls:int(o.modernReplyControls),textareaCandidates:int(o.textareaCandidates),
   focusedEditor:node(o.focusedEditor),focusedInsideDialog:bool(o.focusedInsideDialog),
   candidates:arr(o.candidates,5,e=>({node:node(e?.node),...fields(e,['standard','insideRoleDialog','insideNativeDialog','focused'],bool)}))};
 }

@@ -54,11 +54,14 @@
     return Boolean(doc?.documentElement?.getAttribute?.('data-app-version'));
   }
   function isModernPost(article) {
-    return Boolean(article?.matches?.('article') &&
-      !article.matches?.('[data-testid="tweet"]') &&
-      (modernPage(article.ownerDocument) ||
+    if(!article?.matches?.('article')||article.matches?.('[data-testid="tweet"]'))return false;
+    if(!(modernPage(article.ownerDocument) ||
        article.closest?.('div[role="link"][data-href]') ||
-       article.querySelector?.('[data-engagement-action]')));
+       article.querySelector?.('[data-engagement-action]')))return false;
+    // Mixed/hybrid pages still use the legacy adapter for their own old
+    // body markup. A nested quoted legacy body is not the outer post.
+    return ![...(article.querySelectorAll?.('[data-testid="tweetText"]')||[])]
+      .some(node=>node.closest('article')===article&&!isQuoteContent(node,article));
   }
   function modernIdentityEvidence(article) {
     const ids=new Map();
@@ -78,7 +81,14 @@
         a.closest('div[role="link"][data-href]')===wrapper &&
         !a.parentElement?.closest?.('article'));
       if(owned.length!==1||owned[0]!==article)invalid=true;
-      else add(wrapper.getAttribute('data-href'));
+      else {
+        add(wrapper.getAttribute('data-href'));
+        for(const a of wrapper.querySelectorAll('a[aria-hidden="true"][href*="/status/"]')){
+          if(a.closest('article')||a.closest(MODERN_FRAME)||
+             a.closest('div[role="link"][data-href]')!==wrapper)continue;
+          add(a.getAttribute('href'));
+        }
+      }
     }
     // A focal post can carry a hidden canonical permalink inside its
     // article; exclude embedded quote and ordinary content links.

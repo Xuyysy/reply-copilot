@@ -95,10 +95,10 @@
       visibleReplyEditorCount:editors.filter(node=>visible(node)&&node.closest('[role="dialog"]')).length,
       baselineEditors:editors};
   }
-  function contextId(article) {
+  function contextId(article,modernLayout=false) {
     // Canonical ID from the author's timestamp, never a random quote link.
     const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
-    if(extractor.isModernPost?.(article)){
+    if(modernLayout||extractor.isModernPost?.(article)){
       const evidence=extractor.modernIdentityEvidence(article);
       return evidence.identity?.statusId||(evidence.conflict?'conflicting_status_links':null);
     }
@@ -172,7 +172,7 @@
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
       const candidates=articles.map(article=>({
-        article, id:contextId(article), text:api.postExtractor.postText(article)
+        article, id:contextId(article,post.modernLayout===true), text:api.postExtractor.postText(article)
       }));
       // On some rich-media reply modals X renders the original tweetText
       // directly in the dialog, without wrapping it in an article. The
@@ -222,7 +222,7 @@
       // parent or multiple candidates never fall back to matching text.
       const modernQuotes=post.modernLayout&&post.quoteOnly?
         articles.flatMap(a=>api.postExtractor.modernQuoteTexts?.(a)||[]):[];
-      const modernMatch=!candidates.length?null:
+      const modernMatch=!post.modernLayout?null:!candidates.length?null:
         candidates.some(c=>c.id&&c.id!==post.statusId)?false:
         candidates.length>1?false:
         matching.length!==1?null:
