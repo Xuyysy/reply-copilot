@@ -19,9 +19,9 @@
     // Native draft attachments are outside the textarea. Never count the
     // original post preview BEFORE the editor or the extension's own UI.
     for(const node of scope.querySelectorAll('input[type="file"],[data-testid="attachments"],img[src^="blob:"],video[src^="blob:"],img[src*="pbs.twimg.com/media/"],[data-slot="embedded-tweet-frame"]')){
-      if(node.closest('[data-zane-reply-copilot]')||node.closest('[role="dialog"]')!==dialog||
-         !(editor.compareDocumentPosition(node)&4))continue;
+      if(node.closest('[data-zane-reply-copilot]')||node.closest('[role="dialog"]')!==dialog)continue;
       if(node.localName==='input'){if(node.files?.length)return true;continue;}
+      if(!(editor.compareDocumentPosition(node)&4))continue;
       if(node.getAttribute('data-testid')==='attachments'&&!node.children.length)continue;
       if(!node.closest('[hidden],[aria-hidden="true"],[inert]'))return true;
     }

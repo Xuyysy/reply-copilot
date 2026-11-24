@@ -1,0 +1,8 @@
+# 0.3.16 modern reply candidate (Staging only)
+
+Base: submitted 0.3.15 source 9c0f19351aed1847e0da762cfdbb13df27e3d107.
+Affected V3 Production report: reply_control_unrecognized, nested anchor inside explicit action wrapper, linkless Base UI reply preview, one native focused textarea, route parameter present (equality not captured). Reconstruct these from redacted structure, not user content. Public cross-checks: FeedSieve PR #18, SuperX x-dom and accept-x-redesign, Reddify mock, Minimal Twitter PR #266 (references in PR #247). Independently implement.
+
+Scope: preserve legacy and backend/debit/ACK/permissions. Require trusted gesture, verified outer post and native same-origin click link plus exact current reply route and unique matching preview for linkless association; reject ambiguous/conflicting IDs, duplicate/quote routes, preexisting or modified drafts, late targets. Native insertion once; check value and recognized transparent editor mirror; no auto submit. Conservative quote-only path requires unique marked quote preview. Media-only posts without extractable text and inline composers are outside newly verified scope. Do not relax unknown structures. Fixed diagnostic enums only, no values/IDs/text export.
+
+Validation: component real Chrome fixture plus isolated Chromium CDP harness with mocked backend and controlled textarea; no live X requests. Must pass full CI and signed-in modern X Staging acceptance before production release. Existing float positioning unchanged until actual portal visibility/clickability evidence. No Worker/Pages deploy, SQL, Store upload or production packaging authorization.

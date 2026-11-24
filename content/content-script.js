@@ -536,7 +536,10 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
-      if(current.post.modernLayout&&matchedComposer(current.post).editor!==current.editor)return;
+      if(current.post.modernLayout&&matchedComposer(current.post).editor!==current.editor){
+        if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
+        return;
+      }
       current.preferences = response.preferences; current.initializing = false;
       diagnosticTap('mark','prepare','settings_received');
       if (current.preferences.showFloatingWindow) {
