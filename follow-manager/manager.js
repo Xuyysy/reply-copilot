@@ -2,6 +2,7 @@ import {MAX_ARCHIVE_USERS, normalizeHandle, readArchiveGroup, classifyRelationsh
 import {readSnapshot, readLatestSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
 import {groupArchiveFiles, appendArchiveFiles} from "./file-selection.js";
 import {collectArchiveFilesFromDirectory, MAX_DIRECTORY_ENTRIES} from "./directory-import.js";
+import {indexArchiveZip} from "./zip-import.js";
 
 const $ = id => document.getElementById(id);
 let pageSize = 50;
@@ -14,6 +15,7 @@ let relationships = null;
 let selectedKind = "notFollowingBack";
 let page = 0;
 const selectedFiles = {follower:[], following:[]};
+let selectedZip=null;
 
 function describeSelection(kind) {
   const files = selectedFiles[kind];
@@ -24,14 +26,14 @@ function describeSelection(kind) {
 }
 
 function formatBytes(bytes) {
-  return bytes<1024*1024?(bytes/1024).toFixed(1)+" KB":(bytes/(1024*1024)).toFixed(1)+" MB";
+  return bytes>=1024**3?(bytes/1024**3).toFixed(2)+" GB":bytes<1024*1024?(bytes/1024).toFixed(1)+" KB":(bytes/(1024*1024)).toFixed(1)+" MB";
 }
 function refreshSelection() {
   describeSelection("follower");
   describeSelection("following");
   const files=[...selectedFiles.follower,...selectedFiles.following];
   $("selected-size").textContent=files.length?
-    "实际待分析："+formatBytes(files.reduce((sum,file)=>sum+file.size,0))+"（仅关注与粉丝文件）":
+    (selectedZip?"ZIP："+formatBytes(selectedZip.size)+" · ":"")+"实际待分析："+formatBytes(files.reduce((sum,file)=>sum+file.size,0))+"（仅关注与粉丝文件）":
     "仅分析关注与粉丝文件，不读取整个归档。";
 }
 
@@ -39,12 +41,13 @@ function refreshSelection() {
 let directoryScan = null;
 function scanControls(active) {
   const busy=active || importing || restoring;
-  for (const id of ["choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button", "owner", "same-account", "load-saved", "delete-saved", "close-import", "open-import"]) {
+  for (const id of ["choose-zip", "choose-folder", "choose-files", "choose-folder-fallback", "clear-selection", "import-button", "owner", "same-account", "load-saved", "delete-saved", "close-import", "open-import"]) {
     $(id).disabled = busy;
   }
   $("cancel-scan").hidden = !active;
 }
 function clearSelection() {
+  selectedZip=null;
   selectedFiles.follower=[];
   selectedFiles.following=[];
   $("same-account").checked=false;
@@ -79,6 +82,7 @@ async function acceptDirectory(entry) {
       throw new Error("文件夹缺少粉丝或关注名单，请确认选中的是完整的 X 归档及所有分片。");
     }
     if (controller.signal.aborted) throw new Error("已取消文件夹扫描。");
+    selectedZip=null;
     selectedFiles.follower = groups.follower;
     selectedFiles.following = groups.following;
     $("same-account").checked=false;
@@ -92,10 +96,36 @@ async function acceptDirectory(entry) {
   }
 }
 
+async function acceptZip(file) {
+  if(directoryScan||$("import-button").disabled)return;
+  const controller=new AbortController();
+  directoryScan=controller;
+  scanControls(true);
+  feedback("正在读取 ZIP 目录索引，不会解压媒体或私信…");
+  try {
+    const groups=await indexArchiveZip(file,{signal:controller.signal,onProgress:({scanned,total})=>
+      feedback("正在定位关注文件（"+scanned+"/"+total+" 个目录项）…")});
+    if(controller.signal.aborted)throw new Error("已取消 ZIP 扫描。");
+    // Replace both categories together; never merge a ZIP with a prior selection.
+    selectedZip=file;
+    selectedFiles.follower=groups.follower;
+    selectedFiles.following=groups.following;
+    $("same-account").checked=false;
+    refreshSelection();
+    feedback("已定位两组关注文件。确认账号后点击「导入并分析」，仅解压这些文件。");
+  } catch(error){reportError(error);}
+  finally{directoryScan=null;scanControls(false);}
+}
 async function acceptFiles(fileList) {
   if (directoryScan || $("import-button").disabled) return;
+  const files=[...fileList];
+  if(files.some(file=>/\.zip$/i.test(file.name))){
+    if(files.length!==1){feedback("请一次只选择一个 ZIP，不要与其他文件混合导入。",true);return;}
+    await acceptZip(files[0]);return;
+  }
   try {
-    const next = await appendArchiveFiles(selectedFiles, fileList);
+    const next = await appendArchiveFiles(selectedZip?{follower:[],following:[]}:selectedFiles, fileList);
+    selectedZip=null;
     selectedFiles.follower = next.follower;
     selectedFiles.following = next.following;
     $("same-account").checked=false;
@@ -149,6 +179,7 @@ async function acceptDirectoryFromFiles(files) {
   try {
     const groups = await groupArchiveFiles(files);
     if (!groups.follower.length || !groups.following.length) throw new Error("文件夹缺少粉丝或关注名单。");
+    selectedZip=null;
     selectedFiles.follower = groups.follower;
     selectedFiles.following = groups.following;
     $("same-account").checked=false;
@@ -156,6 +187,12 @@ async function acceptDirectoryFromFiles(files) {
     feedback("已从文件夹定位两组名单。确认账号后点击「导入并分析」。");
   } catch (error) { reportError(error); }
 }
+$("choose-zip").addEventListener("click",()=>$("archive-zip-picker").click());
+$("archive-zip-picker").addEventListener("change",event=>{
+  const file=event.target.files[0];
+  event.target.value="";
+  if(file)void acceptZip(file);
+});
 $("choose-files").addEventListener("click", () => $("archive-picker").click());
 $("archive-picker").addEventListener("change", event => {
   const files = [...event.target.files];
@@ -196,6 +233,7 @@ dropzone.addEventListener("drop", event => {
   dropzone.classList.remove("is-dragging");
   if (directoryScan) return;
   const transfer = event.dataTransfer;
+  const droppedFiles=[...(transfer?.files || [])];
   const items = [...(transfer?.items || [])].filter(item => item.kind === "file");
   // The legacy entry must be captured synchronously inside the drop event.
   const entries = items.map(item => item.webkitGetAsEntry?.()).filter(Boolean);
@@ -220,12 +258,12 @@ dropzone.addEventListener("drop", event => {
         }
         void acceptDirectory(directories[0]);
       } else {
-        void acceptFiles([...(transfer?.files || [])]);
+        void acceptFiles(droppedFiles);
       }
     }).catch(reportError);
     return;
   }
-  void acceptFiles([...(transfer?.files || [])]);
+  void acceptFiles(droppedFiles);
 });
 refreshSelection();
 
@@ -405,7 +443,7 @@ async function restoreLocalResult() {
     let saved=preferred && /^[a-z0-9_]{1,15}$/.test(preferred)?await readSnapshot(preferred):null;
     if(!saved)saved=await readLatestSnapshot();
     if(saved)showSnapshot(saved);
-    else feedback("选择归档文件夹，即可开始分析。");
+    else feedback("选择归档 ZIP 或文件夹，即可开始分析。");
   } catch(error) { reportError(error); }
   finally { restoring=false;scanControls(false); }
 }

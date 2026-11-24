@@ -53,7 +53,7 @@ test("the MVP never obtains X session secrets or sends followers to an API", () 
   assert.equal(manifest.permissions.includes("scripting"), false);
   assert.equal(manifest.host_permissions.some(p => /x\.com|twitter\.com/.test(p)), false);
   for (const path of [
-    "follow-manager/archive.js", "follow-manager/store.js", "follow-manager/manager.js", "follow-manager/file-selection.js", "follow-manager/directory-import.js"
+    "follow-manager/archive.js", "follow-manager/store.js", "follow-manager/manager.js", "follow-manager/file-selection.js", "follow-manager/directory-import.js", "follow-manager/zip-import.js"
   ]) {
     const file = read(path);
     assert.doesNotMatch(file, /chrome\.cookies|document\.cookie|auth_token|x-csrf-token|graphql|XMLHttpRequest|fetch\s*\(|sendBeacon|eval\s*\(|new Function/);
@@ -83,14 +83,17 @@ test("drag and browse share the same safe in-memory file selection pipeline", ()
   assert.match(js, /"archive-picker"\)\.addEventListener\("change"/);
   assert.doesNotMatch(js, /"follower-files"|"following-files"|expectedKind/);
   assert.match(js, /async function acceptFiles\(fileList\)/);
-  assert.match(js, /appendArchiveFiles\(selectedFiles, fileList\)/);
+  assert.match(js, /appendArchiveFiles\(selectedZip\?/);
   assert.match(js, /collectArchiveFilesFromDirectory\(entry/);
   assert.match(js, /window\.showDirectoryPicker/);
   assert.match(js, /webkitGetAsEntry/);
   assert.match(js, /readGroup\(selectedFiles\.follower, "follower"\)/);
   assert.match(js, /readGroup\(selectedFiles\.following, "following"\)/);
   assert.doesNotMatch(js, /new DataTransfer|\.innerHTML\s*=|\.upload\(/);
-  assert.match(page, /不支持直接导入 ZIP/);
+  assert.match(page, /支持直接导入 ZIP/);
+  assert.match(page, /id="choose-zip"/);
+  assert.match(page, /id="archive-zip-picker"/);
+  assert.match(js, /await indexArchiveZip\(file,/);
   assert.match(page, /只查找关注关系文件/);
 });
 

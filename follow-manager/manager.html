@@ -18,25 +18,27 @@
     <div class="heading-line"><h2 id="import-heading">导入 X 数据归档</h2><span class="tag">仅本地处理</span><button class="secondary" id="close-import" type="button" hidden>返回结果</button></div>
     <div class="import-steps" aria-label="导入步骤">
       <div><span>1</span><a href="https://x.com/settings/download_your_data" target="_blank" rel="noopener noreferrer">申请 X 数据归档 ↗</a></div>
-      <div><span>2</span>下载并解压 ZIP</div>
-      <div><span>3</span>选择文件夹并分析</div>
+      <div><span>2</span>下载 ZIP</div>
+      <div><span>3</span>导入 ZIP 并分析</div>
     </div>
     <p class="muted small">归档很大也没关系：仅分析关注与粉丝文件。首次导入后，重新打开即可直接查看本地结果。</p>
     <form id="archive-form">
       <label class="field">归档所属 X 用户名
         <input id="owner" name="owner" placeholder="例如 @yourhandle" autocomplete="off" maxlength="16" required>
       </label>
-      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖入 X 解压后的整个归档文件夹">
+      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖入 X 归档 ZIP 或文件夹">
         <span class="drop-icon" aria-hidden="true">⇧</span>
-        <strong>将解压后的 X 归档文件夹拖到这里</strong>
-        <p class="muted small">可拖入整个归档或其中的 data 文件夹。只查找关注关系文件，不读取图片、视频或私信。</p>
+        <strong>将 X 归档 ZIP 拖到这里</strong>
+        <p class="muted small">无需解压；也可拖入已解压的归档或 data 文件夹。只查找关注关系文件，不读取图片、视频或私信。</p>
         <div class="picker-actions">
-          <button id="choose-folder" class="primary" type="button">选择整个文件夹</button>
+          <button id="choose-zip" class="primary" type="button">选择 ZIP 归档</button>
+          <button id="choose-folder" class="secondary" type="button">选择整个文件夹</button>
           <button id="choose-files" class="secondary" type="button">手动选择 JS 文件</button>
           <button id="choose-folder-fallback" class="secondary" type="button" hidden>兼容选择 data 文件夹</button>
           <button id="cancel-scan" class="secondary" type="button" hidden>取消扫描</button>
         </div>
       </div>
+      <input id="archive-zip-picker" type="file" accept=".zip,application/zip" hidden aria-label="选择 X 官方 ZIP 归档">
       <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="手动选择粉丝与关注归档文件">
       <input id="archive-folder-picker" type="file" webkitdirectory multiple hidden aria-label="兼容选择 X 归档文件夹">
       <div class="selected-files" aria-live="polite" aria-label="已选文件">
@@ -45,7 +47,7 @@
         <button id="clear-selection" class="text-action" type="button">清空待导入文件</button>
       </div>
       <p id="selected-size" class="muted small" aria-live="polite">仅分析关注与粉丝文件，不读取整个归档。</p>
-      <details class="file-details"><summary>支持的文件与导入说明</summary><p class="muted small" id="file-tip">支持 data/follower.js、data/following.js 及连续分片。只读取关注关系文件，不上传服务器，不支持直接导入 ZIP。整个解压归档大小不限于以下文件限制；兼容模式可能枚举媒体文件名，超大目录建议手动选择 JS。每文件最多 32 MB、单组最多 128 MB，每组最多 25 万账号。</p></details>
+      <details class="file-details"><summary>支持的文件与导入说明</summary><p class="muted small" id="file-tip">支持 data/follower.js、data/following.js 及连续分片。只读取关注关系文件，不上传服务器，支持直接导入 ZIP / ZIP64（非加密、非分卷）。仅索引目录及解压目标 JS；整个 ZIP 大小不限于以下文件限制。超大目录或不支持的压缩格式可解压后手动选择 JS。每文件最多 32 MB、单组最多 128 MB，每组最多 25 万账号。</p></details>
       <label class="confirmation"><input type="checkbox" id="same-account" required> 我确认两组文件来自同一份、同一个 X 账号的官方归档。</label>
       <div class="actions">
         <button class="primary" id="import-button" type="submit">导入并分析</button>
