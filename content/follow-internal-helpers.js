@@ -4,6 +4,16 @@
 (() => {
   const VALID_HANDLE = /^[a-z0-9_]{1,15}$/i;
   const VALID_ID = /^[1-9]\d{0,19}$/;
+  // Viewer-relative booleans only; missing or conflicting fields stay unknown.
+  function perspectives(user) {
+    const out={};
+    for(const [key,wire] of [["following","following"],["followedBy","followed_by"]]){
+      const values=[user?.relationship_perspectives?.[wire],user?.legacy?.[wire]]
+        .filter(x=>typeof x==="boolean");
+      if(values.length && values.every(x=>x===values[0]))out[key]=values[0];
+    }
+    return out;
+  }
   function userInfo(result) {
     const user = result?.__typename === "User" ? result : result?.result || result;
     const handle = user?.core?.screen_name || user?.legacy?.screen_name;
@@ -15,9 +25,11 @@
     // Never infer blue from legacy.verified or a generic badge.
     const blue=typeof user?.is_blue_verified === "boolean" ?
       (user.is_blue_verified && !["Business","Government"].includes(verifiedType)) : null;
+    const relation=perspectives(user);
     return {
       handle:handle.toLowerCase(),id,
-      ...(blue === null ? {} : {blueVerified:blue})
+      ...(blue === null ? {} : {blueVerified:blue}),
+      ...(Object.keys(relation).length ? {perspectives:relation} : {})
     };
   }
   function parseProfile(payload) {

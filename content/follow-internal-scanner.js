@@ -159,9 +159,9 @@
       signal.addEventListener("abort",abort,{once:true});
     });
   }
-  function checkpoint(session,reason,cursor,handles,verification,ids) {
+  function checkpoint(session,reason,cursor,handles,verification,ids,perspectives) {
     return {
-      handles:[...handles], verification:{...verification}, ids:{...ids},
+      handles:[...handles], verification:{...verification}, ids:{...ids},perspectives:{...perspectives},
       cursor:cursor || null, reason, pages:session.pages
     };
   }
@@ -172,6 +172,7 @@
     const ids=new Set(Object.values(saved?.ids || {}));
     const verification=Object.assign(Object.create(null),saved?.verification || {});
     const accountIds=Object.assign(Object.create(null),saved?.ids || {});
+    const perspectives=Object.assign(Object.create(null),saved?.perspectives || {});
     let cursor=saved?.cursor || null;
     let pages=Number.isSafeInteger(saved?.pages) ? saved.pages : 0;
     const started=Date.now();
@@ -196,12 +197,21 @@
         const result=parser.parsePage(await request(operation,vars,session));
         let truncated=false;
         for(const u of result.users) {
-          if(ids.has(u.id)) continue;
+          if(ids.has(u.id)){
+            if(u.perspectives)perspectives[u.id]=u.perspectives;
+            else delete perspectives[u.id];
+            continue;
+          }
           if(handles.length>=MAX_USERS) {truncated=true;break;}
+          // The existing handle-indexed format cannot represent two IDs
+          // that reuse one name within the same acquisition stage.
+          if(Object.hasOwn(accountIds,u.handle) && accountIds[u.handle]!==u.id)
+            throw new Error("schema_timeline");
           ids.add(u.id);
           handles.push(u.handle);
           accountIds[u.handle]=u.id;
           if(typeof u.blueVerified==="boolean") verification[u.handle]=u.blueVerified;
+          if(u.perspectives)perspectives[u.id]=u.perspectives;
         }
         pages++;
         session.pages=pages;
@@ -210,7 +220,7 @@
         cursor=result.nextCursor || null;
         if(result.users.length===0) emptyPages++;
         else emptyPages=0;
-        const data=checkpoint(session,"paused",cursor,handles,verification,accountIds);
+        const data=checkpoint(session,"paused",cursor,handles,verification,accountIds,perspectives);
         data.userId=profile.id;
         const atEnd=(!cursor || (cursor && cursor.startsWith("0|"))) && result.hasEntries;
         send({
@@ -237,7 +247,7 @@
          ? error.message : "schema");
     } finally {
       if(active===session) active=null;
-      const data=checkpoint(session,reason,cursor,handles,verification,accountIds);
+      const data=checkpoint(session,reason,cursor,handles,verification,accountIds,perspectives);
       if(session.userId) data.userId=session.userId;
       // The private CSRF header and X cookies never cross the tab boundary.
       send({type:"XRH_INTERNAL_DONE",scanId:session.scanId,kind:session.kind,
@@ -256,6 +266,12 @@
         state.cursor.length>0 && state.cursor.length<=512) &&
       (!state.userId || typeof state.userId==="string" && /^[1-9]\d{0,19}$/.test(state.userId)) &&
       (!state.pages || Number.isSafeInteger(state.pages) && state.pages>=0) &&
+      (state.perspectives===undefined || (state.perspectives && typeof state.perspectives==="object" &&
+        !Array.isArray(state.perspectives) && Object.keys(state.perspectives).length<=MAX_USERS &&
+        Object.entries(state.perspectives).every(([id,value])=>/^[1-9]\d{0,19}$/.test(id) &&
+          value && typeof value==="object" && !Array.isArray(value) &&
+          Object.keys(value).length>0 &&
+          Object.entries(value).every(([key,flag])=>["following","followedBy"].includes(key) && typeof flag==="boolean")))) &&
       (!state.verification || Object.entries(state.verification).every(([h,v])=>
         /^[a-z0-9_]{1,15}$/.test(h) && typeof v==="boolean"));
   }

@@ -4,7 +4,8 @@ import {readFileSync} from "node:fs";
 import vm from "node:vm";
 import {
   verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent,
-  classifySnapshotRelationships,accountProfileUrl,validDirectional
+  classifySnapshotRelationships,accountProfileUrl,validDirectional,
+  classifyConfirmedRelationships,relationshipEvidenceFor,validPerspectives
 } from "../follow-manager/results-utils.js";
 const read=path=>readFileSync(new URL("../"+path,import.meta.url),"utf8");
 
@@ -119,4 +120,29 @@ test("history does not invent churn when old handles lack IDs or either snapshot
   const b={...a,ids:{alice:"123"},importedAt:"2026-11-23"};
   assert.deepEqual(compareSnapshots(b,a),{newFollowers:0,missingFollowers:0,previousAt:a.importedAt,byStableId:false});
   assert.equal(compareSnapshots({...b,reasons:{following:"complete",followers:"paused"}},a),null);
+});
+
+test("partial lists expose explicit one-sided relationships, never unknown absences",()=>{
+  const s={following:["a","b","c","d","e","f"],followers:["g","h","i","j"],
+    reasons:{following:"paused",followers:"paused"},
+    directional:{following:{ids:{a:"1",b:"2",c:"3",d:"4",e:"5",f:"6"},
+      perspectives:{"1":{following:true,followedBy:false},"2":{followedBy:true},
+        "4":{followedBy:false},"5":{following:false,followedBy:false},"6":{followedBy:false}}},
+      followers:{ids:{g:"4",h:"8",i:"9",j:"10"},
+        perspectives:{"8":{following:false,followedBy:true},"9":{following:true}}}}};
+  assert.deepEqual(classifyConfirmedRelationships(s),{notFollowingBack:["a","f"],iHaveNotFollowedBack:["h"]});
+  assert.equal(relationshipEvidenceFor(s,"a","notFollowingBack"),"explicit");
+  assert.equal(relationshipEvidenceFor(s,"c","notFollowingBack"),null);
+  const completed={...s,reasons:{following:"paused",followers:"complete"}};
+  assert.deepEqual(classifyConfirmedRelationships(completed),{notFollowingBack:["a","c","f"],iHaveNotFollowedBack:["h"]});
+  assert.equal(relationshipEvidenceFor(completed,"c","notFollowingBack"),"complete_list");
+  assert.equal(validPerspectives({"1":{followedBy:false}}),true);
+  assert.equal(validPerspectives({"1":{followedBy:"false"}}),false);
+  assert.equal(validPerspectives({"1":{unknown:false}}),false);
+});
+test("old partial cache remains readable without inventing confirmed relationships",()=>{
+  const legacy={following:["a"],followers:["b"],reasons:{following:"paused",followers:"paused"}};
+  assert.deepEqual(classifyConfirmedRelationships(legacy),{notFollowingBack:[],iHaveNotFollowedBack:[]});
+  assert.deepEqual(classifyConfirmedRelationships({...legacy,reasons:{following:"complete",followers:"complete"}}),
+    {notFollowingBack:["a"],iHaveNotFollowedBack:["b"]});
 });

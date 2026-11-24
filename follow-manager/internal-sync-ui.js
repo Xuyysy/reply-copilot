@@ -3,7 +3,7 @@ import {saveInternalSnapshot, readInternalSnapshot, removeInternalSnapshot,
   saveInternalCheckpoint,readInternalCheckpoint,clearInternalCheckpoint}
   from "./internal-sync-store.js";
 import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent,
-  classifySnapshotRelationships,directionForCategory,accountProfileUrl,validDirectional}
+  classifyConfirmedRelationships,relationshipEvidenceFor,directionForCategory,accountProfileUrl,validDirectional}
   from "./results-utils.js";
 import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,viewCheckpoint,checkpointResult,runIncrementalRound}
   from "./internal-sync-state.js";
@@ -102,6 +102,14 @@ function validateSnapshot(value) {
 
 function queueCheckpoint(job,kind,stage) {
   if(!validStage(stage) || job.owner!==job.checkpoint?.owner) return;
+  const previous=job.checkpoint.stages[kind];
+  const other=job.checkpoint.stages[kind==="following"?"followers":"following"];
+  if(stage.userId && [previous,other].some(x=>x?.userId && x.userId!==stage.userId)){
+    const error=new Error("当前登录的 X 账号不匹配。");
+    job.writeError=error;
+    job.pending?.reject(error);
+    return;
+  }
   job.checkpoint=withStage(job.checkpoint,job.owner,kind,stage);
   // Order writes; a late progress event must not resurrect an old checkpoint
   // after a successful full snapshot transaction removes it.
@@ -129,7 +137,7 @@ chrome.runtime.onMessage.addListener((message,sender) => {
     }
     job.pending.resolve({
       handles:message.handles,reason:message.reason,cursor:message.cursor,
-      verification:message.verification||{},ids:message.ids||{},
+      verification:message.verification||{},ids:message.ids||{},perspectives:message.perspectives||{},
       pages:message.pages||0,userId:message.userId
     });
   }
@@ -224,7 +232,7 @@ function renderList() {
   if (!items.length) {
     const empty = document.createElement("p");
     empty.className = "empty";
-    empty.textContent = "没有匹配的本次同步记录。";
+    empty.textContent = isComplete(snapshot)?"没有匹配的账号。":"暂未找到符合条件的已确认关系，继续同步可补充。";
     fragment.append(empty);
   }
   $("internal-result-list").replaceChildren(fragment);
@@ -239,7 +247,7 @@ function renderSnapshot(data,localSaved=false) {
   if (!validateSnapshot(data)) throw new Error("本地数据格式不正确。");
   const sameOwner=snapshot?.owner===data.owner;
   snapshot = data;
-  relationships = classifySnapshotRelationships(data);
+  relationships = classifyConfirmedRelationships(data);
   const change=isComplete(data)?compareSnapshots(data,data.history?.[0]):null;
   const changes=$("internal-changes");
   if (change) {
@@ -260,7 +268,7 @@ function renderSnapshot(data,localSaved=false) {
   $("internal-result-badge").textContent = ended ? "本地结果" : "部分结果 · 待补齐";
   $("internal-coverage-note").textContent=ended?
     "本地快照并非实时数据，按需更新即可。":
-    "当前为部分结果，未回关关系尚待确认，继续同步后会自动修正。";
+    "仅展示当前已确认的单向关系，继续同步可补充更多账号。";
   $("internal-history-toggle").hidden=!(completeSnapshot && latestPartial);
   $("internal-history-toggle").textContent=ended?"查看最新增量结果":"查看上次完整结果";
   $("internal-snapshot-meta").textContent = "@" + data.owner + " · " + time +
@@ -344,8 +352,8 @@ async function start() {
       following:following.handles,followers:followers.handles,
       verification:{...following.verification,...followers.verification},
       ids:{...following.ids,...followers.ids},
-      directional:{following:{ids:following.ids||{},verification:following.verification||{}},
-        followers:{ids:followers.ids||{},verification:followers.verification||{}}},
+      directional:{following:{ids:following.ids||{},verification:following.verification||{},perspectives:following.perspectives||{}},
+        followers:{ids:followers.ids||{},verification:followers.verification||{},perspectives:followers.perspectives||{}}},
       reasons:{following:"complete",followers:"complete"}
     };
     await job.writes;
@@ -444,9 +452,10 @@ $("internal-export").addEventListener("click",() => {
   const items = selectAccounts(relationships[selectedKind],term,
     $("internal-verified").value,snapshot,directionForCategory(selectedKind));
   if (!items.length) return;
-  const csv = "\uFEFFhandle,profile_url,category,source,coverage,blue_verified\r\n" +
-    items.map(x => [x,accountProfileUrl(snapshot,x,directionForCategory(selectedKind)),isComplete(snapshot)?selectedKind:(selectedKind==="notFollowingBack"?"following_unmatched":"followers_unmatched"),"internal_sync",isComplete(snapshot)?"snapshot":"partial",
-      verificationFor(snapshot,x,directionForCategory(selectedKind)) === null ? "unknown" : String(verificationFor(snapshot,x,directionForCategory(selectedKind)))].join(","))
+  const csv = "\uFEFFhandle,profile_url,category,source,coverage,blue_verified,evidence\r\n" +
+    items.map(x => [x,accountProfileUrl(snapshot,x,directionForCategory(selectedKind)),selectedKind,"internal_sync",isComplete(snapshot)?"snapshot":"partial",
+      verificationFor(snapshot,x,directionForCategory(selectedKind)) === null ? "unknown" : String(verificationFor(snapshot,x,directionForCategory(selectedKind))),
+      relationshipEvidenceFor(snapshot,x,selectedKind)].join(","))
       .join("\r\n") + "\r\n";
   const url = URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   const link = document.createElement("a");

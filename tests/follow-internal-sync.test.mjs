@@ -95,7 +95,7 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(scanner,/const raw = \/\(\?:\^\|;\)/);
 });
 
-function webClientHarness({signedIn="owner",status=200,observedQueries=[]}={}) {
+function webClientHarness({signedIn="owner",status=200,observedQueries=[],listEntries}={}) {
   const messages=[];
   const requests=[];
   let listener;
@@ -120,7 +120,7 @@ function webClientHarness({signedIn="owner",status=200,observedQueries=[]}={}) {
     if(url.includes("/UserByScreenName?")) return {
       status:200,ok:true,async json(){return {data:{user:{result:user("owner","1000")}}};}
     };
-    return {status:200,ok:true,async json(){return data([entry("alice","2000"),entry("bob","3000")]);}};
+    return {status:200,ok:true,async json(){return data(listEntries||[entry("alice","2000"),entry("bob","3000")]);}};
   }
   const context=vm.createContext({
     location,document,chrome,URLSearchParams,AbortController,
@@ -266,7 +266,29 @@ test("internal results display only the two one-sided relationship categories",(
   assert.ok(!page.includes('id="internal-mutual"'));
   assert.ok(!ui.includes('$("internal-mutual")'));
   assert.ok(ui.includes('let selectedKind = "notFollowingBack"'));
-  assert.ok(ui.includes("未回关关系尚待确认"));
-  assert.ok(ui.includes("classifySnapshotRelationships(data)"));
+  assert.ok(ui.includes("仅展示当前已确认的单向关系"));
+  assert.ok(ui.includes("classifyConfirmedRelationships(data)"));
   assert.ok(ui.includes('isComplete(snapshot)?"snapshot":"partial"'));
+});
+
+test("viewer-perspective fields distinguish explicit false, true, missing and conflicts",()=>{
+  const p=helpers();
+  const parse=(modern,legacy={})=>p.parseProfile({data:{user:{result:{
+    ...user("alice","2000"),legacy:{screen_name:"alice",...legacy},relationship_perspectives:modern
+  }}}});
+  const flags=v=>JSON.parse(JSON.stringify(v.perspectives));
+  assert.deepEqual(flags(parse({following:true,followed_by:false})),{following:true,followedBy:false});
+  assert.deepEqual(flags(parse(undefined,{followed_by:true,following:false})),{following:false,followedBy:true});
+  assert.equal(parse({followed_by:"false"}).perspectives,undefined);
+  assert.equal(parse({followed_by:false},{followed_by:true}).perspectives,undefined);
+  assert.equal(parse({}).perspectives,undefined);
+});
+test("existing list query transports only observed relationship metadata in the checkpoint",async()=>{
+  const a=entry("alice","2000"),b=entry("bob","3000");
+  a.content.itemContent.user_results.result.relationship_perspectives={following:true,followed_by:false};
+  const h=webClientHarness({listEntries:[a,b]});
+  assert.equal(h.send({type:"XRH_INTERNAL_START",scanId:UUID,kind:"following",owner:"owner"}).ok,true);
+  const done=await completed(h);
+  assert.deepEqual(JSON.parse(JSON.stringify(done.perspectives)),{"2000":{following:true,followedBy:false}});
+  assert.equal(h.requests.length,2);
 });

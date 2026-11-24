@@ -1,3 +1,5 @@
+import {validPerspectives} from "./results-utils.js";
+
 // Pure checkpoint validation/migration for X internal follow-list query mode.
 // Stage progress is never a complete relationship snapshot.
 export const MAX_INTERNAL_HANDLES=30000;
@@ -16,6 +18,7 @@ export function validStage(value) {
   if (value.verification && (typeof value.verification!=="object" ||
       Array.isArray(value.verification) ||
       Object.entries(value.verification).some(([h,v])=>!HANDLE.test(h) || typeof v!=="boolean"))) return false;
+  if (!validPerspectives(value.perspectives))return false;
   if (!(value.cursor===null || typeof value.cursor==="string" &&
       value.cursor.length>=1 && value.cursor.length<=512 ||
       value.cursor===undefined)) return false;
@@ -63,8 +66,8 @@ export function checkpointResult(checkpoint) {
   return {owner:checkpoint.owner,source:"internal_sync",importedAt:checkpoint.savedAt,
     following:a?.handles||[],followers:b?.handles||[],
     verification:{...a?.verification,...b?.verification},ids:{...a?.ids,...b?.ids},
-    directional:{following:{ids:a?.ids||{},verification:a?.verification||{}},
-      followers:{ids:b?.ids||{},verification:b?.verification||{}}},
+    directional:{following:{ids:a?.ids||{},verification:a?.verification||{},perspectives:a?.perspectives||{}},
+      followers:{ids:b?.ids||{},verification:b?.verification||{},perspectives:b?.perspectives||{}}},
     reasons:{following:a?.reason||"not_started",followers:b?.reason||"not_started"}};
 }
 // One user click: at most one short batch of each unfinished list.

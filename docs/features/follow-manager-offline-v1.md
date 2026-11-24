@@ -133,3 +133,7 @@ Staging 真机重点验证非活动标签页可否滚动（特别是在屏幕关
 ### 2026-11-24｜本地数据处理：稳定 ID 和来源隔离
 
 参考 birdclaw 的 [Follow Graph Model](https://github.com/steipete/birdclaw/blob/main/docs/data-architecture.md#follow-graph-model)（方向关系、快照与增量分离）和 XUnfollowGhost 的本地集合差分思想，独立实现按数字字符串账号 ID 优先匹配、未知 ID 时谨慎按用户名匹配、两方向 ID/认证信息分别保存、历史比较兼容旧缓存。部分结果不参与完整历史变化；同账号增量渲染保留搜索和认证筛选。主页/CSV 使用可用的稳定 ID 链接，避免账号改名或用户名被重新使用后打开错误账号。旧记录继续可读，不增加 X 请求、权限或服务端数据。部分名单的差集仍仅为待确认候选。仅 Draft PR/Staging。
+
+### 2026-11-24｜优先使用已返回的关注关系字段
+
+参考 [X-Insights](https://github.com/arslandevs/X-Insights) README 对新 User 结构的记录和 [twitter-openapi #95](https://github.com/fa0311/twitter-openapi/issues/95) 响应样例，解析已返回的 relationship_perspectives.following / followed_by，兼容显式 legacy 布尔值。不存在或现代/旧字段冲突时按未知处理；不新增查询或权限。两个方向的关系字段按账号 ID 保存于原检查点及快照的 directional 元数据。同一账号两名单匹配优先排除，明确自身列表矛盾或反向已关注时不显示。仅当反向明确为 false 或对侧名单完成且差集确认时，才显示相应「未回关我」「我未回关」；缺失且对侧未完成不显示为未回关。CSV 追加 evidence=explicit/complete_list，保留 partial/snapshot 覆盖标记。旧部分缓存仍可恢复，但没有足够证据的账号暂不展示；完整旧缓存可继续使用差集。保持短批次、蓝 V、本地存储、两分类、限流停止等原机制。字段能否在用户真实 Following/Followers 响应中取得仍需 Staging 验证；非公开接口不承诺稳定性。

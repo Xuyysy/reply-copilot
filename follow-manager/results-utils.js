@@ -80,7 +80,7 @@ export function validDirectional(value) {
     ["following","followers"].every(kind=>{
       const x=value[kind];
       return !!x && typeof x==="object" && !Array.isArray(x) &&
-        validIds(x.ids) && validVerification(x.verification);
+        validIds(x.ids) && validVerification(x.verification) && validPerspectives(x.perspectives);
     });
 }
 function members(snapshot,kind) {
@@ -122,4 +122,35 @@ export function classifySnapshotRelationships(snapshot) {
   const d=compareMembers(members(snapshot,"following"),members(snapshot,"followers"));
   return {mutual:d.matched.map(x=>x.handle),notFollowingBack:d.leftOnly.map(x=>x.handle),
     iHaveNotFollowedBack:d.rightOnly.map(x=>x.handle)};
+}
+
+// Viewer relationship evidence is direction-local, keyed by stable ID.
+export function validPerspectives(value) {
+  return value===undefined || (!!value && typeof value==="object" && !Array.isArray(value) &&
+    Object.keys(value).length<=MAX_USERS_PER_KIND &&
+    Object.entries(value).every(([id,flags])=>VALID_ID.test(id) &&
+      flags && typeof flags==="object" && !Array.isArray(flags) &&
+      Object.keys(flags).length>0 && Object.entries(flags).every(([key,v])=>
+        ["following","followedBy"].includes(key) && typeof v==="boolean")));
+}
+// Only call for unmatched candidates after the stable-ID intersection.
+// A contradictory own-list flag or an explicit positive suppresses the row.
+export function relationshipEvidenceFor(snapshot,handle,category) {
+  const kind=directionForCategory(category);
+  const other=kind==="following"?"followers":"following";
+  const id=accountIdFor(snapshot,handle,kind);
+  const flags=id?own(snapshot?.directional?.[kind]?.perspectives,id):null;
+  const ownFlag=kind==="following"?"following":"followedBy";
+  const oppositeFlag=kind==="following"?"followedBy":"following";
+  if(flags?.[ownFlag]===false || flags?.[oppositeFlag]===true)return null;
+  if(flags?.[oppositeFlag]===false)return "explicit";
+  if(["complete","bottom_observed"].includes(snapshot?.reasons?.[other]))return "complete_list";
+  return null;
+}
+export function classifyConfirmedRelationships(snapshot) {
+  const diff=classifySnapshotRelationships(snapshot);
+  return {
+    notFollowingBack:diff.notFollowingBack.filter(h=>relationshipEvidenceFor(snapshot,h,"notFollowingBack")),
+    iHaveNotFollowedBack:diff.iHaveNotFollowedBack.filter(h=>relationshipEvidenceFor(snapshot,h,"iHaveNotFollowedBack"))
+  };
 }
