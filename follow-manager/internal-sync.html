@@ -15,30 +15,33 @@
     <img src="../icons/icon-48.png" width="44" height="44" alt="">
     <div>
       <p class="eyebrow">X REPLY HELPER · 互关助手</p>
-      <h1>快速同步 <span class="experimental">测试模式</span></h1>
+      <h1>互关助手 <span class="experimental">测试模式</span></h1>
       <p class="muted">免数据归档 · 使用当前 X 登录状态 · 本地保存结果</p>
     </div>
   </header>
   <section class="panel follow-main" aria-labelledby="internal-heading">
     <div class="heading-line">
-      <h2 id="internal-heading">同步我的关注关系</h2>
-      <span class="tag">只读</span>
+      <h2 id="internal-heading">我的关注关系</h2>
+      <div class="actions internal-actions">
+        <button id="internal-start" type="button" class="primary">开始同步</button>
+        <button id="internal-cancel" type="button" class="secondary" disabled>停止</button>
+      </div>
     </div>
-    <p class="intro">通过 X 网页内部接口读取自己的关注与粉丝列表，不需要付费开发者 API。该接口不是 X 官方对第三方开放的稳定服务，可能变更、限流或限制账号访问；建议先在 Staging 测试。</p>
-    <label class="field" for="internal-owner">当前登录的 X 用户名
-      <input id="internal-owner" maxlength="16" autocomplete="off" placeholder="@yourhandle">
-    </label>
-    <label class="confirmation">
-      <input type="checkbox" id="internal-consent">
-      我确认同步的是自己的 X 账号，并同意使用此测试方式读取关注关系。
-    </label>
-    <div class="actions">
-      <button id="internal-start" type="button" class="primary">开始快速同步</button>
-      <button id="internal-cancel" type="button" class="secondary" disabled>停止</button>
-      <button id="internal-load" type="button" class="secondary">查看上次结果</button>
-      <button id="internal-reset" type="button" class="secondary">清除未完成进度</button>
-      <button id="internal-clear" type="button" class="danger">清除本地记录</button>
-    </div>
+    <details id="internal-settings" open>
+      <summary>账号与同步设置</summary>
+      <p class="intro">通过 X 网页内部接口只读获取自己的关注与粉丝，结果仅保存在本机。该测试方式可能因接口变化或限流而停止。</p>
+      <label class="field" for="internal-owner">当前登录的 X 用户名
+        <input id="internal-owner" maxlength="16" autocomplete="off" placeholder="@yourhandle">
+      </label>
+      <label class="confirmation">
+        <input type="checkbox" id="internal-consent">
+        我确认同步的是自己的 X 账号，并同意使用此测试方式读取关注关系。
+      </label>
+      <div class="actions">
+        <button id="internal-reset" type="button" class="secondary">清除未完成进度</button>
+        <button id="internal-clear" type="button" class="danger">清除本地记录</button>
+      </div>
+    </details>
     <div id="internal-loading" class="follow-loading" role="status" aria-live="polite" hidden>
       <span class="loading-spinner" aria-hidden="true"></span>
       <div class="loading-description">
@@ -46,12 +49,7 @@
         <span id="internal-elapsed" class="elapsed">已用时间 00:00</span>
       </div>
     </div>
-    <div class="scan-progress" aria-live="polite">
-      <div><span>我关注的人</span><strong id="internal-following-count">—</strong><span id="internal-following-state">未开始</span></div>
-      <div><span>关注我的人</span><strong id="internal-followers-count">—</strong><span id="internal-followers-state">未开始</span></div>
-    </div>
-    <p id="internal-status" class="feedback" role="status" aria-live="polite">准备就绪。</p>
-    <p class="muted small follow-footnote">同步会使用不抢占当前页面的临时 X 标签页。每批最多读取约 3,000 人，完整名单可分多次继续，每类本地最多保留 30,000 人。进度保存在本机，遇到限流或接口错误会停止。</p>
+    <p id="internal-status" class="feedback" role="status" aria-live="polite">正在读取本地记录…</p>
   </section>
   <section class="panel" id="internal-results" hidden aria-labelledby="internal-results-heading">
     <div class="heading-line">
@@ -92,7 +90,7 @@
     </div>
   </section>
   <p class="back-link"><a href="manager.html">← 返回互关助手</a></p>
-  <footer>这是仅供测试的可选同步方式，不使用 X 的付费开发者 API，也不上传 Cookie、Token 或关注名单。</footer>
+  <footer>数据保存在本机。首次同步耗时取决于账号规模；遇到平台限制会停止并保存进度。</footer>
 </main>
 <script type="module" src="internal-sync-ui.js"></script>
 </body>

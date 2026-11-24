@@ -4,3 +4,11 @@
 #internal-consent{accent-color:var(--xrh-brand)}
 #internal-results .notice{line-height:1.65}
 @media (max-width:480px){#internal-start{width:100%}}
+
+/* Results-first layout: account controls collapse after a local snapshot loads. */
+.follow-main .internal-actions{margin:0;justify-content:flex-end;flex-wrap:wrap}
+#internal-settings{margin-top:12px}
+#internal-settings>summary{cursor:pointer;font-weight:650;font-size:12px;color:var(--xrh-muted);padding:5px 0}
+#internal-settings:not([open]){margin-top:5px}
+#internal-cancel:disabled{display:none}
+@media(max-width:600px){.follow-main .heading-line{flex-wrap:wrap}.follow-main .internal-actions{justify-content:flex-start}}

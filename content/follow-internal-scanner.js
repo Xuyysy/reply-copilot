@@ -194,9 +194,10 @@
           withGrokTranslatedBio:true};
         if(cursor) vars.cursor=cursor;
         const result=parser.parsePage(await request(operation,vars,session));
+        let truncated=false;
         for(const u of result.users) {
           if(ids.has(u.id)) continue;
-          if(handles.length>=MAX_USERS) break;
+          if(handles.length>=MAX_USERS) {truncated=true;break;}
           ids.add(u.id);
           handles.push(u.handle);
           accountIds[u.handle]=u.id;
@@ -217,6 +218,7 @@
           count:handles.length,pages,
           ...(batchPage%CHECKPOINT_EVERY===0 || atEnd ? {checkpoint:data} : {})
         });
+        if(truncated) {reason="limit";break;}
         if(!cursor) {reason=atEnd ? "complete" : "schema_timeline";break;}
         if(cursor.startsWith("0|")) {reason="complete";break;}
         if(cursor===previousCursor || seenCursors.has(cursor)) {reason="cursor_loop";break;}

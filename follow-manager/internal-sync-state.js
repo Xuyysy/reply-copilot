@@ -49,3 +49,26 @@ export function resumable(stage) {
   return validStage(stage) && stage.reason!=="complete" && typeof stage.cursor==="string" &&
     stage.cursor.length>0 && stage.handles.length<MAX_INTERNAL_HANDLES;
 }
+
+// A user-initiated refresh can span ordinary local work budgets without
+// needing a new click. Never continue after a service/permission error,
+// cancellation, a cursor loop, storage limit, or a non-advancing checkpoint.
+export async function runStageBatches({initial=null,run,persist,cancelled=()=>false,
+    deadline=Date.now()+45*60*1000,now=Date.now,maxBatches=20}) {
+  let result=initial, previous=resumable(initial)?initial:null;
+  const seen=new Set(previous?.cursor?[previous.cursor]:[]);
+  for(let i=0;i<maxBatches;i++){
+    if(cancelled() || now()>=deadline) return result;
+    result=await run(previous,i);
+    if(!validStage(result)) throw new Error("同步返回的数据无效。");
+    if(result.reason==="paused" && (!resumable(result) ||
+       (previous && result.pages<=previous.pages) || seen.has(result.cursor))){
+      result={...result,reason:"stalled"};
+    }
+    await persist(result);
+    if(result.reason!=="paused" || cancelled() || now()>=deadline) return result;
+    seen.add(result.cursor);
+    previous=result;
+  }
+  return result;
+}

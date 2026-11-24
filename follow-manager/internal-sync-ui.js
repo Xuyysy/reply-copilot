@@ -4,7 +4,7 @@ import {saveInternalSnapshot, readInternalSnapshot, removeInternalSnapshot,
   from "./internal-sync-store.js";
 import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent}
   from "./results-utils.js";
-import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,resumable}
+import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,resumable,runStageBatches}
   from "./internal-sync-state.js";
 
 const $ = id => document.getElementById(id);
@@ -13,10 +13,11 @@ const KINDS = ["mutual","notFollowingBack","iHaveNotFollowedBack"];
 const PAGE_SIZE = 50;
 const MAX_HANDLES = MAX_INTERNAL_HANDLES;
 const LAST_OWNER_KEY = "xrh-follow-internal-last-owner";
+const CONSENT_KEY = "xrh-follow-internal-consent-owner";
 // Each explicit batch can stop and be continued from a locally stored cursor.
 const REASON = {
   complete:"已同步完成",
-  paused:"已保存当前批次，点击「继续同步」获取下一批",
+  paused:"本次处理时间已达保护限制，进度已保存",
   limit:"达到本地最大保存数量 30,000 人；结果仍可能不完整",
   timeout:"同步超时，当前进度已保存",
   cursor_loop:"X 返回了重复的分页位置，本次停止",
@@ -71,15 +72,10 @@ function owner() {
   return value;
 }
 function stageName(kind) { return kind === "following" ? "正在关注" : "粉丝"; }
-function setStatus(kind,count,label) {
-  $(kind === "following" ? "internal-following-count" : "internal-followers-count").textContent =
-    Number.isSafeInteger(count) ? count.toLocaleString("zh-CN") : "—";
-  $(kind === "following" ? "internal-following-state" : "internal-followers-state").textContent = label;
-}
 function setBusy(busy) {
   $("internal-start").disabled = busy;
   $("internal-cancel").disabled = !busy;
-  $("internal-load").disabled = busy;
+  $("internal-consent").disabled = busy;
   $("internal-clear").disabled = busy;
   $("internal-reset").disabled = busy;
   $("internal-owner").disabled = busy;
@@ -116,9 +112,8 @@ chrome.runtime.onMessage.addListener((message,sender) => {
   if(message.type==="XRH_INTERNAL_PROGRESS") {
     if(!Number.isSafeInteger(message.count) || message.count<0 ||
        message.count>MAX_HANDLES) return;
-    setStatus(job.kind,message.count,"已读取第 "+(message.pages||"?")+" 页…");
     $("internal-loading-title").textContent="正在整理「"+stageName(job.kind)+"」";
-    feedback("「"+stageName(job.kind)+"」已读取 "+message.count+" 人，保存进度后可继续。");
+    feedback("正在同步关注关系，完成后将自动显示结果。");
     if(message.checkpoint && validStage(message.checkpoint)) {
       queueCheckpoint(job,job.kind,message.checkpoint);
     }
@@ -158,9 +153,8 @@ async function stage(job,kind,first,resume=null) {
   job.kind = kind;
   job.scanId = crypto.randomUUID();
   job.pending = null;
-  setStatus(kind,null,"正在准备…");
   $("internal-loading-title").textContent = "正在整理「" + stageName(kind) + "」";
-  feedback("正在后台读取「" + stageName(kind) + "」的数据…");
+  feedback("正在同步关注关系，完成后将自动显示结果。");
   if (!first) {
     await chrome.tabs.update(job.tabId,{
       url:"https://x.com/" + job.owner + "/" + kind,
@@ -168,12 +162,11 @@ async function stage(job,kind,first,resume=null) {
   }
   await waitReady(job);
   if (job.cancelled) throw new Error("已停止分析。");
-  setStatus(kind,resume?.handles?.length ?? null,resume ? "从上次分页位置继续…" : "正在读取数据…");
   const scanId = job.scanId;
   return new Promise((resolve,reject) => {
     let settled = false;
     const timeout = setTimeout(() => finish(new Error("处理时间较长，已停止本次分析。")),
-      5 * 60 * 1000);
+      Math.max(1,Math.min(5 * 60 * 1000,job.deadline-Date.now())));
     function finish(error,value) {
       if (settled) return;
       settled = true;
@@ -230,8 +223,8 @@ function renderList() {
     fragment.append(empty);
   }
   $("internal-result-list").replaceChildren(fragment);
-  $("internal-result-count").textContent = "当前分类共 " + items.length + " 条获取记录" +
-    (search ? "（已筛选）" : "（结果可能不完整）");
+  $("internal-result-count").textContent = "当前分类共 " + items.length + " 个账号" +
+    (search || $("internal-verified").value!=="all" ? "（已筛选）" : "");
   $("internal-page-info").textContent = (currentPage+1) + " / " + pageCount;
   $("internal-prev").disabled = currentPage === 0;
   $("internal-next").disabled = currentPage === pageCount - 1;
@@ -259,7 +252,7 @@ function renderSnapshot(data,localSaved=false) {
   const imported = new Date(data.importedAt);
   const time = Number.isFinite(imported.getTime()) ? imported.toLocaleString("zh-CN") : "时间未知";
   const ended = data.reasons.following === "complete" && data.reasons.followers === "complete";
-  $("internal-result-badge").textContent = ended ? "本次分析完成" : "部分结果";
+  $("internal-result-badge").textContent = ended ? "本地结果" : "部分结果";
   $("internal-snapshot-meta").textContent = "@" + data.owner + " · " + time +
     " · 我关注 " + data.following.length + " 人 · 关注我的人 " + data.followers.length +
     " 人 · " + (localSaved ? "已保存到本机" : "本次结果") +
@@ -269,7 +262,8 @@ function renderSnapshot(data,localSaved=false) {
   currentPage = 0;
   $("internal-filter").value = "";
   $("internal-verified").value="all";
-  $("internal-start").textContent="更新关注关系";
+  $("internal-start").textContent="更新数据";
+  $("internal-settings").open=false;
   for (const button of document.querySelectorAll("[data-internal-kind]")) {
     button.setAttribute("aria-pressed",String(button.dataset.internalKind === selectedKind));
   }
@@ -280,15 +274,17 @@ async function start() {
   let account;
   try {account=owner();} catch(error){fail(error);return;}
   if(!$("internal-consent").checked) {
+    $("internal-settings").open=true;
     feedback("请先确认同步的是自己的 X 账号。",true);
     return;
   }
-  try {localStorage.setItem(LAST_OWNER_KEY,account);} catch{}
+  try {localStorage.setItem(LAST_OWNER_KEY,account);localStorage.setItem(CONSENT_KEY,account);} catch{}
   const job={owner:account,tabId:null,cancelled:false,kind:null,scanId:null,
     pending:null,startedAt:Date.now(),timer:null,writes:Promise.resolve(),
-    writeError:null,checkpoint:null};
+    writeError:null,checkpoint:null,deadline:Date.now()+45*60*1000};
   running=job;
   setBusy(true);
+  $("internal-settings").open=false;
   updateElapsed(job);
   job.timer=setInterval(()=>{if(running===job)updateElapsed(job);},1000);
   // Do not clear the last complete snapshot while updating.
@@ -302,55 +298,48 @@ async function start() {
     let following=job.checkpoint.stages.following;
     let followers=job.checkpoint.stages.followers;
     const needFollowing=following?.reason!=="complete";
-    if(!needFollowing && validStage(following)) {
-      setStatus("following",following.handles.length,"上次已完成，无需重复同步");
-    } else {
-      // New refreshes must not accidentally mix in an incompatible old stage.
-      if(following && !resumable(following)) {
-        job.checkpoint={owner:account,stages:{},savedAt:new Date().toISOString()};
-        following=null;followers=null;
-      }
+    if(needFollowing) {
+      // The second list must not be combined with a newly restarted first list.
+      if(following && !resumable(following)) following=null;
+      followers=null;
+      job.checkpoint={...job.checkpoint,stages:following?{following}:{}};
     }
-    const firstKind=needFollowing ? "following" : "followers";
+    const firstKind=needFollowing?"following":"followers";
+    if(job.cancelled)return;
     const tab=await chrome.tabs.create({url:"https://x.com/"+account+"/"+firstKind,active:false});
     if(!Number.isSafeInteger(tab?.id))throw new Error("Chrome 无法打开临时 X 数据标签。");
     job.tabId=tab.id;
-    if(needFollowing) {
-      following=await stage(job,"following",true,resumable(following)?following:null);
-      await job.writes;
-      queueCheckpoint(job,"following",following);
-      await job.writes;
-      if(job.writeError)throw job.writeError;
-      setStatus("following",following.handles.length || null,REASON[following.reason]);
-      if(following.reason!=="complete") {
-        $("internal-start").textContent="继续同步";
-        feedback("我关注的人： "+(REASON[following.reason]||"本次未完成")+
-          "，已保存 "+following.handles.length+" 人。下次可继续；旧结果未覆盖。",true);
-        return;
-      }
-      // Never carry a stale followers stage into a fresh following stage.
-      if(!cached?.stages?.following || cached.stages.following.reason!=="complete")
-        followers=null;
+    async function readKind(kind,initial) {
+      if(initial?.reason==="complete")return initial;
+      return runStageBatches({
+        initial,deadline:job.deadline,cancelled:()=>job.cancelled,
+        run:async(resume,index)=>{
+          // Maintain the existing pacing even at a local batch boundary.
+          if(index>0)await sleep(1800);
+          if(job.cancelled || Date.now()>=job.deadline) {
+            if(resume)return {...resume,reason:job.cancelled?"cancelled":"paused"};
+            throw new Error(job.cancelled?"已停止同步。":"已达到本次同步时间限制。");
+          }
+          return stage(job,kind,index>0||kind===firstKind,resume);
+        },
+        persist:async result=>{
+          await job.writes;
+          queueCheckpoint(job,kind,result);
+          await job.writes;
+          if(job.writeError)throw job.writeError;
+        }
+      });
     }
-    if(job.cancelled) {feedback("已停止，已保留本次进度。");return;}
-    if(followers?.reason!=="complete") {
-      followers=await stage(job,"followers",!needFollowing,resumable(followers)?followers:null);
-      await job.writes;
-      queueCheckpoint(job,"followers",followers);
-      await job.writes;
-      if(job.writeError)throw job.writeError;
-      setStatus("followers",followers.handles.length || null,REASON[followers.reason]);
-      if(followers.reason!=="complete") {
-        $("internal-start").textContent="继续同步";
-        feedback("关注我的人： "+(REASON[followers.reason]||"本次未完成")+
-          "，已保存 "+followers.handles.length+" 人。点击继续从当前分页位置读取，不重复第一轮。",true);
-        return;
-      }
-    } else {
-      setStatus("followers",followers.handles.length,"之前已完成");
+    function stopped(result) {
+      $("internal-start").textContent="继续同步";
+      feedback(job.cancelled?"已停止，之前保存的结果不受影响。":
+        (REASON[result?.reason]||"同步尚未完成")+
+        "。已保存可用进度，下次可继续；历史结果不受影响。",!job.cancelled);
     }
-    if(!following || following.reason!=="complete" || !followers || followers.reason!=="complete")
-      throw new Error("两组名单尚未完整，未生成互关结果。");
+    following=await readKind("following",following);
+    if(job.cancelled || following?.reason!=="complete"){stopped(following);return;}
+    followers=await readKind("followers",followers);
+    if(job.cancelled || followers?.reason!=="complete"){stopped(followers);return;}
     const data={
       owner:account,source:"internal_sync",importedAt:new Date().toISOString(),
       following:following.handles,followers:followers.handles,
@@ -363,10 +352,11 @@ async function start() {
     const completeRecord=await saveInternalSnapshot(data);
     job.checkpoint=null;
     renderSnapshot(completeRecord,true);
-    $("internal-start").textContent="更新关注关系";
+    $("internal-start").textContent="更新数据";
     feedback("两组名单均已同步完成，本地完整记录已更新。");
-  } catch(error) {fail(error);}
+  } catch(error) { $("internal-start").textContent="继续同步";fail(error);}
   finally {
+    await job.writes;
     clearInterval(job.timer);
     updateElapsed(job);
     await closeTemporaryTab(job);
@@ -394,17 +384,6 @@ function cancel() {
 }
 $("internal-start").addEventListener("click",() => { void start(); });
 $("internal-cancel").addEventListener("click",cancel);
-$("internal-load").addEventListener("click",async() => {
-  try {
-    const account = owner();
-    const data = await readInternalSnapshot(account);
-    if (!data) {feedback("本机没有 @" + account + " 的历史结果。");return;}
-    if (data.owner !== account) throw new Error("本地记录账号不匹配。");
-    renderSnapshot(data,true);
-    localStorage.setItem(LAST_OWNER_KEY,account);
-    feedback("已读取 @" + account + " 上次保存在本机的结果。");
-  } catch (error) { fail(error); }
-});
 $("internal-reset").addEventListener("click",async() => {
   if(running) return;
   try {
@@ -412,8 +391,6 @@ $("internal-reset").addEventListener("click",async() => {
     if(!window.confirm("清除 @" + account + " 的未完成同步进度并重新开始？已保存的完整名单不会删除。")) return;
     await clearInternalCheckpoint(account);
     $("internal-start").textContent="重新同步";
-    setStatus("following",null,"进度已重置");
-    setStatus("followers",null,"进度已重置");
     feedback("已清除未完成的同步进度，历史完整结果仍在。");
   } catch(error) {fail(error);}
 });
@@ -423,6 +400,10 @@ $("internal-clear").addEventListener("click",async() => {
     if (!window.confirm("删除本机保存的 @" + account + " 互关记录？其他导入数据不受影响。")) return;
     await removeInternalSnapshot(account);
     if (localStorage.getItem(LAST_OWNER_KEY) === account) localStorage.removeItem(LAST_OWNER_KEY);
+    if (localStorage.getItem(CONSENT_KEY) === account) localStorage.removeItem(CONSENT_KEY);
+    $("internal-consent").checked=false;
+    $("internal-settings").open=true;
+    $("internal-start").textContent="开始同步";
     if (snapshot?.owner === account) {
       snapshot = null; relationships = null; $("internal-results").hidden = true;
     }
@@ -468,24 +449,22 @@ async function restoreLastResult(account) {
     const existing=await readInternalSnapshot(account);
     const pending=readCheckpoint(await readInternalCheckpoint(account),account);
     if(running || $("internal-owner").value.trim().replace(/^@/,"").toLowerCase()!==account) return;
-    if(existing) {
+    try {$("internal-consent").checked=localStorage.getItem(CONSENT_KEY)===account;} catch{}
+    if(existing && existing.owner===account && existing.reasons?.following==="complete" &&
+       existing.reasons?.followers==="complete"){
       renderSnapshot(existing,true);
-      setStatus("following",existing.following.length,"上次完整记录");
-      setStatus("followers",existing.followers.length,"上次完整记录");
-    }
-    if(pending?.stages) {
-      const a=pending.stages.following;
-      const b=pending.stages.followers;
-      const stageToContinue=a?.reason!=="complete" ? a : b;
-      if(a) setStatus("following",a.handles.length,a.reason==="complete"?"本轮已完成":"已保存进度");
-      if(b) setStatus("followers",b.handles.length,b.reason==="complete"?"本轮已完成":"已保存进度");
-      $("internal-start").textContent="继续同步";
-      feedback("上次同步进度已恢复：关注 "+(a?.handles?.length||0)+" 人、粉丝 "+
-        (b?.handles?.length||0)+" 人。点击继续后从已保存的分页位置读取。");
+      $("internal-settings").open=false;
+      feedback("已显示本地结果。仅点击更新数据时才重新同步。");
     } else {
-      $("internal-start").textContent=existing?"更新关注关系":"开始快速同步";
-      feedback(existing ? "已显示 @" + account + " 上次完整结果；需要最新数据再点击更新。" :
-        "暂无本地记录，可以开始同步。");
+      $("internal-settings").open=true;
+      $("internal-start").textContent="开始同步";
+      feedback("首次同步完成后，打开互关助手即可直接查看结果。");
+    }
+    if(pending?.stages){
+      $("internal-start").textContent="继续同步";
+      if($("internal-consent").checked)$("internal-settings").open=false;
+      feedback(existing?"已显示上次结果。可继续未完成的更新。":
+        "已恢复上次同步进度，点击继续即可接着同步。");
     }
   } catch(error) {fail(error);}
 }
@@ -496,14 +475,21 @@ $("internal-owner").addEventListener("change",()=>{
     const account=owner();
     $("internal-results").hidden=true;
     snapshot=null;relationships=null;
+    $("internal-consent").checked=false;
+    $("internal-start").textContent="开始同步";
     if (account) void restoreLastResult(account);
   } catch(error) {fail(error);}
+});
+$("internal-consent").addEventListener("change",()=>{
+  if(!$("internal-consent").checked){try{localStorage.removeItem(CONSENT_KEY);}catch{}}
 });
 try {
   const last=localStorage.getItem(LAST_OWNER_KEY);
   if (last && /^[a-z0-9_]{1,15}$/.test(last)) {
     $("internal-owner").value="@"+last;
     void restoreLastResult(last);
+  } else {
+    feedback("首次同步完成后，打开互关助手即可直接查看结果。");
   }
 } catch {}
 window.addEventListener("beforeunload",() => {

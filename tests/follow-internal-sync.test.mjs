@@ -67,8 +67,8 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.match(manager,/id="archive-dropzone"/);
   assert.match(page,/id="internal-consent"/);
   assert.match(page,/id="internal-loading"/);
-  assert.match(page,/id="internal-following-count"/);
-  assert.match(page,/id="internal-followers-count"/);
+  assert.doesNotMatch(page,/id="internal-(?:following|followers)-count"/);
+  assert.match(page,/id="internal-settings"/);
   assert.match(page,/id="internal-export"/);
   assert.match(page,/通过 X 网页内部接口/);
   assert.doesNotMatch(page,/<script[^>]+src="https?:\/\//);
@@ -82,6 +82,8 @@ test("internal mode declares no new sensitive Chrome permissions and remains sep
   assert.ok(ui.includes("readCheckpoint("));
   assert.ok(ui.includes("queueCheckpoint("));
   assert.ok(ui.includes('job.checkpoint.stages.following'));
+  assert.ok(ui.includes('runStageBatches({'));
+  assert.ok(ui.includes('localStorage.getItem(CONSENT_KEY)'));
   assert.ok(ui.includes('"internal-reset").addEventListener'));
   assert.match(ui,/source:"internal_sync"/);
   assert.doesNotMatch(ui,/chrome\.cookies|auth_token|fetch\s*\(|https:\/\/api-staging|D1|AccountClient/);
@@ -245,7 +247,9 @@ test("staging-only internal page explains bounded batches and reset control",()=
   const html=read("follow-manager/internal-sync.html");
   const script=read("content/follow-internal-scanner.js");
   assert.ok(html.includes('id="internal-reset"'));
-  assert.ok(html.includes("每批最多读取约 3,000 人"));
+  assert.ok(!html.includes("每批最多读取约 3,000 人"));
+  assert.ok(!html.includes("查看上次结果"));
+  assert.ok(!html.includes("scan-progress"));
   assert.ok(script.includes('const MAX_USERS = 30000'));
   assert.ok(script.includes('const MAX_BATCH_ADDED = 3000'));
   assert.ok(script.includes('const CHECKPOINT_EVERY = 8'));

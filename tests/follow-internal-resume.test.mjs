@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {MAX_INTERNAL_HANDLES,RESUME_TTL_MS,validStage,readCheckpoint,withStage,resumable}
+import {MAX_INTERNAL_HANDLES,RESUME_TTL_MS,validStage,readCheckpoint,withStage,resumable,runStageBatches}
   from "../follow-manager/internal-sync-state.js";
 
 function stage(n=3,reason="paused",cursor="cursor-4") {
@@ -41,4 +41,33 @@ test("failure does not imply completion and a resumed list retains previous hand
   assert.equal(checkpoint.stages.followers,undefined);
   assert.equal(checkpoint.stages.following.handles.length,3000);
   assert.ok(readCheckpoint(checkpoint,"owner"));
+});
+
+test("one explicit sync advances ordinary local batches and stops on actual limit or error",async()=>{
+  const first={...stage(3000),pages:120,cursor:"c1"};
+  const second={...stage(3250),pages:130,cursor:"c2"};
+  const done={...stage(3300,"complete",null),pages:140};
+  const sequence=[second,done],calls=[],saved=[];
+  const result=await runStageBatches({initial:first,run:async(previous)=>{calls.push(previous.cursor);return sequence.shift()},
+    persist:async v=>saved.push(v.reason)});
+  assert.equal(result.reason,"complete");
+  assert.deepEqual(calls,["c1","c2"]);
+  assert.deepEqual(saved,["paused","complete"]);
+  for(const reason of ["rate_limited","login_required","query_not_found","cancelled","limit","network"]){
+    let n=0;
+    const end=await runStageBatches({initial:first,run:async()=>{n++;return {...first,reason}},persist:async()=>{}});
+    assert.equal(end.reason,reason);
+    assert.equal(n,1);
+  }
+});
+test("one-click continuation rejects repeated cursor and obeys stop/deadline",async()=>{
+  const initial={...stage(3250),pages:130,cursor:"same"};
+  let n=0;
+  const end=await runStageBatches({initial,run:async()=>{n++;return {...initial,pages:131}},persist:async()=>{}});
+  assert.equal(end.reason,"stalled");
+  assert.equal(n,1);
+  const cancelled=await runStageBatches({initial,cancelled:()=>true,run:async()=>{throw Error("unexpected")},persist:async()=>{}});
+  assert.equal(cancelled,initial);
+  const timed=await runStageBatches({initial,deadline:10,now:()=>11,run:async()=>{throw Error("unexpected")},persist:async()=>{}});
+  assert.equal(timed,initial);
 });
