@@ -2,12 +2,16 @@ import {StorageService,BEHAVIOR_PREFERENCES_KEY,PENDING_REQUEST_KEY} from '../se
 import {VoiceProfileService} from '../services/voice-profile-service.js';
 import {UsageService} from '../services/usage-service.js';
 import {AccountClient} from '../services/account-client.js';
+import {collectDiagnostics,diagnosticRows} from './diagnostics.js';
 
 const storage=new StorageService(),profiles=new VoiceProfileService(),usage=new UsageService(),accountClient=new AccountClient();
 const $=id=>document.getElementById(id);
 let accountPoll=null;
 let manualBindingCheck=false;
 let wasPending=false;
+let diagnosticAccount='unknown';
+let diagnosticReport=null;
+let diagnosticBusy=false;
 
 const momentumControl=globalThis.ReplyCopilotMomentumPresenter.connect(
   $('momentum-control'),message=>chrome.runtime.sendMessage(message),action=>{
@@ -36,6 +40,7 @@ async function refreshDashboard(){
   $('quick-style').value=behavior.defaultReplyMode;$('quick-auto').checked=behavior.autoGenerateOnReply;
   $('quick-language').value=profile.language;$('quick-length').value=profile.replyLength;$('quick-humor').value=profile.humorLevel;
   const status=account?.ok?account.status:'auth_unavailable';
+  diagnosticAccount=account?.pending?'pending':status;
   $('quota-row').classList.toggle('hidden',!account?.quota||account.source!=='server');
   $('account-buttons').classList.toggle('hidden',!['guest','auth_expired','auth_unavailable'].includes(status)&&!account?.pending);
   $('connect-register').classList.toggle('hidden',status!=='guest'||account?.pending);
@@ -155,3 +160,30 @@ void chrome.storage.session.remove(PENDING_REQUEST_KEY).catch(()=>{});
 void refreshDashboard();
 void momentumControl.refresh({ensure:true});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')void momentumControl.refresh({ensure:true});});
+
+async function runDiagnostics(){
+  if(diagnosticBusy)return;
+  diagnosticBusy=true;diagnosticReport=null;
+  $('diagnostic-run').disabled=true;$('diagnostic-copy').disabled=true;
+  $('diagnostic-status').textContent='正在检查当前标签页…';
+  try{
+    const preferences=await storage.getBehaviorPreferences().catch(()=>({}));
+    const report=await collectDiagnostics({userAgent:navigator.userAgent,preferences,accountStatus:diagnosticAccount});
+    const fragment=document.createDocumentFragment();
+    for(const [label,value] of diagnosticRows(report)){
+      const row=document.createElement('div'),dt=document.createElement('dt'),dd=document.createElement('dd');
+      dt.textContent=label;dd.textContent=value;row.append(dt,dd);fragment.append(row);
+    }
+    $('diagnostic-results').replaceChildren(fragment);
+    diagnosticReport=report;
+    $('diagnostic-copy').disabled=false;
+    $('diagnostic-status').textContent=report.contentScript==='running'?'检查完成。若悬浮窗未出现，请点击一条文字帖的回复按钮后再检查。':'请在 X 标签页刷新页面，再点击回复并重新检查。';
+  }catch{$('diagnostic-results').replaceChildren();$('diagnostic-status').textContent='检查失败，请重试。';}
+  finally{diagnosticBusy=false;$('diagnostic-run').disabled=false;}
+}
+$('diagnostic-run').addEventListener('click',()=>void runDiagnostics());
+$('diagnostic-copy').addEventListener('click',async()=>{
+  if(!diagnosticReport)return;
+  try{await navigator.clipboard.writeText(JSON.stringify(diagnosticReport,null,2));$('diagnostic-status').textContent='已复制诊断报告，可手动发给客服。';}
+  catch{$('diagnostic-status').textContent='复制失败，请重新点击。';}
+});

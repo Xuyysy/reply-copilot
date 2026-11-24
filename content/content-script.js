@@ -44,6 +44,7 @@
   // No post text, URL, account data or telemetry is captured.
   const associationEvents=[];
   function traceAssociation(stage,reason){
+    if(associationEvents.at(-1)?.stage===stage&&associationEvents.at(-1)?.reason===reason)return;
     associationEvents.push({stage,reason,at:Math.round(performance.now())});
     if(associationEvents.length>20)associationEvents.shift();
   }
@@ -196,6 +197,7 @@
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
     const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
     const result=active.association.evaluate(facts);
+    if(result.state==='waiting')traceAssociation('waiting',result.reason);
     if (result.state==='rejected') {
       if (active?.editor && result.reason==='editor_replaced_or_closed' && facts.editors.length===0 && facts.visibleDialogCount===0) endSession('reply_closed');
       else rejectAssociation(result.reason);
@@ -249,6 +251,7 @@
       clearTimeout(active.acquireTimer);
       active.editor=found.editor;active.matchedPost=true;
       active.trace?.mark("editor_bound");
+      traceAssociation("bound","new_focused_reply_editor");
       const current=active;
       current.initialComposerText=api.composerAdapter.hasContent(found.editor);
       current.userTouchedComposer=false;
@@ -293,7 +296,10 @@
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
       current.preferences = response.preferences; current.initializing = false;
-      if (current.preferences.showFloatingWindow) current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
+      if (current.preferences.showFloatingWindow) {
+        current.assistant = api.inlineAssistant.mount(current.anchor, handleAction, { preferences: current.preferences });
+        traceAssociation('window',current.assistant?.host?.isConnected?'mounted':'mount_missing');
+      } else traceAssociation('window','disabled_by_setting');
       const account = await refreshAccount(current, accountPending);
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       current.trace?.addDurations({precheck:performance.now()-precheckStart});
@@ -323,7 +329,7 @@
         if (current.preferences.autoGenerateOnReply && current.preferences.showFloatingWindow) void generateActive(requestId);
         else { current.assistant?.showReady(current.preferences.autoGenerateOnReply); completeTrace(current,"incomplete"); }
       } else completeTrace(current,"incomplete");
-    } catch { if (!contextAlive || active !== current || current.cancelled) return; completeTrace(current,"failed"); current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
+    } catch { if (!contextAlive || active !== current || current.cancelled) return; traceAssociation("window","prepare_failed"); completeTrace(current,"failed"); current.initializing = false; current.assistant = api.inlineAssistant.mount(current.anchor, handleAction); current.assistant.setStatus("无法读取插件设置，请打开设置中心检查。"); }
   }
   async function refreshAccount(current, pendingResponse = null) {
     const previousStatus = current.accountStatus;
@@ -610,8 +616,27 @@
     getAssistant(){const assistant=active?.assistant;return active?.editor?.isConnected&&!active.cancelled&&assistant?.host?.isConnected?assistant:null;},
     armNextReply(sample){if(!sample||![1,2,3].includes(sample.stage)||typeof sample.titleZh!=='string'||typeof sample.bodyZh!=='string')return false;stagingGateNext=Object.freeze({stage:sample.stage,titleZh:sample.titleZh,bodyZh:sample.bodyZh});return true;}
   });
-  function onRuntimeMessage(message) {
+  // Explicit local probe from our side panel only. Never send post text,
+  // URLs, IDs, account information, DOM fragments or raw errors.
+  function onRuntimeMessage(message,sender,sendResponse) {
     if (!hasRuntimeContext()) return false;
+    if(message?.type==='REPLY_COPILOT_LOCAL_DIAGNOSTICS'){
+      if(sender?.id!==chrome.runtime.id||sender?.url!==chrome.runtime.getURL('sidepanel/sidepanel.html'))return false;
+      try{
+        const host=active?.assistant?.host||lingeringHost;
+        let windowState='absent';
+        if(host?.isConnected){
+          const rect=host.getBoundingClientRect(),style=getComputedStyle(host);
+          windowState=style.display!=='none'&&style.visibility!=='hidden'&&rect.width>0&&rect.height>0&&
+            rect.right>0&&rect.bottom>0&&rect.left<innerWidth&&rect.top<innerHeight?'visible':'not_visible';
+        }
+        const baseline=api.composerAssociation.baseline(document);
+        sendResponse({ok:true,schema:1,replyControlPresent:Boolean(document.querySelector('article [data-testid="reply"]')),
+          visibleEditors:Math.min(100,baseline.visibleEditorCount),replyDialogs:Math.min(100,baseline.baselineModalCount),
+          windowState,events:associationEvents.slice(-12).map(({stage,reason})=>({stage,reason}))});
+      }catch{sendResponse({ok:false,schema:1});}
+      return false;
+    }
     if (message?.type === "REPLY_COPILOT_PERFORMANCE_STATE") { performanceEnabled=message.enabled===true; return false; }
     if(message?.type === "REPLY_COPILOT_MOMENTUM_CHANGED"){if(active)refreshMomentum(active);momentumEntry?.sync();return false;}
     if (message?.type !== "REPLY_COPILOT_SETTINGS_CHANGED" || !active?.editor?.isConnected) return false;
@@ -653,7 +678,7 @@
         else refreshAssociation();
       } else refreshAssociation();
     }
-    if (recoveryRequired && control) {pendingActivation=null;return;}
+    if (recoveryRequired && control) {traceAssociation('blocked','recovery_required');pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
       if(active&&!active.cancelled&&!active.editor&&!active.assistant?.host?.contains(event.target)) rejectAssociation('competing_activation');
@@ -667,7 +692,8 @@
       pendingActivation={control,blocked:true};return;
     }
     const post=api.postExtractor.extractPost(control.closest('article'));
-    if (!post.ok) {pendingActivation=null;return;}
+    if (!post.ok) {traceAssociation('blocked',post.reason==='no-post'?'no-post':'post-context-incomplete');pendingActivation=null;return;}
+    traceAssociation('capture','reply_control_recognized');
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
@@ -678,10 +704,12 @@
     if (!control || control.closest('[data-zane-reply-copilot]')) return;
     const activation=pendingActivation;pendingActivation=null;
     if (!activation || activation.blocked || performance.now()-activation.at>1500) {
+      traceAssociation('blocked',!activation?'activation_missing':activation.blocked?'competing_activation':'activation_stale');
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId) {
+      traceAssociation('blocked','source_changed');
       return;
     }
     activation.trace = performanceApi?.createTrace({enabled:performanceEnabled,startAt:clickAt});
