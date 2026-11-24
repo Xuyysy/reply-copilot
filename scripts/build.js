@@ -21,7 +21,7 @@ if (packagedChannel && websiteUrl === hostedApiUrl) throw new Error("Website and
 const output = path.join(root, "dist", channel);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
-for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
+for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "follow-manager", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
 if (channel === "staging") cpSync(path.join(root, "staging"), path.join(output, "staging"), {recursive:true});
 if (packagedChannel) {
   const configPath = path.join(output, "config", "runtime.js");
