@@ -82,3 +82,5 @@ footer { background:var(--bg);border-color:var(--line); }
 
 .subscription-overage{margin-top:10px;padding:11px 12px;border:1px solid var(--xrh-pro-line,var(--line));border-radius:10px;background:var(--xrh-pro-surface,var(--soft));color:var(--text)}
 .subscription-overage p{margin:0 0 8px;font-size:12px;line-height:1.5}.subscription-overage .button{margin-top:4px}
+
+.diagnostic-results{margin:8px 0;font-size:12px}.diagnostic-results>div{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}.diagnostic-results dt{flex:0 0 37%;color:var(--muted)}.diagnostic-results dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0;color:var(--text)}.diagnostics-card .dashboard-actions{margin-top:8px}
