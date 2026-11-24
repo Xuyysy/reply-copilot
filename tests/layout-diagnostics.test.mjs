@@ -5,7 +5,7 @@ import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
-import {sanitizeLayout,sanitizeRender,sanitizeReproduction,classifyFailure,environment} from '../sidepanel/layout-report.js';
+import {sanitizeLayout,sanitizeRender,sanitizeReproduction,classifyFailure,environment,classifyLayout} from '../sidepanel/layout-report.js';
 test('V2 structure diagnostics never exports unknown DOM attribute values or raw page identifiers',()=>{
  const secret='private@example.test/status/938475938475',raw={tag:secret,role:secret,testId:secret,ariaLabelPresent:true,editable:false,href:secret};
  const layout=sanitizeLayout({pageType:secret,language:secret,viewportWidth:1234,focusedEditor:raw,candidates:Array.from({length:20},()=>({node:raw,focused:true})),url:secret});
@@ -51,6 +51,16 @@ test('real Chrome records unrecognized nested controls, new editor layout and sa
  out.push(recorder.finish('test').state==='lost'&&!JSON.stringify(report).includes('private'));
  const host=document.createElement('div');host.style.cssText='position:fixed;left:0;top:0;width:80px;height:80px;opacity:0';document.body.append(host);
  out.push(d.render(host,'active').transparent===true);
+ document.documentElement.setAttribute('data-app-version','private-build-marker');
+ const modern=document.createElement('div');modern.setAttribute('role','link');modern.setAttribute('data-href','https://x.com/private-new/status/987654321');
+ modern.innerHTML='<article><div dir="auto" class="whitespace-pre-wrap">private modern text</div><button data-engagement-action="reply">Reply</button></article>';
+ document.body.append(modern);
+ const modal=document.createElement('div');modal.setAttribute('role','dialog');modal.setAttribute('data-base-ui-portal','private-portal');
+ modal.innerHTML='<article><a aria-hidden="true" href="https://x.com/private-new/status/987654321"></a><div dir="auto" class="whitespace-pre-wrap">private modern text</div></article><textarea aria-label="private label">private draft</textarea>';
+ document.body.append(modal);modal.querySelector('textarea').focus();
+ const ml=d.layout(),mg=d.gestureShape(modern.querySelector('button'));
+ out.push(ml.modernAppMarker&&ml.modernReplyControls===1&&ml.modernPostWrappers===1&&ml.dialogTextareaCandidates===1&&ml.dialogs[0].modernCanonicalLinks===1&&ml.dialogs[0].textareaEditors===1&&mg.rule==='engagement'&&mg.post.modernAdapter&&mg.post.identityVerified);
+ out.push(!JSON.stringify({ml,mg}).includes('private')&&!JSON.stringify({ml,mg}).includes('987654321'));
  document.querySelector('#result').textContent=JSON.stringify(out);
  };
  const html='<!doctype html><html lang="en"><body><article id="post"><a href="https://x.com/private-name/status/987654321">time</a><div data-testid="tweetText">private text</div><button id="reply" data-testid="reply"><span role="button" data-testid="unknown-private-id" aria-label="private@example.test">icon</span></button></article><output id="result"></output><script>'+code+'</script><script>('+fixture.toString()+')()</script></body></html>';
@@ -59,8 +69,26 @@ test('real Chrome records unrecognized nested controls, new editor layout and sa
  const result=spawnSync(browser,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+path.join(dir,'profile'),'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:25000,maxBuffer:2*1024*1024});
  assert.equal(result.status,0,result.stderr);
  const matches=result.stdout.match(/<output id="result">(\[[^\]]+\])<\/output>/);
- assert.ok(matches,result.stdout.slice(-500));const checks=JSON.parse(matches[1]);assert.equal(checks.length,8);assert.ok(checks.every(Boolean),JSON.stringify(checks));
+ assert.ok(matches,result.stdout.slice(-500));const checks=JSON.parse(matches[1]);assert.equal(checks.length,10);assert.ok(checks.every(Boolean),JSON.stringify(checks));
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
 
 test('quote-only source and existing verified copy-only route are not misclassified as missing post text or mount',()=>{const r={page:'x',contentScript:'running',floatingEnabled:true,reproduction:{state:'complete',gesture:{rule:'testid',post:{article:true,identityVerified:true,mainTextPresent:false,quoteTextPresent:true}},marks:[{stage:'activated',reason:'trusted_reply_click'},{stage:'copy_only',reason:'new_editor_unverified_parent'},{stage:'window',reason:'mounted'}],samples:[]}};assert.equal(classifyFailure(r),'window_mounted_during_capture');assert.equal(classifyFailure({...r,reproduction:{...r.reproduction,gesture:{...r.reproduction.gesture,post:{...r.reproduction.gesture.post,quoteTextPresent:false}}}}),'post_text_missing');});
+
+
+test('V3 layout classification requires multiple modern signals, supports mixed and fails unknown',()=>{
+ assert.equal(classifyLayout({textareaCandidates:1,modernAppMarker:true}),'unknown');
+ assert.equal(classifyLayout({standardReplyControls:4}),'legacy');
+ assert.equal(classifyLayout({modernAppMarker:true,modernReplyControls:3}),'modern');
+ assert.equal(classifyLayout({modernBundlePresent:true,modernPostWrappers:3,modernBodyNodes:4}),'modern');
+ assert.equal(classifyLayout({modernAppMarker:true,modernReplyControls:3,tweetContainers:1}),'mixed');
+ assert.equal(classifyLayout({modernReplyControls:0,modernBodyNodes:1}),'unknown');
+ const privateValue='private-user-4928484829';
+ const l=sanitizeLayout({layoutFamily:privateValue,modernAppMarker:true,modernReplyControls:3,
+  dialogs:Array.from({length:10},()=>({node:{tag:'div',role:'dialog',slot:privateValue,engagementAction:privateValue,href:privateValue},
+  modernCanonicalLinks:1,textareaEditors:1,html:privateValue})),modernPostWrappers:privateValue});
+ assert.equal(l.layoutFamily,'modern');assert.equal(l.dialogs.length,3);
+ const r=sanitizeReproduction({state:'complete',facts:[{value:{editors:[{editor:{tag:'textarea',engagementAction:privateValue,value:privateValue},contextDetail:privateValue}]}}]},[],[]);
+ assert.equal(r.facts[0].value.editors[0].contextDetail,'unknown');
+ assert.doesNotMatch(JSON.stringify({l,r}),/private-user-4928484829/);
+});

@@ -31,7 +31,7 @@ async function boundedProbe(chromeApi,id,message={type:"REPLY_COPILOT_LOCAL_DIAG
   }catch{return null;}finally{clearTimeout(timer);}
 }
 export async function collectDiagnostics({chromeApi=globalThis.chrome,userAgent="",preferences={},accountStatus="unknown",tabId=null}={}){
-  const report={schema:1,diagnosticRevision:2,extensionVersion:version(chromeApi.runtime.getManifest().version),
+  const report={schema:1,diagnosticRevision:3,extensionVersion:version(chromeApi.runtime.getManifest().version),
     browserVersion:version(/(?:Chrome|Chromium)\/(\d+(?:\.\d+){0,3})/.exec(userAgent)?.[1]),
     accountStatus:enumValue(ACCOUNT,accountStatus),floatingEnabled:flag(preferences.showFloatingWindow),
     autoGenerate:flag(preferences.autoGenerateOnReply),page:"unknown",siteAccess:"unknown",contentScript:"unknown",probe:null};
@@ -62,6 +62,8 @@ export function diagnosticRows(r){
     ["标准回复按钮",p?.replyControlPresent===true?"已找到":p?.replyControlPresent===false?"未找到标准按钮（可能为不同布局）":"未检查"],
     ["可见编辑框 / 回复弹窗",p?String(p.visibleEditors??"未知")+" / "+String(p.replyDialogs??"未知"):"未检查"],
     ["悬浮窗当前状态",p?({visible:"已显示",not_visible:"已挂载但不可见",absent:"未显示",unknown:"未知"})[p.windowState]:"未检查"],
+    ["X 网页布局",({legacy:"旧版 X（结构证据）",modern:"新版 X（多项结构证据）",mixed:"新旧混合布局",unknown:"暂无法确认"})[p?.layout?.layoutFamily||"unknown"]],
+    ["新版回复按钮 / 弹窗 textarea",p?.layout?String(p.layout.modernReplyControls??"?")+" / "+String(p.layout.dialogTextareaCandidates??"?"):"未检查"],
     ["页面结构",p?.layout?`${p.layout.pageType} / ${p.layout.dialogStandardEditors??"?"} 个标准弹窗编辑器`:"未检查"],
     ["复现结果",r.reproduction?.state==="complete"?r.finding||"已录制":r.reproduction?.state==="no_click"?"未捕获点击":r.reproduction?.state==="lost"?"录制已丢失，请重试":"尚未录制"],
     ["最近一次事件",p?.events.length?(REASON_LABELS[p.events.at(-1).reason]||p.events.at(-1).reason):"暂无（请在 X 点击回复后重新检查）"]

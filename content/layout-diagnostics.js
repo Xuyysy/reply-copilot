@@ -6,6 +6,13 @@
   const tags=new Set(['button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use']);
   const roles=new Set(['button','link','group','dialog','textbox','article','presentation','menu','menuitem','region','main','none']);
   const testids=new Set(['reply','tweet','tweetText','tweetTextarea_0','tweetTextarea_1','tweetButton','tweetButtonInline','User-Name','cellInnerDiv','primaryColumn','layers','sheetDialog','confirmationSheetDialog','toolBar','tweetPhoto','videoPlayer','videoComponent','quoteTweet','card.wrapper','like','retweet','unretweet','unlike','bookmark','caret']);
+  const actions=new Set(['reply','retweet','like','bookmark','share','generic']);
+  const slots=new Set(['embedded-tweet-frame']);
+  const MODERN_WRAPPER='div[role="link"][data-href]';
+  const MODERN_BODY='div[dir="auto"].whitespace-pre-wrap';
+  const CANONICAL='a[aria-hidden="true"][href*="/status/"]';
+  const QUOTE_FRAME='[data-slot="embedded-tweet-frame"]';
+  const PORTAL='[data-base-ui-portal]';
   const languages=new Set(['zh','en','ja','ko','es','fr','de','it','pt','ru','ar','id','vi','th','tr','hi','pl','nl','uk']);
   const attr=(node,key)=>node?.getAttribute?.(key)||'';
   const kind=(set,v)=>!v?'none':set.has(v)?v:'other';
@@ -18,7 +25,14 @@
     if(!node)return null;
     return {tag:kind(tags,String(node.localName||'').toLowerCase()),role:kind(roles,attr(node,'role')),
       testId:kind(testids,attr(node,'data-testid')),ariaLabelPresent:Boolean(attr(node,'aria-label')),
-      editable:node.isContentEditable===true};
+      editable:node.isContentEditable===true,
+      engagementAction:kind(actions,attr(node,'data-engagement-action')),
+      slot:kind(slots,attr(node,'data-slot')),
+      permalinkWrapper:node.matches?.(MODERN_WRAPPER)===true,
+      baseUiPortal:node.hasAttribute?.('data-base-ui-portal')===true,
+      readOnly:node.localName==='textarea'?node.readOnly===true:null,
+      disabled:node.localName==='textarea'?node.disabled===true:null,
+      insideInert:Boolean(near(node,'[inert]'))};
   }
   function route(){
     const p=location.pathname;
@@ -34,9 +48,15 @@
     const article=near(node,'article'),tweet=near(node,'[data-testid="tweet"]');
     const root=article||tweet;
     const extracted=article&&api.postExtractor?.extractPost?.(article);
+    const modern=Boolean(article&&api.postExtractor?.isModernPost?.(article));
+    const evidence=modern?api.postExtractor?.modernIdentityEvidence?.(article):null;
     return {article:Boolean(article),tweetContainer:Boolean(tweet),
       textNodes:n(root,'[data-testid="tweetText"]'),timeNodes:n(root,'time'),
       statusLinks:n(root,'a[href*="/status/"]'),mediaNodes:n(root,'[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]'),
+      modernAdapter:modern,modernIdentityConflict:evidence?.conflict===true,
+      modernWrapperPresent:Boolean(near(article,MODERN_WRAPPER)),
+      modernBodyNodes:n(root,MODERN_BODY),modernCanonicalLinks:n(root,CANONICAL),
+      modernQuoteFrames:n(root,QUOTE_FRAME),
       identityVerified:Boolean(article&&api.postExtractor?.postIdentity?.(article)),
       mainTextPresent:Boolean(article&&api.postExtractor?.postText?.(article)),quoteTextPresent:Boolean(extracted?.ok&&extracted.quoteOnly&&extracted.quotedText)};
   }
@@ -54,6 +74,30 @@
       insideDialog:Boolean(near(target,'[role="dialog"],dialog')),
       post:postShape(recognized||nearest||target)};
   }
+  // Fixed selector counts only: no URLs, hash/version strings, raw HTML,
+  // script source, arbitrary attribute values or post/editor text exported.
+  function modernBundlePresent(){
+    for(const node of nodes(document,'script[src]')){
+      try{
+        const url=new URL(node.getAttribute('src'),location.href);
+        if(url.protocol==='https:'&&url.hostname==='abs.twimg.com'&&
+          url.pathname.startsWith('/x-web/x-web/entry-client-'))return true;
+      }catch{}
+    }
+    return false;
+  }
+  function dialogShapes(){
+    return nodes(document,'[role="dialog"],dialog[open]').filter(vis).slice(0,3).map(d=>({
+      node:describe(d),ariaModal:attr(d,'aria-modal')==='true',
+      insideBaseUiPortal:Boolean(near(d,PORTAL)),
+      articles:n(d,'article'),modernBodyNodes:n(d,MODERN_BODY),
+      modernWrappers:n(d,MODERN_WRAPPER),modernCanonicalLinks:n(d,CANONICAL),
+      modernQuoteFrames:n(d,QUOTE_FRAME),
+      legacyBodyNodes:n(d,'[data-testid="tweetText"]'),
+      standardEditors:nv(d,STANDARD),textareaEditors:nv(d,'textarea'),
+      editors:nv(d,EDITABLE),focusedInside:d.contains(document.activeElement)
+    }));
+  }
   function layout(){
     const editors=nodes(document,EDITABLE).filter(vis);
     const active=document.activeElement;
@@ -65,6 +109,12 @@
       standardReplyControls:n(document,'[data-testid="reply"]'),standardEditors:nv(document,STANDARD),
       modernAppMarker:Boolean(document.documentElement?.hasAttribute?.('data-app-version')),
       modernReplyControls:n(document,'[data-engagement-action="reply"]'),textareaCandidates:nv(document,'textarea'),
+      modernBundlePresent:modernBundlePresent(),modernPostWrappers:n(document,MODERN_WRAPPER),
+      modernBodyNodes:n(document,MODERN_BODY),modernCanonicalLinks:n(document,CANONICAL),
+      modernQuoteFrames:n(document,QUOTE_FRAME),baseUiPortals:n(document,PORTAL),
+      legacyBodyNodes:n(document,'[data-testid="tweetText"]'),
+      dialogTextareaCandidates:nv(document,'[role="dialog"] textarea,dialog[open] textarea'),
+      dialogs:dialogShapes(),
       roleDialogs:nv(document,'[role="dialog"]'),nativeDialogs:nv(document,'dialog[open]'),
       editableCandidates:editors.length,inlineCandidates:editors.filter(x=>!near(x,'[role="dialog"],dialog')).length,
       nonstandardCandidates:editors.filter(x=>!x.matches(STANDARD)).length,
@@ -125,6 +175,8 @@
       const f={routeAllowed:value.routeAllowed===true,sourceUnchanged:value.sourceUnchanged===true,
         candidates:Math.min(100,value.editors.length),dialogs:Math.min(100,value.visibleDialogCount),
         editors:value.editors.slice(0,5).map(e=>({modal:e.modal===true,focused:e.focused===true,empty:e.empty===true,
+          editor:describe(e.node),
+          contextDetail:e.contextDetail,
           contextIdentityPresent:Boolean(e.contextStatusId),contextArticleCount:Math.min(100,e.contextArticleCount||0),
           contextTextPresent:e.contextTextPresent===true,contextTextMatches:e.contextTextMatches===true,
           contextMatches:e.contextMatches===null?'pending':e.contextMatches===true?'match':'mismatch'}))};

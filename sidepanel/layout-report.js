@@ -8,17 +8,39 @@ const fields=(obj,keys,fn)=>Object.fromEntries(keys.map(k=>[k,fn(obj?.[k])]));
 const tag=['none','other','button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use'];
 const role=['none','other','button','link','group','dialog','textbox','article','presentation','menu','menuitem','region','main'];
 const testId=['none','other','reply','tweet','tweetText','tweetTextarea_0','tweetTextarea_1','tweetButton','tweetButtonInline','User-Name','cellInnerDiv','primaryColumn','layers','sheetDialog','confirmationSheetDialog','toolBar','tweetPhoto','videoPlayer','videoComponent','quoteTweet','card.wrapper','like','retweet','unretweet','unlike','bookmark','caret'];
-function node(o){return o&&typeof o==='object'?{tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),ariaLabelPresent:bool(o.ariaLabelPresent),editable:bool(o.editable)}:null;}
-function post(o){return {...fields(o,['article','tweetContainer','identityVerified','mainTextPresent','quoteTextPresent'],bool),...fields(o,['textNodes','timeNodes','statusLinks','mediaNodes'],int)};}
+function node(o){return o&&typeof o==='object'?{tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),ariaLabelPresent:bool(o.ariaLabelPresent),editable:bool(o.editable),
+ engagementAction:enumOf(o.engagementAction,['none','other','reply','retweet','like','bookmark','share','generic']),
+ slot:enumOf(o.slot,['none','other','embedded-tweet-frame']),
+ ...fields(o,['permalinkWrapper','baseUiPortal','readOnly','disabled','insideInert'],bool)}:null;}
+function post(o){return {...fields(o,['article','tweetContainer','identityVerified','mainTextPresent','quoteTextPresent','modernAdapter','modernIdentityConflict','modernWrapperPresent'],bool),...fields(o,['textNodes','timeNodes','statusLinks','mediaNodes','modernBodyNodes','modernCanonicalLinks','modernQuoteFrames'],int)};}
 function gesture(o){return o&&typeof o==='object'?{target:node(o.target),nearestControl:node(o.nearestControl),ancestors:arr(o.ancestors,8,node),rule:enumOf(o.rule,['testid','label','engagement','unrecognized']),...fields(o,['replyTestIdAncestor','outerRecognized','insideDialog'],bool),post:post(o.post)}:null;}
+// Conservative layout classification. The new root/bundle marker alone or
+// a lone textarea is not proof. Mixed snapshots preserve both signatures.
+export function classifyLayout(o){
+ const present=k=>Number.isInteger(o?.[k])&&o[k]>0;
+ const legacy=present('tweetContainers')||present('standardReplyControls')||present('legacyBodyNodes');
+ const modernRoot=o?.modernAppMarker===true||o?.modernBundlePresent===true;
+ const modernPost=present('modernPostWrappers')||present('modernCanonicalLinks');
+ const modernAction=present('modernReplyControls');
+ const modernBody=present('modernBodyNodes');
+ const modern=(modernAction&&(modernRoot||modernPost))||
+   (modernRoot&&modernPost&&modernBody)||(modernPost&&modernBody&&present('baseUiPortals'));
+ return modern&&legacy?'mixed':modern?'modern':legacy?'legacy':'unknown';
+}
 export function sanitizeLayout(o){
  if(!o||typeof o!=='object')return null;
- return {pageType:enumOf(o.pageType,['home','post_detail','search','compose','profile','media','other']),language:enumOf(o.language,['zh','en','ja','ko','es','fr','de','it','pt','ru','ar','id','vi','th','tr','hi','pl','nl','uk','other']),
+ const result={pageType:enumOf(o.pageType,['home','post_detail','search','compose','profile','media','other']),language:enumOf(o.language,['zh','en','ja','ko','es','fr','de','it','pt','ru','ar','id','vi','th','tr','hi','pl','nl','uk','other']),
   ...fields(o,['viewportWidth','viewportHeight'],v=>int(v,10000)),
   ...fields(o,['articles','tweetContainers','standardReplyControls','standardEditors','roleDialogs','nativeDialogs','editableCandidates','inlineCandidates','nonstandardCandidates','dialogStandardEditors'],int),
-  modernAppMarker:bool(o.modernAppMarker),modernReplyControls:int(o.modernReplyControls),textareaCandidates:int(o.textareaCandidates),
+  modernAppMarker:bool(o.modernAppMarker),modernBundlePresent:bool(o.modernBundlePresent),
+  ...fields(o,['modernReplyControls','textareaCandidates','modernPostWrappers','modernBodyNodes','modernCanonicalLinks','modernQuoteFrames','baseUiPortals','legacyBodyNodes','dialogTextareaCandidates'],int),
+  dialogs:arr(o.dialogs,3,d=>({node:node(d?.node),
+    ...fields(d,['ariaModal','insideBaseUiPortal','focusedInside'],bool),
+    ...fields(d,['articles','modernBodyNodes','modernWrappers','modernCanonicalLinks','modernQuoteFrames','legacyBodyNodes','standardEditors','textareaEditors','editors'],int)})),
   focusedEditor:node(o.focusedEditor),focusedInsideDialog:bool(o.focusedInsideDialog),
   candidates:arr(o.candidates,5,e=>({node:node(e?.node),...fields(e,['standard','insideRoleDialog','insideNativeDialog','focused'],bool)}))};
+ result.layoutFamily=classifyLayout(result);
+ return result;
 }
 export function sanitizeRender(o){
  if(!o||typeof o!=='object')return null;
@@ -32,7 +54,9 @@ export function sanitizeReproduction(o,stage,reason){
   samples:arr(o.samples,8,s=>({label:enumOf(s?.label,['armed','before','after_click','300ms','1500ms','4500ms','9500ms','12000ms']),atMs:int(s?.atMs,60000),layout:sanitizeLayout(s?.layout),render:sanitizeRender(s?.render)})),
   marks:arr(o.marks,40,m=>({stage:enumOf(m?.stage,stage),reason:enumOf(m?.reason,reason),atMs:int(m?.atMs,60000)})),
   facts:arr(o.facts,12,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
-   editors:arr(f?.value?.editors,5,e=>({...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
+   editors:arr(f?.value?.editors,5,e=>({editor:node(e?.editor),
+    contextDetail:enumOf(e?.contextDetail,['verified_context','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
+    ...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
   sampleErrors:int(o.sampleErrors,100)};
 }
 export function environment(userAgent,tab,manifest){
