@@ -87,3 +87,29 @@ export function profileUrl(id) {
   if (typeof id !== "string" || !VALID_ID.test(id)) throw new Error("无效用户 ID。");
   return "https://x.com/i/user/" + id;
 }
+
+
+// Validate the complete selection before reading any content. Read one file
+// at a time to avoid retaining several large decoded JSON strings together.
+export async function readArchiveGroup(fileList, kind, onProgress=()=>{}) {
+  if (!["follower","following"].includes(kind)) throw new Error("未知的归档名单类型。");
+  const files=[...fileList];
+  if (!files.length) throw new Error("请选择 "+kind+".js 归档文件。");
+  if (files.length>16) throw new Error("单次最多选择 16 个归档分片文件。");
+  let bytes=0;
+  for (const file of files) {
+    if (!file || !/\.js$/i.test(file.name) || !Number.isFinite(file.size) ||
+        file.size<=0 || file.size>MAX_ARCHIVE_BYTES || typeof file.text!=="function") {
+      throw new Error("只能导入 .js 归档文件，且每个文件不超过 32 MB。");
+    }
+    bytes+=file.size;
+    if (bytes>MAX_ARCHIVE_BYTES*4) throw new Error("所选归档分片总体积过大。");
+  }
+  const parts=[];
+  for(let i=0;i<files.length;i++){
+    onProgress({kind,completed:i,total:files.length,name:files[i].name});
+    parts.push(parseArchiveText(await files[i].text(),kind));
+  }
+  onProgress({kind,completed:files.length,total:files.length});
+  return mergeArchiveParts(parts,kind);
+}

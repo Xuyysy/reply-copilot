@@ -1,4 +1,4 @@
-import {MAX_ARCHIVE_BYTES, MAX_ARCHIVE_USERS, normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships, profileUrl} from "./archive.js";
+import {MAX_ARCHIVE_USERS, normalizeHandle, readArchiveGroup, classifyRelationships, profileUrl} from "./archive.js";
 import {readSnapshot, readLatestSnapshot, saveSnapshot, removeSnapshot} from "./store.js";
 import {groupArchiveFiles, appendArchiveFiles} from "./file-selection.js";
 import {collectArchiveFilesFromDirectory, MAX_DIRECTORY_ENTRIES} from "./directory-import.js";
@@ -20,12 +20,19 @@ function describeSelection(kind) {
   const target = $(kind === "follower" ? "selected-follower" : "selected-following");
   const label = kind === "follower" ? "粉丝文件" : "关注文件";
   target.textContent = !files.length ? label + "：未选择" :
-    label + "：" + files.length + " 个（" + files.map(file => file.name).join("、") + "）";
+    label + "：" + files.length + " 个 · " + formatBytes(files.reduce((sum,file)=>sum+file.size,0)) + "（" + files.map(file => file.name).join("、") + "）";
 }
 
+function formatBytes(bytes) {
+  return bytes<1024*1024?(bytes/1024).toFixed(1)+" KB":(bytes/(1024*1024)).toFixed(1)+" MB";
+}
 function refreshSelection() {
   describeSelection("follower");
   describeSelection("following");
+  const files=[...selectedFiles.follower,...selectedFiles.following];
+  $("selected-size").textContent=files.length?
+    "实际待分析："+formatBytes(files.reduce((sum,file)=>sum+file.size,0))+"（仅关注与粉丝文件）":
+    "仅分析关注与粉丝文件，不读取整个归档。";
 }
 
 // Folder import is the primary path. Manual JS selection is an optional fallback.
@@ -104,7 +111,7 @@ $("choose-folder").addEventListener("click", async () => {
   if (directoryScan) return;
   if (typeof window.showDirectoryPicker !== "function") {
     $("choose-folder-fallback").hidden = false;
-    feedback("此 Chrome 无法使用快速目录选择。请点击「兼容选择文件夹」，或直接拖入解压后的文件夹。");
+    feedback("此 Chrome 无法使用快速目录选择。大归档建议直接拖入文件夹，或兼容选择其中的 data 文件夹。");
     return;
   }
   let directory;
@@ -114,7 +121,7 @@ $("choose-folder").addEventListener("click", async () => {
   } catch (error) {
     if (error?.name === "AbortError") return;
     $("choose-folder-fallback").hidden = false;
-    feedback("Chrome 未能打开快速目录选择；请用「兼容选择文件夹」或直接拖拽。", true);
+    feedback("Chrome 未能打开快速目录选择；请直接拖拽归档，或兼容选择其中的 data 文件夹。", true);
     return;
   }
   await acceptDirectory(directory);
@@ -126,7 +133,7 @@ $("archive-folder-picker").addEventListener("change", event => {
   // webkitdirectory is only a fallback: it eagerly enumerates the selected
   // directory in Chrome, so reject unreasonably large catalogs.
   if (all.length > MAX_DIRECTORY_ENTRIES) {
-    feedback("兼容目录选择包含过多项目。请改为拖拽整个文件夹，以免浏览器处理全部媒体目录。", true);
+    feedback("兼容目录选择包含过多项目。请直接拖拽整个归档，或手动选择 data 内的关注关系 JS 文件。", true);
     return;
   }
   const candidates = all.filter(file => {
@@ -306,18 +313,9 @@ function showSnapshot(snapshot) {
   chooseVisible("notFollowingBack");
 }
 async function readGroup(fileList, kind) {
-  const files = [...fileList];
-  if (!files.length) throw new Error("请选择 " + kind + ".js 归档文件。");
-  let bytes = 0;
-  for (const file of files) {
-    if (!/\.js$/i.test(file.name) || file.size > MAX_ARCHIVE_BYTES) {
-      throw new Error("只能导入 .js 归档文件，且每个文件不超过 32 MB。");
-    }
-    bytes += file.size;
-    if (bytes > MAX_ARCHIVE_BYTES * 4) throw new Error("所选归档分片总体积过大。");
-  }
-  const parts = await Promise.all(files.map(async file => parseArchiveText(await file.text(), kind)));
-  return mergeArchiveParts(parts, kind);
+  return readArchiveGroup(fileList,kind,({completed,total})=>{
+    feedback("正在读取"+(kind==="follower"?"粉丝":"关注")+"文件（"+completed+"/"+total+"），仅本地处理…");
+  });
 }
 
 $("archive-form").addEventListener("submit", async event => {
@@ -330,10 +328,8 @@ $("archive-form").addEventListener("submit", async event => {
   try {
     const owner = ownerValue();
     if (!$("same-account").checked) throw new Error("请先确认两组名单属于同一账号、同一份归档。");
-    const [followers, following] = await Promise.all([
-      readGroup(selectedFiles.follower, "follower"),
-      readGroup(selectedFiles.following, "following")
-    ]);
+    const followers = await readGroup(selectedFiles.follower, "follower");
+    const following = await readGroup(selectedFiles.following, "following");
     if (followers.ids.length > MAX_ARCHIVE_USERS || following.ids.length > MAX_ARCHIVE_USERS) {
       throw new Error("账号列表超过支持上限。");
     }

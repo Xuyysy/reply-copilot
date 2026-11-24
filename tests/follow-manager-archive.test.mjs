@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeHandle, parseArchiveText, mergeArchiveParts, classifyRelationships,
-  profileUrl, MAX_ARCHIVE_USERS
+  profileUrl, MAX_ARCHIVE_USERS, readArchiveGroup, MAX_ARCHIVE_BYTES
 } from "../follow-manager/archive.js";
 
 const wrap = (kind, part, ids) => "window.YTD." + kind + ".part" + part + " = " +
@@ -55,4 +55,28 @@ test("snapshots are namespaced by validated handle, not by current X session", (
   for (const invalid of ["", "@@", "../other", "1234567890123456", "a.b", "你好", "a@b"]) {
     assert.throws(() => normalizeHandle(invalid));
   }
+});
+
+
+test("archive group reads only one target part at a time and keeps exact IDs",async()=>{
+  let active=0,maxActive=0;
+  const reads=[],progress=[];
+  const make=(part,ids)=>({name:"following-"+part+".js",size:1024,
+    async text(){
+      reads.push(part);active++;maxActive=Math.max(maxActive,active);
+      await new Promise(resolve=>setTimeout(resolve,1));
+      active--;return wrap("following",part,ids);
+    }
+  });
+  const merged=await readArchiveGroup([make(1,["2","3"]),make(0,["1","2"])],"following",p=>progress.push(p.completed));
+  assert.deepEqual(merged,{ids:["1","2","3"],duplicates:1,partCount:2});
+  assert.deepEqual(reads,[1,0]);assert.equal(maxActive,1);
+  assert.deepEqual(progress,[0,1,2]);
+});
+test("target-file limits checked before reading any selected content",async()=>{
+  let read=false;
+  const f={name:"follower.js",size:1024,async text(){read=true;return wrap("follower",0,[]);}};
+  await assert.rejects(()=>readArchiveGroup([f,{...f,size:MAX_ARCHIVE_BYTES+1}],"follower"),/32 MB/);
+  await assert.rejects(()=>readArchiveGroup(Array.from({length:5},()=>({...f,size:MAX_ARCHIVE_BYTES})),"follower"),/总体积/);
+  assert.equal(read,false);
 });
