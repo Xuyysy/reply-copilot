@@ -9,6 +9,14 @@
   function isReplyControl(element) {
     if (!element?.matches?.('button,[role="button"],a')) return false;
     if (element.getAttribute("data-testid") === "reply") return true;
+    // New X Web exposes explicit engagement actions, not legacy testids.
+    // Do not treat submit buttons or unrelated engagement actions as Reply.
+    const action=element.getAttribute("data-engagement-action");
+    if(action) {
+      const article=element.closest?.("article");
+      return action==="reply" && Boolean(article) &&
+        !article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]');
+    }
     // Exact UI labels only: never treat "Replying to", a user bio, or a
     // nearby translation/action menu as a reply click.
     for (const label of [element.getAttribute("aria-label"), element.innerText || element.textContent]) {

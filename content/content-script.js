@@ -295,7 +295,7 @@
       return;
     }
     if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
-       !session.post.hasCapturedQuote||session.copyOnly)return;
+       !session.post.hasCapturedQuote||session.copyOnly||session.post.modernLayout)return;
     session.offeringQuoteCopyOnly=true;
     try {
     const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
@@ -405,7 +405,7 @@
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
-    if(post.hasCapturedQuote){
+    if(post.hasCapturedQuote&&!post.modernLayout){
       session.copyOnlyFastTimer=setTimeout(()=>{
         void offerQuoteCopyOnly(session,QUOTE_STABILITY_MS);
       },QUOTE_EARLY_CHECK_MS);
@@ -519,7 +519,7 @@
         if(mutationTouchesReply(records))scheduleLocate();
       }else locate();
     });
-    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href']});
+    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly']});
     locate();
   }
   async function prepareCurrent(requestId) {
@@ -1038,7 +1038,8 @@
       // Translation overlays and unrelated page clicks must not poison the
       // pending reply. A second real composer action still cancels safely.
       if(active&&!active.cancelled&&!active.editor&&
-         event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]'))
+         (event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]')||
+          (active.post?.modernLayout&&event.target?.closest?.('[role="dialog"] textarea'))))
         rejectAssociation('competing_activation');
       return;
     }
@@ -1056,7 +1057,7 @@
       pendingActivation=null;return;
     }
     traceAssociation('capture','reply_control_recognized');
-    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document),at:performance.now(),initialUrl:location.href};
+    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     const clickAt = performance.now();
@@ -1085,7 +1086,8 @@
     // Real DOM events identify a reply dialog editor; synthetic/custom editor
     // nodes without .closest still use the original baseline identity fence.
     if(!event.isTrusted||!active||active.cancelled||active.editor)return;
-    const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]');
+    const editor=event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]')||
+      (active.post?.modernLayout?event.target?.closest?.('[role="dialog"] textarea'):null);
     if(active.copyOnly && editor===active.copyOnlyEditor){
       active.copyOnlyInputTouched=true;
       return;

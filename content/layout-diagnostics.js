@@ -49,7 +49,7 @@
     }
     const testIdNode=near(target,'[data-testid="reply"]');
     return {target:describe(target),nearestControl:describe(nearest),ancestors,
-      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':'label'):'unrecognized',
+      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':attr(recognized,'data-engagement-action')==='reply'?'engagement':'label'):'unrecognized',
       replyTestIdAncestor:Boolean(testIdNode),outerRecognized,
       insideDialog:Boolean(near(target,'[role="dialog"],dialog')),
       post:postShape(recognized||nearest||target)};
@@ -63,6 +63,8 @@
       viewportWidth:Math.min(10000,Math.round(innerWidth/100)*100),viewportHeight:Math.min(10000,Math.round(innerHeight/100)*100),
       articles:n(document,'article'),tweetContainers:n(document,'[data-testid="tweet"]'),
       standardReplyControls:n(document,'[data-testid="reply"]'),standardEditors:nv(document,STANDARD),
+      modernAppMarker:Boolean(document.documentElement?.hasAttribute?.('data-app-version')),
+      modernReplyControls:n(document,'[data-engagement-action="reply"]'),textareaCandidates:nv(document,'textarea'),
       roleDialogs:nv(document,'[role="dialog"]'),nativeDialogs:nv(document,'dialog[open]'),
       editableCandidates:editors.length,inlineCandidates:editors.filter(x=>!near(x,'[role="dialog"],dialog')).length,
       nonstandardCandidates:editors.filter(x=>!x.matches(STANDARD)).length,
