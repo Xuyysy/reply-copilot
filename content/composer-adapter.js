@@ -1,4 +1,8 @@
 (() => {
+  const isTextarea=editor=>editor?.localName==='textarea';
+  const writableTextarea=editor=>isTextarea(editor)&&!editor.disabled&&!editor.readOnly&&
+    Boolean(editor.getAttribute('aria-label'))&&
+    !editor.closest?.('[aria-hidden="true"],[hidden],[inert]');
   function findComposer(article) {
     const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
     let candidates = [...(article?.querySelectorAll?.(selectors) || [])];
@@ -6,19 +10,22 @@
     candidates = [...new Set(candidates)].filter((node) => node.isConnected && !node.closest('[aria-hidden="true"]'));
     return candidates.length === 1 ? candidates[0] : null;
   }
-  function readText(editor) { return (editor?.innerText ?? editor?.textContent ?? "").replace(/\u00a0/g, " ").trim(); }
+  function readText(editor) { return (isTextarea(editor)?editor.value:(editor?.innerText ?? editor?.textContent ?? "")).replace(/\u00a0/g, " ").trim(); }
   function hasContent(editor) {
     if (editor?.querySelector?.('img,video,[data-testid="attachments"]')) return true;
-    const raw=editor?.innerText ?? editor?.textContent ?? "";
+    const raw=isTextarea(editor)?editor.value:(editor?.innerText ?? editor?.textContent ?? "");
     // X/Draft.js's pristine editor renders a single BR as a layout newline.
     // Do not trim arbitrary whitespace: a user's spaces or extra blank lines are drafts.
     if (raw==="\n" && editor.textContent==="" && editor.querySelectorAll?.('br').length===1) return false;
     return Boolean(raw.replace(/\u00a0/g," "));
   }
   function focusEmpty(editor) {
-    if (!editor?.isConnected || hasContent(editor)) return false;
+    if (!editor?.isConnected || hasContent(editor) || (isTextarea(editor)&&!writableTextarea(editor))) return false;
     editor.focus();
     if (document.activeElement !== editor || hasContent(editor)) return false;
+    if(isTextarea(editor)){
+      try{editor.setSelectionRange(0,0);return editor.selectionStart===0&&editor.selectionEnd===0;}catch{return false;}
+    }
     const selection = window.getSelection();
     if (!selection) return false;
     if (!editor.contains(selection.anchorNode)) {
@@ -34,6 +41,24 @@
   const attempted = new Set();
   function insertOnce(editor, requestId, text, isCurrent) {
     if (typeof requestId !== 'string' || !requestId || attempted.has(requestId) || typeof text !== 'string' || !text.trim() || typeof isCurrent !== 'function') return false;
+    if(isTextarea(editor)){
+      // The caller supplies the same verified, current reply-session fence.
+      // Use native textarea value semantics, never mutate contenteditable.
+      if(!isCurrent()||!editor.isConnected||!writableTextarea(editor)||
+         document.activeElement!==editor||hasContent(editor)||
+         editor.selectionStart!==0||editor.selectionEnd!==0||
+         (editor.maxLength>=0&&text.length>editor.maxLength))return false;
+      attempted.add(requestId);
+      if(attempted.size>1000)attempted.delete(attempted.values().next().value);
+      try{
+        const view=editor.ownerDocument.defaultView;
+        const setter=Object.getOwnPropertyDescriptor(view.HTMLTextAreaElement.prototype,'value')?.set;
+        if(!setter||!isCurrent()||!writableTextarea(editor)||hasContent(editor)||document.activeElement!==editor)return false;
+        setter.call(editor,text);
+        editor.dispatchEvent(new view.InputEvent('input',{bubbles:true,composed:true,inputType:'insertText',data:text}));
+        return editor.value===text;
+      }catch{return false;}
+    }
     const selection = window.getSelection();
     if (!isCurrent() || !editor?.isConnected || document.activeElement !== editor || hasContent(editor) || !selection?.isCollapsed || !editor.contains(selection.anchorNode) || !editor.contains(selection.focusNode)) return false;
     attempted.add(requestId);

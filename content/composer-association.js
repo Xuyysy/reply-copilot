@@ -79,20 +79,30 @@
   function visible(node) {
     return Boolean(node?.isConnected && !node.closest('[aria-hidden="true"], [hidden]') && node.getClientRects().length && getComputedStyle(node).visibility!=='hidden');
   }
-  function baseline(document) {
+  const modernEditorSelector=editorSelector+',textarea';
+  function selectorFor(doc,post) {
+    return (post?post.modernLayout===true:globalThis.ZaneReplyCopilotContent.postExtractor?.modernPage?.(doc))?modernEditorSelector:editorSelector;
+  }
+  function baseline(document,post) {
+    const selector=selectorFor(document,post);
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
-    const editors=[...document.querySelectorAll(editorSelector)];
+    const editors=[...document.querySelectorAll(selector)];
     // Media viewers and non-composer overlays are not existing reply
     // dialogs. Only a dialog with a visible editable target blocks a fresh
     // verified Reply click.
-    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(editorSelector)].some(visible));
+    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(selector)].some(visible));
     return {baselineModalCount:composerDialogs.length,visibleEditorCount:editors.filter(visible).length,
       visibleReplyEditorCount:editors.filter(node=>visible(node)&&node.closest('[role="dialog"]')).length,
       baselineEditors:editors};
   }
   function contextId(article) {
     // Canonical ID from the author's timestamp, never a random quote link.
-    const identity=globalThis.ZaneReplyCopilotContent.postExtractor.postIdentity?.(article);
+    const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
+    if(extractor.isModernPost?.(article)){
+      const evidence=extractor.modernIdentityEvidence(article);
+      return evidence.identity?.statusId||(evidence.conflict?'conflicting_status_links':null);
+    }
+    const identity=extractor.postIdentity?.(article);
     if (identity?.statusId) return identity.statusId;
     // Preserve fail-closed behavior for a modal with conflicting post links.
     // An unknown parent can use verified text; conflicting IDs cannot.
@@ -122,7 +132,8 @@
     const markedQuote=Boolean(post.article?.querySelector?.('[data-testid="quoteTweet"]'));
     const roleLinkQuote=!markedQuote&&[...(post.article?.querySelectorAll?.('div[role="link"]')||[])]
       .some(card=>card.querySelector?.('[data-testid="User-Name"]')&&card.querySelector?.('[data-testid="tweetText"]'));
-    const hasCapturedQuote=markedQuote||roleLinkQuote;
+    const hasCapturedQuote=markedQuote||roleLinkQuote||
+      Boolean(post.modernLayout&&post.article?.querySelector?.('[data-slot="embedded-tweet-frame"]'));
     const hasCapturedMedia=Boolean(post.article?.querySelector?.('[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]'));
     const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
       if(a.closest('article')!==post.article)return false;
@@ -147,14 +158,16 @@
     const api=globalThis.ZaneReplyCopilotContent;
     const original=post.article?.isConnected?api.postExtractor.extractPost(post.article):null;
     const nodes=new Set();
+    const selector=selectorFor(document,post);
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
     for (const dialog of dialogs) {
-      for (const editor of dialog.querySelectorAll(editorSelector)) if(visible(editor))nodes.add(editor);
+      for (const editor of dialog.querySelectorAll(selector)) if(visible(editor))nodes.add(editor);
     }
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
       const articles=[...dialog.querySelectorAll('article')].filter(a=>visible(a)&&!a.contains(node)
-        && !inQuotedCard(a));
+        && !inQuotedCard(a) &&
+        (!post.modernLayout||!a.closest?.('[data-slot="embedded-tweet-frame"]')));
       // Quoted posts/media can add extra article nodes in the modal.
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
@@ -205,7 +218,17 @@
       // If the post ID is present it wins, even if X changed the display
       // text for translation. Otherwise demand a unique original-text match;
       // missing modal context should WAIT for React, not be rejected.
-      const contextMatches=post.quoteOnly
+      // New layout: an exact canonical parent ID is mandatory. Unknown
+      // parent or multiple candidates never fall back to matching text.
+      const modernQuotes=post.modernLayout&&post.quoteOnly?
+        articles.flatMap(a=>api.postExtractor.modernQuoteTexts?.(a)||[]):[];
+      const modernMatch=!candidates.length?null:
+        candidates.some(c=>c.id&&c.id!==post.statusId)?false:
+        candidates.length>1?false:
+        matching.length!==1?null:
+        (node.localName==='textarea'&&(node.disabled||node.readOnly||!node.getAttribute('aria-label')||node.closest('[inert]')))?false:
+        modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
+      const contextMatches=post.modernLayout?modernMatch:post.quoteOnly
         ? !candidates.length?null
           :matching.length>1?false
           :matching.length===1?(!quotePreview.seen || quotedPreviewMatches)
@@ -241,7 +264,7 @@
         contextTextMatches:Boolean(primary&&sameContext(post,text)),
         contextMatches,contextDetail};
     });
-    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(editorSelector)].some(visible));
+    const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(selector)].some(visible));
     return {now,editors,visibleDialogCount:composerDialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
