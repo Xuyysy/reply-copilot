@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import vm from "node:vm";
 import {
-  verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent
+  verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent,
+  classifySnapshotRelationships,accountProfileUrl,validDirectional
 } from "../follow-manager/results-utils.js";
 const read=path=>readFileSync(new URL("../"+path,import.meta.url),"utf8");
 
@@ -96,4 +97,26 @@ test("v2 shared snapshots keep old v1 records and isolate incomplete checkpoints
   assert.match(internal,/xrh-follow-internal-v1/);
   assert.match(dom,/createFollowStore/);
   assert.match(internal,/createFollowStore/);
+});
+
+test("directional identity diff handles renamed users, recycled handles and legacy records",()=>{
+  const s={following:["old","reused","legacy"],followers:["new","reused","legacy"],
+    directional:{following:{ids:{old:"100",reused:"200"},verification:{reused:true}},
+      followers:{ids:{new:"100",reused:"300"},verification:{reused:false}}}};
+  assert.equal(validDirectional(s.directional),true);
+  assert.deepEqual(classifySnapshotRelationships(s),{mutual:["old","legacy"],
+    notFollowingBack:["reused"],iHaveNotFollowedBack:["reused"]});
+  assert.equal(accountProfileUrl(s,"reused","following"),"https://x.com/i/user/200");
+  assert.equal(accountProfileUrl(s,"reused","followers"),"https://x.com/i/user/300");
+  assert.equal(verificationFor(s,"reused","following"),true);
+  assert.equal(verificationFor(s,"reused","followers"),false);
+  assert.deepEqual(selectAccounts(["reused"],"","blue",s,"followers"),[]);
+  assert.deepEqual(classifySnapshotRelationships({following:["a","b"],followers:["b","c"]}),
+    {mutual:["b"],notFollowingBack:["a"],iHaveNotFollowedBack:["c"]});
+});
+test("history does not invent churn when old handles lack IDs or either snapshot is partial",()=>{
+  const a={owner:"owner",followers:["alice"],following:[],importedAt:"2026-11-22"};
+  const b={...a,ids:{alice:"123"},importedAt:"2026-11-23"};
+  assert.deepEqual(compareSnapshots(b,a),{newFollowers:0,missingFollowers:0,previousAt:a.importedAt,byStableId:false});
+  assert.equal(compareSnapshots({...b,reasons:{following:"complete",followers:"paused"}},a),null);
 });

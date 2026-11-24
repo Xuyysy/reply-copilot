@@ -1,8 +1,9 @@
-import {normalizeHandle, classifyRelationships} from "./archive.js";
+import {normalizeHandle} from "./archive.js";
 import {saveInternalSnapshot, readInternalSnapshot, removeInternalSnapshot,
   saveInternalCheckpoint,readInternalCheckpoint,clearInternalCheckpoint}
   from "./internal-sync-store.js";
-import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent}
+import {verificationFor,validVerification,validIds,selectAccounts,compareSnapshots,snapshotIsCurrent,
+  classifySnapshotRelationships,directionForCategory,accountProfileUrl,validDirectional}
   from "./results-utils.js";
 import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,viewCheckpoint,checkpointResult,runIncrementalRound}
   from "./internal-sync-state.js";
@@ -94,7 +95,7 @@ function validateSnapshot(value) {
   return value && typeof value === "object" &&
     typeof value.owner === "string" && /^[a-z0-9_]{1,15}$/.test(value.owner) &&
     validHandles(value.followers) && validHandles(value.following) &&
-    validVerification(value.verification) && validIds(value.ids) &&
+    validVerification(value.verification) && validIds(value.ids) && validDirectional(value.directional) &&
     value.reasons && typeof value.reasons.following === "string" &&
     typeof value.reasons.followers === "string";
 }
@@ -195,7 +196,7 @@ function renderList() {
   if (!relationships) return;
   const search = $("internal-filter").value.trim().replace(/^@/,"").toLowerCase();
   const items = selectAccounts(relationships[selectedKind],search,
-    $("internal-verified").value,snapshot);
+    $("internal-verified").value,snapshot,directionForCategory(selectedKind));
   const pageCount = Math.max(1,Math.ceil(items.length / PAGE_SIZE));
   currentPage = Math.max(0,Math.min(currentPage,pageCount-1));
   const fragment = document.createDocumentFragment();
@@ -206,11 +207,11 @@ function renderList() {
     const label = document.createElement("strong");
     label.textContent = "@" + handle;
     const link = document.createElement("a");
-    link.href = "https://x.com/" + handle;
+    link.href = accountProfileUrl(snapshot,handle,directionForCategory(selectedKind));
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.textContent = "打开 X 主页 ↗";
-    if (verificationFor(snapshot,handle) === true) {
+    if (verificationFor(snapshot,handle,directionForCategory(selectedKind)) === true) {
       const badge=document.createElement("span");
       badge.className="blue-v-chip";
       badge.textContent="✓ 蓝 V";
@@ -236,8 +237,9 @@ function renderList() {
 }
 function renderSnapshot(data,localSaved=false) {
   if (!validateSnapshot(data)) throw new Error("本地数据格式不正确。");
+  const sameOwner=snapshot?.owner===data.owner;
   snapshot = data;
-  relationships = classifyRelationships(data.followers,data.following);
+  relationships = classifySnapshotRelationships(data);
   const change=isComplete(data)?compareSnapshots(data,data.history?.[0]):null;
   const changes=$("internal-changes");
   if (change) {
@@ -268,8 +270,7 @@ function renderSnapshot(data,localSaved=false) {
     (localSaved && !snapshotIsCurrent(data) ? " · 超过 24 小时，建议按需刷新" : "");
   if (!KINDS.includes(selectedKind)) selectedKind="notFollowingBack";
   currentPage = 0;
-  $("internal-filter").value = "";
-  $("internal-verified").value="all";
+  if(!sameOwner){$("internal-filter").value = "";$("internal-verified").value="all";}
   $("internal-start").textContent=latestPartial?"继续同步":"更新数据";
   $("internal-settings").open=false;
   for (const button of document.querySelectorAll("[data-internal-kind]")) {
@@ -343,6 +344,8 @@ async function start() {
       following:following.handles,followers:followers.handles,
       verification:{...following.verification,...followers.verification},
       ids:{...following.ids,...followers.ids},
+      directional:{following:{ids:following.ids||{},verification:following.verification||{}},
+        followers:{ids:followers.ids||{},verification:followers.verification||{}}},
       reasons:{following:"complete",followers:"complete"}
     };
     await job.writes;
@@ -439,11 +442,11 @@ $("internal-export").addEventListener("click",() => {
   if (!snapshot || !relationships) return;
   const term = $("internal-filter").value.trim().replace(/^@/,"").toLowerCase();
   const items = selectAccounts(relationships[selectedKind],term,
-    $("internal-verified").value,snapshot);
+    $("internal-verified").value,snapshot,directionForCategory(selectedKind));
   if (!items.length) return;
   const csv = "\uFEFFhandle,profile_url,category,source,coverage,blue_verified\r\n" +
-    items.map(x => [x,"https://x.com/"+x,isComplete(snapshot)?selectedKind:(selectedKind==="notFollowingBack"?"following_unmatched":"followers_unmatched"),"internal_sync",isComplete(snapshot)?"snapshot":"partial",
-      verificationFor(snapshot,x) === null ? "unknown" : String(verificationFor(snapshot,x))].join(","))
+    items.map(x => [x,accountProfileUrl(snapshot,x,directionForCategory(selectedKind)),isComplete(snapshot)?selectedKind:(selectedKind==="notFollowingBack"?"following_unmatched":"followers_unmatched"),"internal_sync",isComplete(snapshot)?"snapshot":"partial",
+      verificationFor(snapshot,x,directionForCategory(selectedKind)) === null ? "unknown" : String(verificationFor(snapshot,x,directionForCategory(selectedKind)))].join(","))
       .join("\r\n") + "\r\n";
   const url = URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   const link = document.createElement("a");

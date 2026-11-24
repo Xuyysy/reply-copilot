@@ -40,7 +40,7 @@ export function createFollowStore(dbName) {
     return {
       owner:snapshot.owner,source:snapshot.source,importedAt:snapshot.importedAt,
       following:snapshot.following,followers:snapshot.followers,
-      verification:snapshot.verification,ids:snapshot.ids,reasons:snapshot.reasons
+      verification:snapshot.verification,ids:snapshot.ids,directional:snapshot.directional,reasons:snapshot.reasons
     };
   }
   function readSnapshot(owner) {

@@ -129,3 +129,7 @@ Staging 真机重点验证非活动标签页可否滚动（特别是在屏幕关
 ### 2026-11-24｜结果页仅展示单向关注
 
 快速同步结果页移除互关统计卡与互关分类，默认打开「未回关我」，另一类为「我未回关」。交集仍用于本地计算和去重，不对用户展示。部分结果统一保留一条待确认说明，CSV 保留 partial/unmatched 标记；蓝 V 筛选、搜索、历史、续传与请求策略不变。仅 Draft PR/Staging。
+
+### 2026-11-24｜本地数据处理：稳定 ID 和来源隔离
+
+参考 birdclaw 的 [Follow Graph Model](https://github.com/steipete/birdclaw/blob/main/docs/data-architecture.md#follow-graph-model)（方向关系、快照与增量分离）和 XUnfollowGhost 的本地集合差分思想，独立实现按数字字符串账号 ID 优先匹配、未知 ID 时谨慎按用户名匹配、两方向 ID/认证信息分别保存、历史比较兼容旧缓存。部分结果不参与完整历史变化；同账号增量渲染保留搜索和认证筛选。主页/CSV 使用可用的稳定 ID 链接，避免账号改名或用户名被重新使用后打开错误账号。旧记录继续可读，不增加 X 请求、权限或服务端数据。部分名单的差集仍仅为待确认候选。仅 Draft PR/Staging。

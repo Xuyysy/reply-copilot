@@ -267,6 +267,6 @@ test("internal results display only the two one-sided relationship categories",(
   assert.ok(!ui.includes('$("internal-mutual")'));
   assert.ok(ui.includes('let selectedKind = "notFollowingBack"'));
   assert.ok(ui.includes("未回关关系尚待确认"));
-  assert.ok(ui.includes("classifyRelationships(data.followers,data.following)"));
+  assert.ok(ui.includes("classifySnapshotRelationships(data)"));
   assert.ok(ui.includes('isComplete(snapshot)?"snapshot":"partial"'));
 });

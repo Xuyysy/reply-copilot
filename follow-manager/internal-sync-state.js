@@ -63,6 +63,8 @@ export function checkpointResult(checkpoint) {
   return {owner:checkpoint.owner,source:"internal_sync",importedAt:checkpoint.savedAt,
     following:a?.handles||[],followers:b?.handles||[],
     verification:{...a?.verification,...b?.verification},ids:{...a?.ids,...b?.ids},
+    directional:{following:{ids:a?.ids||{},verification:a?.verification||{}},
+      followers:{ids:b?.ids||{},verification:b?.verification||{}}},
     reasons:{following:a?.reason||"not_started",followers:b?.reason||"not_started"}};
 }
 // One user click: at most one short batch of each unfinished list.
