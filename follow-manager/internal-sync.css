@@ -12,3 +12,5 @@
 #internal-settings:not([open]){margin-top:5px}
 #internal-cancel:disabled{display:none}
 @media(max-width:600px){.follow-main .heading-line{flex-wrap:wrap}.follow-main .internal-actions{justify-content:flex-start}}
+
+#internal-results .stats{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -61,14 +61,12 @@
     <p id="internal-snapshot-meta" class="muted small"></p>
     <p id="internal-changes" class="snapshot-changes" hidden></p>
     <div class="stats">
-      <div><strong id="internal-mutual">0</strong><span>互相关注</span></div>
-      <div><strong id="internal-not-following-back">0</strong><span>可能没回关我</span></div>
-      <div><strong id="internal-i-not-followed-back">0</strong><span>我可能没回关</span></div>
+      <div><strong id="internal-not-following-back">0</strong><span>未回关我</span></div>
+      <div><strong id="internal-i-not-followed-back">0</strong><span>我未回关</span></div>
     </div>
     <nav class="tabs" aria-label="关注关系分类">
-      <button class="tab" type="button" data-internal-kind="mutual" aria-pressed="true">互相关注</button>
-      <button class="tab" type="button" data-internal-kind="notFollowingBack" aria-pressed="false">可能没回关我</button>
-      <button class="tab" type="button" data-internal-kind="iHaveNotFollowedBack" aria-pressed="false">我可能没回关</button>
+      <button class="tab" type="button" data-internal-kind="notFollowingBack" aria-pressed="true">未回关我</button>
+      <button class="tab" type="button" data-internal-kind="iHaveNotFollowedBack" aria-pressed="false">我未回关</button>
     </nav>
     <div class="list-tools">
       <label class="field">搜索用户名<input id="internal-filter" type="search" placeholder="输入 @用户名"></label>

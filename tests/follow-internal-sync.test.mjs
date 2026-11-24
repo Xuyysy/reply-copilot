@@ -256,3 +256,17 @@ test("staging-only internal page explains bounded batches and reset control",()=
   assert.ok(script.includes('const MAX_PAGES = 6'));
   assert.ok(script.includes('method:isList ? "POST" : "GET"'));
 });
+
+test("internal results display only the two one-sided relationship categories",()=>{
+  const page=read("follow-manager/internal-sync.html");
+  const ui=read("follow-manager/internal-sync-ui.js");
+  assert.deepEqual(Array.from(page.matchAll(/data-internal-kind="([^"]+)"/g),m=>m[1]),["notFollowingBack","iHaveNotFollowedBack"]);
+  assert.ok(page.includes('data-internal-kind="notFollowingBack" aria-pressed="true">未回关我'));
+  assert.ok(page.includes('data-internal-kind="iHaveNotFollowedBack" aria-pressed="false">我未回关'));
+  assert.ok(!page.includes('id="internal-mutual"'));
+  assert.ok(!ui.includes('$("internal-mutual")'));
+  assert.ok(ui.includes('let selectedKind = "notFollowingBack"'));
+  assert.ok(ui.includes("未回关关系尚待确认"));
+  assert.ok(ui.includes("classifyRelationships(data.followers,data.following)"));
+  assert.ok(ui.includes('isComplete(snapshot)?"snapshot":"partial"'));
+});

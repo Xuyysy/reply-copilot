@@ -8,7 +8,7 @@ import {MAX_INTERNAL_HANDLES,validStage,readCheckpoint,withStage,viewCheckpoint,
   from "./internal-sync-state.js";
 
 const $ = id => document.getElementById(id);
-const KINDS = ["mutual","notFollowingBack","iHaveNotFollowedBack"];
+const KINDS = ["notFollowingBack","iHaveNotFollowedBack"];
 // Following and followers are read sequentially from a temporary inactive X tab.
 const PAGE_SIZE = 50;
 const MAX_HANDLES = MAX_INTERNAL_HANDLES;
@@ -44,7 +44,7 @@ let completeSnapshot = null;
 let latestPartial = null;
 const isComplete = data => data?.reasons?.following==="complete" && data?.reasons?.followers==="complete";
 let relationships = null;
-let selectedKind = "mutual";
+let selectedKind = "notFollowingBack";
 let currentPage = 0;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -250,7 +250,6 @@ function renderSnapshot(data,localSaved=false) {
     changes.textContent="";
   }
   $("internal-results").hidden = false;
-  $("internal-mutual").textContent = relationships.mutual.length.toLocaleString("zh-CN");
   $("internal-not-following-back").textContent = relationships.notFollowingBack.length.toLocaleString("zh-CN");
   $("internal-i-not-followed-back").textContent = relationships.iHaveNotFollowedBack.length.toLocaleString("zh-CN");
   const imported = new Date(data.importedAt);
@@ -259,13 +258,7 @@ function renderSnapshot(data,localSaved=false) {
   $("internal-result-badge").textContent = ended ? "本地结果" : "部分结果 · 待补齐";
   $("internal-coverage-note").textContent=ended?
     "本地快照并非实时数据，按需更新即可。":
-    "当前只包含已获取的账号。互关为已匹配记录；未匹配不等于未回关，后续同步会继续修正。";
-  const labels=ended?["互相关注","可能没回关我","我可能没回关"]:
-    ["已匹配互关","已关注 · 待匹配","粉丝 · 待匹配"];
-  const statIds=["internal-mutual","internal-not-following-back","internal-i-not-followed-back"];
-  statIds.forEach((id,i)=>{$(id).nextElementSibling.textContent=labels[i];});
-  for(const button of document.querySelectorAll("[data-internal-kind]"))
-    button.textContent=labels[KINDS.indexOf(button.dataset.internalKind)];
+    "当前为部分结果，未回关关系尚待确认，继续同步后会自动修正。";
   $("internal-history-toggle").hidden=!(completeSnapshot && latestPartial);
   $("internal-history-toggle").textContent=ended?"查看最新增量结果":"查看上次完整结果";
   $("internal-snapshot-meta").textContent = "@" + data.owner + " · " + time +
@@ -273,8 +266,7 @@ function renderSnapshot(data,localSaved=false) {
     " 人 · " + (localSaved ? "已保存到本机" : "本次结果") +
     (ended ? "" : " · 本次数据可能不完整") +
     (localSaved && !snapshotIsCurrent(data) ? " · 超过 24 小时，建议按需刷新" : "");
-  selectedKind = !ended && !relationships.mutual.length ?
-    (relationships.notFollowingBack.length?"notFollowingBack":"iHaveNotFollowedBack"):"mutual";
+  if (!KINDS.includes(selectedKind)) selectedKind="notFollowingBack";
   currentPage = 0;
   $("internal-filter").value = "";
   $("internal-verified").value="all";
@@ -450,7 +442,7 @@ $("internal-export").addEventListener("click",() => {
     $("internal-verified").value,snapshot);
   if (!items.length) return;
   const csv = "\uFEFFhandle,profile_url,category,source,coverage,blue_verified\r\n" +
-    items.map(x => [x,"https://x.com/"+x,isComplete(snapshot)||selectedKind==="mutual"?selectedKind:(selectedKind==="notFollowingBack"?"following_unmatched":"followers_unmatched"),"internal_sync",isComplete(snapshot)?"snapshot":"partial",
+    items.map(x => [x,"https://x.com/"+x,isComplete(snapshot)?selectedKind:(selectedKind==="notFollowingBack"?"following_unmatched":"followers_unmatched"),"internal_sync",isComplete(snapshot)?"snapshot":"partial",
       verificationFor(snapshot,x) === null ? "unknown" : String(verificationFor(snapshot,x))].join(","))
       .join("\r\n") + "\r\n";
   const url = URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
