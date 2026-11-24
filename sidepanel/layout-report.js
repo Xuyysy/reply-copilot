@@ -79,7 +79,7 @@ export function sanitizeReproduction(o,stage,reason){
   marks:arr(o.marks,64,m=>({stage:enumOf(m?.stage,stage),reason:enumOf(m?.reason,reason),atMs:int(m?.atMs,60000)})),
   facts:arr(o.facts,20,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
    editors:arr(f?.value?.editors,5,e=>({editor:node(e?.editor),
-    contextDetail:enumOf(e?.contextDetail,['verified_context','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
+    contextDetail:enumOf(e?.contextDetail,['verified_context','verified_route_preview','awaiting_route_preview','route_preview_conflict','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
     ...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
   sampleErrors:int(o.sampleErrors,100)};
 }

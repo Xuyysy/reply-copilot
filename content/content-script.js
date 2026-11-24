@@ -632,6 +632,7 @@
     current.applyingReply = true;
     current.trace?.mark("insert_started");
     diagnosticTap('mark','fill','started');
+    const insertedEditor=current.editor;
     const inserted = api.composerAdapter.insertOnce(current.editor, requestId, candidate, valid);
     current.applyingReply = false;
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
@@ -642,7 +643,10 @@
       diagnosticTap('mark','fill','user_modified');
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
-    if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
+    if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim() ||
+        (current.post.modernLayout&&(current.editor!==insertedEditor||
+          matchedComposer(current.post).editor!==insertedEditor||
+          !api.composerAdapter.verifyReadback(insertedEditor,candidate)))) {
       // A translator can mutate one editor. Fence THIS request, not all future posts.
       // insertOnce prevents duplicate insertion for the same requestId.
       diagnosticTap('mark','fill','readback_mismatch');
@@ -1074,6 +1078,14 @@
       traceAssociation("capture_failed",post.reason||"unknown_post");
       pendingActivation=null;return;
     }
+    // For a modern link, independently compare the target encoded in the
+    // native Reply anchor with the extracted canonical outer post.
+    if(post.modernLayout&&control.localName==='a'){
+      if(api.replyDetector.replyTargetId(control)!==post.statusId){
+        traceAssociation('capture_failed','post-context-incomplete');pendingActivation=null;return;
+      }
+      post.replyRouteVerified=true;
+    }
     traceAssociation('capture','reply_control_recognized');
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
   }
@@ -1090,7 +1102,8 @@
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
-    if (!live.ok || live.statusId!==activation.post.statusId) {
+    if (!live.ok || live.statusId!==activation.post.statusId ||
+        (activation.post.replyRouteVerified&&api.replyDetector.replyTargetId(control)!==activation.post.statusId)) {
       traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;
     }

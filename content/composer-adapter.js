@@ -2,6 +2,7 @@
   const isTextarea=editor=>editor?.localName==='textarea';
   const writableTextarea=editor=>isTextarea(editor)&&!editor.disabled&&!editor.readOnly&&
     Boolean(editor.getAttribute('aria-label'))&&
+    editor.getAttribute('aria-disabled')!=='true'&&editor.getAttribute('aria-readonly')!=='true'&&
     !editor.closest?.('[aria-hidden="true"],[hidden],[inert]');
   function findComposer(article) {
     const selectors = '[contenteditable="true"][role="textbox"], [data-testid="tweetTextarea_0"][contenteditable="true"]';
@@ -11,7 +12,38 @@
     return candidates.length === 1 ? candidates[0] : null;
   }
   function readText(editor) { return (isTextarea(editor)?editor.value:(editor?.innerText ?? editor?.textContent ?? "")).replace(/\u00a0/g, " ").trim(); }
+  function modernDraftMedia(editor) {
+    const dialog=editor.closest?.('[role="dialog"]');
+    const scope=editor.closest?.('form')||dialog;
+    if(!scope)return false;
+    // Native draft attachments are outside the textarea. Never count the
+    // original post preview BEFORE the editor or the extension's own UI.
+    for(const node of scope.querySelectorAll('input[type="file"],[data-testid="attachments"],img[src^="blob:"],video[src^="blob:"],img[src*="pbs.twimg.com/media/"],[data-slot="embedded-tweet-frame"]')){
+      if(node.closest('[data-zane-reply-copilot]')||node.closest('[role="dialog"]')!==dialog||
+         !(editor.compareDocumentPosition(node)&4))continue;
+      if(node.localName==='input'){if(node.files?.length)return true;continue;}
+      if(node.getAttribute('data-testid')==='attachments'&&!node.children.length)continue;
+      if(!node.closest('[hidden],[aria-hidden="true"],[inert]'))return true;
+    }
+    return false;
+  }
+  function verifyReadback(editor,text) {
+    if(readText(editor)!==text.trim())return false;
+    if(!isTextarea(editor))return true;
+    // XDS may display its controlled value in an aria-hidden mirror with
+    // transparent textarea ink. Require that visual representation too
+    // when the transparent native-editor pattern is present.
+    const color=editor.ownerDocument.defaultView.getComputedStyle(editor).color;
+    if(color!=='transparent'&&!/^rgba\([^)]*,\s*0(?:\.0+)?\)$/.test(color))return true;
+    const mirrors=[...(editor.parentElement?.children||[])].filter(node=>{
+      if(node===editor||node.getAttribute('aria-hidden')!=='true')return false;
+      const ws=editor.ownerDocument.defaultView.getComputedStyle(node).whiteSpace;
+      return ['pre-wrap','pre-line','break-spaces'].includes(ws)||node.classList.contains('whitespace-pre-wrap');
+    });
+    return mirrors.length===1&&(mirrors[0].innerText||mirrors[0].textContent||'').replace(/\u00a0/g,' ').trim()===text.trim();
+  }
   function hasContent(editor) {
+    if(isTextarea(editor)&&modernDraftMedia(editor))return true;
     if (editor?.querySelector?.('img,video,[data-testid="attachments"]')) return true;
     const raw=isTextarea(editor)?editor.value:(editor?.innerText ?? editor?.textContent ?? "");
     // X/Draft.js's pristine editor renders a single BR as a layout newline.
@@ -73,5 +105,5 @@
     } catch { return false; }
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.composerAdapter = { findComposer, readText, hasContent, focusEmpty, insertOnce };
+  globalThis.ZaneReplyCopilotContent.composerAdapter = { findComposer, readText, hasContent, focusEmpty, insertOnce, verifyReadback };
 })();

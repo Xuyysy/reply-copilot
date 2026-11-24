@@ -6,16 +6,41 @@
     "رد", "balas", "trả lời", "ตอบกลับ", "yanıtla", "जवाब दें",
     "odpowiedz", "beantwoorden", "відповісти"
   ]);
+  const X_HOSTS=new Set(['x.com','twitter.com','www.x.com','www.twitter.com']);
+  // Parse only native, same-origin reply routes. Duplicate parameters,
+  // quote/new-post routes and off-site links cannot identify a reply.
+  function replyRouteId(raw,base) {
+    if(!raw||!base)return null;
+    try {
+      const from=new URL(base),url=new URL(raw,from);
+      const ids=url.searchParams.getAll('in_reply_to');
+      if(from.protocol!=='https:'||!X_HOSTS.has(from.hostname)||
+         url.origin!==from.origin||url.username||url.password||url.hash||
+         url.pathname!=='/compose/post'||ids.length!==1||!/^\d+$/.test(ids[0])||
+         url.searchParams.has('quote')||url.searchParams.has('quote_tweet_id'))return null;
+      return ids[0];
+    }catch{return null;}
+  }
+  function replyTargetId(element) {
+    if(element?.localName!=='a')return null;
+    return replyRouteId(element.getAttribute('href'),element.ownerDocument?.baseURI);
+  }
   function isReplyControl(element) {
     if (!element?.matches?.('button,[role="button"],a')) return false;
     if (element.getAttribute("data-testid") === "reply") return true;
     // New X Web exposes explicit engagement actions, not legacy testids.
     // Do not treat submit buttons or unrelated engagement actions as Reply.
-    const action=element.getAttribute("data-engagement-action");
+    // In the rebuilt UI the marker lives on a wrapping div, while the
+    // actual click is an anchor (possibly through SVG/span descendants).
+    const owner=element.closest?.('[data-engagement-action]');
+    const action=element.getAttribute("data-engagement-action")||owner?.getAttribute?.("data-engagement-action");
     if(action) {
       const article=element.closest?.("article");
-      return action==="reply" && Boolean(article) &&
-        !article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]');
+      if(action!=="reply"||!article||
+         (owner&&owner.closest?.('article')!==article)||
+         element.closest?.('[data-slot="embedded-tweet-frame"],[data-testid="quoteTweet"],[data-testid="card.wrapper"]')||
+         article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]'))return false;
+      return element.localName!=='a'||Boolean(replyTargetId(element));
     }
     // Exact UI labels only: never treat "Replying to", a user bio, or a
     // nearby translation/action menu as a reply click.
@@ -39,5 +64,5 @@
     return null;
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.replyDetector = { isReplyControl, findReplyControl };
+  globalThis.ZaneReplyCopilotContent.replyDetector = { isReplyControl, findReplyControl, replyTargetId, replyRouteId };
 })();

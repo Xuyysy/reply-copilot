@@ -150,9 +150,39 @@
     // comparison only: never navigate to it or treat it as identity evidence.
     return /^(?:(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+\s*){1,4}$/.test(copy.slice(source.length).trim());
   }
-  function routeAllowed(initial,current,statusId) {
-    if (initial===current) return true;
-    try {const a=new URL(initial),b=new URL(current);return a.origin===b.origin && b.pathname==='/compose/post' && (!b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId);}catch{return false;}
+  function routeAllowed(initial,current,statusId,modern=false) {
+    if(!modern&&initial===current)return true;
+    try {
+      const a=new URL(initial),b=new URL(current);
+      if(!modern)return a.origin===b.origin&&b.pathname==='/compose/post'&&(!b.searchParams.has('in_reply_to')||b.searchParams.get('in_reply_to')===statusId);
+      if(a.origin!==b.origin)return false;
+      if(b.pathname!=='/compose/post')return initial===current;
+      if(b.searchParams.has('quote')||b.searchParams.has('quote_tweet_id'))return false;
+      return !b.searchParams.has('in_reply_to')||
+        globalThis.ZaneReplyCopilotContent.replyDetector.replyRouteId(current,initial)===statusId;
+    }catch{return false;}
+  }
+  const MODERN_BODY='div[dir="auto"].whitespace-pre-wrap';
+  const MODERN_FRAME='[data-slot="embedded-tweet-frame"]';
+  // Only the preview BEFORE the editor can be the original post. Exclude
+  // nested dialogs, quotes, the textarea's visual mirror, and our own UI.
+  function beforeEditor(node,editor,dialog) {
+    return visible(node)&&node.closest('[role="dialog"]')===dialog&&
+      !node.contains(editor)&&!node.closest('[inert],[contenteditable="true"],[data-zane-reply-copilot]')&&
+      Boolean(node.compareDocumentPosition(editor)&4);
+  }
+  function linklessPreviewConflict(dialog,editor,post,initialUrl) {
+    for(const node of dialog.querySelectorAll('a[aria-hidden="true"][href*="/status/"],[data-href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"]')){
+      if(node.closest('article')||node.closest(MODERN_FRAME)||inQuotedCard(node)||
+         node.closest(MODERN_BODY)||node.contains(editor)||
+         node.closest('[role="dialog"]')!==dialog||!(node.compareDocumentPosition(editor)&4))continue;
+      try {
+        const url=new URL(node.getAttribute('data-href')||node.getAttribute('href'),initialUrl);
+        const base=new URL(initialUrl),id=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/)?.[1];
+        if(url.origin!==base.origin||id!==post.statusId)return true;
+      }catch{return true;}
+    }
+    return false;
   }
   function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[]) {
     const api=globalThis.ZaneReplyCopilotContent;
@@ -185,6 +215,14 @@
         const text=normalized(api.postExtractor.readOriginalText?.(textNode)||textNode.innerText||textNode.textContent);
         if(text)candidates.push({article:null,id:null,text});
       }
+      // Real rebuilt X can show an unlinked DIV preview rather than an
+      // article. This is supplementary evidence, never a text-only ID.
+      if(post.modernLayout)for(const textNode of dialog.querySelectorAll(MODERN_BODY)){
+        if(!beforeEditor(textNode,node,dialog)||textNode.closest('article')||
+           textNode.closest(MODERN_FRAME)||inQuotedCard(textNode))continue;
+        const text=normalized(api.postExtractor.readOriginalText(textNode));
+        if(text)candidates.push({article:null,id:null,text});
+      }
       const matching=candidates.filter(item=>item.id===post.statusId);
       // Only quote-only posts need this extra DOM check. X can show the
       // outer author/timestamp without an outer tweetText in the modal.
@@ -212,22 +250,34 @@
         :uniqueText&&(uniqueText.id===null)?uniqueText
         :candidates.length===1?candidates[0]:null;
       const text=primary?.text||'';
-      const statusId=primary?.id||null;
+      let statusId=primary?.id||null;
       const quarantinedContextMatch=Boolean(primary&&text&&quarantinedPosts.some(old=>
         old?.statusId!==post.statusId&&sameContext(old,text)&&statusId!==post.statusId));
       // If the post ID is present it wins, even if X changed the display
       // text for translation. Otherwise demand a unique original-text match;
       // missing modal context should WAIT for React, not be rejected.
-      // New layout: an exact canonical parent ID is mandatory. Unknown
-      // parent or multiple candidates never fall back to matching text.
+      // Require either the original exact parent ID in the dialog, or
+      // the independently verified click-link AND current route ID with a
+      // unique matching, linkless preview. Never bind by text alone.
       const modernQuotes=post.modernLayout&&post.quoteOnly?
         articles.flatMap(a=>api.postExtractor.modernQuoteTexts?.(a)||[]):[];
-      const modernMatch=!post.modernLayout?null:!candidates.length?null:
-        candidates.some(c=>c.id&&c.id!==post.statusId)?false:
-        candidates.length>1?false:
+      const routeId=post.modernLayout&&post.replyRouteVerified?
+        api.replyDetector.replyRouteId(currentUrl,initialUrl):null;
+      const routeConflict=Boolean(post.modernLayout&&linklessPreviewConflict(dialog,node,post,initialUrl));
+      const editorUnsafe=node.localName==='textarea'&&
+        (node.disabled||node.readOnly||node.getAttribute('aria-disabled')==='true'||
+         node.getAttribute('aria-readonly')==='true'||!node.getAttribute('aria-label')||
+         node.closest('[inert],[data-slot="embedded-tweet-frame"]')||node.closest('article'));
+      const linkless=post.modernLayout&&post.replyRouteVerified&&routeId===post.statusId&&
+        !routeConflict&&!quarantinedContextMatch&&!post.quoteOnly&&
+        candidates.length===1&&primary?.article===null&&primary?.id===null&&sameContext(post,primary.text);
+      const modernMatch=!post.modernLayout?null:
+        editorUnsafe||routeConflict||candidates.some(c=>c.id&&c.id!==post.statusId)||candidates.length>1?false:
+        post.replyRouteVerified&&routeId!==post.statusId?null:
+        linkless?true:
         matching.length!==1?null:
-        (node.localName==='textarea'&&(node.disabled||node.readOnly||!node.getAttribute('aria-label')||node.closest('[inert]')))?false:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
+      if(linkless&&modernMatch===true)statusId=routeId;
       const contextMatches=post.modernLayout?modernMatch:post.quoteOnly
         ? !candidates.length?null
           :matching.length>1?false
@@ -250,7 +300,10 @@
           :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
-      const contextDetail=contextMatches===true?"verified_context"
+      const contextDetail=routeConflict?"route_preview_conflict":
+        linkless&&contextMatches===true?"verified_route_preview":
+        post.modernLayout&&post.replyRouteVerified&&contextMatches===null?"awaiting_route_preview":
+        contextMatches===true?"verified_context"
         :matching.length>1?"duplicate_parent_identity"
         :matching.length===1&&post.quoteOnly&&quotePreview.seen&&!quotedPreviewMatches?"quote_preview_mismatch"
         :!candidates.length?"awaiting_parent_article"
@@ -265,7 +318,7 @@
         contextMatches,contextDetail};
     });
     const composerDialogs=dialogs.filter(dialog=>[...dialog.querySelectorAll(selector)].some(visible));
-    return {now,editors,visibleDialogCount:composerDialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId),
+    return {now,editors,visibleDialogCount:composerDialogs.length,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
