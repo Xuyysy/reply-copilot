@@ -103,18 +103,7 @@ test("archive-only dashboard restores local results and exposes only the two one
   assert.ok(js.includes("void restoreLocalResult()"));
   assert.ok(js.includes("await readLatestSnapshot()"));
   assert.ok(js.includes('$(\"import-panel\").hidden=true'));
-  assert.ok(js.includes("const saved=await saveSnapshot(snapshot);\n    showSnapshot(saved);"));
+  assert.ok(js.includes("await saveSnapshot(snapshot);\n    showSnapshot(snapshot);"));
   const manifest=JSON.parse(read("manifest.json"));
   assert.ok(manifest.content_scripts.every(c=>c.js.every(p=>!p.startsWith("content/follow-"))));
-});
-
-test("archive blue V filter uses local labels only, not a new network mode",()=>{
-  const html=read("follow-manager/manager.html"),js=read("follow-manager/manager.js");
-  assert.ok(html.includes('id="filter-verification"'));
-  assert.ok(html.includes("仅看蓝 V"));
-  assert.ok(html.includes("认证未知"));
-  assert.ok(js.includes("filterAccounts(ids,text"));
-  assert.ok(js.includes("saveVerification(expected.owner,expected.importedAt,changes)"));
-  assert.ok(js.includes("category,blue_verified"));
-  assert.doesNotMatch(read("follow-manager/verification.js"),/fetch\s*\(|document\.cookie|chrome\.cookies/);
 });

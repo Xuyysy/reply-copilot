@@ -62,17 +62,14 @@
       <button type="button" class="tab stat-tab" data-kind="notFollowingBack" aria-pressed="true"><span>未回关我</span><strong id="count-not-following-back">0</strong><small>我关注了对方，对方未关注我</small></button>
       <button type="button" class="tab stat-tab" data-kind="iHaveNotFollowedBack" aria-pressed="false"><span>我未回关</span><strong id="count-i-have-not-followed-back">0</strong><small>对方关注了我，我未关注对方</small></button>
     </nav>
-    <p class="snapshot-note">结果以导入的归档为准，并非实时关系。归档仅含账号 ID；蓝 V 状态来自本地标记或你导入的认证资料，并非实时认证。</p>
+    <p class="snapshot-note">结果以导入的归档为准，并非实时关系。归档仅含账号 ID，打开主页可查看账号信息。</p>
     <div class="list-tools">
       <label class="field">筛选账号数字 ID
         <input id="filter-id" type="search" inputmode="numeric" placeholder="输入用户 ID 中的一部分">
       </label>
-      <label class="field verification-filter">认证状态<select id="filter-verification"><option value="all">全部账号</option><option value="blue">仅看蓝 V</option><option value="not-blue">已标记非蓝 V</option><option value="unknown">认证未知</option></select></label>
       <label class="field page-size-field">每页显示<select id="page-size"><option value="25">25 条</option><option value="50" selected>50 条</option><option value="100">100 条</option></select></label>
       <button id="export-csv" type="button" class="secondary">导出 CSV</button>
     </div>
-    <details class="file-details verification-details"><summary>补充蓝 V 数据</summary><p>在账号行中手动标记，或导入含 account_id、blue_verified（true / false / unknown）的本地 CSV。无认证资料的账号保持未知。</p><button type="button" class="secondary" id="import-verification">导入认证 CSV</button><input id="verification-file" type="file" accept=".csv,text/csv" hidden></details>
-    <p id="verification-feedback" class="feedback" role="status" aria-live="polite"></p>
     <p class="muted small" id="result-count" role="status"></p>
     <div class="result-table-head" aria-hidden="true"><span>账号 ID</span><span>操作</span></div>
     <div id="result-list" class="result-list" role="list"></div>
