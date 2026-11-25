@@ -125,3 +125,6 @@ END;
 CREATE TRIGGER partner_alipay_items_sealed BEFORE INSERT ON partner_payout_items
 WHEN EXISTS(SELECT 1 FROM partner_alipay_requests q WHERE q.payout_id=NEW.payout_id AND q.status='approved')
 BEGIN SELECT RAISE(ABORT,'approved payout items sealed'); END;
+
+-- Separate default-off pilot review gate; no real payment is initiated.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_payout_review_enabled','0',0) ON CONFLICT(key) DO NOTHING;
