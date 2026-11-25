@@ -302,7 +302,7 @@
     if(!facts.routeAllowed||!facts.sourceUnchanged||facts.editors.length!==1||
        session.activationBaseline?.baselineModalCount!==0)return;
     const candidate=facts.editors[0];
-    if(!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
+    if(candidate.node?.localName==='textarea'||!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
        session.activationBaseline?.baselineEditors?.includes(candidate.node)||
        candidate.quarantinedContextMatch||candidate.contextStatusId||
        candidate.contextMatches!==null)return;
@@ -324,7 +324,7 @@
     const currentFacts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
     const still=currentFacts.editors.length===1?currentFacts.editors[0]:null;
     if(!currentFacts.routeAllowed||!currentFacts.sourceUnchanged||
-       !still||still.node!==candidate.node||!still.node?.isConnected||
+       !still||still.node!==candidate.node||still.node?.localName==='textarea'||!still.node?.isConnected||
        !still.modal||!still.focused||!still.empty||
        still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
     session.copyOnly=true;
@@ -538,7 +538,7 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
-      if(current.post.modernLayout&&matchedComposer(current.post).editor!==current.editor){
+      if((current.post.modernLayout||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
         if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
         return;
       }

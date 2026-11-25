@@ -45,8 +45,8 @@
     // explicit own reply wrapper, independently parsed exact native href;
     // legacy label/testid behavior stays unchanged.
     if(!modern&&article&&element.localName==='a'&&replyTargetId(element)){
-      const hybridOwner=element.closest('[data-engagement-action="reply"]');
-      if(hybridOwner?.closest('article')===article&&
+      const hybridOwner=element.closest('[data-engagement-action]');
+      if(hybridOwner?.getAttribute('data-engagement-action')==='reply'&&hybridOwner.closest('article')===article&&
          !element.closest('[data-slot="embedded-tweet-frame"],[data-testid="quoteTweet"],[data-testid="card.wrapper"]')&&
          !article.parentElement?.closest('article,[data-slot="embedded-tweet-frame"]')&&
          !globalThis.ZaneReplyCopilotContent?.postExtractor?.isQuoteContent?.(element,article))return true;

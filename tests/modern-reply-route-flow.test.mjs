@@ -18,7 +18,7 @@ test('real Chromium trusted click through content script, portal, generation and
   const code=['utils/generation-performance.js','content/post-extractor.js','content/reply-detector.js','content/composer-adapter.js','content/composer-association.js','content/inline-assistant.js','content/content-script.js'].map(read).join('\n');
   const setup=()=>{
     const mode=new URL(location.href).searchParams.get('case');
-    const source='Synthetic modern original';
+    const source=mode.startsWith('quote-only')?'Synthetic quoted content':'Synthetic modern original';
     const answer='Controlled response 中文 😀\nsecond line';
     const f=window.fixture={mode,source,answer,model:'',inputs:0,submits:0,requests:[],pending:[],events:[]};
     const css=window.fixtureCss;
@@ -33,7 +33,9 @@ test('real Chromium trusted click through content script, portal, generation and
     f.resolve=()=>f.pending.shift()?.({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:answer}}});
     const link=document.querySelector('#reply');
     if(mode==='wrong-link')link.href='/compose/post?in_reply_to=999';
-    if(mode.startsWith('caption-quote')){
+    if(mode.startsWith('hybrid')){const article=link.closest('article'),body=article.querySelector('[dir="auto"]');article.setAttribute('data-testid','tweet');body.setAttribute('data-testid','tweetText');body.removeAttribute('class');article.insertAdjacentHTML('afterbegin','<a href="/fixture/status/202"><time>now</time></a>');}
+    if(mode.startsWith('quote-only'))link.closest('article').querySelector('[dir="auto"]').remove();
+    if(mode.startsWith('caption-quote')||mode.startsWith('quote-only')){
       const frame=document.createElement('div');frame.setAttribute('role','link');frame.setAttribute('data-slot','embedded-tweet-frame');frame.setAttribute('data-href','/quoted/status/303');
       frame.innerHTML='<a aria-hidden="true" href="/quoted/status/303"></a><article><div dir="auto" class="whitespace-pre-wrap">Synthetic quoted content</div></article>';
       link.closest('[data-engagement-action]').before(frame);
@@ -47,9 +49,14 @@ test('real Chromium trusted click through content script, portal, generation and
       setTimeout(()=>{
         const portal=document.createElement('div');portal.setAttribute('data-base-ui-portal','');
         portal.innerHTML='<div role="dialog" data-slot="xds-modal-surface" style="background:white;position:fixed;top:90px;left:100px;width:560px;padding:20px;z-index:100"><div id="preview" dir="auto" class="whitespace-pre-wrap">'+(mode==='stale-preview'?'Previous recipient':source)+'</div><div data-media-upload-dropzone><form><div style="position:relative"><div id="mirror" aria-hidden="true" dir="auto" class="whitespace-pre-wrap" style="white-space:pre-wrap"></div><textarea aria-label="Post your reply" style="color:transparent;width:100%;height:90px"></textarea></div><div id="uploads"></div><button type="submit" disabled>Reply</button></form></div></div>';
-        if(mode.startsWith('caption-quote')){
-          const quote=document.createElement('article');quote.innerHTML='<div dir="auto" class="whitespace-pre-wrap">'+(mode==='caption-quote-conflict'?'Unrelated embedded content':'Synthetic quoted content')+'</div>';
-          portal.querySelector('#preview').after(quote);
+        if(mode.startsWith('hybrid')){
+          const preview=portal.querySelector('#preview');preview.setAttribute('data-testid','tweetText');preview.removeAttribute('class');
+          if(mode==='hybrid-no-proof')portal.querySelector('[role="dialog"]').removeAttribute('data-slot');
+        }
+        if(mode.startsWith('caption-quote')||mode.startsWith('quote-only')){
+          const quote=document.createElement('article');quote.innerHTML='<div dir="auto" class="whitespace-pre-wrap">'+(mode.endsWith('conflict')?'Unrelated embedded content':'Synthetic quoted content')+'</div>';
+          const preview=portal.querySelector('#preview');preview.after(quote);
+          if(mode.startsWith('quote-only'))preview.remove();
         }
         document.body.append(portal);
         const editor=portal.querySelector('textarea'),mirror=portal.querySelector('#mirror'),button=portal.querySelector('button');
@@ -128,8 +135,8 @@ test('real Chromium trusted click through content script, portal, generation and
       assert.equal(state.generated,shouldGenerate?1:0,mode+JSON.stringify(state));
       return state;
     }
-    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict']){
-      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good'].includes(mode);
+    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict','hybrid-good','hybrid-no-proof','quote-only-good','quote-only-conflict']){
+      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good','hybrid-good','quote-only-good'].includes(mode);
       const before=await open(mode,shouldGenerate);
       if(shouldGenerate){
         assert.equal(before.host,true,mode);
@@ -139,9 +146,9 @@ test('real Chromium trusted click through content script, portal, generation and
         await evalIn('fixture.resolve()');await wait(240);
       }
       const state=await evalIn('fixture.result()');
-      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(!['good','caption-quote-good'].includes(mode))assert.equal(state.applied,0,mode);
+      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(!['good','caption-quote-good','hybrid-good','quote-only-good'].includes(mode))assert.equal(state.applied,0,mode);
       assert.equal(state.sourceMatches,true,mode);
-      if(['good','caption-quote-good'].includes(mode)){
+      if(['good','caption-quote-good','hybrid-good','quote-only-good'].includes(mode)){
         const answer=await evalIn('fixture.answer');
         assert.equal(state.inputs,1,JSON.stringify(state));assert.equal(state.value,answer);
         assert.equal(state.model,answer);assert.equal(state.mirror,answer);assert.equal(state.applied,1);assert.match(state.status,/已填入/);

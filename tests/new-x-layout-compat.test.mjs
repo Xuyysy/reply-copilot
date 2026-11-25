@@ -140,6 +140,11 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       qe.value='draft';checks.quoteDraft=qnew().evaluate(qs()).reason==='existing_draft';qe.value='';
       checks.quoteWithoutCapturedEvidence=qnew().evaluate(qs({...qp,modernCaptionQuote:null})).state==='rejected';
       const qBound=qnew();qBound.evaluate(qs());qt.textContent='Changed quote';checks.quoteChangedAfterBind=qBound.evaluate(qs()).state==='rejected';qt.textContent='Quoted body';
+      qc.remove();const hydrating=qnew();qa.prepend(qaLink);qaLink.href='/quoted/status/919';
+      checks.quoteHydrating=hydrating.evaluate(qs()).state==='waiting';
+      qa.before(qc);checks.quoteHydrated=hydrating.evaluate(qs()).editor===qe;qaLink.remove();
+      const feedCaption=qWrap.querySelector('article > div[dir="auto"]');
+      feedCaption.textContent='Changed feed caption';checks.quoteSourceChanged=qnew().evaluate(qs()).reason==='source_changed';feedCaption.textContent='Outer caption';
       qd.remove();
       // Independently rolled-out native editor on a legacy post. Strong
       // structure + trusted route required; old paths remain identical.
@@ -200,7 +205,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,83);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,86);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });
