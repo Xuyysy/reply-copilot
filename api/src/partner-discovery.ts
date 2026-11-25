@@ -5,6 +5,7 @@ import {jsonBody,nowMs} from "./security";
 import {response} from "./http";
 import {discoveryPagePlan,discoveryEnqueuePlan,cursorAdvancePlan} from "./partner-discovery.mjs";
 import {refundCandidatePlan,confirmedRefundAmount,refundSyncPlan} from "./partner-refund-sync.mjs";
+import {subscriptionRefundCandidatePlan,subscriptionRefundSyncPlan} from "./partner-subscription-refund.mjs";
 
 // Explicit admin-triggered bounded pilot, NOT a live cron or payment hook.
 // No production access; no automatic accrual. Existing refunds remain
@@ -18,6 +19,17 @@ export async function adminPartnerDiscovery(request:Request,env:Env):Promise<Res
   if(typeof b.orderId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(b.orderId))throw new ApiFailure(400,'INVALID_REQUEST','订单参数无效。');
   const flag=await env.DB.prepare("SELECT value FROM system_settings WHERE key='partner_refund_sync_enabled'").first<{value:string}>();
   if(flag?.value!=='1')throw new ApiFailure(409,'PARTNER_SYNC_DISABLED','退款同步尚未开启。');
+  if(b.domain!==undefined&&!['recharge','subscription'].includes(String(b.domain)))throw new ApiFailure(400,'INVALID_REQUEST','订单类型无效。');
+  if(b.domain==='subscription'){
+   const candidate=subscriptionRefundCandidatePlan(b.orderId);
+   const rows=(await env.DB.prepare(candidate.sql).bind(...candidate.params).all<Record<string,unknown>>()).results;
+   const work=await subscriptionRefundSyncPlan({orderId:b.orderId,rows,now});
+   if(!work)return response({ok:false,state:'review'},409,env,request);
+   if(!await env.DB.prepare(work.proof.sql).bind(...work.proof.params).first())return response({ok:false,state:'review'},409,env,request);
+   if(!work.write)return response({ok:true,state:'unchanged'},200,env,request);
+   const r=await env.DB.prepare(work.write.sql).bind(...work.write.params).run();
+   return response({ok:r.meta.changes===1,state:r.meta.changes===1?'recorded':'conflict'},r.meta.changes===1?200:409,env,request);
+  }
   const q=refundCandidatePlan(b.orderId);
   const rows=(await env.DB.prepare(q.sql).bind(...q.params).all<Record<string,unknown>>()).results;
   const amount=confirmedRefundAmount(rows);
