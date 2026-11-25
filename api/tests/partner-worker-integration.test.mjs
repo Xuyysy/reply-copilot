@@ -65,13 +65,13 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  await ok('a',root+'policy',policy);
  await ok('p',me+'alipay-recipient',{expectedVersion:0,account:'fixture@example.test',name:'测试账户'});
  const effective=db.prepare("SELECT effective_at FROM partner_policy_versions WHERE user_id='p'").get().effective_at;
- // Use a historical fixture policy time by waiting for a distinct millisecond
- // through the real clock; no mutation of immutable policy rows.
+ // The synthetic payment is at the first authorized instant; no mutation
+ // of immutable policy rows. The one-millisecond hold is fixture-only.
  const paid=effective,applied=paid;
  db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,registered_at) VALUES('b','p','0123456789abcdef',?)").run(paid);
  db.prepare("INSERT INTO partner_accrual_windows VALUES('w',?,NULL,'product_principal',1,'a','fixture only')").run(paid);
  db.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at,paid_at,credited_at) VALUES('o','b','starter','fixture',500,100,'USD','paid','mk99','out',?,?,?)").run(paid,paid,applied);
- db.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,provider_payment_id,paid_at) VALUES('tx','o','xiaodou','CNY',10000,10000,0,0,'fee-v1','not_applicable','paid','out',?,?,'rsa2','ALIPAY_H5','CNY_FIXED',1000000,'mk99','fixture','MD5','CNY_EXACT_BUYER_TOTAL',10000,'trade',?)").run(paid,paid,paid);
+ db.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,provider_payment_id,paid_at) VALUES('tx','o','xiaodou','CNY',10000,10000,0,0,'fee-v1','not_applicable','paid','out',?,?,'rsa2','ALIPAY_H5','fixed_cny',1000000,'mk99','fixture','MD5','CNY_EXACT_BUYER_TOTAL',10000,'trade',?)").run(paid,paid,paid);
  db.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider) VALUES('ev','xiaodou','mk99:paid:trade','tx','PAYMENT_SUCCEEDED',10000,'CNY',?,?,'mk99')").run('a'.repeat(64),paid);
  db.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) VALUES('l','b','purchase_grant',0,500,'o','fixture',?)").run(applied);
  db.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,source_order_id,grant_credits,remaining_credits,granted_at,paid_at,history_confidence,status) VALUES('cb','b','paid','purchase','o',500,500,?,?,'tracked','active')").run(applied,paid);
@@ -83,6 +83,8 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  assert.equal((await call('a',root+'accrual-review',{...command,action:'approve_for_queue',expectedSnapshot:'0'.repeat(64)})).status,409);
  await ok('a',root+'accrual-review',{...command,action:'approve_for_queue',expectedSnapshot:preview.snapshot});
  await worker.scheduled({},f.env);
+ // Ensure the fixture-only one-millisecond hold has elapsed.
+ if(Date.now()<=applied+1)await new Promise(resolve=>setTimeout(resolve,2));
  assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs WHERE order_id='o'").get().state,'done');
  assert.equal(db.prepare("SELECT commission_fen FROM partner_commissions WHERE order_id='o'").get().commission_fen,2000);
  const r=await ok('p',me+'alipay-requests',{amountFen:1000,recipientVersion:1});
