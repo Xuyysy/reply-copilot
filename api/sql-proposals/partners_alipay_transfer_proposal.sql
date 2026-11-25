@@ -69,6 +69,7 @@ BEGIN
  SELECT 1 FROM partner_payouts p JOIN partner_alipay_payout_destinations d ON d.payout_id=p.id
  JOIN partner_alipay_requests q ON q.payout_id=p.id AND q.status='approved'
  WHERE p.id=NEW.payout_id AND p.status='reserved' AND NEW.started_at>=p.created_at
+ AND EXISTS(SELECT 1 FROM users u WHERE u.id=p.partner_user_id AND u.role='user' AND u.status='active' AND u.email_verified_at IS NOT NULL AND u.archived_at IS NULL AND u.is_test_account=0)
  AND (SELECT COALESCE(SUM(i.amount_fen),0) FROM partner_payout_items i WHERE i.payout_id=p.id)=p.amount_fen
  AND NOT EXISTS(SELECT 1 FROM partner_payout_items i JOIN partner_commissions c ON c.order_domain=i.order_domain AND c.order_id=i.order_id
  WHERE i.payout_id=p.id AND i.amount_fen>c.commission_fen+
@@ -116,3 +117,8 @@ BEGIN
  UPDATE partner_payouts SET status=CASE WHEN NEW.outcome='paid' THEN 'paid' ELSE 'cancelled' END,
  resolved_at=NEW.recorded_at,resolved_by=NEW.recorded_by,transfer_reference=NEW.reference WHERE id=NEW.payout_id;
 END;
+
+-- Once an application is approved its payout item set is sealed.
+CREATE TRIGGER partner_alipay_items_sealed BEFORE INSERT ON partner_payout_items
+WHEN EXISTS(SELECT 1 FROM partner_alipay_requests q WHERE q.payout_id=NEW.payout_id AND q.status='approved')
+BEGIN SELECT RAISE(ABORT,'approved payout items sealed'); END;
