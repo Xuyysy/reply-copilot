@@ -13,7 +13,7 @@ export async function scheduledPartnerDiscovery(env:Env,now:number):Promise<void
   // Seven days is a technical pilot lookback, NOT the commission hold period.
   for(const domain of ['recharge','subscription']){
    try{
-    await discoverPartnerPage(env,domain,now,5);
+    await discoverPartnerPage(env,domain,now,5,true);
     await repairPartnerPage(env,domain,now,Math.max(0,now-7*86400000));
    }catch{
     // Never log buyer identifiers, order details, or payment information.
