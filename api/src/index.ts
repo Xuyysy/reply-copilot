@@ -26,6 +26,7 @@ import {adminPayoutReview} from "./partner-payout-review";
 import {adminPartnerDiscovery} from "./partner-discovery";
 import {scheduledPartnerDiscovery} from "./partner-scheduled";
 import {scheduledPartnerRefundSync} from "./partner-refund-scheduled";
+import {scheduledPartnerAccrual} from "./partner-accrual-scheduled";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminAuthCpuReadiness} from './admin-auth-cpu-readiness';
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
@@ -62,7 +63,7 @@ async function feedback(request: Request, env: Env): Promise<Response> {
 const adminEntitlementActivity=createAdminEntitlementActivity({requireAdminSession,response,ApiFailure});
 
 export default {
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); await scheduledPartnerDiscovery(env,Date.now()); await scheduledPartnerRefundSync(env,Date.now()); },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); await scheduledPartnerDiscovery(env,Date.now()); await scheduledPartnerRefundSync(env,Date.now()); await scheduledPartnerAccrual(env,Date.now()); },
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
     const isRegistration = request.method === "POST" && path === "/v1/auth/register";
