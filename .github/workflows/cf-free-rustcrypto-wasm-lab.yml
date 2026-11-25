@@ -1,0 +1,38 @@
+name: CF Free RustCrypto WASM offline lab
+on:
+  push:
+    branches:
+      - chatgpt/cf-free-rustcrypto-wasm-lab-20261125
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned JS dependencies
+        run: npm --prefix api ci
+      - name: Build precompiled RustCrypto module
+        working-directory: api/prototypes/cf-free-rustcrypto-wasm
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal --target wasm32-unknown-unknown
+          cargo +1.85.1 generate-lockfile
+          cargo +1.85.1 build --locked --release --target wasm32-unknown-unknown
+          sha256sum Cargo.lock target/wasm32-unknown-unknown/release/xrh_legacy_kdf_lab.wasm
+      - name: Test exact compatibility and benchmark real local workerd
+        run: node api/scripts/cf-free-rustcrypto-wasm-lab.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rustcrypto-wasm-offline-lab
+          path: |
+            api/prototypes/cf-free-rustcrypto-wasm/Cargo.lock
+            api/prototypes/cf-free-rustcrypto-wasm/target/wasm32-unknown-unknown/release/xrh_legacy_kdf_lab.wasm
+          if-no-files-found: ignore
+          retention-days: 14
