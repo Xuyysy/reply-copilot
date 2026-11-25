@@ -10,7 +10,7 @@ import {reserveSubscribedGeneration,confirmSubscribedDelivery,failSubscribedGene
 import { bestEffortReferralAward } from "./referrals";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
-export type Reservation = { kind: "new"; quota?: Balance } | { kind: "replay"; quota: Balance; raw: string };
+export type Reservation = { kind: "new"; quota?: Balance; funding?: "subscription"|"free"|"paid" } | { kind: "replay"; quota: Balance; raw: string };
 type StoredRequest = { status: string; generation_phase?: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
 type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
 
@@ -104,11 +104,12 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     const prior = await existing(env, session.user_id, requestId);
     if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
   }
-  const subscription=await subscriptionAccount(env,session.user_id,now);
-  if(subscription.status==='active' && subscription.remainingToday>0){
+  // The subscription reservation owns the authoritative eligibility read.
+  // Avoid reading the same paid proof and usage twice on a normal request.
+  if(subscriptionsEnabled(env)&&Number.isSafeInteger(budgetReserve)&&budgetReserve>=0){
     try{
       if(await reserveSubscribedGeneration(env,session.user_id,requestId,requestHash,budgetReserve,providerSnapshot,now))
-        return options.omitNewQuota ? {kind:'new'} : {kind:'new',quota:await balance(env,session.user_id)};
+        return options.omitNewQuota ? {kind:'new',funding:'subscription'} : {kind:'new',quota:await balance(env,session.user_id)};
     }catch(error){
       const concurrent=await existing(env,session.user_id,requestId);
       if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,now);
@@ -184,7 +185,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   }
   // The HTTP generation path reads the balance only after provider settlement.
   // Preserve the original return contract for other callers by default.
-  return options.omitNewQuota ? {kind:"new"} : {kind:"new", quota:await balance(env,session.user_id)};
+  return options.omitNewQuota ? {kind:"new",funding:lot.bucket} : {kind:"new", quota:await balance(env,session.user_id)};
 }
 
 export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string): Promise<Reservation | null> {

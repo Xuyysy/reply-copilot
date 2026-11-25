@@ -106,8 +106,6 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const enabled = await env.DB.prepare("SELECT value FROM system_settings WHERE key='ai_enabled'").first<{value:string}>();
   if (enabled?.value !== "1") throw new ApiFailure(503,"AI_DISABLED","AI 服务暂时停止，请稍后再试。");
   const mode=aiMode(env);
-  const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildProductionV55NoCorpusPrompts:buildPrompts;
-  const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
@@ -119,6 +117,8 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   };
   const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
   if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(()=>prior.quota)}),200,env,request);
+  const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildProductionV55NoCorpusPrompts:buildPrompts;
+  const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
@@ -145,5 +145,10 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
   const { balance } = await import("./quota");
-  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...await wireQuota(()=>balance(env,session.user_id)) }), 200, env, request);
+  // A new successful reservation already established its funding in the
+  // atomic transaction; only replay paths need an authoritative lookup.
+  const quotaFields=execution.funding==="subscription"?{}:
+    execution.funding==="free"||execution.funding==="paid"?{quota:await balance(env,session.user_id)}:
+    await wireQuota(()=>balance(env,session.user_id));
+  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...quotaFields }), 200, env, request);
 }
