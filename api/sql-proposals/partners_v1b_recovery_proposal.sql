@@ -56,3 +56,19 @@ CREATE TABLE partner_recovery_assertions (
  id TEXT PRIMARY KEY,
  ok INTEGER NOT NULL CHECK(ok=1)
 );
+
+-- Default-off non-production single-order review. Manual risk review is not a provider attestation.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_accrual_review_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_accrual_review_audits (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ reviewed_at INTEGER NOT NULL CHECK(typeof(reviewed_at)='integer' AND reviewed_at>0),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_commissions(order_domain,order_id)
+);
+CREATE TRIGGER partner_review_audit_no_update BEFORE UPDATE ON partner_accrual_review_audits
+BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
+CREATE TRIGGER partner_review_audit_no_delete BEFORE DELETE ON partner_accrual_review_audits
+BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
