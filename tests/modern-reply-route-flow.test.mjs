@@ -68,7 +68,7 @@ test('real Chromium trusted click through content script, portal, generation and
     f.result=()=>({value:f.editor?.value??null,model:f.model,mirror:document.querySelector('#mirror')?.textContent??null,
       inputs:f.inputs,submits:f.submits,generated:f.requests.filter(m=>m.type==='REPLY_COPILOT_GENERATE').length,
       sourceMatches:f.requests.filter(m=>m.type==='REPLY_COPILOT_GENERATE').every(m=>m.sourceText===source&&m.sourceUrl==='https://x.com/fixture/status/202'),
-      applied:f.requests.filter(m=>m.type==='REPLY_COPILOT_RECORD_EVENT'&&m.event==='applied').length,
+      applied:f.requests.filter(m=>m.type==='REPLY_COPILOT_HISTORY'&&m.event==='applied').length,
       host:!!document.querySelector('[data-zane-reply-copilot]'),
       status:document.querySelector('[data-zane-reply-copilot]')?.shadowRoot?.querySelector('.status')?.textContent||'',
       trusted:f.events.every(Boolean)&&f.events.length===1,
@@ -107,7 +107,7 @@ test('real Chromium trusted click through content script, portal, generation and
     await call('Fetch.enable',{patterns:[{urlPattern:'*'}]});await call('Target.activateTarget',{targetId:t.targetId},null);
     async function open(mode,shouldGenerate){
       await call('Page.navigate',{url:'https://x.com/home?case='+mode});
-      await until(()=>evalIn('document.readyState==="complete"&&window.fixture?.mode==='+JSON.stringify(mode)&&typeof replyCopilotAssociationReport==="function"'),'load '+mode);
+      await until(()=>evalIn('document.readyState==="complete"&&window.fixture?.mode==='+JSON.stringify(mode)+'&&typeof replyCopilotAssociationReport==="function"'),'load '+mode);
       const pt=await evalIn('(()=>{const r=document.querySelector("#icon").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');
       await call('Input.dispatchMouseEvent',{type:'mousePressed',...pt,button:'left',clickCount:1});
       await call('Input.dispatchMouseEvent',{type:'mouseReleased',...pt,button:'left',clickCount:1});
@@ -130,12 +130,12 @@ test('real Chromium trusted click through content script, portal, generation and
         await evalIn('fixture.resolve()');await wait(240);
       }
       const state=await evalIn('fixture.result()');
-      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);
+      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(mode!=='good')assert.equal(state.applied,0,mode);
       assert.equal(state.sourceMatches,true,mode);
       if(mode==='good'){
         const answer=await evalIn('fixture.answer');
         assert.equal(state.inputs,1,JSON.stringify(state));assert.equal(state.value,answer);
-        assert.equal(state.model,answer);assert.equal(state.mirror,answer);assert.match(state.status,/已填入/);
+        assert.equal(state.model,answer);assert.equal(state.mirror,answer);assert.equal(state.applied,1);assert.match(state.status,/已填入/);
       }else if(mode==='mirror-reject'){
         assert.equal(state.inputs,1,mode);assert.equal(state.model,'',mode);assert.doesNotMatch(state.status,/已填入/);
       }else{
