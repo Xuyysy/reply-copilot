@@ -7,6 +7,7 @@ import {createHash, pbkdf2Sync, randomUUID} from 'node:crypto';
 import {readFileSync, readdirSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import {pathToFileURL,fileURLToPath} from 'node:url';
+import {encryptProviderApiKey} from '../src/ai-model-crypto.js';
 import {ROUTES, parseOptions, migrationStatements, summarizeWallMs, summarizeV8Profile} from './lib/workerd-cpu-evidence.mjs';
 
 const API = 'https://isolated-api.example.test';
@@ -20,7 +21,9 @@ const MAIN_USER = 'benchmark-main-user';
 const VERIFIER='cf-free-offline-business-verifier';
 const EXTENDED_ROUTES=Object.freeze([...ROUTES.slice(0,7),'login_60k','login_210k',...ROUTES.slice(7)]);
 
-export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full', passwordMode='native', extendedLogin=false} = {}) {
+export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full', passwordMode='native', extendedLogin=false, productionProvider=null, syntheticUpstream=null} = {}) {
+  if(productionProvider!==null&&(!['legacy','managed'].includes(productionProvider)||typeof syntheticUpstream!=='function'))throw Error('Synthetic Production provider requires an explicit intercepted upstream');
+  if(productionProvider===null&&syntheticUpstream!==null)throw Error('Unexpected upstream handler');
   if(!['native','wasm_do'].includes(passwordMode)||typeof extendedLogin!=='boolean')throw Error('Unknown local password experiment');
   if(!['full','partial'].includes(expiryIndex))throw Error('Unknown local index experiment');
   if(!['legacy','select'].includes(assertionMode))throw Error('Unknown assertion mode');
@@ -77,12 +80,27 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
     AI_MOCK_DELAY_MS:'0', SUBSCRIPTIONS_ENABLED:'1', PAYMENTS_ENABLED:'0',
     ADMIN_PORTAL_ENABLED:'0', CF_FREE_ZERO_WRITE_ASSERTIONS:assertionMode==='select'?'1':'0'
   };
+  const localProviderKey='synthetic-local-model-key';
+  const localEncryptionKey=Buffer.alloc(32,9).toString('base64');
+  if(productionProvider)Object.assign(vars,{ENVIRONMENT:'production',AI_MODE:'production',DEEPSEEK_API_KEY:localProviderKey,DEEPSEEK_INPUT_USD_PER_MILLION:'0.3',DEEPSEEK_OUTPUT_USD_PER_MILLION:'1.32',AI_CONFIG_ENCRYPTION_KEY:localEncryptionKey});
   const env = Object.fromEntries(Object.entries(vars).map(([key,value]) => [key,{type:'text',value}]));
   env.DB = {type:'d1',id:'cf-free-offline-synthetic-d1'};
   const config = {name:'cf-free-offline-synthetic',compatibilityDate:'2026-10-14',env,
     manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:bundle}}}};
   const deny=()=>{external++;throw Error('External network denied');};
-  const workers=[{config,dev:{...(profile?{unsafeInspectorProxy:true}:{}),outboundService:{type:'fetcher',handler:deny}}}];
+  // Every outbound request is intercepted inside the local runtime. Only
+  // the exact synthetic DNS and completion endpoints may be handled. Never
+  // call fetch() from this adapter or forward a request to the public network.
+  const intercept=async req=>{
+    const u=new URL(req.url);
+    if(u.origin==='https://cloudflare-dns.com'&&u.pathname==='/dns-query'&&u.searchParams.get('name')==='api.deepseek.com'&&['A','AAAA'].includes(u.searchParams.get('type'))&&req.method==='GET'){
+      if(productionProvider!=='managed')return deny();
+      return Response.json({Status:0,Answer:u.searchParams.get('type')==='A'?[{type:1,data:'8.8.8.8'}]:[]});
+    }
+    if(u.origin!=='https://api.deepseek.com'||u.search||u.hash||req.method!=='POST'||u.pathname!==(productionProvider==='managed'?'/v1/chat/completions':'/chat/completions')||req.headers.get('authorization')!=='Bearer '+localProviderKey)return deny();
+    return syntheticUpstream(await req.json());
+  };
+  const workers=[{config,dev:{...(profile?{unsafeInspectorProxy:true}:{}),outboundService:{type:'fetcher',handler:productionProvider?intercept:deny}}}];
   if(passwordMode==='wasm_do'){
     env.PASSWORD_VERIFY_DO_ENABLED={type:'text',value:'1'};
     env.PASSWORD_VERIFY_DO={type:'durable-object',worker:VERIFIER,exportName:'PasswordVerifierDO'};
@@ -127,7 +145,21 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
       await db.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,provider_trade_id,payment_channel,amount_fen,status,risk_state,created_at,updated_at,paid_at) VALUES('synthetic-txn','synthetic-order','local_mock','synthetic-trade','LOCAL_MOCK',6990,'paid','clear',1,1,?)").bind(now).run();
       await db.prepare("INSERT INTO subscription_payment_events(id,transaction_id,merchant_provider,provider_event_id,event_type,amount_fen,received_at) VALUES('synthetic-event','synthetic-txn','local_mock','synthetic-event-key','PAYMENT_SUCCEEDED',6990,?)").bind(now).run();
       await db.prepare("INSERT INTO subscription_periods(id,user_id,source_order_id,plan_version_id,daily_limit,status,start_at,end_at,created_at,updated_at) VALUES('synthetic-period',?,'synthetic-order','basic-v1',500,'active',?,?,1,1)").bind(MAIN_USER,start,start+30*86400000).run();
+      if(productionProvider){
+        // Synthetic fiat proof shape accepted by Production; no actual payment,
+        // webhook, merchant key, or network is involved.
+        await db.prepare("UPDATE subscription_payment_transactions SET merchant_provider='mk99',merchant_account='synthetic-merchant',notification_sign_type='RSA2',payment_channel='ALIPAY_H5' WHERE id='synthetic-txn'").run();
+        await db.prepare("UPDATE subscription_payment_events SET merchant_provider='mk99',body_sha256=? WHERE id='synthetic-event'").bind('a'.repeat(64)).run();
+      }
     }
+    if(productionProvider==='managed'){
+      const configId='synthetic-model';
+      const encrypted=await encryptProviderApiKey(localEncryptionKey,configId,1,localProviderKey);
+      await db.prepare("INSERT INTO ai_provider_configs(id,display_name,latest_version,created_at,updated_at,updated_by) VALUES(?,'Synthetic managed model',1,1,1,?)").bind(configId,MAIN_USER).run();
+      await db.prepare("INSERT INTO ai_provider_config_versions(config_id,version,provider,protocol,base_url,model_id,api_key_ciphertext,input_rate_micro_usd_per_million,output_rate_micro_usd_per_million,max_output_tokens,timeout_ms,options_json,endpoint_addresses_json,created_at,created_by) VALUES(?,1,'deepseek','openai_chat','https://api.deepseek.com/v1','synthetic-managed',?,300000,1320000,512,10000,'{}','[]',1,?)").bind(configId,encrypted,MAIN_USER).run();
+      await db.prepare("UPDATE ai_provider_runtime SET active_config_id=?,active_version=1 WHERE id=1").bind(configId).run();
+    }
+    if(productionProvider)await db.prepare("UPDATE system_settings SET value='100000000' WHERE key='daily_cost_limit_micro_usd'").run();
     await db.prepare("UPDATE system_settings SET value='1' WHERE key='ai_enabled'").run();
     return {mf,db,getExternalCalls:() => external};
   } catch (error) {await mf.dispose();throw error;}
