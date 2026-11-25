@@ -124,3 +124,20 @@ CREATE TRIGGER partner_accrual_approval_no_update BEFORE UPDATE ON partner_accru
 BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
 CREATE TRIGGER partner_accrual_approval_no_delete BEFORE DELETE ON partner_accrual_approvals
 BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
+
+-- Source-only administrator reopen history.
+CREATE INDEX partner_accrual_queue_state ON partner_accrual_jobs(state,updated_at DESC,order_domain,order_id);
+CREATE TABLE partner_accrual_reopen_audits (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ previous_attempt INTEGER NOT NULL CHECK(previous_attempt BETWEEN 0 AND 18),
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ created_at INTEGER NOT NULL CHECK(created_at>0),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_accrual_jobs(order_domain,order_id)
+);
+CREATE TRIGGER partner_reopen_audit_no_update BEFORE UPDATE ON partner_accrual_reopen_audits
+BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
+CREATE TRIGGER partner_reopen_audit_no_delete BEFORE DELETE ON partner_accrual_reopen_audits
+BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
