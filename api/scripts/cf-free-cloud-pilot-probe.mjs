@@ -99,7 +99,7 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
         let parsed=null;const bodyText=await response.text();try{parsed=JSON.parse(bodyText);}catch{}
         if(['NOT_CONFIGURED','UNAUTHORIZED','VERIFIER_UNAVAILABLE','PILOT_UNAVAILABLE','BAD_INPUT','NOT_FOUND','METHOD_NOT_ALLOWED'].includes(parsed?.code)){
           diagnostic={code:parsed.code,stage:['REQUEST','HTTP_VERIFY','DO_RPC'].includes(parsed.stage)?parsed.stage:null,failure:['KDF_RUNTIME_LIMIT','RUNTIME_RESOURCE_LIMIT','KDF_NOT_SUPPORTED','KDF_OPERATION_ERROR','UNCLASSIFIED'].includes(parsed.failure)?parsed.failure:null};
-        }else if(!response.ok){diagnostic={code:/\\b(?:Error\\s*1102|exceeded resources)\\b/i.test(bodyText)?'CF_RESOURCE_LIMIT_PAGE':'UNCLASSIFIED_HTTP_RESPONSE',stage:null,failure:null};}
+        }else if(!response.ok){diagnostic={code:/\b(?:Error\s*1102|exceeded resources)\b/i.test(bodyText)?'CF_RESOURCE_LIMIT_PAGE':'UNCLASSIFIED_HTTP_RESPONSE',stage:null,failure:null};}
         status=resultStatus(response,parsed,mode,rounds,wrong);
       }catch{
         status='FAILED_OR_RESOURCE_LIMIT';
