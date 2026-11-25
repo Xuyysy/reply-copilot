@@ -19,6 +19,8 @@ export interface Env {
   PARTNER_PAYOUT_REVIEW_ENABLED?: string;
   /** Non-production bounded discovery/refund sync pilot, absent by default. */
   PARTNER_DISCOVERY_ENABLED?: string;
+  /** Optional non-production scheduled discovery, absent by default. */
+  PARTNER_SCHEDULED_DISCOVERY_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
