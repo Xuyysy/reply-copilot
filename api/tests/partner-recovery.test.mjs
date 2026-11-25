@@ -156,6 +156,9 @@ test('confirmed refund sync rejects unknown or stale totals and records cumulati
  db.exec("UPDATE payment_transactions SET principal_refunded_fen=1000,status='refunded'; UPDATE recharge_orders SET status='refunded'");
  const plan=refundSyncPlan({orderId:'o',rows:read(),now:400});assert.ok(plan);assert.equal(run(db,plan),0);
  db.exec("UPDATE system_settings SET value='1' WHERE key='partner_refund_sync_enabled'; UPDATE system_settings SET value='0' WHERE key='partner_cash_accrual_enabled'");
+ db.exec("UPDATE payment_transactions SET provider_payment_id='different'");
+ assert.equal(confirmedRefundAmount(read()),null);assert.equal(run(db,plan),0);
+ db.exec("UPDATE payment_transactions SET provider_payment_id='pay-r'");
  assert.equal(run(db,plan),1);assert.equal(run(db,plan),0);
  assert.equal(db.prepare("SELECT SUM(delta_fen) total FROM partner_commission_refunds").get().total,-200);
  assert.equal(refundSyncPlan({orderId:'o',rows:read(),now:401}),null);
@@ -166,13 +169,14 @@ test('MK99 subscription refund requires explicit full-amount digest, not default
  const {createHash}=await import('node:crypto');
  const db=fixture(t);
  db.exec(`CREATE TABLE subscription_orders(id TEXT PRIMARY KEY,user_id TEXT,kind TEXT,status TEXT,paid_at INTEGER,applied_at INTEGER,amount_fen INTEGER,target_period_id TEXT);
- CREATE TABLE subscription_payment_transactions(id TEXT PRIMARY KEY,order_id TEXT,provider_trade_id TEXT,provider_payment_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER);
+ CREATE TABLE subscription_payment_transactions(id TEXT PRIMARY KEY,order_id TEXT,provider_trade_id TEXT,provider_payment_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,paid_at INTEGER);
  CREATE TABLE subscription_payment_events(transaction_id TEXT,merchant_provider TEXT,provider_event_id TEXT,event_type TEXT,amount_fen INTEGER,body_sha256 TEXT);
  CREATE TABLE subscription_periods(id TEXT,source_order_id TEXT,user_id TEXT);
  CREATE TABLE subscription_tier_changes(order_id TEXT,period_id TEXT,charged_fen INTEGER);
  INSERT INTO partner_commissions VALUES('subscription','s','p','b',1,350,351,'product_principal','CNY',1000,2000,200,451,360);
  INSERT INTO subscription_orders VALUES('s','b','upgrade','refund_pending',350,351,1000,'period');
- INSERT INTO subscription_payment_transactions VALUES('tx','s','out','trade','mk99','paid','frozen','CNY',1000);
+ INSERT INTO subscription_payment_transactions VALUES('tx','s','out','trade','mk99','paid','frozen','CNY',1000,350);
+ INSERT INTO partner_payment_identity_claims VALUES('mk99','out','trade','subscription','s',360);
  INSERT INTO subscription_payment_events VALUES('tx','mk99','payment','PAYMENT_SUCCEEDED',1000,'fixture');
  INSERT INTO subscription_periods VALUES('period','old','b');
  INSERT INTO subscription_tier_changes VALUES('s','period',1000);`);
@@ -190,6 +194,9 @@ test('MK99 subscription refund requires explicit full-amount digest, not default
  assert.ok(db.prepare(plan.proof.sql).get(...plan.proof.params));
  assert.equal(run(db,plan.write),0); // default off
  db.exec("UPDATE system_settings SET value='1' WHERE key='partner_refund_sync_enabled'");
+ db.exec("UPDATE subscription_payment_transactions SET paid_at=349");
+ assert.equal(run(db,plan.write),0);
+ db.exec("UPDATE subscription_payment_transactions SET paid_at=350");
  assert.equal(run(db,plan.write),1);assert.equal(run(db,plan.write),0);
  assert.equal(db.prepare("SELECT delta_fen FROM partner_commission_refunds").get().delta_fen,-200);
  const replay=await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:501});
@@ -359,4 +366,12 @@ test('immutable provider claim rolls back a later conflicting accrual',t=>{
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,1);
  assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs").get().state,'pending');
  assert.throws(()=>db.exec("DELETE FROM partner_payment_identity_claims"));
+});
+
+test('scheduled discovery rechecks kill switch within enqueue and cursor transaction',()=>{
+ const s=readFileSync(new URL('../src/partner-discovery.ts',import.meta.url),'utf8');
+ const scheduler=readFileSync(new URL('../src/partner-scheduled.ts',import.meta.url),'utf8');
+ assert.match(scheduler,/discoverPartnerPage\(env,domain,now,5,true\)/);
+ assert.match(s,/scheduled\?"AND EXISTS\(SELECT 1 FROM system_settings WHERE key='partner_scheduled_discovery_enabled'/);
+ assert.match(s,/p\.sql=p\.sql\.replace\('ON CONFLICT\(order_domain,order_id\) DO NOTHING'/);
 });
