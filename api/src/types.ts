@@ -15,6 +15,8 @@ export interface Env {
   PARTNER_ALIPAY_KEY_ID?: string;
   /** Non-production single-order accrual review; absent by default. */
   PARTNER_ACCRUAL_REVIEW_ENABLED?: string;
+  /** Non-production manual payout review only, absent by default. */
+  PARTNER_PAYOUT_REVIEW_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
