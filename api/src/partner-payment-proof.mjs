@@ -2,10 +2,23 @@
 // Do not use browser/payment callback fields as monetary evidence.
 const validId=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(x);
 const integer=(x,min=1)=>Number.isSafeInteger(x)&&x>=min&&x<=1000000000000;
+// Require a stable provider identity across both business domains. Scope to
+// provider, not merchant account: conservative collisions block rather than
+// accidentally credit a single provider payment twice across accounts.
+function identityColumns(domain){
+ const own=domain==='recharge'?'payment_transactions':'subscription_payment_transactions';
+ const other=domain==='recharge'?'subscription_payment_transactions':'payment_transactions';
+ return `t.provider_trade_id,t.provider_payment_id,t.paid_at transaction_paid_at,
+ (SELECT COUNT(*) FROM ${own} x WHERE x.merchant_provider=t.merchant_provider AND
+ (x.provider_trade_id=t.provider_trade_id OR x.provider_payment_id=t.provider_payment_id))+
+ (SELECT COUNT(*) FROM ${other} x WHERE x.merchant_provider=t.merchant_provider AND
+ (x.provider_trade_id=t.provider_trade_id OR x.provider_payment_id=t.provider_payment_id)) identity_count`;
+}
 export function paymentEvidencePlan(domain,orderId){
  if(!validId(orderId)||!['recharge','subscription'].includes(domain))throw new TypeError('PARTNER_ORDER_INVALID');
  if(domain==='recharge')return {sql:`SELECT o.id order_id,o.user_id buyer_id,'recharge' order_kind,o.status order_status,
  o.paid_at,o.credited_at applied_at,t.id transaction_id,t.merchant_provider,t.status payment_status,t.risk_state,t.currency,
+ ${identityColumns(domain)},
  t.amount_fen buyer_fen,t.base_amount_fen principal_fen,t.service_fee_fen,t.principal_refunded_fen,
  (SELECT COUNT(*) FROM payment_transactions x WHERE x.order_id=o.id) transaction_count,
  EXISTS(SELECT 1 FROM provider_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
@@ -16,7 +29,8 @@ export function paymentEvidencePlan(domain,orderId){
  COALESCE((SELECT SUM(r.base_amount_fen) FROM payment_refunds r WHERE r.transaction_id=t.id AND r.status='succeeded'),0) refund_proof_fen
  FROM recharge_orders o JOIN payment_transactions t ON t.order_id=o.id WHERE o.id=? LIMIT 2`,params:[orderId]};
  return {sql:`SELECT o.id order_id,o.user_id buyer_id,o.kind order_kind,o.status order_status,o.paid_at,o.applied_at,
- t.id transaction_id,t.merchant_provider,t.status payment_status,t.risk_state,t.currency,t.amount_fen buyer_fen,
+ t.id transaction_id,t.merchant_provider,t.status payment_status,t.risk_state,t.currency,
+ ${identityColumns(domain)},t.amount_fen buyer_fen,
  o.amount_fen principal_fen,0 service_fee_fen,0 principal_refunded_fen,
  (SELECT COUNT(*) FROM subscription_payment_transactions x WHERE x.order_id=o.id) transaction_count,
  EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider=t.merchant_provider
@@ -45,6 +59,7 @@ export function classifyPaymentEvidence(domain,rows,{allowFullyReversed=false}={
  if(!paid&&!refunded)return blocked('not_paid');
  if(r.payment_proof!==1||r.applied_proof!==1||!Number.isSafeInteger(r.paid_at)||r.paid_at<=0||
  !Number.isSafeInteger(r.applied_at)||r.applied_at<r.paid_at)return blocked('missing_settlement_proof');
+ if(typeof r.provider_trade_id!=='string'||!r.provider_trade_id.trim()||r.provider_trade_id.length>200||typeof r.provider_payment_id!=='string'||!r.provider_payment_id.trim()||r.provider_payment_id.length>200||r.identity_count!==1||r.transaction_paid_at!==r.paid_at)return blocked('payment_identity_review');
  if(!integer(r.principal_fen)||!integer(r.buyer_fen)||r.principal_fen>r.buyer_fen)return blocked('invalid_amount_snapshot');
  if(domain==='subscription'&&(!['purchase','renewal','upgrade'].includes(r.order_kind)||r.principal_fen!==r.buyer_fen))return blocked('invalid_subscription_amount');
  if(domain==='recharge'&&(!integer(r.principal_refunded_fen,0)||r.refund_proof_fen!==r.principal_refunded_fen||
