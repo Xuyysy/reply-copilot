@@ -29,7 +29,7 @@ test('local workerd D1 batch: success, false, NULL, missing rows, collision and 
   const mf = new Miniflare({workers:[{
     config:{name:'xrh-assertion-offline',compatibilityDate:'2026-10-14',
       env:{DB:{type:'d1',id:'xrh-assertion-offline'}},
-      manifest:{mainModule:'index.js',modules:[{name:'index.js',contents:'export default {fetch(){return new Response("offline")}}'}]}},
+      manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:'export default {fetch(){return new Response("offline")}}'}}}},
     dev:{outboundService:{type:'fetcher',handler:()=>{throw Error('Offline only');}}}
   }]});
   try {
@@ -40,6 +40,7 @@ test('local workerd D1 batch: success, false, NULL, missing rows, collision and 
       db.prepare('CREATE TABLE credit_operation_assertions(operation_id TEXT PRIMARY KEY,ok INTEGER NOT NULL CHECK(ok=1))'),
       db.prepare("INSERT INTO balances VALUES('u',5)")
     ]);
+    const measured=[];
     for(const flag of ['0','1']){
       const env={DB:db,[FLAG]:flag};
       async function reset(){
@@ -58,6 +59,14 @@ test('local workerd D1 batch: success, false, NULL, missing rows, collision and 
       const result=await db.batch([...mutate(),...creditInvariant(env,'op',condition,['u',4,'debit'])]);
       assert.deepEqual(await snapshot(),{balance:4,ledger:[{id:'debit',delta:-1}],assertions:[]});
       if(flag==='1')assert.equal(result[2].results[0].assertion_ok,1);
+      // Count only the committed batch (not setup, reads or reset). Keep local
+      // D1 metadata separate from cloud billing; no extrapolation to production.
+      const readWrite = key => result.every(r => Number.isSafeInteger(r.meta?.[key]))
+        ? result.reduce((sum,r)=>sum+r.meta[key],0) : null;
+      measured.push({mode:flag==='1'?'select':'insert-delete',statements:result.length,
+        rowsRead:readWrite('rows_read'),rowsWritten:readWrite('rows_written'),
+        assertionRowsWritten:result.slice(2).every(r=>Number.isSafeInteger(r.meta?.rows_written))
+          ? result.slice(2).reduce((sum,r)=>sum+r.meta.rows_written,0):null});
       for(const [predicate,args] of [['?',[0]],['?',[null]], [condition,['missing',4,'debit']]]){
         await reset();
         const before=await snapshot();
@@ -74,6 +83,10 @@ test('local workerd D1 batch: success, false, NULL, missing rows, collision and 
       await assert.rejects(db.batch([...mutate(),...creditInvariant(env,'op',condition,['u',4,'debit']),db.prepare("INSERT INTO ledger VALUES('debit',-1)")]));
       assert.deepEqual(await snapshot(),laterBefore);
     }
+    assert.equal(measured[0].statements-measured[1].statements,1);
+    if(measured[1].assertionRowsWritten!==null)assert.equal(measured[1].assertionRowsWritten,0);
+    if(measured.every(row=>row.rowsWritten!==null))assert.ok(measured[0].rowsWritten>measured[1].rowsWritten);
+    console.log('CF_FREE_LOCAL_D1_METADATA '+JSON.stringify(measured));
   } finally { await mf.dispose(); }
 });
 
