@@ -263,3 +263,12 @@ test('set review accepts exact fully reversed subscription proof and rejects cha
  db.exec("UPDATE subscription_payment_events SET body_sha256='changed' WHERE event_type='TRADE_REFUND'");
  assert.throws(()=>atomic(db,[g.check,g.cleanup]));
 });
+
+test('request state cannot be forged or reviewed with null evidence fields',t=>{
+ const db=fixture(t);enable(db);
+ assert.throws(()=>db.exec("INSERT INTO partner_alipay_requests(id,partner_user_id,recipient_version,amount_fen,created_at,status,reviewed_by,reviewed_at,reason) VALUES('forged','p',1,1000,25,'rejected','a',26,'fixture rejected')"));
+ assert.equal(run(db,alipayRequestPlan(request)),1);
+ assert.throws(()=>db.exec("UPDATE partner_alipay_requests SET status='rejected',reviewed_by='a',reviewed_at=NULL,reason='fixture rejected' WHERE id='r'"));
+ assert.throws(()=>db.exec("UPDATE partner_alipay_requests SET status='rejected',reviewed_by='a',reviewed_at=26,reason=NULL WHERE id='r'"));
+ assert.equal(db.prepare("SELECT status FROM partner_alipay_requests WHERE id='r'").get().status,'pending');
+});
