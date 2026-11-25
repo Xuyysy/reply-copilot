@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
-import {alipayRequestPlan,alipayApprovePlan,alipayRejectPlan,alipayStartPlan,alipayOutcomePlan} from '../src/partner-transfer.mjs';
+import {alipayAdmissionPlan,alipayRequestPlan,alipayApprovePlan,alipayRejectPlan,alipayStartPlan,alipayOutcomePlan} from '../src/partner-transfer.mjs';
 import {refundInsertPlan} from '../src/partner-ledger.mjs';
 import {partnerSummaryPlan,payoutResolvePlan} from '../src/partner-payout.mjs';
 function fixture(t){
@@ -78,4 +78,27 @@ test('owner can reject only a pending application',t=>{
  assert.equal(run(db,alipayRejectPlan(reject)),1);
  assert.equal(run(db,alipayRejectPlan(reject)),0);
  assert.throws(()=>batch(db,alipayApprovePlan(approve)));
+});
+
+test('public admission requires explicit minimum and enabled request gate, mature balance and current recipient',t=>{
+ const db=fixture(t);enable(db);
+ const candidate={...request,minFen:100};
+ assert.equal(run(db,alipayAdmissionPlan(candidate)),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_payout_requests_enabled'; UPDATE system_settings SET value='100' WHERE key='partner_payout_min_fen'");
+ assert.throws(()=>alipayAdmissionPlan({...candidate,amountFen:99}),/INVALID/);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,minFen:101})),0);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,amountFen:201})),0);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,now:19})),0);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,recipientVersion:2})),0);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,partnerId:'q'})),0);
+ assert.equal(run(db,alipayAdmissionPlan(candidate)),1);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,requestId:'r2'})),0);
+});
+test('request routes use session-owned reads, CSRF and reauthenticated admin writes',()=>{
+ const source=readFileSync(new URL('../src/partner-requests.ts',import.meta.url),'utf8');
+ assert.match(source,/if\(write\)await requireCsrf\(request,env,token\)/);
+ assert.match(source,/partnerId:session\.user_id/);
+ assert.match(source,/WHERE q\.partner_user_id=\? ORDER BY q\.created_at DESC,q\.id DESC LIMIT 30"\)\.bind\(session\.user_id\)/);
+ assert.match(source,/requireAdminSession\(request,env,write\)/);
+ assert.doesNotMatch(source,/openAlipayRecipient|alipayStartPlan|alipayOutcomePlan/);
 });
