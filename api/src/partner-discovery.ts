@@ -45,7 +45,7 @@ export async function adminPartnerDiscovery(request:Request,env:Env):Promise<Res
 }
 
 // Shared with the scheduled pilot. No public invocation without admin guard.
-export async function discoverPartnerPage(env:Env,domain:string,now:number,limit=5){
+export async function discoverPartnerPage(env:Env,domain:string,now:number,limit=5,scheduled=false){
  if(!['development','staging'].includes(env.ENVIRONMENT)||env.PARTNER_DISCOVERY_ENABLED!=='1')
  throw new ApiFailure(404,'NOT_FOUND','功能未开放。');
  const gate=await env.DB.prepare("SELECT COUNT(*) n FROM system_settings WHERE key IN ('partner_program_enabled','partner_cash_accrual_enabled','partner_discovery_enabled') AND value='1'").first<{n:number}>();
@@ -61,6 +61,7 @@ export async function discoverPartnerPage(env:Env,domain:string,now:number,limit
  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN
  EXISTS(SELECT 1 FROM partner_discovery_cursors WHERE order_domain=? AND applied_at=? AND order_id=?)
  AND (SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_cash_accrual_enabled','partner_discovery_enabled') AND value='1')=3
+ ${scheduled?"AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_scheduled_discovery_enabled' AND value='1')":""}
  THEN 1 ELSE 0 END`,params:[claim,domain,cursor.applied_at,cursor.order_id]},
  ...rows.map(r=>discoveryEnqueuePlan({domain,orderId:r.order_id,now})),advance,
  {sql:"INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM partner_discovery_cursors WHERE order_domain=? AND applied_at=? AND order_id=?) THEN 1 ELSE 0 END",params:[claim+':done',domain,last.applied_at,last.order_id]},
@@ -84,7 +85,7 @@ export async function repairPartnerPage(env:Env,domain:string,now:number,fromAt:
  const plan=discoveryRepairPagePlan({domain,fromAt,now,limit:5});
  const rows=(await env.DB.prepare(plan.sql).bind(...plan.params).all<{order_id:string}>()).results;
  if(!rows.length)return {scanned:0,enqueued:0};
- const plans=rows.map(r=>discoveryEnqueuePlan({domain,orderId:r.order_id,now}));
+ const plans=rows.map(r=>{const p=discoveryEnqueuePlan({domain,orderId:r.order_id,now});p.sql=p.sql.replace('ON CONFLICT(order_domain,order_id) DO NOTHING',"AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_scheduled_discovery_enabled' AND value='1') ON CONFLICT(order_domain,order_id) DO NOTHING");return p;});
  const result=await env.DB.batch(plans.map(p=>env.DB.prepare(p.sql).bind(...p.params)));
  return {scanned:rows.length,enqueued:result.reduce((n,r)=>n+(r.meta.changes||0),0)};
 }
