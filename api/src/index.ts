@@ -18,6 +18,7 @@ import {adminOperationsInsights,acknowledgeExpiredCreditAlert} from "./admin-ope
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {myPartnerPolicy,adminPartnerPolicy} from "./partners";
+import {myAlipayRecipient} from "./partner-recipient";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminAuthCpuReadiness} from './admin-auth-cpu-readiness';
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
@@ -180,6 +181,7 @@ export default {
       if (request.method === "POST" && path === "/v1/referrals/link") return await createReferralLink(request,env);
       if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);
       if (request.method === "GET" && path === "/v1/partners/me") return await myPartnerPolicy(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/alipay-recipient") return await myAlipayRecipient(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/policy") return await adminPartnerPolicy(request,env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await filteredUsers(request,env);
