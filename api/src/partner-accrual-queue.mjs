@@ -1,6 +1,7 @@
 // Bounded administrator queue; no identity or payment secrets in list.
 const id=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(x);
 const gate="(SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_cash_accrual_enabled','partner_accrual_review_enabled') AND value='1')=3";
+/** @param {string} state @param {number} [limit] @param {{updatedAt:number,domain:string,orderId:string}|null} [cursor] */
 export function accrualQueuePlan(state,limit=30,cursor=null){
  if(!['pending','review','done'].includes(state)||!Number.isSafeInteger(limit)||limit<1||limit>30)throw new TypeError('PARTNER_QUEUE_INVALID');
  if(cursor!==null&&(!Number.isSafeInteger(cursor.updatedAt)||cursor.updatedAt<=0||!['recharge','subscription'].includes(cursor.domain)||!id(cursor.orderId)))throw new TypeError('PARTNER_QUEUE_INVALID');
