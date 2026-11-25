@@ -1086,7 +1086,7 @@
     }
     // For a modern link, independently compare the target encoded in the
     // native Reply anchor with the extracted canonical outer post.
-    const nativeReplyId=api.replyDetector.replyTargetId(control);
+    const nativeReplyId=control.localName==='a'?api.replyDetector.replyTargetId(control):null;
     if((post.modernLayout&&control.localName==='a')||nativeReplyId){
       if(nativeReplyId!==post.statusId){
         traceAssociation('capture_failed','post-context-incomplete');pendingActivation=null;return;
@@ -1110,7 +1110,6 @@
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId ||
-        (activation.post.replyRouteVerified&&live.sourceText!==activation.post.sourceText) ||
         (activation.post.replyRouteVerified&&api.replyDetector.replyTargetId(control)!==activation.post.statusId)) {
       traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;

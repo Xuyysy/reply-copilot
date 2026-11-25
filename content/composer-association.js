@@ -403,7 +403,7 @@
         contextMatches,contextDetail};
     });
     return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true),
-      sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId&&(!post.replyRouteVerified||original.sourceText===post.sourceText))};
+      sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
 })();
