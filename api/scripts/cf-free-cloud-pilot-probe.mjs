@@ -4,6 +4,7 @@
 import {pathToFileURL} from 'node:url';
 const EXPECTED_KIND='xrh-cf-free-isolated-probe';
 const WORKER='xrh-cf-free-cpu-pilot-20261120';
+const SUBDOMAIN='x-reply-helper-isolated-workers-free-cpu-pilot';
 export const ROUNDS=Object.freeze([10000,60000,100000,210000]);
 export const MAX_REPEATS=2;
 
@@ -13,7 +14,7 @@ export function isAllowedCloudUrl(value){
     const url=new URL(value);
     return url.protocol==='https:' && !url.username && !url.password &&
       !url.port && url.pathname==='/' && !url.search && !url.hash &&
-      new RegExp('^'+WORKER+'\\.[a-z0-9-]+\\.workers\\.dev$').test(url.hostname);
+      url.hostname===WORKER+'.'+SUBDOMAIN+'.workers.dev';
   }catch{return false;}
 }
 export function parseCloudArgs(args,env){
@@ -43,11 +44,11 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
   if(!isAllowedCloudUrl(url)||typeof token!=='string'||token.length<40||token.length>256||
      !Number.isInteger(repeats)||repeats<1||repeats>MAX_REPEATS)
     throw Error('Invalid isolated test input');
-  const base=url.slice(0,-1);
+  const base=new URL(url).origin;
   const headers={Authorization:'Bearer '+token};
   let identity;
   try{
-    const r=await fetchImpl(base+'/__pilot',{method:'GET',headers,signal:AbortSignal.timeout(15000)});
+    const r=await fetchImpl(base+'/__pilot',{method:'GET',headers,redirect:'error',signal:AbortSignal.timeout(15000)});
     const body=await r.json();
     if(!r.ok||body?.kind!==EXPECTED_KIND||body?.protocol!==1||
        body?.syntheticOnly!==true||body?.freeCertified!==false)
@@ -62,7 +63,7 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
       try{
         const started=performance.now();
         const response=await fetchImpl(base+'/probe',{
-          method:'POST',headers:{...headers,'Content-Type':'application/json'},
+          method:'POST',redirect:'error',headers:{...headers,'Content-Type':'application/json'},
           body:JSON.stringify(request),signal:AbortSignal.timeout(15000)
         });
         wallMs=Number((performance.now()-started).toFixed(3));
@@ -75,19 +76,25 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
       }
       cases.push({mode,rounds,wrong,repeat:repeat+1,behavior:status,httpStatus,wallMs});
     }
-  const succeeded=cases.every(x=>x.behavior==='SYNTHETIC_BEHAVIOR_OK');
+  const summarize=mode=>{
+    const group=cases.filter(x=>x.mode===mode);
+    const passed=group.filter(x=>x.behavior==='SYNTHETIC_BEHAVIOR_OK').length;
+    return {passed,total:group.length,status:passed===group.length?'BEHAVIOR_PASS':'FAILED_OR_RESOURCE_LIMIT'};
+  };
+  const components={http:summarize('http'),do:summarize('do')};
+  const succeeded=components.http.status==='BEHAVIOR_PASS'&&components.do.status==='BEHAVIOR_PASS';
   return {kind:'SYNTHETIC_CF_FREE_ACCOUNT_PILOT',target:identity,
     execution:'REMOTE_CLOUD',outcome:succeeded?'SYNTHETIC_SMOKE_PASS':'SYNTHETIC_SMOKE_FAIL',
-    syntheticRequests:cases.length,freeCertified:false,
+    syntheticRequests:cases.length,components,freeCertified:false,
     httpCpuInCloudMs:null,doCpuInCloudMs:null,freeAccountPlanIndependentlyVerified:false,
     safeToDowngradeProduction:false,
-    caveat:'HTTP/DO CPU budgets must be verified through genuine account, plan, version and Cloudflare per-invocation evidence. Client wall time is not CPU. A Paid account cannot prove Free limits.',
+    caveat:'HTTP/DO CPU budgets must be verified through genuine account, plan, version and Cloudflare per-invocation evidence. Client wall time is not CPU. A Paid account cannot prove Free limits. HTTP control failure does not imply DO failure, and neither component's behavioral pass certifies CPU.',
     cases};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   let args;
   try{args=parseCloudArgs(process.argv.slice(2),process.env);}
-  catch{console.error('No cloud calls made. Requires --execute-cloud --confirm-dedicated-free-account --url https://xrh-cf-free-cpu-pilot-20261120.<subdomain>.workers.dev plus CF_FREE_PILOT_ACCESS_TOKEN.');process.exitCode=2;}
+  catch{console.error('No cloud calls made. Requires --execute-cloud --confirm-dedicated-free-account --url https://'+WORKER+'.'+SUBDOMAIN+'.workers.dev plus CF_FREE_PILOT_ACCESS_TOKEN.');process.exitCode=2;}
   if(args)probeCloudPilot(args).then(report=>{
     process.stdout.write(JSON.stringify(report,null,2)+'\n');
     if(report.outcome!=='SYNTHETIC_SMOKE_PASS')process.exitCode=1;
