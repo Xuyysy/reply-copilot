@@ -9,7 +9,7 @@ export async function accrualSnapshot(input,row){
  // now is intentionally excluded: execution occurs after the approval.
  const fields=[f.orderDomain,f.orderId,f.partnerUserId,f.buyerUserId,f.policyVersion,f.paidAt,f.appliedAt,
  f.holdUntil,f.registeredAt,f.firstAuthorizedAt,f.termMonths,f.currency,f.basis,f.principalFen,f.rateBps,
- input.windowId,input.attempts,input.refundPrincipalFen,row.transaction_id,row.merchant_provider,row.buyer_fen];
+ input.windowId,input.attempts,input.refundPrincipalFen,row.transaction_id,row.merchant_provider,row.provider_trade_id,row.provider_payment_id,row.transaction_paid_at,row.buyer_fen];
  if(fields.some(x=>x===undefined))fail();
  const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(fields)));
  return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('');
