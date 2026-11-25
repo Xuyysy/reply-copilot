@@ -235,10 +235,12 @@ test('0.3.5 wire path receives three candidates and never recaches exhausted per
   const headers={Authorization:'Bearer '+'b'.repeat(64),Origin:f.env.EXTENSION_ORIGIN};
   const requestId=id(800);
   const body={requestId,post:{text:'A public post for isolated testing.',url:'https://x.com/example/status/123'}};
-  const balanceReads=[];
+  const balanceReads=[],eligibilityReads=[],fundingReads=[];
   const prepare=f.env.DB.prepare.bind(f.env.DB);
   f.env.DB.prepare=sql=>{
     const statement=prepare(sql);
+    if(sql.includes('SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code'))eligibilityReads.push(sql);
+    if(sql.includes('SELECT 1 FROM subscription_ai_allocations WHERE user_id=? AND request_id=?'))fundingReads.push(sql);
     if(sql.includes('free_remaining')&&sql.includes('paid_remaining')){
       const first=statement.first.bind(statement);
       statement.first=async(...args)=>{balanceReads.push(sql);return first(...args);};
@@ -249,6 +251,8 @@ test('0.3.5 wire path receives three candidates and never recaches exhausted per
   assert.equal(first.status,200,JSON.stringify(first.body));
   assert.deepEqual(Object.keys(JSON.parse(first.body.raw).replies).sort(),['light_humor','natural','thoughtful']);
   assert.equal(balanceReads.length,0,'new subscription generation never reads unused permanent quota');
+  assert.equal(eligibilityReads.length,1,'subscription proof read once before reservation');
+  assert.equal(fundingReads.length,0,'new subscription funding is already committed');
   assert.equal(first.body.quota,undefined);
   const received=await ack(f,800);
   assert.equal(received.status,200);

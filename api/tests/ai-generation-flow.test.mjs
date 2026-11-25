@@ -82,3 +82,5 @@ test("invalid completion refunds once and retains usage cost for the failed mode
   assert.equal(refundCount, 1);
   assert.equal(preservedCost, result.usage.costMicroUsd);
 });
+
+test("committed new funding survives orchestration without changing legacy result shape",async()=>{for(const funding of ['free','paid','subscription',undefined]){const out=await executeAiGeneration({reserve:async()=>({kind:'new',funding}),provider:async()=>result,validate:()=>{},finish:async()=>true});assert.deepEqual(out,{kind:'generated',raw:result.raw,...(funding?{funding}:{})});}});

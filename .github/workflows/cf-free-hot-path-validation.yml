@@ -1,0 +1,23 @@
+name: CF Free hot path targeted validation
+on:
+  push:
+    branches: ['chatgpt/cf-free-hot-path-20261125']
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install locked local runtime
+        run: npm --prefix api ci
+      - name: API typecheck
+        run: npm --prefix api run typecheck
+      - name: Test replay, funding, bootstrap, concurrent quota and payment evidence
+        run: node --test api/tests/generation-hot-path.test.mjs api/tests/ai-generation-flow.test.mjs api/tests/extension-bootstrap-production.test.mjs api/tests/subscription-generation.test.mjs api/tests/configured-ai-generation.test.mjs api/tests/cf-free-business-d1-ab.test.mjs
