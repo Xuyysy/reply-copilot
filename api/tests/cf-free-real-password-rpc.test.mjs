@@ -51,9 +51,16 @@ async function setup(offload,legacyCompat=false,rollbackMatrix=false){
         manifest:manifest(bundle('../src/index.ts'))},dev:{outboundService:{type:'fetcher',handler:deny}}});
     }
   }
+  if(rollbackMatrix){
+    // Route through a local test-only service binding, not Miniflare's
+    // getWorker().fetch proxy, which may reject the synthetic HTTPS Origin.
+    workers.unshift({config:{name:'cf-free-local-test-router',compatibilityDate:'2026-10-14',env:{
+      CANDIDATE:{type:'worker',worker:'cf-free-local-rpc-api'},ROLLBACK:{type:'worker',worker:'cf-free-local-rollback'},BROKEN:{type:'worker',worker:'cf-free-local-missing-verifier'}},
+      manifest:manifest(`export default {fetch(request,env){const headers=new Headers(request.headers);const target=headers.get('x-local-test-target');headers.delete('x-local-test-target');const binding=target==='rollback'?env.ROLLBACK:target==='broken'?env.BROKEN:env.CANDIDATE;return binding.fetch(new Request(request,{headers}));}}`)} ,dev:{outboundService:{type:'fetcher',handler:deny}}});
+  }
   const mf=new Miniflare({workers});
   try{
-    const db=await mf.getD1Database('DB');
+    const db=await mf.getD1Database('DB','cf-free-local-rpc-api');
     const root=new URL('../migrations/',import.meta.url);
     for(const name of readdirSync(root).filter(n=>/^\d{4}_[\w-]+\.sql$/.test(n)).sort())
       for(const sql of migrationStatements(readFileSync(new URL(name,root),'utf8')))await db.prepare(sql).run();
@@ -153,9 +160,8 @@ test('CF Free actual business login with isolated 210k compatibility candidate p
 test('private candidate rollback and missing binding fail closed against the same synthetic account state',{timeout:120000},async()=>{
   const {mf,db,outbound}=await setup(true,true,true);
   try{
-    const rollback=await mf.getWorker('cf-free-local-rollback');
-    const broken=await mf.getWorker('cf-free-local-missing-verifier');
-    const login=(worker,identity,password,ip)=>call({dispatchFetch:(...args)=>worker.fetch(...args)},'/v1/auth/login',{identity,password},ip);
+    const rollback='rollback',broken='broken';
+    const login=(target,identity,password,ip)=>call({dispatchFetch:(url,init)=>mf.dispatchFetch(url,{...init,headers:{...init.headers,'x-local-test-target':target}})},'/v1/auth/login',{identity,password},ip);
     const user='test-210000', identity=user+'@example.test', before=hash(210000);
     const first=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},50);
     assert.equal(first.status,200);
