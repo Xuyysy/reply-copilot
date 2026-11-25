@@ -8,7 +8,7 @@ This package is a synthetic-only **cloud behavior probe** for the next CF Free i
 - A SQLite-backed Durable Object class using the project's existing, unmodified `PasswordVerifierDO` and `verifyPassword` PBKDF2 implementation. No password is saved in object storage; no customer or project credentials are handled.
 - Four **fixed, synthetic** stored hashes: 10k, 60k, 100k and 210k iterations. The same fixed fake password, fake pepper and fixed salt are used by the local/remote tester; the HTTP endpoint accepts neither passwords nor hashes.
 - Only two authenticated HTTP endpoints: `GET /__pilot` identifies the test Worker and `POST /probe` verifies a fixed scenario using the HTTP Worker or DO RPC. Every request requires the separately set `PILOT_ACCESS_TOKEN` secret (minimum 40 characters). No client IP, personal data or request body is written to logs; observability is disabled in the checked-in Wrangler config.
-- The remote smoke script refuses any endpoint other than exactly `https://xrh-cf-free-cpu-pilot-20261120.<separate-subdomain>.workers.dev/`, requires explicit `--execute-cloud` and `--confirm-dedicated-free-account`, and sends at most 32 synthetic probes, sequentially. The script itself makes no Cloudflare control-plane changes.
+- The remote smoke script refuses any endpoint other than exactly `https://xrh-cf-free-cpu-pilot-20261120.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/`, requires explicit `--execute-cloud` and `--confirm-dedicated-free-account`, and sends at most 32 synthetic probes, sequentially. The script itself makes no Cloudflare control-plane changes.
 
 ## Offline verification (already part of normal repository CI)
 
@@ -39,7 +39,7 @@ These are Miniflare/workerd local tests, so **CPU quotas are not enforced locall
    export CF_FREE_PILOT_ACCESS_TOKEN='***set interactively or via secret manager***'
    node api/scripts/cf-free-cloud-pilot-probe.mjs \
      --execute-cloud --confirm-dedicated-free-account \
-     --url https://xrh-cf-free-cpu-pilot-20261120.<separate-subdomain>.workers.dev/ \
+     --url https://xrh-cf-free-cpu-pilot-20261120.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/ \
      --repeats 1
    ```
 
@@ -142,3 +142,6 @@ node api/scripts/cf-free-cloud-cpu-evidence.mjs \
 Keep CF_FREE_PILOT_API_TOKEN private in environment variables, and revoke after collecting evidence. See Cloudflare official Workers GraphQL Analytics docs (https://developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) and Durable Object GraphQL metrics docs (https://developers.cloudflare.com/durable-objects/observability/metrics-and-analytics/).
 
 No new cloud deployment has occurred for this code change. Production remains Paid and Free readiness remains NO-GO.
+## Integrated candidate evidence rules (2026-11-25)
+
+The probe now pins the exact isolated hostname and rejects redirects. `components.http` and `components.do` independently report behavioral passes and totals. An HTTP control failure does not establish a DO failure; a DO behavioral pass does not establish cloud CPU compliance. The overall smoke outcome and readiness gate remain fail-closed. A positive Free-plan confirmation and separate authorization for the bounded remote experiment are required; neither CI nor an empty account constitutes that authorization.
