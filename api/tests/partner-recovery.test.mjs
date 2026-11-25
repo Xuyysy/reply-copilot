@@ -272,3 +272,36 @@ test('scheduled refund sync is separate, non-production, bounded and gated withi
  assert.doesNotMatch(s,/partner_cash_accrual_enabled|alipayOutcomePlan|commissionInsertPlan/);
  assert.match(router,/await scheduledPartnerRefundSync\(env,Date.now\(\)\)/);
 });
+
+test('approved snapshot gates background accrual and rejects changed evidence, expiry and replay',async t=>{
+ const {accrualSnapshot,accrualApprovalPlan,approvedDuePlan,approvedAccrualBatch}=await import('../src/partner-accrual-approval.mjs');
+ const db=reviewFixture(t);
+ const p=paymentEvidencePlan('recharge','o'),rows=db.prepare(p.sql).all(...p.params);
+ const a=attributionPlan('b',350),attribution=db.prepare(a.sql).get(...a.params);
+ const job=db.prepare("SELECT j.*,w.hold_ms FROM partner_accrual_jobs j JOIN partner_accrual_windows w ON w.id=j.window_id").get();
+ const input=reviewedFacts({orderDomain:'recharge',orderId:'o',rows,attribution,job,now:360});
+ const digest=await accrualSnapshot(input,rows[0]);
+ assert.equal(digest,await accrualSnapshot({...input,facts:{...input.facts,now:361}},rows[0]));
+ assert.notEqual(digest,await accrualSnapshot({...input,refundPrincipalFen:251},rows[0]));
+ const plan=accrualApprovalPlan({input,digest,actorId:'a',operationId:'ap1',reason:'fixture reviewed',now:360});
+ assert.equal(run(db,plan),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_scheduled_accrual_enabled'");
+ assert.equal(run(db,plan),1);assert.equal(run(db,plan),0);
+ const due=approvedDuePlan(361),approval=db.prepare(due.sql).get(...due.params);
+ const work=reviewedAccrualBatch({input:{...input,facts:{...input.facts,now:361}},row:rows[0],actorId:'a',operationId:'ap1',reason:'fixture reviewed'});
+ assert.equal(approvedAccrualBatch({approval,digest:'0'.repeat(64),work,now:361}),null);
+ assert.equal(approvedAccrualBatch({approval,digest,work,now:approval.expires_at}),null);
+ const statements=approvedAccrualBatch({approval,digest,work,now:361});
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
+ assert.throws(()=>batch(db,statements));
+ db.exec("UPDATE payment_transactions SET risk_state='clear'; UPDATE system_settings SET value='0' WHERE key='partner_scheduled_accrual_enabled'");
+ assert.throws(()=>batch(db,statements));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_scheduled_accrual_enabled'");
+ batch(db,statements);
+ assert.equal(db.prepare("SELECT commission_fen FROM partner_commissions").get().commission_fen,200);
+ assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs").get().state,'done');
+ assert.equal(db.prepare("SELECT operation_id FROM partner_accrual_review_audits").get().operation_id,'ap1');
+ assert.equal(db.prepare(due.sql).all(...due.params).length,0);
+ assert.throws(()=>batch(db,statements));
+});
