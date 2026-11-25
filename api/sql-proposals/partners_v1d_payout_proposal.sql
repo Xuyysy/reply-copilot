@@ -60,3 +60,27 @@ BEGIN
       -COALESCE((SELECT SUM(j.amount_fen) FROM partner_payout_items j JOIN partner_payouts p ON p.id=j.payout_id WHERE j.order_domain=c.order_domain AND j.order_id=c.order_id AND p.status='paid'),0))
  ) THEN RAISE(ABORT,'payout requires reconciliation') END;
 END;
+
+-- Refund debt across ALL orders must be offset before any new reservation.
+CREATE TRIGGER partner_payout_balance_guard BEFORE INSERT ON partner_payouts
+BEGIN
+ SELECT CASE WHEN NEW.status<>'reserved' OR NEW.amount_fen>
+  COALESCE((SELECT SUM(c.commission_fen+COALESCE((SELECT SUM(r.delta_fen) FROM partner_commission_refunds r
+    WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0))
+    FROM partner_commissions c WHERE c.partner_user_id=NEW.partner_user_id AND c.hold_until<=NEW.created_at),0)
+  -COALESCE((SELECT SUM(p.amount_fen) FROM partner_payouts p
+    WHERE p.partner_user_id=NEW.partner_user_id AND p.status IN ('reserved','paid')),0)
+ THEN RAISE(ABORT,'insufficient partner net balance') END;
+END;
+-- A refund on a different order can reduce net funds during reservation.
+CREATE TRIGGER partner_payout_net_confirm_guard BEFORE UPDATE ON partner_payouts
+WHEN NEW.status='paid'
+BEGIN
+ SELECT CASE WHEN
+  COALESCE((SELECT SUM(c.commission_fen+COALESCE((SELECT SUM(r.delta_fen) FROM partner_commission_refunds r
+    WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0))
+    FROM partner_commissions c WHERE c.partner_user_id=OLD.partner_user_id AND c.hold_until<=OLD.created_at),0)
+  <COALESCE((SELECT SUM(p.amount_fen) FROM partner_payouts p
+    WHERE p.partner_user_id=OLD.partner_user_id AND p.status IN ('reserved','paid')),0)
+ THEN RAISE(ABORT,'payout requires reconciliation') END;
+END;
