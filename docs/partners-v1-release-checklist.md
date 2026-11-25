@@ -53,3 +53,10 @@ Before handoff:
 6. Only after all required tests pass, provide owner a concise report, exact Staging URL and approved QA account access through a secure channel, plus a short owner acceptance path. Never place passwords or keys in GitHub or public logs. Owner's acceptance remains separate from production authorization.
 
 Current execution: only isolated local/CI tests, no Staging QA account creation yet. Do not represent these aliases as existing logins.
+
+## Consolidated local acceptance evidence
+
+- Main candidate 31e7ba64: [full PR CI 45628755997](https://github.com/Xuyysy/reply-copilot/actions/runs/45628755997), 1575/1575 tests and 91/91 focused regression checks; merge-context evidence, not exact-head release artifacts.
+- Child draft #258 b12c29fe: [isolated Chrome browser QA 45630138724](https://github.com/Xuyysy/reply-copilot/actions/runs/45630138724) passed actual Astro user/admin pages and real bundled Worker, synthetic authorization, discovery, approval, receiving details, request, reserve, one-time reveal, simulated outcome and ownership. Companion CI 45630138568 passed 91/91.
+- The passing browser files are copied into the main candidate; repeat full and browser checks together on the integrated head. No remote staging accounts or funds yet. Browser QA uses local synthetic sessions (not proof of real hosted login or provider settlement).
+- Exact-head push metadata is reported by the candidate PR's read-only CI lookup; inspect the push job and SHA-named artifacts before release. No deployment is authorized by CI.
