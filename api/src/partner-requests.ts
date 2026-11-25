@@ -4,7 +4,7 @@ import { sessionFor, requireCsrf } from "./auth";
 import { requireAdminSession } from "./admin-auth";
 import { response } from "./http";
 import { jsonBody, nowMs, uuid } from "./security";
-import { alipayRequestPlan, alipayRejectPlan } from "./partner-transfer.mjs";
+import { alipayAdmissionPlan, alipayRejectPlan } from "./partner-transfer.mjs";
 
 // Separate request-acceptance gate. No default commercial minimum.
 // All money movement and approval remain unwired until provider risk evidence
@@ -14,7 +14,7 @@ async function config(env:Env){
  const v=new Map(rows.results.map(x=>[x.key,x.value]));
  const ready=['partner_program_enabled','partner_alipay_recipient_enabled','partner_payout_enabled','partner_payout_requests_enabled'].every(k=>v.get(k)==='1');
  const raw=v.get('partner_payout_min_fen')||'';
- const min=/^[1-9][0-9]{0,11}$/.test(raw)?Number(raw):null;
+ const min=/^[1-9][0-9]{0,12}$/.test(raw)&&Number(raw)<=1000000000000?Number(raw):null;
  return {visible:v.get('partner_program_enabled')==='1'&&v.get('partner_alipay_recipient_enabled')==='1',ready:ready&&min!==null,min};
 }
 const stateSql=`SELECT q.id,q.amount_fen,q.recipient_version,q.created_at,q.status,q.reviewed_at,
@@ -48,17 +48,8 @@ export async function myAlipayRequests(request:Request,env:Env):Promise<Response
  typeof b.recipientVersion!=="number"||!Number.isSafeInteger(b.recipientVersion)||b.recipientVersion<=0)
  throw new ApiFailure(400,"PARTNER_REQUEST_INVALID","结算金额或收款版本无效。");
  const now=nowMs(),requestId=uuid();
- const plan=alipayRequestPlan({requestId,partnerId:session.user_id,recipientVersion:b.recipientVersion,amountFen:b.amountFen,now});
- // Check commercial gate/minimum and indicative matured net in the same
- // statement. This is NOT a provider risk check or an authorization to pay.
- const sql=plan.sql.replace(" ON CONFLICT DO NOTHING",`
- AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_payout_requests_enabled' AND value='1')
- AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_payout_min_fen' AND value=?)
- AND ? <= COALESCE((SELECT SUM(c.commission_fen+COALESCE((SELECT SUM(r.delta_fen) FROM partner_commission_refunds r WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0))
- FROM partner_commissions c WHERE c.partner_user_id=u.id AND c.hold_until<=?),0)
- -COALESCE((SELECT SUM(p.amount_fen) FROM partner_payouts p WHERE p.partner_user_id=u.id AND p.status IN ('reserved','paid')),0)
- ON CONFLICT DO NOTHING`);
- const result=await env.DB.prepare(sql).bind(...plan.params,String(c.min),b.amountFen,now).run();
+ const plan=alipayAdmissionPlan({requestId,partnerId:session.user_id,recipientVersion:b.recipientVersion,amountFen:b.amountFen,now,minFen:c.min});
+ const result=await env.DB.prepare(plan.sql).bind(...plan.params).run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_REQUEST_CONFLICT","余额、资格、收款版本或申请状态已变化，请重新查询。");
  return response({ok:true,requestId},200,env,request);
 }
