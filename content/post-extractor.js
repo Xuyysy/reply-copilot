@@ -219,7 +219,7 @@
   function postText(article) {
     return isModernPost(article)?modernBody(article):legacyPostText(article);
   }
-  function legacyQuoteText(article) {
+  function quoteText(article) {
     // Only read nested content if a real X quote card exists.
     const card=quoteCard(article);
     if (!card) return "";
@@ -249,7 +249,7 @@
     const ownText = legacyPostText(article);
     // A quote-only post has a canonical OUTER post ID but no own tweetText.
     // Use the visibly attached quote as context, never its ID as the target.
-    const quotedText = ownText ? "" : legacyQuoteText(article);
+    const quotedText = ownText ? "" : quoteText(article);
     const sourceText = ownText || quotedText;
     if (!identity || !sourceText) return { ok: false, reason: "post-context-incomplete" };
     return { ok: true, article, ...identity, sourceText,

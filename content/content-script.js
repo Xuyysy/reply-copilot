@@ -520,7 +520,7 @@
       }else locate();
     });
     const observedAttributes=['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly'];
-    if(post.modernLayout||post.replyRouteVerified)observedAttributes.push('inert','aria-disabled','aria-readonly');
+    if(post.modernLayout||post.replyRouteVerified)observedAttributes.push('inert','aria-disabled','aria-readonly','data-status','lang','dir','class');
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:observedAttributes});
     locate();
   }
