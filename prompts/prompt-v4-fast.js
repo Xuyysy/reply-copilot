@@ -1,4 +1,4 @@
-import { buildLiveProductionV3Prompts } from "./prompt-v3-live-parity.js";
+import { buildPrompts } from "./prompt-builder.js";
 
 // Static prompt accepted in Staging V5.5 no-corpus trial.
 const STATIC = `You write X replies in the user's voice. Sound like a person scrolling their feed, not an assistant. Give three short, sendable options in one JSON response.
@@ -17,13 +17,15 @@ const S = "\nRequired JSON shape (";
 const U = "\n<post_text_json>";
 
 export function buildFastV4Prompts(args) {
-  const baseline = buildLiveProductionV3Prompts(args);
+  // V3 only replaces the old tone block; V4 discards that block completely.
+  // Build the same original sanitized payload once, without V3 reconstruction.
+  const baseline = buildPrompts(args);
   if (args?.outputSchemaVersion !== 2) return baseline;
   const p = baseline.system.indexOf(P);
   const r = baseline.system.indexOf(R, p + P.length);
   const s = baseline.system.indexOf(S, r + R.length);
   const u = baseline.user.indexOf(U);
-  if (p < 0 || r <= p || s <= r || u < 0) throw Error("prompt_v4_baseline_drift");
+  if (p < 0 || r <= p || s <= r || u < 0 || baseline.system.indexOf(R,r+1)!==-1) throw Error("prompt_v4_baseline_drift");
   // Preserve the exact sanitized personalization, JSON schema, language
   // policy, post, history, and settings. Static common prefix comes first.
   const profile = baseline.system.slice(p + P.length, r).trimEnd();
