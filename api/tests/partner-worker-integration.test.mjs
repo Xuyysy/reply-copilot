@@ -137,7 +137,8 @@ test('staging test-account marker and production pilot isolation remain enforced
  assert.equal((await ok('p',me+'me')).policy,null);
  assert.equal((await call('p',me+'alipay-recipient',{expectedVersion:0,account:'fixture@example.test',name:'测试账户'})).status,403);
  assert.equal((await call('p',me+'alipay-requests',{amountFen:1000,recipientVersion:1})).status,403);
- db.exec("UPDATE users SET role='admin' WHERE id='q'");
+ // Actual schema enforces a singleton admin at the database level.
+ assert.throws(()=>db.exec("UPDATE users SET role='admin' WHERE id='q'"),/UNIQUE constraint failed/);
  assert.equal((await call('q',root+'policy?q=p')).status,403);
  // Even with every pilot binding/DB switch enabled, the actual Worker
  // must not execute production pilot review or discovery.
