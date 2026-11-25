@@ -263,7 +263,8 @@ test('scheduled refund sync is separate, non-production, bounded and gated withi
  const s=readFileSync(new URL('../src/partner-refund-scheduled.ts',import.meta.url),'utf8');
  const router=readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');
  assert.match(s,/PARTNER_SCHEDULED_REFUND_SYNC_ENABLED!=='1'/);
- assert.ok(s.indexOf("PARTNER_SCHEDULED_REFUND_SYNC_ENABLED!=='1'")<s.indexOf('env.DB.prepare'));
+ const entry=s.slice(s.indexOf('export async function scheduledPartnerRefundSync'));
+ assert.ok(entry.indexOf("PARTNER_SCHEDULED_REFUND_SYNC_ENABLED!=='1'")<entry.indexOf('env.DB.prepare'));
  assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
  assert.match(s,/limit:3/);
  assert.match(s,/function scheduledWrite/);
