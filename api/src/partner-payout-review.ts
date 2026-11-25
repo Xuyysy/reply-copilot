@@ -6,7 +6,8 @@ import {jsonBody,nowMs,uuid} from "./security";
 import {alipayApprovePlan,alipayStartPlan,alipayOutcomePlan} from "./partner-transfer.mjs";
 import {openAlipayRecipient} from "./partner-alipay.mjs";
 import {paymentEvidencePlan} from "./partner-payment-proof.mjs";
-import {payoutReviewRowsPlan,allocateReviewedItems,payoutEvidenceMatches,payoutReviewAssertions} from "./partner-payout-review.mjs";
+import {subscriptionRefundCandidatePlan} from "./partner-subscription-refund.mjs";
+import {payoutReviewRowsPlan,allocateReviewedItems,payoutEvidenceMatches,payoutReviewAssertions,reversedSubscriptionReviewPlan} from "./partner-payout-review.mjs";
 type Commission={order_domain:string;order_id:string;remaining_fen:number;hold_until:number;buyer_user_id:string;principal_fen:number;paid_at:number;applied_at:number;reversed_principal:number};
 type RequestRow={id:string;partner_user_id:string;recipient_version:number;amount_fen:number;status:string;payout_id:string|null;payout_status:string|null;started_at:number|null;key_id:string;nonce_hex:string;ciphertext_hex:string};
 function conflict():never{throw new ApiFailure(409,'PARTNER_PAYOUT_REVIEW_CONFLICT','结算状态或证据不符合，请重新核对。');}
@@ -44,6 +45,14 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
  if(!commissions.length||commissions.length>30)conflict();
  const reviewed=[];
  for(const commission of commissions){
+  if(commission.order_domain==='subscription'&&commission.reversed_principal===commission.principal_fen){
+   const p=subscriptionRefundCandidatePlan(commission.order_id);
+   const rows=(await env.DB.prepare(p.sql).bind(...p.params).all<Record<string,unknown>>()).results;
+   const proof=await reversedSubscriptionReviewPlan(commission,rows);
+   if(!proof||!await env.DB.prepare(proof.sql).bind(...proof.params).first())conflict();
+   reviewed.push({commission,reversedSubscriptionProof:proof});
+   continue;
+  }
   const e=paymentEvidencePlan(commission.order_domain,commission.order_id);
   const rows=(await env.DB.prepare(e.sql).bind(...e.params).all<Record<string,unknown>>()).results;
   if(!payoutEvidenceMatches(commission,rows))conflict();
