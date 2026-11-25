@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: reply-copilot-ci-${{ github.ref }}
@@ -122,6 +123,12 @@ jobs:
             api/tests/partner-schema-integration.test.mjs \
             api/tests/partner-worker-integration.test.mjs
 
+      - name: Partners isolated browser acceptance
+        if: (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
+        env:
+          CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
+        run: node api/tests/partner-browser-qa.mjs
+
       - name: Build pinned Staging extension
         # Only push artifacts can be promoted by the guarded Staging release.
         if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
@@ -194,6 +201,18 @@ jobs:
         if: env.PARTNER_FULL_PR == 'true'
         run: |
           echo 'Full suite in candidate PR merge context; no promotable release artifacts. Exact-head Push CI remains mandatory.' >> "$GITHUB_STEP_SUMMARY"
+
+      # Read-only metadata, no deployment or artifact promotion. The ordinary
+      # exact-head push remains the authoritative release build.
+      - name: Report exact-head Push CI run IDs
+        if: always() && env.PARTNER_FULL_PR == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          gh api --method GET "repos/$GH_REPO/actions/workflows/ci.yml/runs" -f event=push -f head_sha="$HEAD_SHA" -f per_page=10 --jq '.workflow_runs[] | {id,head_sha,event,status,conclusion,html_url}' | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Always save full test logs
         if: always() && (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
