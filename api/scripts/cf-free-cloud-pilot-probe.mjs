@@ -80,10 +80,12 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
     throw error;
   }
   const cases=[];
-  for(const mode of ['http','do'])for(const rounds of ROUNDS)for(const wrong of [false,true])
-    for(let repeat=0;repeat<repeats;repeat++){
+  // Alternate HTTP and DO and reverse the factor order on the second pass.
+  // This helps separate startup/propagation failures from work-factor effects.
+  for(let repeat=0;repeat<repeats;repeat++)
+    for(const rounds of (repeat===0?ROUNDS:[...ROUNDS].reverse()))for(const mode of ['http','do'])for(const wrong of [false,true]){
       const request={mode,rounds,wrong};
-      let status='FAILED_OR_RESOURCE_LIMIT',httpStatus=null,wallMs=null;
+      let status='FAILED_OR_RESOURCE_LIMIT',httpStatus=null,wallMs=null,ray=false,diagnostic=null;
       try{
         const started=performance.now();
         const response=await fetchImpl(base+'/probe',{
@@ -92,13 +94,17 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
         });
         wallMs=Number((performance.now()-started).toFixed(3));
         httpStatus=response.status;
+        ray=!!response.headers.get('cf-ray');
         // Cloudflare Error 1102 may be HTML; never reproduce the response body.
-        let parsed;try{parsed=await response.json();}catch{parsed=null;}
+        let parsed=null;const bodyText=await response.text();try{parsed=JSON.parse(bodyText);}catch{}
+        if(['NOT_CONFIGURED','UNAUTHORIZED','VERIFIER_UNAVAILABLE','PILOT_UNAVAILABLE','BAD_INPUT','NOT_FOUND','METHOD_NOT_ALLOWED'].includes(parsed?.code)){
+          diagnostic={code:parsed.code,stage:['REQUEST','HTTP_VERIFY','DO_RPC'].includes(parsed.stage)?parsed.stage:null,failure:['KDF_RUNTIME_LIMIT','RUNTIME_RESOURCE_LIMIT','KDF_NOT_SUPPORTED','KDF_OPERATION_ERROR','UNCLASSIFIED'].includes(parsed.failure)?parsed.failure:null};
+        }else if(!response.ok){diagnostic={code:/\\b(?:Error\\s*1102|exceeded resources)\\b/i.test(bodyText)?'CF_RESOURCE_LIMIT_PAGE':'UNCLASSIFIED_HTTP_RESPONSE',stage:null,failure:null};}
         status=resultStatus(response,parsed,mode,rounds,wrong);
       }catch{
         status='FAILED_OR_RESOURCE_LIMIT';
       }
-      cases.push({mode,rounds,wrong,repeat:repeat+1,behavior:status,httpStatus,wallMs});
+      cases.push({mode,rounds,wrong,repeat:repeat+1,behavior:status,httpStatus,wallMs,ray,diagnostic});
     }
   const summarize=mode=>{
     const group=cases.filter(x=>x.mode===mode);
