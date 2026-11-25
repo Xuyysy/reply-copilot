@@ -77,7 +77,12 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  db.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,source_order_id,grant_credits,remaining_credits,granted_at,paid_at,history_confidence,status) VALUES('cb','b','paid','purchase','o',500,500,?,?,'tracked','active')").run(applied,paid);
  db.exec("UPDATE credit_accounts SET paid_balance=500 WHERE user_id='b'");
  const command={domain:'recharge',orderId:'o',operationId:randomUUID(),reason,riskReviewed:true};
- await ok('a',root+'accrual-review',{...command,action:'enqueue'});
+ db.exec("INSERT INTO partner_discovery_cursors VALUES('recharge',0,'',0),('subscription',0,'',0)");
+ // Scheduled discovery, not a direct job insertion, creates the candidate.
+ await worker.scheduled({},f.env);
+ assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs WHERE order_id='o'").get().state,'pending');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+ assert.equal(db.prepare("SELECT order_id FROM partner_discovery_cursors WHERE order_domain='recharge'").get().order_id,'o');
  const preview=await ok('a',root+'accrual-review?action=inspect&domain=recharge&orderId=o');
  assert.equal(preview.ok,true);assert.equal(preview.candidateFen,2000);
  assert.equal((await call('a',root+'accrual-review',{...command,action:'approve_for_queue',expectedSnapshot:'0'.repeat(64)})).status,409);
@@ -104,5 +109,20 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  await ok('a',root+'payout-review',{...action,operationId:randomUUID(),action:'paid',amountFen:1000,reference:'synthetic-transfer'});
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
  assert.equal((await call('a',root+'payout-review',{...action,operationId:randomUUID(),action:'paid',amountFen:1000,reference:'synthetic-transfer'})).status,409);
+ // Simulate an already-confirmed full refund in the source payment ledger.
+ // This is NOT a provider callback or a test of the buyer credit reversal.
+ const refundAt=Date.now();
+ db.prepare("INSERT INTO payment_refunds(id,transaction_id,out_refund_no,amount_fen,status,reason,credits_reserved,base_amount_fen,service_fee_amount_fen,refund_kind,credits_to_revoke,actor_user_id,reviewer_user_id,reason_category,credit_adjustment_confirmed,credit_batch_id,created_at,updated_at,succeeded_at,resolved_event_id) VALUES('refund','tx','refund-fixture',10000,'succeeded','synthetic confirmed refund',0,10000,0,'special',0,'a','a','merchant_or_legal',1,NULL,?,?,?,'synthetic-refund-event')").run(refundAt,refundAt,refundAt);
+ db.exec("UPDATE payment_transactions SET status='refunded',principal_refunded_fen=10000 WHERE id='tx'; UPDATE recharge_orders SET status='refunded' WHERE id='o'");
+ f.env.PARTNER_SCHEDULED_REFUND_SYNC_ENABLED='1';
+ db.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_refund_sync_enabled','partner_scheduled_refund_sync_enabled')");
+ await worker.scheduled({},f.env);
+ assert.equal(db.prepare("SELECT SUM(delta_fen) total FROM partner_commission_refunds").get().total,-2000);
+ assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
+ await worker.scheduled({},f.env);await worker.scheduled({},f.env);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commission_refunds").get().n,1);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_program_enabled'");
+ const summary=await ok('p',me+'me');
+ assert.equal(summary.totals.outstanding_fen,-1000);
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
 });
