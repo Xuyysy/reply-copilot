@@ -88,10 +88,10 @@ export async function adminPartnerAccrualReview(request:Request,env:Env):Promise
   await env.DB.prepare(p.sql).bind(...p.params).run();
   return response({ok:false,state:'review'},409,env,request);
  }
+ const digest=await accrualSnapshot(input,rows[0]);
+ if(b.expectedSnapshot!==digest)throw new ApiFailure(409,'PARTNER_ACCRUAL_CONFLICT','订单证据已变化，请重新核对。');
  if(b.action==='approve_for_queue'){
   if(env.PARTNER_SCHEDULED_ACCRUAL_ENABLED!=='1')throw new ApiFailure(409,'PARTNER_ACCRUAL_DISABLED','后台计佣测试尚未开启。');
-  const digest=await accrualSnapshot(input,rows[0]);
-  if(b.expectedSnapshot!==digest)throw new ApiFailure(409,'PARTNER_ACCRUAL_CONFLICT','订单证据已变化，请重新核对。');
   const p=accrualApprovalPlan({input,digest,actorId:actor.user_id,operationId:b.operationId,reason:b.reason,now});
   const r=await env.DB.prepare(p.sql).bind(...p.params).run();
   return response({ok:r.meta.changes===1,state:r.meta.changes===1?'approved':'conflict',pilot:true},r.meta.changes===1?200:409,env,request);
