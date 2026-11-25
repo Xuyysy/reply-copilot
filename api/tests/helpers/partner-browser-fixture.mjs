@@ -8,7 +8,7 @@ const secret='local-v2-auth-secret-which-is-not-a-real-secret';
 const reason='local synthetic review only';
 export function setup(t){
  const f=fixture();t.after(()=>f.sql.close());
- for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1b_recovery_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql','partners_query_indexes_proposal.sql'])f.sql.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
+ for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1b_recovery_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql','partners_query_indexes_proposal.sql'])f.sql.exec(readFileSync(new URL('../../sql-proposals/'+name,import.meta.url),'utf8'));
  const db=f.sql,now=Date.now();
  // No real network or payment operations. Every account, session and
  // provider fact below is synthetic and confined to this memory database.
