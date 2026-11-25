@@ -37,3 +37,21 @@ export function cursorAdvancePlan({domain,oldAt,oldId,nextAt,nextId,now}){
  WHERE order_domain=? AND applied_at=? AND order_id=? AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_discovery_enabled' AND value='1')`,
  params:[nextAt,nextId,now,domain,oldAt,oldId]};
 }
+
+// Bounded recovery sweep independent of the forward cursor. Only missing
+// candidate jobs, within an explicitly chosen applied-time interval. This
+// catches corrected/backdated entitlement timestamps and formerly ineligible
+// orders in the interval without resetting the main cursor.
+// A result is still NOT verified payment evidence or a cash entitlement.
+export function discoveryRepairPagePlan({domain,fromAt,now,limit=5}){
+ if(!['recharge','subscription'].includes(domain)||!int(fromAt,0)||!int(now)||fromAt>now||!int(limit,1,20))fail();
+ const orders=domain==='recharge'?'recharge_orders':'subscription_orders';
+ const applied=domain==='recharge'?'credited_at':'applied_at';
+ return {sql:`SELECT o.id order_id,o.paid_at,o.${applied} applied_at
+ FROM ${orders} o JOIN referral_invites r ON r.invited_user_id=o.user_id AND r.registered_at<=o.paid_at
+ WHERE o.${applied}>=? AND o.${applied}<=? AND o.${applied}>=o.paid_at AND o.paid_at>0 AND o.status='paid'
+ AND EXISTS(SELECT 1 FROM partner_accrual_windows w WHERE w.starts_at<=o.paid_at AND (w.ends_at IS NULL OR o.paid_at<w.ends_at))
+ AND EXISTS(SELECT 1 FROM partner_policy_versions p WHERE p.user_id=r.inviter_user_id AND p.effective_at<=o.paid_at)
+ AND NOT EXISTS(SELECT 1 FROM partner_accrual_jobs j WHERE j.order_domain=? AND j.order_id=o.id)
+ ORDER BY o.${applied},o.id LIMIT ?`,params:[fromAt,now,domain,limit]};
+}
