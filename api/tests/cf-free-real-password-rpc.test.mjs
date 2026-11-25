@@ -1,0 +1,113 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {buildSync} from 'esbuild';
+import {Miniflare} from 'miniflare';
+import {pbkdf2Sync,createHmac} from 'node:crypto';
+import {readFileSync,readdirSync} from 'node:fs';
+import {performance} from 'node:perf_hooks';
+import {migrationStatements,summarizeWallMs} from '../scripts/lib/workerd-cpu-evidence.mjs';
+
+// Two real local workerd isolates, synthetic credentials, no network or cloud.
+// This is compatibility and dispatch latency evidence, NOT cloud CPU proof.
+const API='https://isolated-api.example.test',WEB='https://isolated-web.example.test';
+const AUTH='offline-rpc-test-auth-key-never-production-123';
+const PEPPER='offline-rpc-test-pepper-never-production-123';
+const PASSWORD='synthetic-local-password-2026!';
+const NEW_PASSWORD='synthetic-reset-password-2026!';
+const FACTORS=[10000,60000,100000,210000];
+const VERIFIER='cf-free-local-rpc-verifier';
+
+function bundle(path,extra={}){
+  return buildSync({entryPoints:[new URL(path,import.meta.url).pathname],bundle:true,write:false,
+    platform:'browser',format:'esm',target:'es2022',...extra}).outputFiles[0].text;
+}
+function manifest(contents){return {mainModule:'index.js',modules:{'index.js':{type:'esm',contents}}};}
+const hash=(n,password=PASSWORD)=>'pbkdf2-sha256:'+n+':'+('ab'.repeat(16))+':'+pbkdf2Sync(password+'\0'+PEPPER,Buffer.alloc(16,0xab),n,32,'sha256').toString('hex');
+
+async function setup(offload){
+  let outbound=0;
+  const deny=()=>{outbound++;throw Error('External network forbidden');};
+  const vars={ENVIRONMENT:'staging',WEB_ORIGIN:WEB,API_ORIGIN:API,EXTENSION_ORIGIN:'chrome-extension://'+'a'.repeat(32),
+    AUTH_HASH_SECRET:AUTH,PASSWORD_PEPPER:PEPPER,AI_MODE:'mock',SUBSCRIPTIONS_ENABLED:'0',PAYMENTS_ENABLED:'0',
+    ADMIN_PORTAL_ENABLED:'0',PASSWORD_VERIFY_DO_ENABLED:offload?'1':'0'};
+  const env=Object.fromEntries(Object.entries(vars).map(([key,value])=>[key,{type:'text',value}]));
+  env.DB={type:'d1',id:'synthetic-password-rpc'};
+  if(offload)env.PASSWORD_VERIFY_DO={type:'durable-object',worker:VERIFIER,exportName:'PasswordVerifierDO'};
+  const workers=[{config:{name:'cf-free-local-rpc-api',compatibilityDate:'2026-10-14',env,
+    manifest:manifest(bundle('../src/index.ts'))},dev:{outboundService:{type:'fetcher',handler:deny}}}];
+  if(offload)workers.push({config:{name:VERIFIER,compatibilityDate:'2026-10-14',
+    env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},
+    manifest:manifest(bundle('../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers']})),
+    exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
+    dev:{outboundService:{type:'fetcher',handler:deny}}});
+  const mf=new Miniflare({workers});
+  try{
+    const db=await mf.getD1Database('DB');
+    const root=new URL('../migrations/',import.meta.url);
+    for(const name of readdirSync(root).filter(n=>/^\d{4}_[\w-]+\.sql$/.test(n)).sort())
+      for(const sql of migrationStatements(readFileSync(new URL(name,root),'utf8')))await db.prepare(sql).run();
+    for(const n of FACTORS)await db.prepare('INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,status) VALUES(?,?,?,?,?,?,?)')
+      .bind('test-'+n,'test-'+n+'@example.test',1,1,'testuser'+n,hash(n),'active').run();
+    return {mf,db,outbound:()=>outbound};
+  }catch(e){await mf.dispose();throw e;}
+}
+
+async function call(mf,path,body,ip=10){
+  const started=performance.now();
+  const response=await mf.dispatchFetch(API+path,{method:'POST',headers:{Origin:WEB,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.'+ip},body:JSON.stringify(body)});
+  const data=await response.json();
+  return {status:response.status,code:data?.code??null,wallMs:performance.now()-started,cookie:response.headers.get('set-cookie')};
+}
+
+test('CF Free actual local workerd password RPC and legacy compatibility matrix',{timeout:120000},async()=>{
+  const results=[];
+  for(const offload of [false,true]){
+    const {mf,db,outbound}=await setup(offload);
+    try{
+      const cases=[];
+      let sessions=0;
+      for(const [i,n] of FACTORS.entries()){
+        const identity='test-'+n+'@example.test';
+        const samples=[];
+        const a=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},10+i);
+        samples.push(a.wallMs);
+        // 210k native WebCrypto may be unsupported in this runtime. Record
+        // the exact limitation rather than treating a failed login as success.
+        if(n===210000&&a.status!==200){
+          assert.ok([500,503].includes(a.status),'legacy runtime failure must fail closed');
+          assert.equal(a.cookie,null);
+          assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').bind('test-'+n).first()).n,0);
+          cases.push({factor:n,status:'RUNTIME_BLOCKED',httpStatus:a.status,code:a.code});
+          continue;
+        }
+        assert.equal(a.status,200,'factor '+n+' offload '+offload+' '+a.code);
+        assert.ok(a.cookie?.startsWith('rc_session='));
+        const b=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},10+i);
+        assert.equal(b.status,200);
+        samples.push(b.wallMs);
+        sessions+=2;
+        const wrong=await call(mf,'/v1/auth/login',{identity,password:'wrong-synthetic-password'},10+i);
+        assert.equal(wrong.status,401);
+        assert.equal(wrong.code,'INVALID_CREDENTIALS');
+        assert.equal(wrong.cookie,null);
+        assert.equal((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind('test-'+n).first()).password_hash,hash(n));
+        cases.push({factor:n,status:'COMPATIBLE',wall:summarizeWallMs(samples),wrongPasswordDenied:true});
+      }
+      assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions').first()).n,sessions);
+      const user='test-100000',code='123456',now=Date.now();
+      const digest=createHmac('sha256',AUTH).update('reset:'+user+':'+code).digest('hex');
+      await db.prepare('INSERT INTO password_resets(user_id,code_hash,expires_at,sent_at,attempts) VALUES(?,?,?,?,0)').bind(user,digest,now+600000,now).run();
+      const reset=await call(mf,'/v1/auth/reset-password',{email:user+'@example.test',code,password:NEW_PASSWORD},30);
+      assert.equal(reset.status,200,'reset '+reset.code);
+      const stored=(await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash;
+      const parts=stored.split(':');
+      assert.equal(parts[1],'100000');
+      assert.equal(parts[3],pbkdf2Sync(NEW_PASSWORD+'\0'+PEPPER,Buffer.from(parts[2],'hex'),100000,32,'sha256').toString('hex'));
+      assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=? AND revoked_at IS NULL').bind(user).first()).n,0);
+      assert.equal((await db.prepare('SELECT COUNT(*) n FROM password_resets WHERE user_id=?').bind(user).first()).n,0);
+      assert.equal(outbound(),0);
+      results.push({mode:offload?'real_do_rpc':'http_local',cases,reset:{status:200,originalFactor:100000,sessionsRevoked:true,challengeConsumed:true,wallMs:Number(reset.wallMs.toFixed(3))},externalCalls:0});
+    }finally{await mf.dispose();}
+  }
+  console.log('CF_FREE_REAL_PASSWORD_RPC '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',freeCertified:false,results}));
+});

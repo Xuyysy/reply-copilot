@@ -19,17 +19,19 @@ import { requestConfiguredModel, serializeModelOutput } from "./ai-model-provide
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
 async function activeProvider(env: Env): Promise<{ config: any; apiKey: string } | null> {
-  const pointer = await env.DB.prepare("SELECT active_config_id,active_version FROM ai_provider_runtime WHERE id=1").first<{active_config_id:string|null;active_version:number|null}>();
-  if (!pointer?.active_config_id || !pointer.active_version) return null;
+  // Read the active pointer and its immutable version in one D1 snapshot.
+  // LEFT JOIN is deliberate: a broken active pointer must fail closed rather
+  // than silently falling back to the legacy provider.
+  const row = await env.DB.prepare(`SELECT p.active_config_id,p.active_version,c.archived,v.provider,v.protocol,v.base_url,v.model_id,v.api_key_ciphertext,v.input_rate_micro_usd_per_million,v.output_rate_micro_usd_per_million,v.max_output_tokens,v.timeout_ms,v.options_json,v.endpoint_addresses_json
+    FROM ai_provider_runtime p LEFT JOIN ai_provider_configs c ON c.id=p.active_config_id LEFT JOIN ai_provider_config_versions v ON v.config_id=p.active_config_id AND v.version=p.active_version WHERE p.id=1`).first<any>();
+  if (!row?.active_config_id || !row.active_version) return null;
   if (!env.AI_CONFIG_ENCRYPTION_KEY) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型的加密配置不可用，请联系管理员。");
-  const row = await env.DB.prepare(`SELECT c.archived,v.provider,v.protocol,v.base_url,v.model_id,v.api_key_ciphertext,v.input_rate_micro_usd_per_million,v.output_rate_micro_usd_per_million,v.max_output_tokens,v.timeout_ms,v.options_json,v.endpoint_addresses_json
-    FROM ai_provider_configs c JOIN ai_provider_config_versions v ON v.config_id=c.id AND v.version=? WHERE c.id=?`).bind(pointer.active_version,pointer.active_config_id).first<any>();
-  if (!row || row.archived || !row.api_key_ciphertext) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。");
+  if (row.archived!==0 || !row.api_key_ciphertext) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。");
   let options: Record<string, unknown>, endpointAddresses: string[];
   try { options=JSON.parse(row.options_json); endpointAddresses=JSON.parse(row.endpoint_addresses_json); } catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。"); }
-  const config={configId:pointer.active_config_id,version:pointer.active_version,provider:row.provider,protocol:row.protocol,baseUrl:row.base_url,modelId:row.model_id,maxOutputTokens:row.max_output_tokens,timeoutMs:row.timeout_ms,options,endpointAddresses,inputRateMicroUsdPerMillion:row.input_rate_micro_usd_per_million,outputRateMicroUsdPerMillion:row.output_rate_micro_usd_per_million};
+  const config={configId:row.active_config_id,version:row.active_version,provider:row.provider,protocol:row.protocol,baseUrl:row.base_url,modelId:row.model_id,maxOutputTokens:row.max_output_tokens,timeoutMs:row.timeout_ms,options,endpointAddresses,inputRateMicroUsdPerMillion:row.input_rate_micro_usd_per_million,outputRateMicroUsdPerMillion:row.output_rate_micro_usd_per_million};
   let apiKey: string;
-  try { apiKey=await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY,pointer.active_config_id,pointer.active_version,row.api_key_ciphertext,env); }
+  try { apiKey=await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY,row.active_config_id,row.active_version,row.api_key_ciphertext,env); }
   catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型加密配置不可用，请联系管理员。"); }
   return {config,apiKey};
 }
@@ -109,20 +111,20 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
-  const wireQuota=async (quota:unknown)=>{
+  const wireQuota=async (getQuota:()=>unknown|Promise<unknown>)=>{
     if(subscriptionsEnabled(env)&&await env.DB.prepare(
       "SELECT 1 FROM subscription_ai_allocations WHERE user_id=? AND request_id=?"
     ).bind(session.user_id,input.requestId).first())return {};
-    return {quota};
+    return {quota:await getQuota()};
   };
   const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
-  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(prior.quota)}),200,env,request);
+  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(()=>prior.quota)}),200,env,request);
   const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
   trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
-    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true})),
+    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true})),
     provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
     if(mode==="real"&&!configuredModel) {
@@ -136,12 +138,12 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
-  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(execution.quota) }), 200, env, request);
+  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(()=>execution.quota) }), 200, env, request);
   if (execution.kind === "abandoned") throw new ApiFailure(409,"GENERATION_ABANDONED","这次生成已结束，请使用新的回复请求。");
   if (execution.kind === "failed") {
     const error = execution.error;
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
   const { balance } = await import("./quota");
-  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...await wireQuota(await balance(env,session.user_id)) }), 200, env, request);
+  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...await wireQuota(()=>balance(env,session.user_id)) }), 200, env, request);
 }

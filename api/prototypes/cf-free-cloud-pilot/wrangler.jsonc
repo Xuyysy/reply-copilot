@@ -1,0 +1,20 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "xrh-cf-free-cpu-pilot-20261120",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": true,
+  "vars": {
+    "PILOT_ENV": "dedicated-synthetic-free-account",
+    "PASSWORD_PEPPER": "xrh-isolated-free-pilot-pepper-2026-synthetic-only"
+  },
+  "durable_objects": {
+    "bindings": [
+      {"name": "PASSWORD_VERIFY_DO", "class_name": "PasswordVerifierDO"}
+    ]
+  },
+  "migrations": [
+    {"tag": "isolated-free-pilot-v1", "new_sqlite_classes": ["PasswordVerifierDO"]}
+  ],
+  "observability": {"enabled": false}
+}
