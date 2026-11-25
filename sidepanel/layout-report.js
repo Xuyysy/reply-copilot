@@ -5,22 +5,22 @@ const bool=v=>typeof v==='boolean'?v:null;
 const int=(v,max=100)=>Number.isInteger(v)&&v>=0&&v<=max?v:null;
 const arr=(v,max,fn)=>Array.isArray(v)?v.slice(0,max).map(fn):[];
 const fields=(obj,keys,fn)=>Object.fromEntries(keys.map(k=>[k,fn(obj?.[k])]));
-const tag=['none','other','button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use'];
+const tag=['none','other','button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use','form','img','video','label'];
 const role=['none','other','button','link','group','dialog','textbox','article','presentation','menu','menuitem','region','main'];
 const testId=['none','other','reply','tweet','tweetText','tweetTextarea_0','tweetTextarea_1','tweetButton','tweetButtonInline','User-Name','cellInnerDiv','primaryColumn','layers','sheetDialog','confirmationSheetDialog','toolBar','tweetPhoto','videoPlayer','videoComponent','quoteTweet','card.wrapper','like','retweet','unretweet','unlike','bookmark','caret'];
 function node(o){return o&&typeof o==='object'?{tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),ariaLabelPresent:bool(o.ariaLabelPresent),editable:bool(o.editable),
  engagementAction:enumOf(o.engagementAction,['none','other','reply','retweet','like','bookmark','share','generic']),
- slot:enumOf(o.slot,['none','other','embedded-tweet-frame']),
+ slot:enumOf(o.slot,['none','other','embedded-tweet-frame','xds-modal-surface','xds-button']),
  ...fields(o,['permalinkWrapper','baseUiPortal','readOnly','disabled','insideInert'],bool)}:null;}
 function post(o){return {...fields(o,['article','tweetContainer','identityVerified','mainTextPresent','quoteTextPresent','modernAdapter','modernIdentityConflict','modernWrapperPresent'],bool),...fields(o,['textNodes','timeNodes','statusLinks','mediaNodes','modernBodyNodes','modernCanonicalLinks','modernQuoteFrames'],int)};}
-const structuralAttrs=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard'];
-const structuralClasses=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content'];
+const structuralAttrs=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard','data-media-upload-dropzone','data-textarea-autogrow','data-base-ui-tooltip-trigger','aria-multiline','aria-autocomplete','aria-readonly','data-modal-slot-surface'];
+const structuralClasses=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content','text-transparent','text-transparent!','field-sizing-content','wrap-anywhere'];
 const knownOnly=(values,allow)=>[...new Set(arr(values,allow.length,v=>allow.includes(v)?v:null).filter(Boolean))];
 const linkKinds=['none','fragment','status','status_media','compose','single_segment','x_other','external','other'];
 function structuralNode(o){return o&&typeof o==='object'?{
  parentIndex:int(o.parentIndex,47),tag:enumOf(o.tag,tag),role:enumOf(o.role,role),testId:enumOf(o.testId,testId),
  engagementAction:enumOf(o.engagementAction,['none','other','reply','retweet','like','bookmark','share','generic']),
- slot:enumOf(o.slot,['none','other','embedded-tweet-frame']),
+ slot:enumOf(o.slot,['none','other','embedded-tweet-frame','xds-modal-surface','xds-button']),
  flags:knownOnly(o.flags,structuralAttrs),classes:knownOnly(o.classes,structuralClasses),
  labelKind:enumOf(o.labelKind,['none','reply','reply_context','reply_count','post','close','search','other']),
  hrefKind:enumOf(o.hrefKind,linkKinds),dataHrefKind:enumOf(o.dataHrefKind,linkKinds),
@@ -79,7 +79,7 @@ export function sanitizeReproduction(o,stage,reason){
   marks:arr(o.marks,64,m=>({stage:enumOf(m?.stage,stage),reason:enumOf(m?.reason,reason),atMs:int(m?.atMs,60000)})),
   facts:arr(o.facts,20,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
    editors:arr(f?.value?.editors,5,e=>({editor:node(e?.editor),
-    contextDetail:enumOf(e?.contextDetail,['verified_context','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
+    contextDetail:enumOf(e?.contextDetail,['verified_context','verified_route_preview','awaiting_route_preview','route_preview_conflict','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
     ...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
   sampleErrors:int(o.sampleErrors,100)};
 }

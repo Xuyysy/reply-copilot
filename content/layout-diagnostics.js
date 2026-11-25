@@ -3,11 +3,11 @@
   const STANDARD='[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]';
   const EDITABLE='[contenteditable]:not([contenteditable="false"]),textarea,[role="textbox"]';
   const CONTROL='button,[role="button"],a';
-  const tags=new Set(['button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use']);
+  const tags=new Set(['button','a','div','span','svg','path','article','section','main','dialog','textarea','input','p','g','use','form','img','video','label']);
   const roles=new Set(['button','link','group','dialog','textbox','article','presentation','menu','menuitem','region','main','none']);
   const testids=new Set(['reply','tweet','tweetText','tweetTextarea_0','tweetTextarea_1','tweetButton','tweetButtonInline','User-Name','cellInnerDiv','primaryColumn','layers','sheetDialog','confirmationSheetDialog','toolBar','tweetPhoto','videoPlayer','videoComponent','quoteTweet','card.wrapper','like','retweet','unretweet','unlike','bookmark','caret']);
   const actions=new Set(['reply','retweet','like','bookmark','share','generic']);
-  const slots=new Set(['embedded-tweet-frame']);
+  const slots=new Set(['embedded-tweet-frame','xds-modal-surface','xds-button']);
   const MODERN_WRAPPER='div[role="link"][data-href]';
   const MODERN_BODY='div[dir="auto"].whitespace-pre-wrap';
   const CANONICAL='a[aria-hidden="true"][href*="/status/"]';
@@ -38,8 +38,8 @@
   // flags, enums, bounded counts and tree-local parent indexes are retained.
   // No arbitrary class/attribute names, values, DOM text, IDs, URL strings,
   // exact coordinates, input contents or selection contents.
-  const STRUCT_ATTRS=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard'];
-  const STRUCT_CLASSES=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content'];
+  const STRUCT_ATTRS=['data-testid','data-engagement-action','data-slot','data-href','data-base-ui-portal','data-post-avatar','data-state','data-app-version','data-open','data-disabled','aria-label','aria-labelledby','aria-describedby','aria-modal','aria-hidden','aria-controls','aria-expanded','aria-pressed','aria-disabled','role','href','contenteditable','tabindex','dir','type','name','id','class','placeholder','disabled','readonly','required','maxlength','hidden','inert','autocomplete','form','open','data-lexical-editor','data-slate-editor','data-placeholder','data-focus-guard','data-media-upload-dropzone','data-textarea-autogrow','data-base-ui-tooltip-trigger','aria-multiline','aria-autocomplete','aria-readonly','data-modal-slot-surface'];
+  const STRUCT_CLASSES=['group/post','whitespace-pre-wrap','x-middot-group','sr-only','flex','grid','relative','absolute','fixed','overflow-hidden','overflow-auto','pointer-events-none','ProseMirror','DraftEditor-root','public-DraftEditor-content','text-transparent','text-transparent!','field-sizing-content','wrap-anywhere'];
   function linkKind(raw){
     if(!raw)return 'none';
     if(raw.startsWith('#'))return 'fragment';
@@ -149,7 +149,7 @@
     const composed=typeof event?.composedPath==='function'?event.composedPath():[];
     const path=composed.filter(x=>x?.nodeType===1).slice(0,12).map(x=>structuralNode(x,null));
     return {target:describe(target),nearestControl:describe(nearest),ancestors,
-      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':attr(recognized,'data-engagement-action')==='reply'?'engagement':'label'):'unrecognized',
+      rule:recognized?(attr(recognized,'data-testid')==='reply'?'testid':(attr(recognized,'data-engagement-action')==='reply'||attr(near(recognized,'[data-engagement-action]'),'data-engagement-action')==='reply')?'engagement':'label'):'unrecognized',
       replyTestIdAncestor:Boolean(testIdNode),outerRecognized,
       insideDialog:Boolean(near(target,'[role="dialog"],dialog')),
       post:postShape(source),controlPath:ancestry(source),composedPath:path,

@@ -302,7 +302,7 @@
     if(!facts.routeAllowed||!facts.sourceUnchanged||facts.editors.length!==1||
        session.activationBaseline?.baselineModalCount!==0)return;
     const candidate=facts.editors[0];
-    if(!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
+    if(candidate.node?.localName==='textarea'||!candidate.modal||!candidate.focused||!candidate.empty||!candidate.node?.isConnected||
        session.activationBaseline?.baselineEditors?.includes(candidate.node)||
        candidate.quarantinedContextMatch||candidate.contextStatusId||
        candidate.contextMatches!==null)return;
@@ -324,7 +324,7 @@
     const currentFacts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
     const still=currentFacts.editors.length===1?currentFacts.editors[0]:null;
     if(!currentFacts.routeAllowed||!currentFacts.sourceUnchanged||
-       !still||still.node!==candidate.node||!still.node?.isConnected||
+       !still||still.node!==candidate.node||still.node?.localName==='textarea'||!still.node?.isConnected||
        !still.modal||!still.focused||!still.empty||
        still.contextMatches!==null||still.contextStatusId||still.quarantinedContextMatch)return;
     session.copyOnly=true;
@@ -465,6 +465,8 @@
     // this source article, its dialog, the bound editor, or a newly created
     // competing dialog. Never filter unbound sessions: they must reject a
     // wrong target immediately, before a second human Reply gesture.
+    const modernObservation=post.modernLayout||post.replyRouteVerified;
+    const extraHydrationAttributes=new Set(['data-status','lang','dir','class']);
     const mutationTouchesReply=records=>{
       if(!records?.length)return true; // conservative on unknown records
       const editor=session.editor,article=session.post?.article;
@@ -478,7 +480,11 @@
         if(inside(node,article)||inside(node,dialog)||node===editor)return true;
         if(record.type==='attributes')
           return Boolean(node.contains?.(article)||node.contains?.(dialog)||
-            node.contains?.(editor));
+            node.contains?.(editor)||
+            // A competing dialog can become visible by changing its class
+            // alone. Do not drop that change in the modern observer.
+            (modernObservation&&extraHydrationAttributes.has(record.attributeName)&&
+             (node.closest?.('[role="dialog"]')||node.querySelector?.('[role="dialog"]'))));
         if(record.type==='characterData')return false;
         if(record.type!=='childList')return true;
         const changed=[...(record.addedNodes||[]),...(record.removedNodes||[])];
@@ -517,9 +523,24 @@
       // clearly unrelated changes and batch relevant mutation bursts.
       if(session.editor){
         if(mutationTouchesReply(records))scheduleLocate();
-      }else locate();
+      }else {
+        // The additional modern-only hydration attributes can be noisy on
+        // a virtualized feed. Ignore ONLY batches consisting entirely of
+        // those attributes outside the captured source and every dialog.
+        // Original acquisition signals, unknown records and focus are
+        // still immediate; no timeout or debounce is introduced.
+        const onlyUnrelatedHydration=modernObservation&&records?.length&&records.every(record=>{
+          const node=record.target,article=session.post?.article;
+          return record.type==='attributes'&&extraHydrationAttributes.has(record.attributeName)&&node&&
+            node!==article&&!article?.contains?.(node)&&!node.contains?.(article)&&
+            !node.closest?.('[role="dialog"]')&&!node.querySelector?.('[role="dialog"]');
+        });
+        if(!onlyUnrelatedHydration)locate();
+      }
     });
-    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly']});
+    const observedAttributes=['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly'];
+    if(modernObservation)observedAttributes.push('inert','aria-disabled','aria-readonly',...extraHydrationAttributes);
+    active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:observedAttributes});
     locate();
   }
   async function prepareCurrent(requestId) {
@@ -536,6 +557,10 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
+      if((current.post.modernLayout||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
+        if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
+        return;
+      }
       current.preferences = response.preferences; current.initializing = false;
       diagnosticTap('mark','prepare','settings_received');
       if (current.preferences.showFloatingWindow) {
@@ -632,6 +657,7 @@
     current.applyingReply = true;
     current.trace?.mark("insert_started");
     diagnosticTap('mark','fill','started');
+    const insertedEditor=current.editor;
     const inserted = api.composerAdapter.insertOnce(current.editor, requestId, candidate, valid);
     current.applyingReply = false;
     if (!contextAlive || active !== current || current.requestId !== requestId || current.cancelled) return;
@@ -642,7 +668,10 @@
       diagnosticTap('mark','fill','user_modified');
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
-    if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim()) {
+    if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim() ||
+        ((current.post.modernLayout||insertedEditor.localName==='textarea')&&(current.editor!==insertedEditor||
+          matchedComposer(current.post).editor!==insertedEditor||
+          !api.composerAdapter.verifyReadback(insertedEditor,candidate)))) {
       // A translator can mutate one editor. Fence THIS request, not all future posts.
       // insertOnce prevents duplicate insertion for the same requestId.
       diagnosticTap('mark','fill','readback_mismatch');
@@ -1057,7 +1086,7 @@
       // pending reply. A second real composer action still cancels safely.
       if(active&&!active.cancelled&&!active.editor&&
          (event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]')||
-          (active.post?.modernLayout&&event.target?.closest?.('[role="dialog"] textarea'))))
+          ((active.post?.modernLayout||active.post?.replyRouteVerified)&&event.target?.closest?.('[role="dialog"] textarea'))))
         rejectAssociation('competing_activation');
       return;
     }
@@ -1073,6 +1102,15 @@
       // Only on a failed verified Reply gesture; never log text or URLs.
       traceAssociation("capture_failed",post.reason||"unknown_post");
       pendingActivation=null;return;
+    }
+    // For a modern link, independently compare the target encoded in the
+    // native Reply anchor with the extracted canonical outer post.
+    const nativeReplyId=control.localName==='a'?api.replyDetector.replyTargetId(control):null;
+    if((post.modernLayout&&control.localName==='a')||nativeReplyId){
+      if(nativeReplyId!==post.statusId){
+        traceAssociation('capture_failed','post-context-incomplete');pendingActivation=null;return;
+      }
+      post.replyRouteVerified=true;
     }
     traceAssociation('capture','reply_control_recognized');
     pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
@@ -1090,7 +1128,8 @@
       return;
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
-    if (!live.ok || live.statusId!==activation.post.statusId) {
+    if (!live.ok || live.statusId!==activation.post.statusId ||
+        (activation.post.replyRouteVerified&&api.replyDetector.replyTargetId(control)!==activation.post.statusId)) {
       traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;
     }
