@@ -6,7 +6,7 @@ import { response } from "./http";
 import { jsonBody, nowMs, uuid } from "./security";
 import { alipayAdmissionPlan, alipayRejectPlan } from "./partner-transfer.mjs";
 
-// Separate request-acceptance gate. No default commercial minimum.
+// Separate request-acceptance gate. Owner-approved minimum is CNY 10 (1000 fen).
 // All money movement and approval remain unwired until provider risk evidence
 // is verified. An application is intent only, not a withdrawable balance.
 async function config(env:Env){
@@ -14,7 +14,7 @@ async function config(env:Env){
  const v=new Map(rows.results.map(x=>[x.key,x.value]));
  const ready=['partner_program_enabled','partner_alipay_recipient_enabled','partner_payout_enabled','partner_payout_requests_enabled'].every(k=>v.get(k)==='1');
  const raw=v.get('partner_payout_min_fen')||'';
- const min=/^[1-9][0-9]{0,12}$/.test(raw)&&Number(raw)<=1000000000000?Number(raw):null;
+ const min=/^[1-9][0-9]{0,12}$/.test(raw)&&Number(raw)>=1000&&Number(raw)<=1000000000000?Number(raw):null;
  return {visible:v.get('partner_program_enabled')==='1'&&v.get('partner_alipay_recipient_enabled')==='1',ready:ready&&min!==null,min};
 }
 const stateSql=`SELECT q.id,q.amount_fen,q.recipient_version,q.created_at,q.status,q.reviewed_at,
