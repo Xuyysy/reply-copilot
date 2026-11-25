@@ -195,3 +195,19 @@ test('two-pass cloud pilot interleaves modes, reverses factors and records only 
   assert.equal(JSON.stringify(report).includes(TOKEN),false);
   assert.equal(report.freeCertified,false);
 });
+
+test('pilot-only 210k compatibility matches independent Node PBKDF2 including Unicode and rejects malformed hashes',async()=>{
+  const {build}=await import('esbuild');
+  const output=await build({entryPoints:[new URL('../prototypes/cf-free-cloud-pilot/src/legacy-210k.ts',import.meta.url).pathname],bundle:true,write:false,platform:'node',format:'esm'});
+  const {verifyLegacy210k}=await import('data:text/javascript;base64,'+Buffer.from(output.outputFiles[0].text).toString('base64'));
+  for(const password of ['synthetic-long-password!','测试🔐é-synthetic-password']){
+    const salt=Buffer.from('00112233445566778899aabbccddeeff','hex');
+    const digest=pbkdf2Sync(password+'\0'+PEPPER,salt,210000,32,'sha256').toString('hex');
+    const stored='pbkdf2-sha256:210000:'+salt.toString('hex')+':'+digest;
+    assert.equal(verifyLegacy210k(PEPPER,password,stored),true);
+    assert.equal(verifyLegacy210k(PEPPER,password+'!',stored),false);
+    assert.equal(verifyLegacy210k(PEPPER,password,stored.replace(':210000:',':100000:')),false);
+    assert.equal(verifyLegacy210k(PEPPER,password,stored+'00'),false);
+    assert.throws(()=>verifyLegacy210k(undefined,password,stored));
+  }
+});

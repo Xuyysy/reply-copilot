@@ -1,8 +1,17 @@
 // EXCLUSIVELY for a separate Cloudflare Free test account.
 // Never import customer D1, account IDs, payment config, or production secrets.
-import { PasswordVerifierDO } from "../../cf-free-password-do/src/index";
+import { PasswordVerifierDO as NativePasswordVerifierDO } from "../../cf-free-password-do/src/index";
 import { verifyPassword } from "../../../src/password-auth";
-export { PasswordVerifierDO };
+import { verifyLegacy210k } from "./legacy-210k";
+// Only this synthetic pilot overrides the 210k verification path.
+// Production's PasswordVerifierDO and all native control cases stay unchanged.
+export class PasswordVerifierDO extends NativePasswordVerifierDO {
+  async verify(password: string, stored: string): Promise<boolean> {
+    if (typeof stored === "string" && stored.startsWith("pbkdf2-sha256:210000:"))
+      return verifyLegacy210k(this.env.PASSWORD_PEPPER, password, stored);
+    return super.verify(password, stored);
+  }
+}
 
 const PROBE_KIND = "xrh-cf-free-isolated-probe";
 const PILOT_ENV = "dedicated-synthetic-free-account";
