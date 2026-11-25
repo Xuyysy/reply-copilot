@@ -141,3 +141,22 @@ CREATE TRIGGER partner_reopen_audit_no_update BEFORE UPDATE ON partner_accrual_r
 BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
 CREATE TRIGGER partner_reopen_audit_no_delete BEFORE DELETE ON partner_accrual_reopen_audits
 BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
+
+-- Permanent provider identity claim, independent of mutable transaction data.
+-- Source-only proposal; do not apply without explicit schema authorization.
+CREATE TABLE partner_payment_identity_claims (
+ merchant_provider TEXT NOT NULL CHECK(merchant_provider IN ('mk99','xiaodou')),
+ provider_trade_id TEXT NOT NULL CHECK(length(trim(provider_trade_id)) BETWEEN 1 AND 200),
+ provider_payment_id TEXT NOT NULL CHECK(length(trim(provider_payment_id)) BETWEEN 1 AND 200),
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ created_at INTEGER NOT NULL CHECK(created_at>0),
+ PRIMARY KEY(merchant_provider,provider_payment_id),
+ UNIQUE(merchant_provider,provider_trade_id),
+ UNIQUE(order_domain,order_id),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_commissions(order_domain,order_id)
+);
+CREATE TRIGGER partner_identity_claim_no_update BEFORE UPDATE ON partner_payment_identity_claims
+BEGIN SELECT RAISE(ABORT,'payment identity claim immutable'); END;
+CREATE TRIGGER partner_identity_claim_no_delete BEFORE DELETE ON partner_payment_identity_claims
+BEGIN SELECT RAISE(ABORT,'payment identity claim immutable'); END;
