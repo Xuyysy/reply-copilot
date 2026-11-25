@@ -331,7 +331,7 @@ test('queue approval binds the inspected snapshot and admin reauthentication',()
  const s=readFileSync(new URL('../src/partner-accrual-review.ts',import.meta.url),'utf8');
  assert.match(s,/requireAdminSession\(request,env,request.method==="POST"\)/);
  assert.match(s,/b\.expectedSnapshot!==digest/);
- assert.match(s,/accrualQueuePlan\(state\)/);
+ assert.match(s,/accrualQueuePlan\(state,30,cursor\)/);
 });
 
 test('cross-domain payment identity conflict discovered after approval aborts accrual',t=>{
@@ -339,4 +339,24 @@ test('cross-domain payment identity conflict discovered after approval aborts ac
  db.exec("INSERT INTO subscription_payment_transactions VALUES('other','s','xiaodou','out-other','pay-r')");
  assert.throws(()=>batch(db,work));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+});
+
+test('accrual queue keyset handles equal timestamps without skipping rows',async t=>{
+ const {accrualQueuePlan}=await import('../src/partner-accrual-queue.mjs');
+ const db=fixture(t);enable(db);window(db);
+ for(const orderId of ['a','b','c'])run(db,accrualEnqueuePlan({...order,orderId}));
+ const page=accrualQueuePlan('pending',2);
+ const first=db.prepare(page.sql).all(...page.params);
+ assert.deepEqual(first.map(r=>r.order_id),['a','b']);
+ const last=first[1],next=accrualQueuePlan('pending',2,{updatedAt:last.updated_at,domain:last.order_domain,orderId:last.order_id});
+ assert.deepEqual(db.prepare(next.sql).all(...next.params).map(r=>r.order_id),['c']);
+ assert.throws(()=>accrualQueuePlan('pending',2,{updatedAt:0,domain:'recharge',orderId:'a'}));
+});
+test('immutable provider claim rolls back a later conflicting accrual',t=>{
+ const db=reviewFixture(t);
+ db.exec("INSERT INTO partner_commissions VALUES('subscription','historical','p','b',1,310,311,'product_principal','CNY',1000,2000,200,411,320); INSERT INTO partner_payment_identity_claims VALUES('xiaodou','old-out','pay-r','subscription','historical',320)");
+ assert.throws(()=>batch(db,reviewBatch(db)));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,1);
+ assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs").get().state,'pending');
+ assert.throws(()=>db.exec("DELETE FROM partner_payment_identity_claims"));
 });
