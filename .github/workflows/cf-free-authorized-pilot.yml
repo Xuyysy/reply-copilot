@@ -13,12 +13,14 @@ concurrency:
   cancel-in-progress: false
 jobs:
   pilot:
-    if: github.ref == 'refs/heads/chatgpt/cf-free-authorized-pilot-runner-20261125' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'ci-lite: prepare authorized isolated pilot runner'))
+    if: >-
+      github.ref == 'refs/heads/chatgpt/cf-free-authorized-pilot-runner-20261125' &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'ci-lite: prepare authorized isolated pilot runner'))
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     environment: cf-free-isolated-pilot
     env:
-      PILOT_SOURCE: '825c4b0fa5fb73c86b7cfaa40ca4367088377cff'
+      PILOT_SOURCE: '648e263abe377d679cb58206440c6cce12214564'
       PILOT_ACCOUNT: '307563e1fa86940ac46ca4dd78f1f12a'
     steps:
       - name: Require dedicated environment credential before any cloud operation
@@ -52,6 +54,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$PILOT_SOURCE"
+          set +e
           node api/scripts/cf-free-cloud-live-run.mjs \
             --execute-isolated-free-pilot \
             --confirm-workers-free \
@@ -59,6 +62,12 @@ jobs:
             --expected-account-id "$PILOT_ACCOUNT" \
             --expected-commit "$PILOT_SOURCE" \
             --repeats 1 > "$RUNNER_TEMP/cf-free-isolated-evidence.json"
+          result=$?
+          set -e
+          if [[ -s "$RUNNER_TEMP/cf-free-isolated-evidence.json" ]]; then
+            node -e 'const r=JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8")); console.log(JSON.stringify(r));' "$RUNNER_TEMP/cf-free-isolated-evidence.json"
+          fi
+          exit "$result"
       - name: Preserve sanitized pilot evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
