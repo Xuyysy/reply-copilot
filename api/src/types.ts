@@ -17,6 +17,8 @@ export interface Env {
   PARTNER_ACCRUAL_REVIEW_ENABLED?: string;
   /** Non-production manual payout review only, absent by default. */
   PARTNER_PAYOUT_REVIEW_ENABLED?: string;
+  /** Non-production bounded discovery/refund sync pilot, absent by default. */
+  PARTNER_DISCOVERY_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
