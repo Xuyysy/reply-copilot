@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     environment: cf-free-isolated-pilot
     env:
-      PILOT_SOURCE: 'b21dfcc4998d136ad90b9e16f6110dd9cbfb6934'
+      PILOT_SOURCE: 'c1508fd22dbe7b99d207323e4b20035519a364a2'
       PILOT_ACCOUNT: '307563e1fa86940ac46ca4dd78f1f12a'
     steps:
       - name: Require dedicated environment credential before any cloud operation
@@ -46,7 +46,7 @@ jobs:
         run: npm --prefix api ci
       - name: Run local safety checks
         run: |
-          node --test api/tests/cf-free-cloud-live-run.test.mjs api/tests/cf-free-cloud-pilot.test.mjs api/tests/cf-free-cloud-cpu-evidence.test.mjs api/tests/cf-free-cloud-live-tail.test.mjs
+          node --test api/tests/cf-free-cloud-live-run.test.mjs api/tests/cf-free-cloud-pilot.test.mjs api/tests/cf-free-cloud-cpu-evidence.test.mjs api/tests/cf-free-cloud-live-tail.test.mjs api/tests/cf-free-cloud-pilot-dry-run.test.mjs api/tests/cf-free-real-password-rpc.test.mjs
       - name: Execute bounded authorized synthetic experiment
         env:
           CF_FREE_PILOT_API_TOKEN: ${{ secrets.CF_FREE_PILOT_API_TOKEN }}
