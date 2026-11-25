@@ -2,7 +2,7 @@
 -- External Alipay transfers are manual; these records do NOT initiate money movement.
 -- No public write routes until independent commercial, risk and D1 review.
 INSERT INTO system_settings(key,value,updated_at)
-VALUES('partner_payout_requests_enabled','0',0),('partner_payout_min_fen','0',0)
+VALUES('partner_payout_requests_enabled','0',0),('partner_payout_min_fen','1000',0)
 ON CONFLICT(key) DO NOTHING;
 CREATE TABLE partner_alipay_requests (
  id TEXT PRIMARY KEY,
