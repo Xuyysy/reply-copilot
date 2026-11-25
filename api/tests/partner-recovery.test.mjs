@@ -239,3 +239,35 @@ test('scheduled discovery is opt-in, non-production and never posts commission',
  assert.doesNotMatch(s,/commissionInsertPlan|reviewedAccrualBatch|refundSyncPlan|alipayOutcomePlan/);
  assert.match(router,/await cleanup\(env\); await scheduledPartnerDiscovery\(env,Date.now\(\)\)/);
 });
+
+test('refund sweep keyset advances across ambiguous rows, wraps, and rejects stale cursor',async t=>{
+ const {refundSweepPagePlan,refundSweepAdvancePlan}=await import('../src/partner-refund-sweep.mjs');
+ const db=fixture(t);
+ db.exec(`INSERT INTO partner_commissions VALUES('recharge','a1','p','b',1,350,351,'product_principal','CNY',1000,2000,200,451,360),('recharge','a2','p','b',1,350,351,'product_principal','CNY',1000,2000,200,451,360),('recharge','a3','p','b',1,350,351,'product_principal','CNY',1000,2000,200,451,360);`);
+ const read=afterId=>{const p=refundSweepPagePlan({orderDomain:'recharge',afterId,limit:2});return db.prepare(p.sql).all(...p.params).map(r=>r.order_id);};
+ assert.deepEqual(read(''),['a1','a2']);
+ const first=refundSweepAdvancePlan({orderDomain:'recharge',oldId:'',nextId:'a2',generation:0,now:500});
+ assert.equal(run(db,first),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_refund_sync_enabled','partner_scheduled_refund_sync_enabled')");
+ assert.equal(run(db,first),1);assert.equal(run(db,first),0);
+ assert.deepEqual(read('a2'),['a3']);
+ assert.equal(run(db,refundSweepAdvancePlan({orderDomain:'recharge',oldId:'a2',nextId:'a3',generation:0,now:501})),1);
+ assert.deepEqual(read('a3'),[]);
+ assert.equal(run(db,refundSweepAdvancePlan({orderDomain:'recharge',oldId:'a3',nextId:'',generation:0,now:502,wrap:true})),1);
+ assert.equal(run(db,first),0);
+ assert.deepEqual(read(''),['a1','a2']);
+ assert.equal(db.prepare("SELECT generation FROM partner_refund_sweep_cursors WHERE order_domain='recharge'").get().generation,1);
+ assert.equal(db.prepare("SELECT value FROM system_settings WHERE key='partner_cash_accrual_enabled'").get().value,'0');
+});
+test('scheduled refund sync is separate, non-production, bounded and gated within writes',()=>{
+ const s=readFileSync(new URL('../src/partner-refund-scheduled.ts',import.meta.url),'utf8');
+ const router=readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');
+ assert.match(s,/PARTNER_SCHEDULED_REFUND_SYNC_ENABLED!=='1'/);
+ assert.ok(s.indexOf("PARTNER_SCHEDULED_REFUND_SYNC_ENABLED!=='1'")<s.indexOf('env.DB.prepare'));
+ assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
+ assert.match(s,/limit:3/);
+ assert.match(s,/function scheduledWrite/);
+ assert.match(s,/partner_scheduled_refund_sync_enabled' AND value='1'/);
+ assert.doesNotMatch(s,/partner_cash_accrual_enabled|alipayOutcomePlan|commissionInsertPlan/);
+ assert.match(router,/await scheduledPartnerRefundSync\(env,Date.now\(\)\)/);
+});
