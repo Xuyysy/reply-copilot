@@ -49,3 +49,10 @@ BEGIN SELECT CASE WHEN OLD.state='done' OR NEW.order_domain<>OLD.order_domain OR
  SELECT CASE WHEN NEW.state='done' AND NOT EXISTS(SELECT 1 FROM partner_commissions c
  WHERE c.order_domain=NEW.order_domain AND c.order_id=NEW.order_id AND c.paid_at=NEW.paid_at)
  THEN RAISE(ABORT,'commission not recorded') END; END;
+
+-- Transaction-local invariant assertions. Any false assertion aborts the
+-- entire D1.batch; rows are removed in the same successful batch.
+CREATE TABLE partner_recovery_assertions (
+ id TEXT PRIMARY KEY,
+ ok INTEGER NOT NULL CHECK(ok=1)
+);
