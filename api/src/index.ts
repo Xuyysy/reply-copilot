@@ -193,7 +193,7 @@ export default {
       if (["GET","POST"].includes(request.method) && path === "/v1/partners/alipay-requests") return await myAlipayRequests(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/alipay-requests") return await adminAlipayRequests(request,env);
       if (request.method === "GET" && path === "/v1/admin/partners/order-preview") return await adminPartnerOrderPreview(request,env);
-      if (request.method === "POST" && path === "/v1/admin/partners/accrual-review") return await adminPartnerAccrualReview(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/accrual-review") return await adminPartnerAccrualReview(request,env);
       if (request.method === "POST" && path === "/v1/admin/partners/payout-review") return await adminPayoutReview(request,env);
       if (request.method === "POST" && path === "/v1/admin/partners/discovery") return await adminPartnerDiscovery(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/policy") return await adminPartnerPolicy(request,env);
