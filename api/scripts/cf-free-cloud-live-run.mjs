@@ -208,9 +208,11 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   if(args){
     const r=await runIsolatedFreePilot({accountId:args.accountId,commit:args.commit,
       repeats:args.repeats,token:args.token},{tailOpen:openPilotTail});
-    process.stdout.write(JSON.stringify(r,null,2)+'\n');
-    if(r.smoke?.outcome!=='SYNTHETIC_SMOKE_PASS'||
+    const exitCode=r.smoke?.outcome!=='SYNTHETIC_SMOKE_PASS'||
        r.cpuAnalytics?.status!=='BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED'||
-       !r.cleanup.workerAbsent||!r.cleanup.doNamespaceAbsent||r.errors.length)process.exitCode=1;
+       !r.cleanup.workerAbsent||!r.cleanup.doNamespaceAbsent||r.errors.length||r.tailErrors.length?1:0;
+    // All cloud cleanup and evidence collection have already completed.
+    // Flush the sanitized report before exiting even if a socket lingers.
+    process.stdout.write(JSON.stringify(r,null,2)+'\n',()=>process.exit(exitCode));
   }
 }
