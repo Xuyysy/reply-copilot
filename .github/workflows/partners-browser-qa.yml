@@ -1,0 +1,42 @@
+name: Partners browser QA (isolated)
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+permissions:
+  contents: read
+concurrency:
+  group: partners-browser-qa-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    if: github.head_ref == 'chatgpt/partners-browser-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Install locked dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix api ci
+      - name: Isolated browser acceptance
+        env:
+          REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/partner-browser"
+          printf '#!/usr/bin/env bash\nexec %q --no-sandbox --disable-dev-shm-usage "$@"\n' "$REAL_CHROME" > "$RUNNER_TEMP/partner-browser/chrome"
+          chmod +x "$RUNNER_TEMP/partner-browser/chrome"
+          CHROME_BINARY="$RUNNER_TEMP/partner-browser/chrome" node api/tests/partner-browser-qa.mjs
