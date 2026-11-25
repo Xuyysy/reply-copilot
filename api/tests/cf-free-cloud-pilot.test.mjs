@@ -175,3 +175,23 @@ test('identity can recover from one transient deployment 404 without replaying c
   }});
   assert.equal(identityCalls,2);assert.equal(probeCalls,16);assert.equal(report.identityAttempts[0].status,404);assert.equal(report.identityAttempts[1].code,'IDENTITY_OK');
 });
+
+test('two-pass cloud pilot interleaves modes, reverses factors and records only allowlisted diagnostics',async()=>{
+  const order=[];
+  const report=await probeCloudPilot({url:PILOT_URL,token:TOKEN,repeats:2,fetchImpl:async(url,init)=>{
+    if(url.endsWith('/__pilot'))return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',protocol:1,syntheticOnly:true,freeCertified:false});
+    const {mode,rounds,wrong}=JSON.parse(init.body);order.push({mode,rounds,wrong});
+    if(rounds===210000&&mode==='http')return Response.json({ok:false,code:'PILOT_UNAVAILABLE',stage:'HTTP_VERIFY',failure:'KDF_RUNTIME_LIMIT',raw:TOKEN},{status:503,headers:{'cf-ray':'synthetic'}});
+    if(rounds===210000&&mode==='do')return new Response('<html>Error 1102 '+TOKEN+'</html>',{status:500});
+    return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',mode,rounds,verified:!wrong,syntheticOnly:true,freeCertified:false});
+  }});
+  assert.equal(report.syntheticRequests,32);
+  assert.deepEqual(order.slice(0,4).map(x=>x.mode),['http','http','do','do']);
+  assert.equal(order[0].rounds,10000);assert.equal(order[16].rounds,210000);
+  assert.equal(order[31].rounds,10000);
+  const http=report.cases.filter(x=>x.mode==='http'&&x.rounds===210000);
+  assert.ok(http.every(x=>x.ray&&x.diagnostic?.failure==='KDF_RUNTIME_LIMIT'&&x.diagnostic.stage==='HTTP_VERIFY'));
+  assert.ok(report.cases.filter(x=>x.mode==='do'&&x.rounds===210000).every(x=>x.diagnostic?.code==='CF_RESOURCE_LIMIT_PAGE'));
+  assert.equal(JSON.stringify(report).includes(TOKEN),false);
+  assert.equal(report.freeCertified,false);
+});
