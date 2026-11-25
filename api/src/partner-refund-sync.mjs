@@ -13,7 +13,10 @@ export function refundCandidatePlan(orderId){
  COALESCE((SELECT MAX(r.cumulative_principal_fen) FROM partner_commission_refunds r WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0) recorded_fen
  FROM partner_commissions c JOIN recharge_orders o ON o.id=c.order_id AND o.user_id=c.buyer_user_id
  JOIN payment_transactions t ON t.order_id=o.id
+ JOIN partner_payment_identity_claims k ON k.order_domain=c.order_domain AND k.order_id=c.order_id
+ AND k.merchant_provider=t.merchant_provider AND k.provider_trade_id=t.provider_trade_id AND k.provider_payment_id=t.provider_payment_id
  WHERE c.order_domain='recharge' AND c.order_id=? AND t.currency='CNY' AND t.merchant_provider IN ('mk99','xiaodou')
+ AND o.paid_at=c.paid_at AND o.credited_at=c.applied_at AND t.paid_at=c.paid_at
  AND t.base_amount_fen=c.principal_fen AND t.status IN ('paid','refunded') LIMIT 2`,params:[orderId]};
 }
 export function confirmedRefundAmount(rows){
