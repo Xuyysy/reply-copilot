@@ -20,7 +20,13 @@ function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++
 async function ev(expression){const r=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error('Browser evaluation failed');return r.result.result.value;}
 const visible="e=>e.getClientRects().length>0";
 async function text(s){await until(()=>ev('document.body.innerText.includes('+JSON.stringify(s)+')'),s);}
-async function click(s,scope='body'){const expr='(()=>{const e=[...document.querySelector('+JSON.stringify(scope)+').querySelectorAll("button,[role=tab]")].find(e=>e.textContent.trim()==='+JSON.stringify(s)+'&&('+visible+')(e)&&!e.disabled);if(!e)return false;e.click();return true})()';await until(()=>ev(expr),s);}
+// Radix tabs activate on pointer down/focus, not synthetic HTMLElement.click().
+async function click(s,scope='body'){
+ const selector='(()=>{const root=document.querySelector('+JSON.stringify(scope)+');const e=[...root.querySelectorAll("button,[role=tab]")].find(e=>e.textContent.trim()==='+JSON.stringify(s)+'&&('+visible+')(e)&&!e.disabled);if(!e)return false;e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()';
+ let point;await until(async()=>{point=await ev(selector);return !!point;},s);
+ await cdp('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
+ await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+}
 async function fill(label,value,scope='body'){
  const expr='(()=>{const root=document.querySelector('+JSON.stringify(scope)+');if(!root)return false;const l=[...root.querySelectorAll("label")].find(e=>e.textContent.trim().startsWith('+JSON.stringify(label)+'));const e=l?.querySelector("input")||[...root.querySelectorAll("input")].find(e=>e.getAttribute("aria-label")==='+JSON.stringify(label)+');if(!e||e.disabled)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(value)+');e.dispatchEvent(new Event("input",{bubbles:true}));return true})()';
  await until(()=>ev(expr),label);
@@ -28,7 +34,7 @@ async function fill(label,value,scope='body'){
 async function check(label){await until(()=>ev('(()=>{const l=[...document.querySelectorAll("label")].find(e=>e.textContent.includes('+JSON.stringify(label)+'));const e=l?.querySelector("input[type=checkbox]");if(!e||e.disabled)return false;if(!e.checked)e.click();return true})()'),label);}
 async function as(id,url){
  await cdp('Network.clearBrowserCookies');await cdp('Network.setCookie',{name:'rc_session',value:tokens[id],url:origin,httpOnly:true,sameSite:'Lax'});
- await cdp('Page.navigate',{url:origin+url});await until(()=>ev('document.readyState==="complete"'),'navigation '+url);
+ await cdp('Page.navigate',{url:origin+url});await until(()=>ev('location.href==='+JSON.stringify(origin+url)+'&&document.readyState==="complete"&&[...document.querySelectorAll("astro-island")].every(e=>!e.hasAttribute("ssr"))'),'navigation '+url);
 }
 try{
  assert.ok(existsSync(chrome));
@@ -60,6 +66,7 @@ try{
  socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error(m.error.message)):p.resolve(m);}if(m.method==='Page.javascriptDialogOpening')void cdp('Page.handleJavaScriptDialog',{accept:true});});
  await cdp('Runtime.enable');await cdp('Page.enable');await cdp('Network.enable');
  await cdp('Network.setBlockedURLs',{urls:['https://*']});
+ await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  await as('a','/admin/');await click('推广管理');await text('推广伙伴 · 资格与规则');
  await fill('用户 ID 或邮箱','p');
  // Scope the first search to the policy card's form, not the queue.
@@ -93,7 +100,7 @@ try{
  assert.equal(await ev('document.body.innerText.includes("fixture@example.test")'),false);
  await as('q','/account/');await click('查询推广伙伴资格');await text('目前未开放推广伙伴资格或尚未获得授权。');
  assert.equal(await ev('document.body.innerText.includes("f***@***")'),false);
- await cdp('Emulation.clearDeviceMetricsOverride');
+ await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
  await as('a','/admin/');await click('推广管理');await fill('推广伙伴用户 ID','p');
  await ev('document.querySelector("input[aria-label=\\\"推广伙伴用户 ID\\\"]").closest("form").requestSubmit()');
  await text('待审核');await fill('审核原因','isolated browser payout');await check('已人工核对相应订单与转账证据');await click('模拟批准并预留');await text('已预留');
@@ -103,6 +110,10 @@ try{
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
  console.log('PARTNER_BROWSER_QA_PASS: actual Astro account/admin pages; real Worker; synthetic authorization, approval, recipient, request, reserve, reveal, outcome and ownership');
+}catch(error){
+ // Safe diagnostics only: never dump DOM, cookies, or raw financial data.
+ if(socket)try{console.error('QA diagnostic',await ev('JSON.stringify({path:location.pathname,tabs:[...document.querySelectorAll("[role=tab][data-state=active]")].map(e=>e.textContent.trim()),cards:[...document.querySelectorAll("[data-slot=card-title]")].map(e=>e.textContent.trim()),islands:[...document.querySelectorAll("astro-island")].map(e=>e.hasAttribute("ssr"))})'));}catch{}
+ throw error;
 }finally{
  globalThis.fetch=nativeFetch;try{socket?.close();}catch{}for(const p of pending.values())clearTimeout(p.timer);child?.kill('SIGTERM');server?.close();for(const fn of cleanups.reverse())fn();await delay(300);rmSync(temp,{recursive:true,force:true});
 }
