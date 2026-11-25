@@ -52,6 +52,6 @@ export function alipayOutcomePlan({payoutId,actorId,now,outcome,amountFen,refere
  if(!id(payoutId)||!id(actorId)||!pos(now)||!reason(why)||!['paid','no_transfer'].includes(outcome)||
  (outcome==='paid'?(!pos(amountFen)||typeof reference!=='string'||!reference.trim()||reference.trim().length>160):(amountFen!==0||reference!==null)))fail();
  return {sql:`INSERT INTO partner_alipay_transfer_outcomes(payout_id,outcome,amount_fen,reference,recorded_by,recorded_at,reason)
- SELECT ?,?,?,?,?,?,? WHERE ${admin} ON CONFLICT(payout_id) DO NOTHING`,
- params:[payoutId,outcome,amountFen,reference?.trim()??null,actorId,now,why.trim(),actorId]};
+ SELECT ?,?,?,?,?,?,? WHERE ${admin} AND NOT EXISTS(SELECT 1 FROM partner_alipay_transfer_outcomes WHERE payout_id=?) ON CONFLICT(payout_id) DO NOTHING`,
+ params:[payoutId,outcome,amountFen,reference?.trim()??null,actorId,now,why.trim(),actorId,payoutId]};
 }
