@@ -111,20 +111,20 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   // Released clients cache quota.totalRemaining as generation eligibility.
   // Their parser accepts an absent quota on generation/ACK. Usage still carries
   // the original permanent balance fields and the server-owned status.
-  const wireQuota=async (quota:unknown)=>{
+  const wireQuota=async (getQuota:()=>unknown|Promise<unknown>)=>{
     if(subscriptionsEnabled(env)&&await env.DB.prepare(
       "SELECT 1 FROM subscription_ai_allocations WHERE user_id=? AND request_id=?"
     ).bind(session.user_id,input.requestId).first())return {};
-    return {quota};
+    return {quota:await getQuota()};
   };
   const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
-  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(prior.quota)}),200,env,request);
+  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(()=>prior.quota)}),200,env,request);
   const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
   if(mode==="real"&&!configuredModel&&!env.DEEPSEEK_API_KEY) throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","托管 AI 尚未配置。");
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
   trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
-    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true})),
+    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true})),
     provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
     if(mode==="real"&&!configuredModel) {
@@ -138,12 +138,12 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
-  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(execution.quota) }), 200, env, request);
+  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(()=>execution.quota) }), 200, env, request);
   if (execution.kind === "abandoned") throw new ApiFailure(409,"GENERATION_ABANDONED","这次生成已结束，请使用新的回复请求。");
   if (execution.kind === "failed") {
     const error = execution.error;
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
   const { balance } = await import("./quota");
-  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...await wireQuota(await balance(env,session.user_id)) }), 200, env, request);
+  return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...await wireQuota(()=>balance(env,session.user_id)) }), 200, env, request);
 }
