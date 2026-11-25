@@ -39,6 +39,11 @@ test('export exact synthetic Wrangler bundle for isolated authorized CPU pilot',
     assert.ok(source.length>5000&&source.length<1000000,'Expected bounded synthetic source');
     assert.ok(!source.includes('reply-copilot-api-production'));
     const digest=createHash('sha256').update(source).digest('hex');
+    const wasmFiles=walk(output).filter(path=>path.endsWith('.wasm'));
+    assert.equal(wasmFiles.length,1);
+    const wasmDigest=createHash('sha256').update(readFileSync(wasmFiles[0])).digest('hex');
+    assert.equal(wasmDigest,'2d34ed3d829ebff018cf3afaba063c9cfd90d14b00db938d082fa862e74ce838');
+    console.log('XRH_SYNTHETIC_WASM_SHA256='+wasmDigest);
     console.log('XRH_SYNTHETIC_BUNDLE_SHA256='+digest);
     console.log('XRH_SYNTHETIC_BUNDLE_BASE64='+Buffer.from(source).toString('base64'));
     console.log('XRH_SYNTHETIC_BUNDLE_END');

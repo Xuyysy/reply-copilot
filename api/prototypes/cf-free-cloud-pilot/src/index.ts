@@ -2,15 +2,15 @@
 // Never import customer D1, account IDs, payment config, or production secrets.
 import { PasswordVerifierDO as NativePasswordVerifierDO } from "../../cf-free-password-do/src/index";
 import { verifyPassword } from "../../../src/password-auth";
-import { verifyLegacy210k } from "./legacy-210k";
+import { verifyLegacy210kWasm } from "./legacy-210k-wasm";
 // Only this synthetic pilot overrides the 210k verification path.
 // Production's PasswordVerifierDO and all native control cases stay unchanged.
 export class PasswordVerifierDO extends NativePasswordVerifierDO {
   async verify(password: string, stored: string): Promise<boolean> {
-    const rounds=Number(stored.split(":")[1]);
+    const rounds=typeof stored==="string"?Number(stored.split(":")[1]):0;
     if([10000,60000,100000,210000].includes(rounds))console.log("XRH_PILOT_CPU","do_rpc",rounds);
     if (typeof stored === "string" && stored.startsWith("pbkdf2-sha256:210000:"))
-      return verifyLegacy210k(this.env.PASSWORD_PEPPER, password, stored);
+      return verifyLegacy210kWasm(this.env.PASSWORD_PEPPER, password, stored);
     return super.verify(password, stored);
   }
 }

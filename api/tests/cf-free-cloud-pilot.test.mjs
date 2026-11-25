@@ -22,11 +22,11 @@ async function fixture(vars=BINDINGS){
   const script=buildSync({
     entryPoints:[new URL('../prototypes/cf-free-cloud-pilot/src/index.ts',import.meta.url).pathname],
     bundle:true,write:false,platform:'browser',format:'esm',target:'es2022',
-    external:['cloudflare:workers']
+    external:['cloudflare:workers','./legacy-210k.wasm']
   }).outputFiles[0].text;
   const mf=new Miniflare({workers:[{
     config:{name:NAME,compatibilityDate:'2026-10-14',env:vars,
-      manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:script}}},
+      manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:script},'legacy-210k.wasm':{type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-cloud-pilot/src/legacy-210k.wasm',import.meta.url)))}}},
       exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
     dev:{outboundService:{type:'fetcher',handler:()=>{external++;throw Error('Offline only');}}}
   }]});

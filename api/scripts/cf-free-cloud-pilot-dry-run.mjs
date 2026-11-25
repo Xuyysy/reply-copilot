@@ -2,6 +2,7 @@
 // Isolated Cloudflare Free pilot deploy dry-run ONLY.
 // Uses the repo-pinned Wrangler with credentials stripped. Never deploys.
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {existsSync,mkdtempSync,readFileSync,readdirSync,rmSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -82,6 +83,8 @@ export function runPilotDryRun(){
       throw Error('Standalone Worker is at or over the 64MiB Free bundle limit');
     if(!existsSync(outdir))throw Error('Wrangler reported success but emitted no build');
     const files=collect(outdir);
+    const wasmFiles=files.filter(file=>file.endsWith('.wasm'));
+    if(wasmFiles.length!==1||createHash('sha256').update(readFileSync(wasmFiles[0])).digest('hex')!=='2d34ed3d829ebff018cf3afaba063c9cfd90d14b00db938d082fa862e74ce838')throw Error('PILOT_WASM_ARTIFACT_MISMATCH');
     const sources=files.filter(file=>file.endsWith('.js')||file.endsWith('.mjs'));
     if(sources.length===0)throw Error('No bundled Worker source emitted');
     const code=sources.map(file=>readFileSync(file,'utf8')).join('\n');
