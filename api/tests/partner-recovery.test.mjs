@@ -159,3 +159,41 @@ test('confirmed refund sync rejects unknown or stale totals and records cumulati
  assert.equal(db.prepare("SELECT SUM(delta_fen) total FROM partner_commission_refunds").get().total,-200);
  assert.equal(refundSyncPlan({orderId:'o',rows:read(),now:401}),null);
 });
+
+test('MK99 subscription refund requires explicit full-amount digest, not default amount or hold',async t=>{
+ const {subscriptionRefundCandidatePlan,subscriptionRefundSyncPlan}=await import('../src/partner-subscription-refund.mjs');
+ const {createHash}=await import('node:crypto');
+ const db=fixture(t);
+ db.exec(`CREATE TABLE subscription_orders(id TEXT PRIMARY KEY,user_id TEXT,kind TEXT,status TEXT,paid_at INTEGER,applied_at INTEGER,amount_fen INTEGER,target_period_id TEXT);
+ CREATE TABLE subscription_payment_transactions(id TEXT PRIMARY KEY,order_id TEXT,provider_trade_id TEXT,provider_payment_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER);
+ CREATE TABLE subscription_payment_events(transaction_id TEXT,merchant_provider TEXT,provider_event_id TEXT,event_type TEXT,amount_fen INTEGER,body_sha256 TEXT);
+ CREATE TABLE subscription_periods(id TEXT,source_order_id TEXT,user_id TEXT);
+ CREATE TABLE subscription_tier_changes(order_id TEXT,period_id TEXT,charged_fen INTEGER);
+ INSERT INTO partner_commissions VALUES('subscription','s','p','b',1,350,351,'product_principal','CNY',1000,2000,200,451,360);
+ INSERT INTO subscription_orders VALUES('s','b','upgrade','refund_pending',350,351,1000,'period');
+ INSERT INTO subscription_payment_transactions VALUES('tx','s','out','trade','mk99','paid','frozen','CNY',1000);
+ INSERT INTO subscription_payment_events VALUES('tx','mk99','payment','PAYMENT_SUCCEEDED',1000,'fixture');
+ INSERT INTO subscription_periods VALUES('period','old','b');
+ INSERT INTO subscription_tier_changes VALUES('s','period',1000);`);
+ const q=subscriptionRefundCandidatePlan('s'),read=()=>db.prepare(q.sql).all(...q.params);
+ const makeDigest=amount=>createHash('sha256').update(JSON.stringify(['out','trade','TRADE_REFUND',amount])).digest('hex');
+ const notice=(amount,digest)=>db.prepare("INSERT INTO subscription_payment_events VALUES('tx','mk99',?,'TRADE_REFUND',?,?)").run('sub-risk:'+digest,amount,digest);
+ notice(1000,makeDigest(null)); // persisted fallback amount is NOT proof
+ assert.equal(await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:500}),null);
+ db.exec("UPDATE subscription_orders SET status='refunded'; UPDATE subscription_payment_transactions SET status='refunded'");
+ let plan=await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:500});
+ assert.ok(plan?.write);assert.equal(db.prepare(plan.proof.sql).get(...plan.proof.params),undefined);
+ assert.equal(run(db,plan.write),0);
+ notice(1000,makeDigest(1000));
+ plan=await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:500});
+ assert.ok(db.prepare(plan.proof.sql).get(...plan.proof.params));
+ assert.equal(run(db,plan.write),0); // default off
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_refund_sync_enabled'");
+ assert.equal(run(db,plan.write),1);assert.equal(run(db,plan.write),0);
+ assert.equal(db.prepare("SELECT delta_fen FROM partner_commission_refunds").get().delta_fen,-200);
+ const replay=await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:501});
+ assert.equal(replay.write,null);
+ assert.ok(db.prepare(replay.proof.sql).get(...replay.proof.params));
+ db.exec("UPDATE subscription_payment_transactions SET merchant_provider='xiaodou'");
+ assert.equal(await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:502}),null);
+});
