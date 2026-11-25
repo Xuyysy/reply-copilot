@@ -42,11 +42,11 @@ export function reviewedAccrualBatch({input,row,actorId,reason,operationId}){
  AND u.role='admin' AND u.status='active' AND u.email_verified_at IS NOT NULL AND u.archived_at IS NULL AND u.is_test_account=0)
  AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_accrual_review_enabled' AND value='1')
  AND EXISTS(SELECT 1 FROM (${proof.sql}) e WHERE e.transaction_count=1 AND e.transaction_id=?
- AND e.merchant_provider=? AND e.merchant_provider IN ('mk99','xiaodou') AND e.currency='CNY'
+ AND e.merchant_provider=? AND e.provider_trade_id=? AND e.provider_payment_id=? AND e.identity_count=1 AND e.transaction_paid_at=e.paid_at AND e.merchant_provider IN ('mk99','xiaodou') AND e.currency='CNY'
  AND e.order_status='paid' AND e.payment_status='paid' AND e.risk_state='clear' AND e.refund_pending=0
  AND e.payment_proof=1 AND e.applied_proof=1 AND e.buyer_id=? AND e.paid_at=? AND e.applied_at=?
  AND e.principal_fen=? AND e.buyer_fen=? AND e.principal_refunded_fen=? AND e.refund_proof_fen=?)
- THEN 1 ELSE 0 END`,params:[assertId,actorId,...proof.params,row.transaction_id,row.merchant_provider,facts.buyerUserId,facts.paidAt,facts.appliedAt,
+ THEN 1 ELSE 0 END`,params:[assertId,actorId,...proof.params,row.transaction_id,row.merchant_provider,row.provider_trade_id,row.provider_payment_id,facts.buyerUserId,facts.paidAt,facts.appliedAt,
  facts.principalFen,row.buyer_fen,refundPrincipalFen,refundPrincipalFen]};
  const audit={sql:`INSERT INTO partner_accrual_review_audits(operation_id,order_domain,order_id,actor_id,reason,reviewed_at)
  VALUES(?,?,?,?,?,?)`,params:[operationId,facts.orderDomain,facts.orderId,actorId,reason.trim(),facts.now]};
