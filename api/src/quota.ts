@@ -1,3 +1,4 @@
+import { creditInvariant } from "./credit-assertion.js";
 import { releaseStaleProductionGenerations } from "./production-generation-timeout";
 import type { Env, Session } from "./types";
 import { ApiFailure } from "./types";
@@ -54,16 +55,13 @@ export async function releaseExpiredDeliveryReservations(env: Env, now = nowMs()
       FROM ai_credit_allocations x JOIN ai_requests r ON r.user_id=x.user_id AND r.request_id=x.request_id
       WHERE x.state='released' AND x.released_at=? AND r.status='upstream_failed' AND r.completed_at=?
       ON CONFLICT(kind,reference_id) DO NOTHING`).bind(now,now,now),
-    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
-      SELECT ?,CASE WHEN NOT EXISTS(SELECT 1 FROM credit_accounts a WHERE
+    ...creditInvariant(env,operationId,`NOT EXISTS(SELECT 1 FROM credit_accounts a WHERE
         a.free_balance<>(SELECT COALESCE(SUM(b.remaining_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='free') OR
         a.paid_balance<>(SELECT COALESCE(SUM(b.remaining_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid') OR
         a.free_generation_reserved<>(SELECT COALESCE(SUM(b.generation_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='free') OR
         a.paid_generation_reserved<>(SELECT COALESCE(SUM(b.generation_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid') OR
         a.paid_reserved_for_refunds<>(SELECT COALESCE(SUM(b.refund_reserved_credits),0) FROM credit_batches b WHERE b.user_id=a.user_id AND b.bucket='paid'))
-        AND NOT EXISTS(SELECT 1 FROM ai_credit_allocations x JOIN ai_requests r ON r.user_id=x.user_id AND r.request_id=x.request_id WHERE x.state='released' AND x.released_at=? AND r.status='upstream_failed' AND r.completed_at=? AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.user_id=x.user_id AND l.kind='generation_release' AND l.reference_id=x.user_id||':'||x.request_id))
-        THEN 1 ELSE 0 END`).bind(operationId,now,now),
-    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(operationId),
+        AND NOT EXISTS(SELECT 1 FROM ai_credit_allocations x JOIN ai_requests r ON r.user_id=x.user_id AND r.request_id=x.request_id WHERE x.state='released' AND x.released_at=? AND r.status='upstream_failed' AND r.completed_at=? AND NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.user_id=x.user_id AND l.kind='generation_release' AND l.reference_id=x.user_id||':'||x.request_id))`,[now,now]),
   ];
   await env.DB.batch(statements);
 }
@@ -164,13 +162,11 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
       WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE id=? AND state='reserved')`).bind(now,session.user_id,allocationId),
     env.DB.prepare("UPDATE ai_budget_days SET reserved_micro_usd=reserved_micro_usd+? WHERE budget_day=? AND reserved_micro_usd+settled_micro_usd+?<=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(budgetReserve,budgetDay,budgetReserve,budgetLimit,session.user_id,requestId,nonce),
     env.DB.prepare("UPDATE site_daily_usage SET used=used+1 WHERE quota_date=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND reservation_nonce=?)").bind(date,session.user_id,requestId,nonce),
-    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok)
-      SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
+    ...creditInvariant(env,nonce,`EXISTS(SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
         WHERE r.user_id=? AND r.request_id=? AND r.reservation_nonce=? AND r.status='reserved' AND x.state='reserved' AND b.generation_reserved_credits>0
         AND a.${lot.bucket === "free" ? "free_generation_reserved" : "paid_generation_reserved"}>0
         AND EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=? AND d.reserved_micro_usd>=?)
-        AND EXISTS(SELECT 1 FROM site_daily_usage s WHERE s.quota_date=? AND s.used>0)) THEN 1 ELSE 0 END`).bind(nonce,session.user_id,requestId,nonce,budgetDay,budgetReserve,date),
-    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(nonce),
+        AND EXISTS(SELECT 1 FROM site_daily_usage s WHERE s.quota_date=? AND s.used>0))`,[session.user_id,requestId,nonce,budgetDay,budgetReserve,date]),
   ];
   try { await env.DB.batch(batch); } catch {
     const concurrent = await existing(env, session.user_id, requestId);
@@ -253,7 +249,7 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
       env.DB.prepare("UPDATE credit_batches SET remaining_credits=remaining_credits-1,consumed_credits=consumed_credits+1,generation_reserved_credits=generation_reserved_credits-1 WHERE id=? AND remaining_credits>0 AND generation_reserved_credits>0 AND refund_reserved_credits=0 AND status='active' AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='consumed' AND consumed_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?)").bind(allocation.credit_batch_id,userId,requestId,now,userId,requestId,operationId),
       env.DB.prepare("UPDATE credit_accounts SET free_balance=free_balance-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END,paid_balance=paid_balance-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END,free_generation_reserved=MAX(0,free_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='free' THEN 1 ELSE 0 END),paid_generation_reserved=MAX(0,paid_generation_reserved-CASE WHEN (SELECT bucket FROM credit_batches WHERE id=?)='paid' THEN 1 ELSE 0 END),version=version+1,updated_at=? WHERE user_id=? AND EXISTS(SELECT 1 FROM ai_credit_allocations WHERE user_id=? AND request_id=? AND state='consumed' AND consumed_at=?) AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?) AND free_balance+paid_balance>0").bind(allocation.credit_batch_id,allocation.credit_batch_id,allocation.credit_batch_id,allocation.credit_batch_id,now,userId,userId,requestId,now,userId,requestId,operationId),
       env.DB.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) SELECT ?,?,'generation_debit',CASE WHEN b.bucket='free' THEN -1 ELSE 0 END,CASE WHEN b.bucket='paid' THEN -1 ELSE 0 END,?,?,? FROM credit_batches b JOIN ai_credit_allocations x ON x.credit_batch_id=b.id WHERE b.id=? AND x.user_id=? AND x.request_id=? AND x.state='consumed' AND x.consumed_at=? AND EXISTS(SELECT 1 FROM ai_requests WHERE user_id=? AND request_id=? AND delivery_confirmation_id=?) ON CONFLICT(kind,reference_id) DO NOTHING").bind(uuid(),userId,`${userId}:${requestId}`,"回复已送达插件，扣除一次额度",now,allocation.credit_batch_id,userId,requestId,now,userId,requestId,operationId),
-      env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN EXISTS(
+      ...creditInvariant(env,operationId,`EXISTS(
         SELECT 1 FROM ai_requests r JOIN ai_credit_allocations x ON x.user_id=r.user_id AND x.request_id=r.request_id
         JOIN credit_batches b ON b.id=x.credit_batch_id JOIN credit_accounts a ON a.user_id=r.user_id
         JOIN credit_ledger l ON l.user_id=r.user_id AND l.kind='generation_debit' AND l.reference_id=?
@@ -265,15 +261,17 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
           AND a.free_generation_reserved=(SELECT COALESCE(sum(generation_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='free')
           AND a.paid_generation_reserved=(SELECT COALESCE(sum(generation_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')
           AND a.paid_reserved_for_refunds=(SELECT COALESCE(sum(refund_reserved_credits),0) FROM credit_batches WHERE user_id=? AND bucket='paid')
-      ) THEN 1 ELSE 0 END`).bind(operationId,`${userId}:${requestId}`,userId,requestId,operationId,now,allocation.credit_batch_id,userId,userId,userId,userId,userId),
-      env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(operationId),
+      )`,[`${userId}:${requestId}`,userId,requestId,operationId,now,allocation.credit_batch_id,userId,userId,userId,userId,userId]),
     ]);
   } catch {
     const current=await env.DB.prepare("SELECT status,delivery_confirmation_id FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId,requestId).first<{status:string;delivery_confirmation_id:string|null}>();
     if(current?.status==="succeeded"&&current.delivery_confirmation_id){await bestEffortReferralAward(env,userId);return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);}
     throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   }
-  if(batch[5].meta.changes!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
+  // The read-only assertion has no write count. Its success is enforced by
+  // the batch itself; confirm the unique request claim instead.
+  const confirmedChanges=env.CF_FREE_ZERO_WRITE_ASSERTIONS==="1"?batch[0].meta.changes:batch[5].meta.changes;
+  if(confirmedChanges!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   await bestEffortReferralAward(env,userId);
   return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId)},200,env,request);
 }

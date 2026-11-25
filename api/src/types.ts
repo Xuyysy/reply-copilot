@@ -1,6 +1,8 @@
 import type { PasswordVerifierDO } from "../prototypes/cf-free-password-do/src/index";
 
 export interface Env {
+  // Default off. Enable only after independent D1 transaction and rollout review.
+  CF_FREE_ZERO_WRITE_ASSERTIONS?: string;
   DB: D1Database;
   ENVIRONMENT: string;
   WEB_ORIGIN: string;
