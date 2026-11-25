@@ -465,6 +465,8 @@
     // this source article, its dialog, the bound editor, or a newly created
     // competing dialog. Never filter unbound sessions: they must reject a
     // wrong target immediately, before a second human Reply gesture.
+    const modernObservation=post.modernLayout||post.replyRouteVerified;
+    const extraHydrationAttributes=new Set(['data-status','lang','dir','class']);
     const mutationTouchesReply=records=>{
       if(!records?.length)return true; // conservative on unknown records
       const editor=session.editor,article=session.post?.article;
@@ -478,7 +480,11 @@
         if(inside(node,article)||inside(node,dialog)||node===editor)return true;
         if(record.type==='attributes')
           return Boolean(node.contains?.(article)||node.contains?.(dialog)||
-            node.contains?.(editor));
+            node.contains?.(editor)||
+            // A competing dialog can become visible by changing its class
+            // alone. Do not drop that change in the modern observer.
+            (modernObservation&&extraHydrationAttributes.has(record.attributeName)&&
+             (node.closest?.('[role="dialog"]')||node.querySelector?.('[role="dialog"]'))));
         if(record.type==='characterData')return false;
         if(record.type!=='childList')return true;
         const changed=[...(record.addedNodes||[]),...(record.removedNodes||[])];
@@ -517,10 +523,23 @@
       // clearly unrelated changes and batch relevant mutation bursts.
       if(session.editor){
         if(mutationTouchesReply(records))scheduleLocate();
-      }else locate();
+      }else {
+        // The additional modern-only hydration attributes can be noisy on
+        // a virtualized feed. Ignore ONLY batches consisting entirely of
+        // those attributes outside the captured source and every dialog.
+        // Original acquisition signals, unknown records and focus are
+        // still immediate; no timeout or debounce is introduced.
+        const onlyUnrelatedHydration=modernObservation&&records?.length&&records.every(record=>{
+          const node=record.target,article=session.post?.article;
+          return record.type==='attributes'&&extraHydrationAttributes.has(record.attributeName)&&node&&
+            node!==article&&!article?.contains?.(node)&&!node.contains?.(article)&&
+            !node.closest?.('[role="dialog"]')&&!node.querySelector?.('[role="dialog"]');
+        });
+        if(!onlyUnrelatedHydration)locate();
+      }
     });
     const observedAttributes=['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly'];
-    if(post.modernLayout||post.replyRouteVerified)observedAttributes.push('inert','aria-disabled','aria-readonly','data-status','lang','dir','class');
+    if(modernObservation)observedAttributes.push('inert','aria-disabled','aria-readonly',...extraHydrationAttributes);
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:observedAttributes});
     locate();
   }

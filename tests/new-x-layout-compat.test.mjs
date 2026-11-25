@@ -221,6 +221,18 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       checks.focalIgnoresNestedQuote=de().ok&&de().statusId==='929'&&de().sourceText==='Detail body';nested.remove();
       const inline=document.createElement('form');inline.innerHTML='<textarea aria-label="Post your reply"></textarea>';detail.append(inline);inline.querySelector('textarea').focus();
       od.remove();checks.noInlineReplyAssociation=a.snapshot(document,de(),start,start,20).editors.length===0;
+      // Count actual DOM operations, not noisy wall-clock time on CI.
+      // Normal legacy extraction must not inspect modern body/quote
+      // selectors or repeat the layout classification.
+      const legacyQuery=legacy.querySelectorAll,legacyMatch=legacy.matches;
+      let modernQueries=0,legacyClassifications=0;
+      legacy.querySelectorAll=function(selector){
+        if(selector.includes('whitespace-pre-wrap')||selector.includes('data-engagement-action')||selector.includes('embedded-tweet-frame')||selector.includes('dir="auto"'))modernQueries++;
+        return legacyQuery.call(this,selector);
+      };
+      legacy.matches=function(selector){if(selector==='[data-testid="tweet"]')legacyClassifications++;return legacyMatch.call(this,selector);};
+      checks.legacyFastPath=p.extractPost(legacy).ok&&modernQueries===0&&legacyClassifications===1;
+      legacy.querySelectorAll=legacyQuery;legacy.matches=legacyMatch;
       $('result').textContent=JSON.stringify(checks);
     };
     const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
@@ -239,7 +251,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,101);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,102);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });

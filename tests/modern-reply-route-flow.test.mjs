@@ -141,14 +141,20 @@ test('real Chromium trusted click through content script, portal, generation and
       assert.equal(state.generated,shouldGenerate?1:0,mode+JSON.stringify(state));
       return state;
     }
-    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict','hybrid-good','hybrid-no-proof','quote-only-good','quote-only-conflict','focal-active-good','focal-active-conflict']){
-      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good','hybrid-good','quote-only-good','focal-active-good'].includes(mode);
+    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict','hybrid-good','hybrid-no-proof','quote-only-good','quote-only-conflict','focal-active-good','focal-active-conflict','late-competing-class']){
+      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good','hybrid-good','quote-only-good','focal-active-good','late-competing-class'].includes(mode);
       const before=await open(mode,shouldGenerate);
       if(shouldGenerate){
         assert.equal(before.host,true,mode);
         if(mode==='late-draft')await evalIn("fixture.editor.value='user draft';fixture.editor.dispatchEvent(new InputEvent('input',{bubbles:true}))");
         if(mode==='late-media')await evalIn('fixture.addMedia()');
         if(mode==='late-route')await evalIn("history.pushState({},'', '/compose/post?in_reply_to=999');window.dispatchEvent(new PopStateEvent('popstate'))");
+        if(mode==='late-competing-class'){
+          await evalIn("(()=>{const style=document.createElement('style');style.textContent='.fixture-hidden{display:none}';document.head.append(style);const d=document.createElement('div');d.setAttribute('role','dialog');d.className='fixture-hidden';d.innerHTML='<textarea aria-label=\"Other reply\"></textarea>';document.body.append(d);window.fixture.other=d;})()");
+          await wait(40);
+          await evalIn("fixture.other.classList.remove('fixture-hidden')");
+          await wait(40);
+        }
         await evalIn('fixture.resolve()');await wait(240);
       }
       const state=await evalIn('fixture.result()');
