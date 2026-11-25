@@ -42,8 +42,20 @@ async function allowed(request: Request, expected: string): Promise<boolean> {
   for(let i=0;i<aa.length;i++)diff|=aa[i]^bb[i];
   return diff===0;
 }
+// Only expose a fixed synthetic diagnostic category, never exception text.
+function failureKind(error: unknown): string {
+  const e=error as {name?:unknown;message?:unknown};
+  const message=typeof e?.message==="string"?e.message:"";
+  if(/(?:pbkdf2|iterations?)/i.test(message)&&/(?:limit|maximum|not supported|too (?:many|large)|exceed|above)/i.test(message))
+    return "KDF_RUNTIME_LIMIT";
+  if(/(?:cpu time|exceeded cpu|cpu limit|resource limit)/i.test(message))return "RUNTIME_RESOURCE_LIMIT";
+  if(e?.name==="NotSupportedError")return "KDF_NOT_SUPPORTED";
+  if(e?.name==="OperationError")return "KDF_OPERATION_ERROR";
+  return "UNCLASSIFIED";
+}
 export default {
   async fetch(request: Request, env: PilotEnv): Promise<Response> {
+    let stage="REQUEST";
     try {
       const path=new URL(request.url).pathname;
       if(path!=="/__pilot"&&path!=="/probe")return json({ok:false,code:"NOT_FOUND"},404);
@@ -79,19 +91,21 @@ export default {
       const stored=HASHES[rounds];
       let verified:boolean;
       if(input.mode==="http"){
+        stage="HTTP_VERIFY";
         verified=await verifyPassword(env,password,stored);
       }else{
         if(!env.PASSWORD_VERIFY_DO)return json({ok:false,code:"VERIFIER_UNAVAILABLE"},503);
+        stage="DO_RPC";
         const result=await env.PASSWORD_VERIFY_DO.getByName("synthetic-legacy-factor-"+rounds).verify(password,stored);
         if(typeof result!=="boolean")return json({ok:false,code:"VERIFIER_UNAVAILABLE"},503);
         verified=result;
       }
       return json({ok:true,kind:PROBE_KIND,mode:input.mode,rounds,verified,
         syntheticOnly:true,freeCertified:false});
-    }catch{
+    }catch(error){
       // Never reflect exceptions, PBKDF2 parameters beyond allowlisted
       // round counts, credentials, stack traces or provider details.
-      return json({ok:false,code:"PILOT_UNAVAILABLE"},503);
+      return json({ok:false,code:"PILOT_UNAVAILABLE",stage,failure:failureKind(error)},503);
     }
   }
 };
