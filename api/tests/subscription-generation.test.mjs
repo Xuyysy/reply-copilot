@@ -258,10 +258,13 @@ test('0.3.5 wire path receives three candidates and never recaches exhausted per
   assert.equal(received.status,200);
   assert.equal(received.body.quota,undefined);
   assert.equal(received.body.subscription.remainingToday,499);
+  balanceReads.length=0;fundingReads.length=0;
   const replayed=await f.call('/v1/ai/generate',{headers,body});
   assert.equal(replayed.status,200);
   assert.equal(replayed.body.raw,first.body.raw);
   assert.equal(replayed.body.quota,undefined);
+  assert.equal(balanceReads.length,0,"subscription replay never builds unused permanent quota");
+  assert.equal(fundingReads.length,1,"subscription replay identifies committed funding once");
   assert.equal((await ack(f,800)).body.alreadyConfirmed,true);
   assert.equal(daily(f).used,1);
  }finally{f.sql.close();}

@@ -115,8 +115,8 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     ).bind(session.user_id,input.requestId).first())return {};
     return {quota:await getQuota()};
   };
-  const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash));
-  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...await wireQuota(()=>prior.quota)}),200,env,request);
+  const prior=await trace.measure("worker_replay",()=>checkGenerationReplay(env,session,input.requestId,hash,{omitSubscriptionReplayQuota:true}));
+  if(prior?.kind==="replay")return response(withTimings({requestId:input.requestId,raw:serializeModelOutput(prior.raw),...(prior.quota===undefined?{}:{quota:prior.quota})}),200,env,request);
   const promptBuilder=env.ENVIRONMENT==="production"&&input.outputSchemaVersion===2?buildProductionV55NoCorpusPrompts:buildPrompts;
   const prompts = promptBuilder({ postContext: input.post, voiceProfile: input.profile, recentHistory: input.history, styleStats: input.styleStats, replyStyle: input.replyStyle, outputSchemaVersion: input.outputSchemaVersion || 1 } as any);
   const configuredModel=mode==="real"?await trace.measure("worker_config",()=>activeProvider(env)):null;
@@ -124,7 +124,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const budgetReserve=configuredModel?configuredReservation(configuredModel,prompts.system,prompts.user):reservationCost(env,prompts.system,prompts.user,mode);
   trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
-    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true})),
+    reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true,omitSubscriptionReplayQuota:true})),
     provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
     if(mode==="real"&&!configuredModel) {
@@ -138,7 +138,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
   });
-  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...await wireQuota(()=>execution.quota) }), 200, env, request);
+  if (execution.kind === "replay") return response(withTimings({ requestId: input.requestId, raw: serializeModelOutput(execution.raw), ...(execution.quota===undefined?{}:{quota:execution.quota}) }), 200, env, request);
   if (execution.kind === "abandoned") throw new ApiFailure(409,"GENERATION_ABANDONED","这次生成已结束，请使用新的回复请求。");
   if (execution.kind === "failed") {
     const error = execution.error;

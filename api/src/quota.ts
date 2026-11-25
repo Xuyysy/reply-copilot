@@ -10,7 +10,7 @@ import {reserveSubscribedGeneration,confirmSubscribedDelivery,failSubscribedGene
 import { bestEffortReferralAward } from "./referrals";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
-export type Reservation = { kind: "new"; quota?: Balance; funding?: "subscription"|"free"|"paid" } | { kind: "replay"; quota: Balance; raw: string };
+export type Reservation = { kind: "new"; quota?: Balance; funding?: "subscription"|"free"|"paid" } | { kind: "replay"; quota?: Balance; raw: string };
 type StoredRequest = { status: string; generation_phase?: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
 type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
 
@@ -78,10 +78,18 @@ export async function balance(env: Env, userId: string): Promise<Balance> {
 async function existing(env: Env, userId: string, requestId: string): Promise<StoredRequest | null> {
   return env.DB.prepare("SELECT status,generation_phase,request_hash,raw_response,response_expires_at FROM ai_requests WHERE user_id=? AND request_id=?").bind(userId, requestId).first<StoredRequest>();
 }
-async function replay(env: Env, userId: string, requestId: string, hash: string, row: StoredRequest, now: number): Promise<Reservation> {
+async function replay(env: Env, userId: string, requestId: string, hash: string, row: StoredRequest, now: number, omitSubscriptionQuota=false): Promise<Reservation> {
   if(row.status === "upstream_failed" && row.request_hash === "") throw new ApiFailure(409,"GENERATION_FAILED","原生成已结束，请重新生成。 ");
   if (row.request_hash !== hash) throw new ApiFailure(409, "IDEMPOTENCY_CONFLICT", "同一请求标识不能用于不同内容。");
-  if ((row.status === "succeeded" || row.generation_phase === "awaiting_delivery") && row.raw_response && row.response_expires_at && row.response_expires_at > now) return { kind: "replay", raw: row.raw_response, quota: await balance(env, userId) };
+  if ((row.status === "succeeded" || row.generation_phase === "awaiting_delivery") && row.raw_response && row.response_expires_at && row.response_expires_at > now) {
+    // HTTP clients must not receive permanent-credit quota for a subscription
+    // result. Read the immutable funding allocation first, exactly as the wire
+    // path did before; avoid building a balance that would be discarded.
+    if(omitSubscriptionQuota&&subscriptionsEnabled(env)&&await env.DB.prepare(
+      "SELECT 1 FROM subscription_ai_allocations WHERE user_id=? AND request_id=?"
+    ).bind(userId,requestId).first())return {kind:"replay",raw:row.raw_response};
+    return {kind:"replay",raw:row.raw_response,quota:await balance(env,userId)};
+  }
   if (row.status === "reserved") throw new ApiFailure(409, "GENERATION_IN_PROGRESS", "这条回复仍在生成或确认交付，请稍后再试。", 3);
   if (row.status === "succeeded") throw new ApiFailure(409, "IDEMPOTENCY_RESULT_EXPIRED", "原结果已过保留期，请重新生成。");
   if (row.status === "upstream_failed") throw new ApiFailure(409, "GENERATION_FAILED", "这次生成已失败且额度已释放，请重新生成。", 1);
@@ -97,12 +105,12 @@ export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generati
   )) needs_cleanup
   FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean;omitNewQuota?:boolean} = {}): Promise<Reservation> {
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean;omitNewQuota?:boolean;omitSubscriptionReplayQuota?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
   if(!options.prechecked){
     await releaseExpiredDeliveryReservations(env, now, session.user_id);
     const prior = await existing(env, session.user_id, requestId);
-    if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now);
+    if (prior) return replay(env, session.user_id, requestId, requestHash, prior, now, options.omitSubscriptionReplayQuota);
   }
   // The subscription reservation owns the authoritative eligibility read.
   // Avoid reading the same paid proof and usage twice on a normal request.
@@ -112,7 +120,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
         return options.omitNewQuota ? {kind:'new',funding:'subscription'} : {kind:'new',quota:await balance(env,session.user_id)};
     }catch(error){
       const concurrent=await existing(env,session.user_id,requestId);
-      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,now);
+      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,now,options.omitSubscriptionReplayQuota);
       throw error;
     }
   }
@@ -135,7 +143,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
     if(options.prechecked&&!options.cleanupRetried){
       await releaseExpiredDeliveryReservations(env,nowMs(),session.user_id);
       const concurrent=await existing(env,session.user_id,requestId);
-      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs());
+      if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,nowMs(),options.omitSubscriptionReplayQuota);
       return reserveGeneration(env,session,requestId,requestHash,budgetReserve,providerSnapshot,{...options,prechecked:true,cleanupRetried:true});
     }
     throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
@@ -171,7 +179,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   ];
   try { await env.DB.batch(batch); } catch {
     const concurrent = await existing(env, session.user_id, requestId);
-    if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now);
+    if (concurrent) return replay(env, session.user_id, requestId, requestHash, concurrent, now, options.omitSubscriptionReplayQuota);
     const user = await env.DB.prepare("SELECT status FROM users WHERE id=?").bind(session.user_id).first<{status:string}>();
     if (user?.status === "frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
     const budget = await env.DB.prepare("SELECT reserved_micro_usd,settled_micro_usd FROM ai_budget_days WHERE budget_day=?").bind(budgetDay).first<{reserved_micro_usd:number;settled_micro_usd:number}>();
@@ -188,15 +196,15 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   return options.omitNewQuota ? {kind:"new",funding:lot.bucket} : {kind:"new", quota:await balance(env,session.user_id)};
 }
 
-export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string): Promise<Reservation | null> {
+export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string, options:{omitSubscriptionReplayQuota?:boolean}={}): Promise<Reservation | null> {
   const now = nowMs();
   const inspection=await env.DB.prepare(GENERATION_PREFLIGHT_SQL).bind(session.user_id,now-600000,now,session.user_id,requestId).first<StoredRequest & {request_id:string|null;needs_cleanup:number}>();
   if(inspection?.needs_cleanup){
     await releaseExpiredDeliveryReservations(env,now,session.user_id);
     const prior=await existing(env,session.user_id,requestId);
-    return prior?replay(env,session.user_id,requestId,requestHash,prior,now):null;
+    return prior?replay(env,session.user_id,requestId,requestHash,prior,now,options.omitSubscriptionReplayQuota):null;
   }
-  return inspection?.request_id?replay(env,session.user_id,requestId,requestHash,inspection,now):null;
+  return inspection?.request_id?replay(env,session.user_id,requestId,requestHash,inspection,now,options.omitSubscriptionReplayQuota):null;
 }
 
 
