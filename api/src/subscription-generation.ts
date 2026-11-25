@@ -1,3 +1,4 @@
+import { creditInvariant } from './credit-assertion.js';
 import type { Env } from './types';
 import { ApiFailure } from './types';
 import { nowMs, shanghaiDay, uuid } from './security';
@@ -19,10 +20,7 @@ async function pendingSubscriptionAllocation(env:Env,userId:string,requestId:str
 }
 
 function invariant(env:Env,operationId:string,assertionSql:string,values:unknown[]) {
-  return [
-    env.DB.prepare("INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN "+assertionSql+" THEN 1 ELSE 0 END").bind(operationId,...values),
-    env.DB.prepare("DELETE FROM credit_operation_assertions WHERE operation_id=?").bind(operationId)
-  ];
+  return creditInvariant(env,operationId,assertionSql,values);
 }
 
 /**
