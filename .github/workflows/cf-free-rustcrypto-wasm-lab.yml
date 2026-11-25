@@ -25,6 +25,13 @@ jobs:
           cargo +1.85.1 generate-lockfile
           cargo +1.85.1 build --locked --release --target wasm32-unknown-unknown
           sha256sum Cargo.lock target/wasm32-unknown-unknown/release/xrh_legacy_kdf_lab.wasm
+          echo '09a6085dc9e2becfde66d4c013a8f5b2423800513ca8b3af6a6e37f6e632ccc3  Cargo.lock' | sha256sum -c -
+          echo '2d34ed3d829ebff018cf3afaba063c9cfd90d14b00db938d082fa862e74ce838  target/wasm32-unknown-unknown/release/xrh_legacy_kdf_lab.wasm' | sha256sum -c -
+          printf 'XRH_PUBLIC_CARGO_LOCK_B64 '
+          base64 -w0 Cargo.lock
+          printf '\nXRH_PUBLIC_WASM_B64 '
+          base64 -w0 target/wasm32-unknown-unknown/release/xrh_legacy_kdf_lab.wasm
+          printf '\n'
       - name: Test exact compatibility and benchmark real local workerd
         run: node api/scripts/cf-free-rustcrypto-wasm-lab.mjs
       - uses: actions/upload-artifact@v4
