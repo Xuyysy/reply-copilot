@@ -13,6 +13,7 @@ const dist=path.join(temp,'dist'),cleanups=[];
 const {f,db,reauth,enable,tokens}=setup({after:fn=>cleanups.push(fn)});
 const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const nativeFetch=globalThis.fetch;
+const routeTrace=[];
 let server,child,socket,next=0,origin;const pending=new Map();
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function until(fn,label,ms=20000){const end=Date.now()+ms;while(Date.now()<end){if(await fn())return;await delay(100);}throw Error('Browser QA timed out: '+label);}
@@ -20,18 +21,25 @@ function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++
 async function ev(expression){const r=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error('Browser evaluation failed');return r.result.result.value;}
 const visible="e=>e.getClientRects().length>0";
 async function text(s){await until(()=>ev('document.body.innerText.includes('+JSON.stringify(s)+')'),s);}
-// Radix tabs activate on pointer down/focus, not synthetic HTMLElement.click().
+// Radix tabs require pointer activation. Ordinary buttons use native DOM
+// activation, avoiding sticky-header hit testing while retaining React handlers.
 async function click(s,scope='body'){
- const selector='(()=>{const root=document.querySelector('+JSON.stringify(scope)+');const e=[...root.querySelectorAll("button,[role=tab]")].find(e=>e.textContent.trim()==='+JSON.stringify(s)+'&&('+visible+')(e)&&!e.disabled);if(!e)return false;e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()';
+ const selector='(()=>{const root=document.querySelector('+JSON.stringify(scope)+');if(!root)return false;const e=[...root.querySelectorAll("button,[role=tab]")].find(e=>e.textContent.trim()==='+JSON.stringify(s)+'&&('+visible+')(e)&&!e.disabled);if(!e)return false;if(e.getAttribute("role")!=="tab"){e.click();return {clicked:true};}e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()';
  let point;await until(async()=>{point=await ev(selector);return !!point;},s);
+ if(point.clicked)return;
  await cdp('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});
  await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});
+}
+async function card(title,key){
+ const expr='(()=>{const e=[...document.querySelectorAll("[data-slot=card-title]")].find(e=>e.textContent.trim()==='+JSON.stringify(title)+');const c=e?.closest("[data-slot=card]");if(!c)return false;c.dataset.qaTarget='+JSON.stringify(key)+';return true})()';
+ await until(()=>ev(expr),title);
+ return '[data-qa-target="'+key+'"]';
 }
 async function fill(label,value,scope='body'){
  const expr='(()=>{const root=document.querySelector('+JSON.stringify(scope)+');if(!root)return false;const l=[...root.querySelectorAll("label")].find(e=>e.textContent.trim().startsWith('+JSON.stringify(label)+'));const e=l?.querySelector("input")||[...root.querySelectorAll("input")].find(e=>e.getAttribute("aria-label")==='+JSON.stringify(label)+');if(!e||e.disabled)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(value)+');e.dispatchEvent(new Event("input",{bubbles:true}));return true})()';
  await until(()=>ev(expr),label);
 }
-async function check(label){await until(()=>ev('(()=>{const l=[...document.querySelectorAll("label")].find(e=>e.textContent.includes('+JSON.stringify(label)+'));const e=l?.querySelector("input[type=checkbox]");if(!e||e.disabled)return false;if(!e.checked)e.click();return true})()'),label);}
+async function check(label,scope='body'){await until(()=>ev('(()=>{const l=[...document.querySelector('+JSON.stringify(scope)+').querySelectorAll("label")].find(e=>e.textContent.includes('+JSON.stringify(label)+'));const e=l?.querySelector("input[type=checkbox]");if(!e||e.disabled)return false;if(!e.checked)e.click();return true})()'),label);}
 async function as(id,url){
  await cdp('Network.clearBrowserCookies');await cdp('Network.setCookie',{name:'rc_session',value:tokens[id],url:origin,httpOnly:true,sameSite:'Lax'});
  await cdp('Page.navigate',{url:origin+url});await until(()=>ev('location.href==='+JSON.stringify(origin+url)+'&&document.readyState==="complete"&&[...document.querySelectorAll("astro-island")].every(e=>!e.hasAttribute("ssr"))'),'navigation '+url);
@@ -45,7 +53,12 @@ try{
     const chunks=[];for await(const chunk of req)chunks.push(chunk);
     const headers=new Headers();for(const [k,v] of Object.entries(req.headers))if(v!==undefined)headers.set(k,Array.isArray(v)?v.join(','):v);
     const response=await worker.fetch(new Request(origin+req.url,{method:req.method,headers,...(['GET','HEAD'].includes(req.method)?{}:{body:Buffer.concat(chunks)})}),f.env);
-    res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));return;
+    const bytes=Buffer.from(await response.arrayBuffer());
+    if(u.pathname.includes('/partners/')){
+     let code,ok;try{const value=JSON.parse(bytes);code=value.code||value.reason;ok=value.ok;}catch{}
+     routeTrace.push({method:req.method,path:u.pathname,action:u.searchParams.get('action')||undefined,status:response.status,...(typeof code==='string'&&/^[A-Za-z0-9_]{1,80}$/.test(code)?{code}:{}),...(typeof ok==='boolean'?{ok}:{})});
+    }
+    res.writeHead(response.status,Object.fromEntries(response.headers));res.end(bytes);return;
    }
    const rel=decodeURIComponent(u.pathname),file=path.resolve(dist,'.'+(rel.endsWith('/')?rel+'index.html':path.extname(rel)?rel:rel+'/index.html'));
    if(!file.startsWith(dist+path.sep)||!existsSync(file)||!statSync(file).isFile()){res.writeHead(404);res.end();return;}
@@ -79,12 +92,10 @@ try{
  db.exec("INSERT INTO partner_discovery_cursors VALUES('recharge',0,'',0),('subscription',0,'',0)");
  await worker.scheduled({},f.env);
  // Exercise the actual browser controls, including approval confirmation.
- const queueScope='[data-slot=card]';
- const queueIndex=await ev('[...document.querySelectorAll('+JSON.stringify(queueScope)+')].findIndex(e=>e.textContent.includes("计佣审核队列（测试）"))');
- assert.ok(queueIndex>=0);
- await ev('document.querySelectorAll('+JSON.stringify(queueScope)+')['+queueIndex+'].querySelector("button").click()');
- await text('discovered');await click('核对');await text('净候选佣金');
- await fill('审核原因','isolated browser review');await check('我已人工核对风险与证据');await click('批准后台模拟入账');
+ const queueScope=await card('计佣审核队列（测试）','queue');
+ await click('查询',queueScope);await text('discovered');
+ await click('核对',queueScope);await text('净候选佣金');
+ await fill('审核原因','isolated browser review',queueScope);await check('我已人工核对风险与证据',queueScope);await click('批准后台模拟入账',queueScope);
  await until(()=>db.prepare("SELECT COUNT(*) n FROM partner_accrual_approvals").get().n===1,'browser approval');
  await worker.scheduled({},f.env);
  assert.equal(db.prepare("SELECT commission_fen FROM partner_commissions").get().commission_fen,2000);
@@ -101,17 +112,18 @@ try{
  await as('q','/account/');await click('查询推广伙伴资格');await text('目前未开放推广伙伴资格或尚未获得授权。');
  assert.equal(await ev('document.body.innerText.includes("f***@***")'),false);
  await cdp('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
- await as('a','/admin/');await click('推广管理');await fill('推广伙伴用户 ID','p');
+ await as('a','/admin/');await click('推广管理');const payoutScope=await card('支付宝结算申请','payout');await fill('推广伙伴用户 ID','p',payoutScope);
  await ev('document.querySelector("input[aria-label=\\\"推广伙伴用户 ID\\\"]").closest("form").requestSubmit()');
- await text('待审核');await fill('审核原因','isolated browser payout');await check('已人工核对相应订单与转账证据');await click('模拟批准并预留');await text('已预留');
- await fill('审核原因','isolated browser payout');await check('已人工核对相应订单与转账证据');await click('锁定转账并查看账号');await text('fixture@example.test');await click('隐藏');
+ await text('待审核');await fill('审核原因','isolated browser payout',payoutScope);await check('已人工核对相应订单与转账证据',payoutScope);await click('模拟批准并预留',payoutScope);await text('已预留');
+ await fill('审核原因','isolated browser payout',payoutScope);await check('已人工核对相应订单与转账证据',payoutScope);await click('锁定转账并查看账号',payoutScope);await text('fixture@example.test');await click('隐藏',payoutScope);
  assert.equal(await ev('document.body.innerText.includes("fixture@example.test")'),false);
- await fill('审核原因','isolated browser payout');await check('已人工核对相应订单与转账证据');await fill('确认金额','10');await fill('模拟转账流水号','browser-synthetic-transfer');await click('确认模拟付款');await text('已结算');
+ await fill('审核原因','isolated browser payout',payoutScope);await check('已人工核对相应订单与转账证据',payoutScope);await fill('确认金额','10');await fill('模拟转账流水号','browser-synthetic-transfer');await click('确认模拟付款',payoutScope);await text('已结算');
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
  console.log('PARTNER_BROWSER_QA_PASS: actual Astro account/admin pages; real Worker; synthetic authorization, approval, recipient, request, reserve, reveal, outcome and ownership');
 }catch(error){
  // Safe diagnostics only: never dump DOM, cookies, or raw financial data.
+ console.error('QA route trace',JSON.stringify(routeTrace.slice(-25)));
  if(socket)try{console.error('QA diagnostic',await ev('JSON.stringify({path:location.pathname,tabs:[...document.querySelectorAll("[role=tab][data-state=active]")].map(e=>e.textContent.trim()),cards:[...document.querySelectorAll("[data-slot=card-title]")].map(e=>e.textContent.trim()),islands:[...document.querySelectorAll("astro-island")].map(e=>e.hasAttribute("ssr"))})'));}catch{}
  throw error;
 }finally{
