@@ -148,7 +148,7 @@ test('cloud response classifier rejects wrong results and non-JSON Cloudflare CP
 
 test('direct HTTP resource failures are recorded separately from successful DO controls',async()=>{
   const report=await probeCloudPilot({url:PILOT_URL,token:TOKEN,repeats:1,fetchImpl:async(url,init)=>{
-    assert.equal(init.redirect,'error');
+    assert.equal(init.redirect,url.endsWith('/__pilot')?'manual':'error');
     if(url.endsWith('/__pilot'))return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',protocol:1,syntheticOnly:true,freeCertified:false});
     const {mode,rounds,wrong}=JSON.parse(init.body);
     if(mode==='http'&&rounds>10000)return new Response('<html>Error 1102</html>',{status:500});
@@ -158,4 +158,20 @@ test('direct HTTP resource failures are recorded separately from successful DO c
   assert.equal(report.outcome,'SYNTHETIC_SMOKE_FAIL');
   assert.equal(report.freeCertified,false);
   assert.equal(report.safeToDowngradeProduction,false);
+});
+
+test('identity redirect and mismatch stop immediately and never send password probes',async()=>{
+  for(const [response,code] of [[()=>new Response(null,{status:302,headers:{location:'https://example.test/'}}),'PROBE_IDENTITY_REDIRECT_REJECTED'],[()=>Response.json({kind:'wrong'}),'PROBE_IDENTITY_MISMATCH'],[()=>new Response(null,{status:403}),'PROBE_IDENTITY_HTTP_403']]){
+    let count=0;
+    await assert.rejects(()=>probeCloudPilot({url:PILOT_URL,token:TOKEN,fetchImpl:async(url,init)=>{count++;assert.ok(url.endsWith('/__pilot'));assert.equal(init.redirect,'manual');return response();}}),e=>e.message===code&&e.identityAttempts.length===1);
+    assert.equal(count,1);
+  }
+});
+test('identity can recover from one transient deployment 404 without replaying calculation probes',async()=>{
+  let identityCalls=0,probeCalls=0;
+  const report=await probeCloudPilot({url:PILOT_URL,token:TOKEN,fetchImpl:async(url,init)=>{
+    if(url.endsWith('/__pilot')){identityCalls++;return identityCalls===1?new Response(null,{status:404,headers:{'cf-ray':'synthetic'}}):Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',protocol:1,syntheticOnly:true,freeCertified:false});}
+    probeCalls++;const {mode,rounds,wrong}=JSON.parse(init.body);return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',mode,rounds,verified:!wrong,syntheticOnly:true,freeCertified:false});
+  }});
+  assert.equal(identityCalls,2);assert.equal(probeCalls,16);assert.equal(report.identityAttempts[0].status,404);assert.equal(report.identityAttempts[1].code,'IDENTITY_OK');
 });
