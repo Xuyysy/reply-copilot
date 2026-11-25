@@ -103,3 +103,24 @@ BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.updated_at<OLD.
  (NEW.generation=OLD.generation AND NEW.order_id>OLD.order_id) OR
  (NEW.generation=OLD.generation+1 AND NEW.order_id='' AND OLD.order_id<>'')
  ) THEN RAISE(ABORT,'invalid refund sweep cursor') END; END;
+
+-- Explicit per-order human approval, one per attempt. No auto-fraud claim.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_accrual_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_accrual_approvals (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ attempt INTEGER NOT NULL CHECK(typeof(attempt)='integer' AND attempt BETWEEN 0 AND 19),
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ snapshot_sha256 TEXT NOT NULL CHECK(length(snapshot_sha256)=64 AND snapshot_sha256 NOT GLOB '*[^0-9a-f]*'),
+ approved_at INTEGER NOT NULL CHECK(typeof(approved_at)='integer' AND approved_at>0),
+ expires_at INTEGER NOT NULL CHECK(expires_at=approved_at+3600000),
+ UNIQUE(order_domain,order_id,attempt),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_accrual_jobs(order_domain,order_id)
+);
+CREATE INDEX partner_accrual_approval_order ON partner_accrual_approvals(approved_at,operation_id);
+CREATE TRIGGER partner_accrual_approval_no_update BEFORE UPDATE ON partner_accrual_approvals
+BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
+CREATE TRIGGER partner_accrual_approval_no_delete BEFORE DELETE ON partner_accrual_approvals
+BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
