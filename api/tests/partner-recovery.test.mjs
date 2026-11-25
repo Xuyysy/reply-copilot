@@ -212,3 +212,30 @@ test('MK99 subscription refund requires explicit full-amount digest, not default
  db.exec("UPDATE subscription_payment_transactions SET merchant_provider='xiaodou'");
  assert.equal(await subscriptionRefundSyncPlan({orderId:'s',rows:read(),now:502}),null);
 });
+
+test('lookback finds backdated paid candidates behind forward cursor without rewinding it',async t=>{
+ const {discoveryRepairPagePlan,discoveryEnqueuePlan}=await import('../src/partner-discovery.mjs');
+ const db=fixture(t);enable(db);window(db);
+ db.exec(`CREATE TABLE recharge_orders(id TEXT PRIMARY KEY,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER);
+ INSERT INTO recharge_orders VALUES('old','b','paid',299,350),('missed','b','paid',310,350),('outside','b','paid',301,305),('pending','b','pending',311,350),('no-referral','a','paid',311,350);
+ INSERT INTO partner_discovery_cursors VALUES('recharge',400,'z',400);
+ UPDATE system_settings SET value='1' WHERE key='partner_discovery_enabled';`);
+ const read=()=>{const p=discoveryRepairPagePlan({domain:'recharge',fromAt:320,now:500,limit:5});return db.prepare(p.sql).all(...p.params);};
+ assert.deepEqual(read().map(r=>r.order_id),['missed']);
+ const plan=discoveryEnqueuePlan({domain:'recharge',orderId:'missed',now:500});
+ assert.equal(run(db,plan),1);assert.equal(run(db,plan),0);
+ assert.deepEqual(read(),[]);
+ assert.equal(db.prepare("SELECT applied_at FROM partner_discovery_cursors WHERE order_domain='recharge'").get().applied_at,400);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+ assert.throws(()=>discoveryRepairPagePlan({domain:'recharge',fromAt:320,now:500,limit:21}));
+});
+test('scheduled discovery is opt-in, non-production and never posts commission',()=>{
+ const s=readFileSync(new URL('../src/partner-scheduled.ts',import.meta.url),'utf8');
+ const router=readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');
+ assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
+ assert.match(s,/PARTNER_SCHEDULED_DISCOVERY_ENABLED!=='1'/);
+ assert.match(s,/partner_scheduled_discovery_enabled/);
+ assert.ok(s.indexOf("PARTNER_SCHEDULED_DISCOVERY_ENABLED!=='1'")<s.indexOf('env.DB.prepare'));
+ assert.doesNotMatch(s,/commissionInsertPlan|reviewedAccrualBatch|refundSyncPlan|alipayOutcomePlan/);
+ assert.match(router,/await cleanup\(env\); await scheduledPartnerDiscovery\(env,Date.now\(\)\)/);
+});
