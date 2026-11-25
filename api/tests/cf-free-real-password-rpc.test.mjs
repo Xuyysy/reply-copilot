@@ -24,7 +24,7 @@ function bundle(path,extra={}){
 function manifest(contents){return {mainModule:'index.js',modules:{'index.js':{type:'esm',contents}}};}
 const hash=(n,password=PASSWORD)=>'pbkdf2-sha256:'+n+':'+('ab'.repeat(16))+':'+pbkdf2Sync(password+'\0'+PEPPER,Buffer.alloc(16,0xab),n,32,'sha256').toString('hex');
 
-async function setup(offload){
+async function setup(offload,legacyCompat=false){
   let outbound=0;
   const deny=()=>{outbound++;throw Error('External network forbidden');};
   const vars={ENVIRONMENT:'staging',WEB_ORIGIN:WEB,API_ORIGIN:API,EXTENSION_ORIGIN:'chrome-extension://'+'a'.repeat(32),
@@ -37,7 +37,7 @@ async function setup(offload){
     manifest:manifest(bundle('../src/index.ts'))},dev:{outboundService:{type:'fetcher',handler:deny}}}];
   if(offload)workers.push({config:{name:VERIFIER,compatibilityDate:'2026-10-14',
     env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},
-    manifest:manifest(bundle('../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers']})),
+    manifest:manifest(bundle(legacyCompat?'../prototypes/cf-free-cloud-pilot/src/index.ts':'../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers']})),
     exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
     dev:{outboundService:{type:'fetcher',handler:deny}}});
   const mf=new Miniflare({workers});
@@ -110,4 +110,31 @@ test('CF Free actual local workerd password RPC and legacy compatibility matrix'
     }finally{await mf.dispose();}
   }
   console.log('CF_FREE_REAL_PASSWORD_RPC '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',freeCertified:false,results}));
+});
+
+// Real production HTTP handler + candidate synthetic verifier + real local D1.
+// This is not an authorization to deploy or a cloud CPU measurement.
+test('CF Free actual business login with isolated 210k compatibility candidate preserves sessions and legacy hashes',{timeout:120000},async()=>{
+  const {mf,db,outbound}=await setup(true,true);
+  try{
+    const user='test-210000',identity=user+'@example.test',before=hash(210000);
+    const denied=await call(mf,'/v1/auth/login',{identity,password:'wrong-synthetic-password'},40);
+    assert.equal(denied.status,401);assert.equal(denied.cookie,null);
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').bind(user).first()).n,0);
+    const accepted=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},40);
+    assert.equal(accepted.status,200);assert.ok(accepted.cookie?.startsWith('rc_session='));
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=? AND revoked_at IS NULL').bind(user).first()).n,1);
+    assert.equal((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash,before);
+    const now=Date.now(),code='123456',digest=createHmac('sha256',AUTH).update('reset:'+user+':'+code).digest('hex');
+    await db.prepare('INSERT INTO password_resets(user_id,code_hash,expires_at,sent_at,attempts) VALUES(?,?,?,?,0)').bind(user,digest,now+600000,now).run();
+    const reset=await call(mf,'/v1/auth/reset-password',{email:identity,code,password:NEW_PASSWORD},41);
+    assert.equal(reset.status,200);
+    const stored=(await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash;
+    const [,factor,salt,expected]=stored.split(':');
+    assert.equal(factor,'100000');assert.equal(expected,pbkdf2Sync(NEW_PASSWORD+'\0'+PEPPER,Buffer.from(salt,'hex'),100000,32,'sha256').toString('hex'));
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=? AND revoked_at IS NULL').bind(user).first()).n,0);
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM password_resets WHERE user_id=?').bind(user).first()).n,0);
+    assert.equal(outbound(),0);
+    console.log('CF_FREE_REAL_210K_COMPAT_AUTH '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',loginStatus:accepted.status,wrongStatus:denied.status,legacyHashPreservedBeforeReset:true,resetStatus:reset.status,sessionsRevoked:true,challengeConsumed:true,externalCalls:0,freeCertified:false}));
+  }finally{await mf.dispose();}
 });
