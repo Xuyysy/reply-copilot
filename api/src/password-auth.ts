@@ -1,3 +1,4 @@
+import { bytesToHex } from "./crypto-hex.js";
 import {LOGIN_USER_SQL,REGISTRATION_IDENTITY_SQL} from "./admin-read-queries.js";
 import {futureCampaignStatements} from "./campaigns";
 import { eligibleReferralCode, referralRegistrationStatement, referralsEnabled } from "./referrals";
@@ -50,13 +51,12 @@ function codeFrom(value: unknown): string {
   if (!code) throw new ApiFailure(400,"INVALID_CODE","验证码无效或已过期。");
   return code;
 }
-function hex(bytes: Uint8Array): string { return Array.from(bytes, b => b.toString(16).padStart(2,"0")).join(""); }
 function fromHex(value: string): Uint8Array { return Uint8Array.from(value.match(/../g) || [], value => parseInt(value,16)); }
-async function derive(env: Pick<Env, "PASSWORD_PEPPER">, password: string, salt: Uint8Array, iterations: number): Promise<string> {
+async function derive(env: Pick<Env, "PASSWORD_PEPPER">, password: string, salt: Uint8Array, iterations: number): Promise<Uint8Array> {
   if (!env.PASSWORD_PEPPER || env.PASSWORD_PEPPER.length < 24) throw new ApiFailure(503,"AUTH_NOT_CONFIGURED","账户服务尚未配置。");
   const key = await crypto.subtle.importKey("raw",encoder.encode(`${password}\u0000${env.PASSWORD_PEPPER}`),"PBKDF2",false,["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({name:"PBKDF2",hash:"SHA-256",salt:new Uint8Array(salt),iterations},key,256);
-  return hex(new Uint8Array(bits));
+  return new Uint8Array(bits);
 }
 /**
  * Shared by the original local handler and the isolated Durable Object.
@@ -67,7 +67,7 @@ export async function hashPasswordWithIterations(env: Pick<Env,"PASSWORD_PEPPER"
   if (iterations!==DEFAULT_ITERATIONS && iterations!==FREE_ITERATIONS && iterations!==TINY_ITERATIONS)
     throw new ApiFailure(400,"INVALID_HASH_PROFILE","不支持的密码哈希参数。");
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  return `pbkdf2-sha256:${iterations}:${hex(salt)}:${await derive(env,password,salt,iterations)}`;
+  return `pbkdf2-sha256:${iterations}:${bytesToHex(salt)}:${bytesToHex(await derive(env,password,salt,iterations))}`;
 }
 export async function hashPassword(env: Env, password: string): Promise<string> {
   return hashPasswordWithIterations(env,password,creationIterations(env));
@@ -76,7 +76,7 @@ export async function verifyPassword(env: Pick<Env, "PASSWORD_PEPPER">, password
   const parts = stored?.split(":") || [];
   const iterations = Number(parts[1]);
   if (parts.length !== 4 || parts[0] !== "pbkdf2-sha256" || !SUPPORTED_ITERATIONS.has(iterations) || String(iterations) !== parts[1] || !/^[0-9a-f]{32}$/.test(parts[2]) || !/^[0-9a-f]{64}$/.test(parts[3])) return false;
-  const actual = fromHex(await derive(env,password,fromHex(parts[2]),iterations));
+  const actual = await derive(env,password,fromHex(parts[2]),iterations);
   const expected = fromHex(parts[3]);
   let mismatch = 0; for (let i=0;i<32;i++) mismatch |= actual[i]^expected[i];
   return mismatch === 0;
