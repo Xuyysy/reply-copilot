@@ -117,7 +117,7 @@ test('risk changes after review abort all accrual writes',t=>{
 });
 test('review endpoint prohibits production and requires reauthentication',()=>{
  const s=readFileSync(new URL('../src/partner-accrual-review.ts',import.meta.url),'utf8');
- assert.match(s,/requireAdminSession\(request,env,true\)/);
+ assert.match(s,/requireAdminSession\(request,env,request.method==="POST"\)/);
  assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
  assert.match(s,/PARTNER_ACCRUAL_REVIEW_ENABLED!=='1'/);
  assert.match(s,/b\.riskReviewed!==true/);
@@ -304,4 +304,31 @@ test('approved snapshot gates background accrual and rejects changed evidence, e
  assert.equal(db.prepare("SELECT operation_id FROM partner_accrual_review_audits").get().operation_id,'ap1');
  assert.equal(db.prepare(due.sql).all(...due.params).length,0);
  assert.throws(()=>batch(db,statements));
+});
+
+test('queue lists bounded states and audited reopen requires a fresh attempt',async t=>{
+ const {accrualQueuePlan,reopenAccrualPlan}=await import('../src/partner-accrual-queue.mjs');
+ const db=reviewFixture(t);
+ const p=accrualQueuePlan('pending');
+ assert.equal(db.prepare(p.sql).all(...p.params).length,1);
+ assert.throws(()=>accrualQueuePlan('invalid'));assert.throws(()=>accrualQueuePlan('pending',31));
+ assert.equal(run(db,recoveryFailurePlan({...order,attempts:0,code:'risk_review',review:true})),1);
+ const q=accrualQueuePlan('review'),row=db.prepare(q.sql).get(...q.params);
+ assert.equal(row.attempts,1);
+ const args={domain:'recharge',orderId:'o',attempt:1,actorId:'a',operationId:'reopen1',reason:'fixture rechecked',now:361};
+ assert.throws(()=>batch(db,reopenAccrualPlan({...args,actorId:'p'})));
+ db.exec("UPDATE system_settings SET value='0' WHERE key='partner_cash_accrual_enabled'");
+ assert.throws(()=>batch(db,reopenAccrualPlan(args)));
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_cash_accrual_enabled'");
+ const work=reopenAccrualPlan(args);batch(db,work);
+ assert.equal(db.prepare(p.sql).get(...p.params).attempts,2);
+ assert.equal(db.prepare("SELECT previous_attempt FROM partner_accrual_reopen_audits").get().previous_attempt,1);
+ assert.throws(()=>batch(db,work));assert.throws(()=>reopenAccrualPlan({...args,attempt:19}));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+});
+test('queue approval binds the inspected snapshot and admin reauthentication',()=>{
+ const s=readFileSync(new URL('../src/partner-accrual-review.ts',import.meta.url),'utf8');
+ assert.match(s,/requireAdminSession\(request,env,request.method==="POST"\)/);
+ assert.match(s,/b\.expectedSnapshot!==digest/);
+ assert.match(s,/accrualQueuePlan\(state\)/);
 });
