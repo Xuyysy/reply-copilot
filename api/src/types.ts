@@ -23,6 +23,7 @@ export interface Env {
   PARTNER_SCHEDULED_DISCOVERY_ENABLED?: string;
   /** Optional non-production scheduled refund sync, absent by default. */
   PARTNER_SCHEDULED_REFUND_SYNC_ENABLED?: string;
+  PARTNER_SCHEDULED_ACCRUAL_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
