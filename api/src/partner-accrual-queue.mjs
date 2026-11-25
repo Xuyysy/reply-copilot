@@ -1,12 +1,14 @@
 // Bounded administrator queue; no identity or payment secrets in list.
 const id=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(x);
 const gate="(SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_cash_accrual_enabled','partner_accrual_review_enabled') AND value='1')=3";
-export function accrualQueuePlan(state,limit=30){
+export function accrualQueuePlan(state,limit=30,cursor=null){
  if(!['pending','review','done'].includes(state)||!Number.isSafeInteger(limit)||limit<1||limit>30)throw new TypeError('PARTNER_QUEUE_INVALID');
+ if(cursor!==null&&(!Number.isSafeInteger(cursor.updatedAt)||cursor.updatedAt<=0||!['recharge','subscription'].includes(cursor.domain)||!id(cursor.orderId)))throw new TypeError('PARTNER_QUEUE_INVALID');
+ const page=cursor?' AND (j.updated_at<? OR (j.updated_at=? AND (j.order_domain>? OR (j.order_domain=? AND j.order_id>?))))':'';
  return {sql:`SELECT j.order_domain,j.order_id,j.state,j.attempts,j.last_code,j.paid_at,j.next_attempt_at,j.updated_at,
  a.expires_at approval_expires_at FROM partner_accrual_jobs j LEFT JOIN partner_accrual_approvals a
  ON a.order_domain=j.order_domain AND a.order_id=j.order_id AND a.attempt=j.attempts
- WHERE j.state=? ORDER BY j.updated_at DESC,j.order_domain,j.order_id LIMIT ?`,params:[state,limit]};
+ WHERE j.state=?${page} ORDER BY j.updated_at DESC,j.order_domain,j.order_id LIMIT ?`,params:[state,...(cursor?[cursor.updatedAt,cursor.updatedAt,cursor.domain,cursor.domain,cursor.orderId]:[]),limit]};
 }
 // Never reset attempts or revive a recorded commission. Reopen consumes one
 // attempt and requires a new review; the old approval cannot authorize it.
