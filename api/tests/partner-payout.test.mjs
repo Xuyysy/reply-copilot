@@ -51,3 +51,13 @@ test('post-payment refund preserves immutable paid amount and exposes negative n
  assert.equal(summary(db).outstanding_fen,-200);assert.equal(summary(db).paid_fen,200);
  assert.throws(()=>db.exec("DELETE FROM partner_payouts"),/immutable/);
 });
+
+test('refund debt reduces future settlement across orders',t=>{
+ const db=fixture(t);enable(db);batch(db,payoutReservePlan(f));assert.equal(resolve(db),1);
+ assert.equal(run(db,refundInsertPlan({orderDomain:'recharge',orderId:'o',refundEventId:'r',cumulativePrincipalFen:1000,now:45})),1);
+ db.exec("INSERT INTO partner_commissions VALUES('recharge','o2','p','b',1,46,47,'product_principal','CNY',1500,2000,300,48,47)");
+ const next={...f,payoutId:'y',now:50,items:[{orderDomain:'recharge',orderId:'o2',amountFen:300}]};
+ assert.throws(()=>batch(db,payoutReservePlan(next)),/insufficient/);
+ batch(db,payoutReservePlan({...next,items:[{...next.items[0],amountFen:100}]}));
+ assert.equal(summary(db).outstanding_fen,0);
+});
