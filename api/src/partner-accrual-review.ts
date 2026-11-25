@@ -40,10 +40,18 @@ export async function adminPartnerAccrualReview(request:Request,env:Env):Promise
   }
   const state=q.get('state')||'pending';
   if(!['pending','review','done'].includes(state))throw new ApiFailure(400,'INVALID_REQUEST','队列状态无效。');
-  const p=accrualQueuePlan(state);
-  const rows=(await env.DB.prepare(p.sql).bind(...p.params).all()).results;
+  const at=q.get('afterAt'),domain=q.get('afterDomain'),id=q.get('afterId');
+  let cursor:null|{updatedAt:number;domain:string;orderId:string}=null;
+  if(at!==null||domain!==null||id!==null){
+   if(!at||!/^\d{1,16}$/.test(at)||!Number.isSafeInteger(Number(at))||Number(at)<=0||!domain||!['recharge','subscription'].includes(domain)||!id||!/^[A-Za-z0-9_-]{1,80}$/.test(id))throw new ApiFailure(400,'INVALID_REQUEST','分页参数无效。');
+   cursor={updatedAt:Number(at),domain,orderId:id};
+  }
+  const p=accrualQueuePlan(state,30,cursor);
+  const rows=(await env.DB.prepare(p.sql).bind(...p.params).all<{updated_at:number;order_domain:string;order_id:string}>()).results;
+  const last=rows[rows.length-1];
+  const next=rows.length===30&&last?{updatedAt:last.updated_at,domain:last.order_domain,orderId:last.order_id}:null;
   const scheduled=await env.DB.prepare("SELECT value FROM system_settings WHERE key='partner_scheduled_accrual_enabled'").first<{value:string}>();
-  return response({ok:true,scheduled:env.PARTNER_SCHEDULED_ACCRUAL_ENABLED==='1'&&scheduled?.value==='1',rows},200,env,request);
+  return response({ok:true,scheduled:env.PARTNER_SCHEDULED_ACCRUAL_ENABLED==='1'&&scheduled?.value==='1',rows,next},200,env,request);
  }
  const b=await jsonBody(request,2048);
  if(Object.keys(b).some(k=>!['domain','orderId','action','operationId','reason','riskReviewed','expectedSnapshot','attempt'].includes(k))||
