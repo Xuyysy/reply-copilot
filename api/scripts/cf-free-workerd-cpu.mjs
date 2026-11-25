@@ -18,7 +18,8 @@ const PASSWORD = 'local-synthetic-password-123456!';
 const WEB_TOKEN = 'a'.repeat(64), EXT_TOKEN = 'e'.repeat(64);
 const MAIN_USER = 'benchmark-main-user';
 
-export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false} = {}) {
+export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full'} = {}) {
+  if(!['full','partial'].includes(expiryIndex))throw Error('Unknown local index experiment');
   if(!['legacy','select'].includes(assertionMode))throw Error('Unknown assertion mode');
   if(!['free','paid','subscription'].includes(source))throw Error('Unknown synthetic funding source');
   let external = 0;
@@ -71,6 +72,8 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
       for (const statement of migrationStatements(readFileSync(new URL(name,migrations),'utf8')))
         await db.prepare(statement).run();
     }
+    // This proposal is only applied inside a new isolated in-memory D1.
+    if(expiryIndex==='partial')for(const statement of migrationStatements(readFileSync(new URL('../sql-proposals/0033_cf_free_partial_expiry_index.sql',import.meta.url),'utf8')))await db.prepare(statement).run();
     for (const [id,rounds] of [[MAIN_USER,null],['benchmark-login-10k',10000],['benchmark-login-100k',100000]]) {
       const salt = '00'.repeat(16);
       const digest = rounds ? pbkdf2Sync(PASSWORD + '\0' + PEPPER, Buffer.alloc(16), rounds, 32,'sha256').toString('hex') : null;
@@ -194,9 +197,9 @@ async function invoke(mf,label,index,pendingIds) {
   return {elapsed,batch:raw?JSON.parse(raw):null};
 }
 
-export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free',assertionMode='legacy',measureBatches=false}={}) {
+export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free',assertionMode='legacy',measureBatches=false,expiryIndex='full'}={}) {
   if(!Number.isInteger(samples)||samples<1||samples>4||!Number.isInteger(warmup)||warmup<0||warmup>1)throw Error('Synthetic request cap exceeded');
-  const setup=await setupSyntheticWorkerd({profile,source,assertionMode,measureBatches});
+  const setup=await setupSyntheticWorkerd({profile,source,assertionMode,measureBatches,expiryIndex});
   let inspector;
   const rows=[],ids=[];
   try {
@@ -230,7 +233,7 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
       throw Error('Synthetic generation/ACK credit accounting regression');
     if(setup.getExternalCalls()!==0)throw Error('External network was attempted');
     return {status:'SYNTHETIC_LOCAL_ONLY',runtime:'Miniflare/workerd',environment:'isolated, fresh local D1, offline mock AI',
-      source,assertionMode,measureBatches,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
+      source,assertionMode,measureBatches,expiryIndex,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
       caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit. Optional D1 totals cover successful DB.batch calls only, excluding standalone statements and background work; not cloud billing.',
       cases:rows,assertions:{realNetworkCalls:0,creditDebits:expectedDebits,subscriptionUsed:sub.used,endingFreeCredits:expectedFree,endingPaidCredits:expectedPaid,endingReservedCredits:0}};
   }finally{if(inspector)inspector.close();await setup.mf.dispose();}
