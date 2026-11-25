@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
+import {attributionPlan,reviewedFacts,reviewedAccrualBatch} from '../src/partner-accrual-review.mjs';
+import {paymentEvidencePlan} from '../src/partner-payment-proof.mjs';
 import {accrualEnqueuePlan,dueAccrualPlan,recoveryFailurePlan,recoveredAccrualPlan} from '../src/partner-recovery.mjs';
 function fixture(t){
  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
@@ -66,4 +68,57 @@ test('bounded retry, CAS and manual review',t=>{
  assert.equal(run(db,recoveryFailurePlan({...failure,attempts:1,now:30360,code:'risk_review',review:true})),1);
  assert.equal(due(db,99999999).length,0);
  assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs").get().state,'review');
+});
+
+function reviewFixture(t){
+ const db=fixture(t);enable(db);window(db);
+ db.exec(`CREATE TABLE site_administrator(id INTEGER,user_id TEXT);
+ INSERT INTO site_administrator VALUES(1,'a');
+ UPDATE system_settings SET value='1' WHERE key='partner_accrual_review_enabled';
+ CREATE TABLE recharge_orders(id TEXT,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER,credits INTEGER);
+ CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER);
+ CREATE TABLE provider_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,currency TEXT);
+ CREATE TABLE credit_ledger(kind TEXT,reference_id TEXT,user_id TEXT,paid_delta INTEGER);
+ CREATE TABLE credit_batches(source_order_id TEXT,user_id TEXT,source_kind TEXT,grant_credits INTEGER);
+ CREATE TABLE payment_refunds(transaction_id TEXT,status TEXT,base_amount_fen INTEGER);
+ INSERT INTO recharge_orders VALUES('o','b','paid',350,351,500);
+ INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,250);
+ INSERT INTO provider_payment_events VALUES('tx','xiaodou','PAYMENT_SUCCEEDED',1000,'CNY');
+ INSERT INTO credit_ledger VALUES('purchase_grant','o','b',500);
+ INSERT INTO credit_batches VALUES('o','b','purchase',500);
+ INSERT INTO payment_refunds VALUES('tx','succeeded',250);`);
+ run(db,accrualEnqueuePlan(order));
+ return db;
+}
+function reviewBatch(db){
+ const p=paymentEvidencePlan('recharge','o'),rows=db.prepare(p.sql).all(...p.params);
+ const a=attributionPlan('b',350),attribution=db.prepare(a.sql).get(...a.params);
+ const job=db.prepare("SELECT j.*,w.hold_ms FROM partner_accrual_jobs j JOIN partner_accrual_windows w ON w.id=j.window_id").get();
+ const input=reviewedFacts({orderDomain:'recharge',orderId:'o',rows,attribution,job,now:360});
+ assert.ok(input);
+ return reviewedAccrualBatch({input,row:rows[0],actorId:'a',reason:'fixture reviewed',operationId:'op1'});
+}
+test('reviewed accrual reads actual fixture payment evidence and atomically records audit and commission',t=>{
+ const db=reviewFixture(t),ps=reviewBatch(db);
+ batch(db,ps);
+ assert.equal(db.prepare("SELECT commission_fen FROM partner_commissions").get().commission_fen,200);
+ assert.equal(db.prepare("SELECT delta_fen FROM partner_commission_refunds").get().delta_fen,-50);
+ assert.equal(db.prepare("SELECT actor_id FROM partner_accrual_review_audits").get().actor_id,'a');
+ assert.throws(()=>batch(db,ps));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_accrual_review_audits").get().n,1);
+});
+test('risk changes after review abort all accrual writes',t=>{
+ const db=reviewFixture(t),ps=reviewBatch(db);
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
+ assert.throws(()=>batch(db,ps));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+ assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs").get().state,'pending');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_accrual_review_audits").get().n,0);
+});
+test('review endpoint prohibits production and requires reauthentication',()=>{
+ const s=readFileSync(new URL('../src/partner-accrual-review.ts',import.meta.url),'utf8');
+ assert.match(s,/requireAdminSession\(request,env,true\)/);
+ assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
+ assert.match(s,/PARTNER_ACCRUAL_REVIEW_ENABLED!=='1'/);
+ assert.match(s,/b\.riskReviewed!==true/);
 });
