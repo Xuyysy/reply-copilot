@@ -1,6 +1,9 @@
 -- Source-only proposal, after V1-A/B/D + recipient. Never auto-migrate.
 -- External Alipay transfers are manual; these records do NOT initiate money movement.
 -- No public write routes until independent commercial, risk and D1 review.
+INSERT INTO system_settings(key,value,updated_at)
+VALUES('partner_payout_requests_enabled','0',0),('partner_payout_min_fen','0',0)
+ON CONFLICT(key) DO NOTHING;
 CREATE TABLE partner_alipay_requests (
  id TEXT PRIMARY KEY,
  partner_user_id TEXT NOT NULL,
