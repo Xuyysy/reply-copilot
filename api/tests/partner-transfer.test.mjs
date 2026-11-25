@@ -82,12 +82,15 @@ test('owner can reject only a pending application',t=>{
 
 test('public admission requires explicit minimum and enabled request gate, mature balance and current recipient',t=>{
  const db=fixture(t);enable(db);
- const candidate={...request,minFen:100};
+ assert.equal(db.prepare("SELECT value FROM system_settings WHERE key='partner_payout_min_fen'").get().value,'1000');
+ db.exec("INSERT INTO partner_commissions VALUES('recharge','o2','p','b',1,10,11,'product_principal','CNY',4000,2000,800,20,11)");
+ const candidate={...request,minFen:1000,amountFen:1000};
  assert.equal(run(db,alipayAdmissionPlan(candidate)),0);
- db.exec("UPDATE system_settings SET value='1' WHERE key='partner_payout_requests_enabled'; UPDATE system_settings SET value='100' WHERE key='partner_payout_min_fen'");
- assert.throws(()=>alipayAdmissionPlan({...candidate,amountFen:99}),/INVALID/);
- assert.equal(run(db,alipayAdmissionPlan({...candidate,minFen:101})),0);
- assert.equal(run(db,alipayAdmissionPlan({...candidate,amountFen:201})),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_payout_requests_enabled'");
+ assert.throws(()=>alipayAdmissionPlan({...candidate,amountFen:999}),/INVALID/);
+ assert.throws(()=>alipayAdmissionPlan({...candidate,minFen:999}),/INVALID/);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,minFen:1001,amountFen:1001})),0);
+ assert.equal(run(db,alipayAdmissionPlan({...candidate,amountFen:1001})),0);
  assert.equal(run(db,alipayAdmissionPlan({...candidate,now:19})),0);
  assert.equal(run(db,alipayAdmissionPlan({...candidate,recipientVersion:2})),0);
  assert.equal(run(db,alipayAdmissionPlan({...candidate,partnerId:'q'})),0);
