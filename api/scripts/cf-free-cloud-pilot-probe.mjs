@@ -47,14 +47,38 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
   const base=new URL(url).origin;
   const headers={Authorization:'Bearer '+token};
   let identity;
-  try{
-    const r=await fetchImpl(base+'/__pilot',{method:'GET',headers,redirect:'error',signal:AbortSignal.timeout(15000)});
-    const body=await r.json();
-    if(!r.ok||body?.kind!==EXPECTED_KIND||body?.protocol!==1||
-       body?.syntheticOnly!==true||body?.freeCertified!==false)
-      throw Error('Wrong isolated probe target');
-    identity='SYNTHETIC_ONLY_TARGET_CONFIRMED';
-  }catch{throw Error('Isolated target identity unavailable');}
+  // Deployment/secret propagation is asynchronous. Retry only transient
+  // availability or authentication failures, never redirects or wrong identity.
+  const identityAttempts=[];
+  for(let attempt=1;attempt<=4;attempt++){
+    let status=null,ray=false,code='PROBE_IDENTITY_NETWORK_UNAVAILABLE';
+    try{
+      const r=await fetchImpl(base+'/__pilot',{method:'GET',headers,redirect:'manual',signal:AbortSignal.timeout(8000)});
+      status=r.status;ray=!!r.headers.get('cf-ray');
+      if(status>=300&&status<400)throw Error('PROBE_IDENTITY_REDIRECT_REJECTED');
+      let body=null;try{body=await r.json();}catch{}
+      if(r.ok&&body?.kind===EXPECTED_KIND&&body?.protocol===1&&
+         body?.syntheticOnly===true&&body?.freeCertified===false){
+        identity='SYNTHETIC_ONLY_TARGET_CONFIRMED';
+        identityAttempts.push({attempt,status,ray,code:'IDENTITY_OK'});
+        break;
+      }
+      if(status===200)throw Error('PROBE_IDENTITY_MISMATCH');
+      code='PROBE_IDENTITY_HTTP_'+status;
+    }catch(e){
+      if(['PROBE_IDENTITY_REDIRECT_REJECTED','PROBE_IDENTITY_MISMATCH'].includes(e?.message)){
+        code=e.message;identityAttempts.push({attempt,status,ray,code});break;
+      }
+    }
+    identityAttempts.push({attempt,status,ray,code});
+    if(![null,401,404,429,500,502,503,504].includes(status))break;
+    if(attempt<4)await new Promise(resolve=>setTimeout(resolve,2000*attempt));
+  }
+  if(!identity){
+    const error=new Error(identityAttempts.at(-1)?.code||'PROBE_IDENTITY_UNAVAILABLE');
+    error.identityAttempts=identityAttempts;
+    throw error;
+  }
   const cases=[];
   for(const mode of ['http','do'])for(const rounds of ROUNDS)for(const wrong of [false,true])
     for(let repeat=0;repeat<repeats;repeat++){
@@ -84,7 +108,7 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
   const components={http:summarize('http'),do:summarize('do')};
   const succeeded=components.http.status==='BEHAVIOR_PASS'&&components.do.status==='BEHAVIOR_PASS';
   return {kind:'SYNTHETIC_CF_FREE_ACCOUNT_PILOT',target:identity,
-    execution:'REMOTE_CLOUD',outcome:succeeded?'SYNTHETIC_SMOKE_PASS':'SYNTHETIC_SMOKE_FAIL',
+    identityAttempts,execution:'REMOTE_CLOUD',outcome:succeeded?'SYNTHETIC_SMOKE_PASS':'SYNTHETIC_SMOKE_FAIL',
     syntheticRequests:cases.length,components,freeCertified:false,
     httpCpuInCloudMs:null,doCpuInCloudMs:null,freeAccountPlanIndependentlyVerified:false,
     safeToDowngradeProduction:false,
