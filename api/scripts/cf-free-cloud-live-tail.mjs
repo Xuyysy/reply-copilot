@@ -1,5 +1,6 @@
 // Synthetic-only ephemeral Worker tail. Never print raw frames, URLs, headers, or tokens.
 import {validAccount} from './cf-free-cloud-cpu-evidence.mjs';
+import WebSocket from 'ws';
 const NAME='xrh-cf-free-cpu-pilot-20261120';
 const ROUNDS=[10000,60000,100000,210000];
 const MODES=['http','do'];
@@ -29,7 +30,8 @@ export async function openPilotTail({accountId,token,fetchImpl=fetch,WebSocketIm
   let tailId=null,ws=null;
   const rows=[];
   async function close(){
-    try{ws?.close();}catch{}
+    // Match Wrangler's ws transport and bound local socket lifetime.
+    try{if(typeof ws?.terminate==='function')ws.terminate();else ws?.close();}catch{}
     if(tailId){
       const r=await fetchImpl(endpoint+'/'+tailId,{method:'DELETE',redirect:'error',headers,signal:AbortSignal.timeout(10000)});
       if(!r.ok)throw Error('TAIL_DELETE_FAILED');
@@ -47,12 +49,13 @@ export async function openPilotTail({accountId,token,fetchImpl=fetch,WebSocketIm
     // Cloudflare issued a transient WebSocket URL; never forward the API token.
     ws=new WebSocketImpl(url.toString(),'trace-v1');
     ws.addEventListener('message',e=>{
-      if(rows.length>=128||typeof e.data!=='string'||e.data.length>256000)return;
-      try{const parsed=JSON.parse(e.data);for(const raw of (Array.isArray(parsed)?parsed:[parsed])){if(rows.length>=128)break;const row=sanitizeTailEvent(raw);if(row)rows.push(row);}}catch{}
+      const data=typeof e.data==='string'?e.data:Buffer.isBuffer(e.data)?e.data.toString('utf8'):null;
+      if(rows.length>=128||!data||data.length>256000)return;
+      try{const parsed=JSON.parse(data);for(const raw of (Array.isArray(parsed)?parsed:[parsed])){if(rows.length>=128)break;const row=sanitizeTailEvent(raw);if(row)rows.push(row);}}catch{}
     });
     await new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>reject(Error('TAIL_CONNECT_TIMEOUT')),10000);
-      ws.addEventListener('open',()=>{clearTimeout(timer);try{ws.send(JSON.stringify({debug:false}));resolve();}catch{reject(Error('TAIL_CONNECT_FAILED'));}},{once:true});
+      ws.addEventListener('open',()=>{clearTimeout(timer);try{const message=JSON.stringify({debug:false});if(typeof ws.terminate==='function')ws.send(message,{binary:false,compress:false,mask:false,fin:true});else ws.send(message);resolve();}catch{reject(Error('TAIL_CONNECT_FAILED'));}},{once:true});
       ws.addEventListener('error',()=>{clearTimeout(timer);reject(Error('TAIL_CONNECT_FAILED'));},{once:true});
     });
     return {close,report:()=>summarizeTail(rows)};
