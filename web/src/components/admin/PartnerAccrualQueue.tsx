@@ -5,7 +5,8 @@ import {Button} from "../ui/button";
 import {Input} from "../ui/input";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 type Job={order_domain:string;order_id:string;state:string;attempts:number;last_code:string;next_attempt_at:number;approval_expires_at:number|null};
-type Queue={ok:boolean;scheduled:boolean;rows:Job[]};
+type Cursor={updatedAt:number;domain:string;orderId:string};
+type Queue={ok:boolean;scheduled:boolean;rows:Job[];next?:Cursor|null};
 type Detail={ok:boolean;reason?:string;snapshot?:string;provider?:string;principalFen?:number;refundedFen?:number;candidateFen?:number;rateBps?:number;policyVersion?:number;holdUntil?:number};
 const endpoint="/v1/admin/partners/accrual-review";
 export default function PartnerAccrualQueue({language,write}:{language:Language;write:<T>(path:string,body:object)=>Promise<T>}){
@@ -14,9 +15,9 @@ export default function PartnerAccrualQueue({language,write}:{language:Language;
  const lock=useRef(false);
  const money=(fen:number)=>new Intl.NumberFormat(language==="zh"?"zh-CN":"en-US",{style:"currency",currency:"CNY"}).format(fen/100);
  function clear(){setSelected(null);setDetail(null);setReason("");setReviewed(false);}
- async function load(next=state){
+ async function load(next=state,cursor?:Cursor){
   if(lock.current)return;lock.current=true;setBusy(true);clear();setQueue(null);setError("");
-  try{setQueue(await api<Queue>(endpoint+"?"+new URLSearchParams({state:next})));}catch(e){setError(readableError(e,language));}finally{lock.current=false;setBusy(false);}
+  try{setQueue(await api<Queue>(endpoint+"?"+new URLSearchParams({state:next,...(cursor?{afterAt:String(cursor.updatedAt),afterDomain:cursor.domain,afterId:cursor.orderId}:{})})));}catch(e){setError(readableError(e,language));}finally{lock.current=false;setBusy(false);}
  }
  async function inspect(j:Job){
   if(lock.current)return;lock.current=true;setBusy(true);setError("");clear();setSelected(j);
@@ -33,8 +34,9 @@ export default function PartnerAccrualQueue({language,write}:{language:Language;
  return <Card><CardHeader><CardTitle>{t("计佣审核队列（测试）","Accrual review queue (pilot)")}</CardTitle></CardHeader><CardContent className="space-y-3">
  <p className="text-sm text-muted-foreground">{t("仅非生产环境启用；人工核对后批准后台入账。未核验订单不产生佣金。","Non-production only. Review evidence before background accrual; unverified orders are not credited.")}</p>
  <div className="flex gap-2"><select aria-label={t("队列状态","Queue state")} className="rounded border p-2" value={state} disabled={busy} onChange={e=>{setState(e.target.value);setQueue(null);clear();}}>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><Button type="button" onClick={()=>void load()} disabled={busy}>{t("查询","Load")}</Button></div>
- {queue&&<p className="text-xs text-muted-foreground">{queue.scheduled?t("后台入账已启用（测试）","Scheduled posting enabled (pilot)"):t("后台入账未启用","Scheduled posting disabled")} · {t("最多显示 30 条","Up to 30 rows")}</p>}
+ {queue&&<p className="text-xs text-muted-foreground">{queue.scheduled?t("后台入账已启用（测试）","Scheduled posting enabled (pilot)"):t("后台入账未启用","Scheduled posting disabled")} · {t("每页最多 30 条","Up to 30 rows per page")}</p>}
  {queue?.rows.map(j=><div className="rounded border p-3 text-sm space-y-1" key={j.order_domain+":"+j.order_id}><p>{j.order_domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {labels[j.state]} · {t("尝试次数","Attempts")} {j.attempts}</p><p className="break-all text-xs">{j.order_id}</p><p className="text-xs">{j.last_code}{j.approval_expires_at?" · "+t("审批截止","Approval expiry")+" "+new Date(j.approval_expires_at).toLocaleString(): ""}</p>{j.state!=="done"&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void inspect(j)}>{t("核对","Review")}</Button>}</div>)}
+ {queue?.next&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void load(state,queue.next!)}>{t("下一页","Next page")}</Button>}
  {queue?.rows.length===0&&<p>{t("暂无记录","No records")}</p>}
  {selected&&<div className="space-y-2 rounded border p-3 text-sm"><p className="font-medium break-all">{selected.order_id}</p>
  {detail?.ok&&<><p>{t("支付渠道","Provider")}: {detail.provider}</p><p>{t("候选本金","Principal")}: {money(detail.principalFen||0)} · {t("退款本金","Refunded")}: {money(detail.refundedFen||0)}</p><p>{t("历史规则","Policy")} v{detail.policyVersion} · {(detail.rateBps||0)/100}%</p><p>{t("净候选佣金","Net candidate")}: {money(detail.candidateFen||0)}</p><p>{t("冻结截止","Hold until")}: {detail.holdUntil?new Date(detail.holdUntil).toLocaleString():"—"}</p></>}
