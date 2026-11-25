@@ -113,7 +113,11 @@ function payoutReviewFixture(t){
  db.exec(`UPDATE system_settings SET value='1' WHERE key='partner_payout_review_enabled';
  CREATE TABLE recharge_orders(id TEXT,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER,credits INTEGER);
  CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER,provider_trade_id TEXT,provider_payment_id TEXT,paid_at INTEGER);
- CREATE TABLE subscription_payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,provider_trade_id TEXT,provider_payment_id TEXT);
+ CREATE TABLE subscription_payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,provider_trade_id TEXT,provider_payment_id TEXT,paid_at INTEGER,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER);
+ CREATE TABLE subscription_orders(id TEXT,user_id TEXT,kind TEXT,status TEXT,paid_at INTEGER,applied_at INTEGER,amount_fen INTEGER,target_period_id TEXT);
+ CREATE TABLE subscription_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,body_sha256 TEXT,provider_event_id TEXT);
+ CREATE TABLE subscription_periods(id TEXT,source_order_id TEXT,user_id TEXT);
+ CREATE TABLE subscription_tier_changes(order_id TEXT,period_id TEXT,charged_fen INTEGER);
  CREATE TABLE provider_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,currency TEXT);
  CREATE TABLE credit_ledger(kind TEXT,reference_id TEXT,user_id TEXT,paid_delta INTEGER);
  CREATE TABLE credit_batches(source_order_id TEXT,user_id TEXT,source_kind TEXT,grant_credits INTEGER);
@@ -183,4 +187,55 @@ test('fully reversed recharge is evidence for debt review, not new accrual or av
  atomic(db,[...g.checks,g.cleanup]);
  db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
  assert.throws(()=>atomic(db,[...g.checks,g.cleanup]));
+});
+
+function largeHistory(t,n=45){
+ const db=payoutReviewFixture(t);
+ db.exec("INSERT INTO partner_payment_identity_claims VALUES('xiaodou','out-r','pay-r','recharge','o',11)");
+ for(let i=1;i<n;i++){
+  const o='o'+String(i).padStart(3,'0'),tx='tx'+i,out='out'+i,pay='pay'+i;
+  db.prepare("INSERT INTO partner_commissions VALUES('recharge',?,'p','b',1,10,11,'product_principal','CNY',1000,2000,200,20,11)").run(o);
+  db.prepare("INSERT INTO recharge_orders VALUES(?,'b','paid',10,11,500)").run(o);
+  db.prepare("INSERT INTO payment_transactions VALUES(?,?,'xiaodou','paid','clear','CNY',1000,1000,0,0,?,?,10)").run(tx,o,out,pay);
+  db.prepare("INSERT INTO provider_payment_events VALUES(?,'xiaodou','PAYMENT_SUCCEEDED',1000,'CNY')").run(tx);
+  db.prepare("INSERT INTO credit_ledger VALUES('purchase_grant',?,'b',500)").run(o);
+  db.prepare("INSERT INTO credit_batches VALUES(?,'b','purchase',500)").run(o);
+  db.prepare("INSERT INTO partner_payment_identity_claims VALUES('xiaodou',?,?,'recharge',?,11)").run(out,pay,o);
+ }
+ return db;
+}
+test('set-based payout checks 45 historical commissions and reserves more than 30 items atomically',async t=>{
+ const {allHistoryPayoutGuard,setPayoutApprovePlan}=await import('../src/partner-payout-set-review.mjs');
+ const db=largeHistory(t);
+ const req={...request,amountFen:8100};
+ assert.equal(run(db,alipayRequestPlan(req)),1);
+ const g=allHistoryPayoutGuard({partnerId:'p',operationId:'large'});
+ const work=[g.check,...setPayoutApprovePlan({...req,payoutId:'x',actorId:'a',now:30,reason:'verified fixture'}),g.cleanup];
+ // A late, unallocated order must still block approval.
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review' WHERE order_id='o044'");
+ assert.throws(()=>atomic(db,work));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,0);
+ db.exec("UPDATE payment_transactions SET risk_state='clear'");
+ atomic(db,work);
+ const items=db.prepare("SELECT COUNT(*) n,SUM(amount_fen) total FROM partner_payout_items WHERE payout_id='x'").get();
+ assert.equal(items.n,41);assert.equal(items.total,8100);
+ assert.equal(state(db),'reserved');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_recovery_assertions").get().n,0);
+ db.exec("UPDATE payment_transactions SET provider_payment_id='changed' WHERE order_id='o044'");
+ assert.throws(()=>atomic(db,[g.check,alipayStartPlan(start),g.cleanup]));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_alipay_transfer_starts").get().n,0);
+ db.exec("UPDATE payment_transactions SET provider_payment_id='pay44' WHERE order_id='o044'");
+ atomic(db,[g.check,alipayStartPlan(start),g.cleanup]);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_alipay_transfer_starts").get().n,1);
+});
+test('set-based payout respects prior refund debt outside selected allocation',async t=>{
+ const {allHistoryPayoutGuard,setPayoutApprovePlan}=await import('../src/partner-payout-set-review.mjs');
+ const db=largeHistory(t,45);ready(db);run(db,alipayStartPlan(start));run(db,alipayOutcomePlan(outcome));
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=1000,status='refunded' WHERE order_id='o'; UPDATE recharge_orders SET status='refunded' WHERE id='o'; INSERT INTO payment_refunds VALUES('tx','succeeded',1000)");
+ assert.equal(run(db,refundInsertPlan({orderDomain:'recharge',orderId:'o',refundEventId:'full',cumulativePrincipalFen:1000,now:55})),1);
+ const req={...request,requestId:'r2',amountFen:8700,now:60};
+ assert.equal(run(db,alipayRequestPlan(req)),1);
+ const g=allHistoryPayoutGuard({partnerId:'p',operationId:'debt'});
+ assert.throws(()=>atomic(db,[g.check,...setPayoutApprovePlan({...req,payoutId:'x2',actorId:'a',now:61,reason:'verified fixture'}),g.cleanup]),/insufficient partner net balance/);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,1);
 });
