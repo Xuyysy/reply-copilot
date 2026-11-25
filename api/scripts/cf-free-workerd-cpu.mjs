@@ -17,8 +17,11 @@ const AUTH = 'isolated-benchmark-auth-key-not-a-secret-123';
 const PASSWORD = 'local-synthetic-password-123456!';
 const WEB_TOKEN = 'a'.repeat(64), EXT_TOKEN = 'e'.repeat(64);
 const MAIN_USER = 'benchmark-main-user';
+const VERIFIER='cf-free-offline-business-verifier';
+const EXTENDED_ROUTES=Object.freeze([...ROUTES.slice(0,7),'login_60k','login_210k',...ROUTES.slice(7)]);
 
-export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full'} = {}) {
+export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full', passwordMode='native', extendedLogin=false} = {}) {
+  if(!['native','wasm_do'].includes(passwordMode)||typeof extendedLogin!=='boolean')throw Error('Unknown local password experiment');
   if(!['full','partial'].includes(expiryIndex))throw Error('Unknown local index experiment');
   if(!['legacy','select'].includes(assertionMode))throw Error('Unknown assertion mode');
   if(!['free','paid','subscription'].includes(source))throw Error('Unknown synthetic funding source');
@@ -63,8 +66,20 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
   env.DB = {type:'d1',id:'cf-free-offline-synthetic-d1'};
   const config = {name:'cf-free-offline-synthetic',compatibilityDate:'2026-10-14',env,
     manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:bundle}}}};
-  const mf = new Miniflare({...(profile ? {inspectorPort:0} : {}),workers:[{config,
-    dev:{...(profile ? {unsafeInspectorProxy:true} : {}),outboundService:{type:'fetcher',handler:() => {external++;throw Error('External network denied');}}}}]});
+  const deny=()=>{external++;throw Error('External network denied');};
+  const workers=[{config,dev:{...(profile?{unsafeInspectorProxy:true}:{}),outboundService:{type:'fetcher',handler:deny}}}];
+  if(passwordMode==='wasm_do'){
+    env.PASSWORD_VERIFY_DO_ENABLED={type:'text',value:'1'};
+    env.PASSWORD_VERIFY_DO={type:'durable-object',worker:VERIFIER,exportName:'PasswordVerifierDO'};
+    const verifier=buildSync({entryPoints:[new URL('../prototypes/cf-free-cloud-pilot/src/index.ts',import.meta.url).pathname],bundle:true,write:false,platform:'browser',format:'esm',target:'es2022',external:['cloudflare:workers','./legacy-210k.wasm']}).outputFiles[0].text;
+    workers.push({config:{name:VERIFIER,compatibilityDate:'2026-10-14',
+      env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},
+      manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:verifier},
+        'legacy-210k.wasm':{type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-cloud-pilot/src/legacy-210k.wasm',import.meta.url)))} }},
+      exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
+      dev:{outboundService:{type:'fetcher',handler:deny}}});
+  }
+  const mf=new Miniflare({...(profile?{inspectorPort:0}:{}),workers});
   try {
     const db = await mf.getD1Database('DB');
     const migrations = new URL('../migrations/',import.meta.url);
@@ -74,7 +89,7 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
     }
     // This proposal is only applied inside a new isolated in-memory D1.
     if(expiryIndex==='partial')for(const statement of migrationStatements(readFileSync(new URL('../sql-proposals/0033_cf_free_partial_expiry_index.sql',import.meta.url),'utf8')))await db.prepare(statement).run();
-    for (const [id,rounds] of [[MAIN_USER,null],['benchmark-login-10k',10000],['benchmark-login-100k',100000]]) {
+    for (const [id,rounds] of [[MAIN_USER,null],['benchmark-login-10k',10000],['benchmark-login-100k',100000],...(extendedLogin?[['benchmark-login-60k',60000],['benchmark-login-210k',210000]]:[])]) {
       const salt = '00'.repeat(16);
       const digest = rounds ? pbkdf2Sync(PASSWORD + '\0' + PEPPER, Buffer.alloc(16), rounds, 32,'sha256').toString('hex') : null;
       const stored = digest ? 'pbkdf2-sha256:' + rounds + ':' + salt + ':' + digest : null;
@@ -158,7 +173,7 @@ class InspectorClient {
       this.ws.send(JSON.stringify({id,method}));
     });
   }
-  close(){this.ws.close();}
+  close(){this.ws.terminate();}
 }
 
 async function invoke(mf,label,index,pendingIds) {
@@ -170,9 +185,9 @@ async function invoke(mf,label,index,pendingIds) {
   else if(label==='usage')path='/v1/usage';
   else if(label==='entitlements')path='/v1/entitlements';
   else if(label==='bootstrap'){path='/v1/extension/bootstrap';headers=extension;}
-  else if(label==='login_10k'||label==='login_100k'){
+  else if(['login_10k','login_60k','login_100k','login_210k'].includes(label)){
     path='/v1/auth/login';method='POST';
-    body={identity:'benchmark-login-'+(label==='login_10k'?'10k':'100k')+'@example.test',password:PASSWORD};
+    body={identity:'benchmark-login-'+label.slice(6)+'@example.test',password:PASSWORD};
   }else if(label==='ai_generate_mock'){
     path='/v1/ai/generate';method='POST';headers=extension;
     const requestId=randomUUID();pendingIds.push(requestId);
@@ -197,9 +212,9 @@ async function invoke(mf,label,index,pendingIds) {
   return {elapsed,batch:raw?JSON.parse(raw):null};
 }
 
-export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free',assertionMode='legacy',measureBatches=false,expiryIndex='full'}={}) {
+export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free',assertionMode='legacy',measureBatches=false,expiryIndex='full',passwordMode='native',extendedLogin=false}={}) {
   if(!Number.isInteger(samples)||samples<1||samples>4||!Number.isInteger(warmup)||warmup<0||warmup>1)throw Error('Synthetic request cap exceeded');
-  const setup=await setupSyntheticWorkerd({profile,source,assertionMode,measureBatches,expiryIndex});
+  const setup=await setupSyntheticWorkerd({profile,source,assertionMode,measureBatches,expiryIndex,passwordMode,extendedLogin});
   let inspector;
   const rows=[],ids=[];
   try {
@@ -211,7 +226,7 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
       await ready.text();
       inspector=await InspectorClient.connect(setup.mf);
     }
-    for(const name of ROUTES) {
+    for(const name of (extendedLogin?EXTENDED_ROUTES:ROUTES)) {
       for(let i=0;i<warmup;i++)await invoke(setup.mf,name,i,ids);
       if(profile)await inspector.call('Profiler.start');
       const elapsed=[],batches=[];
@@ -233,7 +248,7 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
       throw Error('Synthetic generation/ACK credit accounting regression');
     if(setup.getExternalCalls()!==0)throw Error('External network was attempted');
     return {status:'SYNTHETIC_LOCAL_ONLY',runtime:'Miniflare/workerd',environment:'isolated, fresh local D1, offline mock AI',
-      source,assertionMode,measureBatches,expiryIndex,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
+      source,assertionMode,measureBatches,expiryIndex,passwordMode,extendedLogin,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
       caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit. Optional D1 totals cover successful DB.batch calls only, excluding standalone statements and background work; not cloud billing.',
       cases:rows,assertions:{realNetworkCalls:0,creditDebits:expectedDebits,subscriptionUsed:sub.used,endingFreeCredits:expectedFree,endingPaidCredits:expectedPaid,endingReservedCredits:0}};
   }finally{if(inspector)inspector.close();await setup.mf.dispose();}
