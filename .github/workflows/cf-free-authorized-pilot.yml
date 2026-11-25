@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     environment: cf-free-isolated-pilot
     env:
-      PILOT_SOURCE: 'f84a5b248047832a7c778a4f824cfff174b549ec'
+      PILOT_SOURCE: '8ffc6e2f240e8bf1938b802341be48c4cd58bd1d'
       PILOT_ACCOUNT: '307563e1fa86940ac46ca4dd78f1f12a'
     steps:
       - name: Require dedicated environment credential before any cloud operation
@@ -61,7 +61,7 @@ jobs:
             --confirm-delete-test-resources \
             --expected-account-id "$PILOT_ACCOUNT" \
             --expected-commit "$PILOT_SOURCE" \
-            --repeats 1 > "$RUNNER_TEMP/cf-free-isolated-evidence.json"
+            --repeats 2 > "$RUNNER_TEMP/cf-free-isolated-evidence.json"
           result=$?
           set -e
           if [[ -s "$RUNNER_TEMP/cf-free-isolated-evidence.json" ]]; then
