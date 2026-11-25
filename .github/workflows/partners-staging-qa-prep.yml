@@ -1,0 +1,77 @@
+name: Partners isolated Staging preparation
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+permissions:
+  contents: read
+concurrency:
+  group: partners-staging-prep-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: ff8a2e2c7e85f2faf56232739d280415f964ef9d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+      - name: Install exact candidate dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix api ci
+      - name: Verify migration order against an empty local SQLite fixture
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/partners-qa"
+          node --input-type=module <<'JS'
+          import {DatabaseSync} from 'node:sqlite';
+          import {readFileSync,readdirSync,writeFileSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const db=new DatabaseSync(':memory:');
+          const paths=readdirSync('api/migrations').filter(x=>x.endsWith('.sql')).sort().map(x=>'api/migrations/'+x);
+          paths.push(...['0025_subscription_xiaodou_rsa2.sql','0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1b_recovery_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql','partners_query_indexes_proposal.sql'].map(x=>'api/sql-proposals/'+x));
+          const manifest=[];
+          for(const path of paths){
+            const sql=readFileSync(path,'utf8');
+            db.exec(sql);
+            manifest.push({path,sha256:createHash('sha256').update(sql).digest('hex'),bytes:Buffer.byteLength(sql)});
+          }
+          assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+          assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);
+          assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_commissions').get().n,0);
+          const flags=db.prepare("SELECT key,value FROM system_settings WHERE key LIKE 'partner_%' ORDER BY key").all();
+          assert.ok(flags.length>=10);
+          for(const f of flags)assert.equal(f.value,f.key==='partner_payout_min_fen'?'1000':'0');
+          const schema=db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+          const report={sourceSha:process.env.SOURCE_SHA,manifest,flags,tableCount:schema.filter(x=>x.type==='table').length,indexCount:schema.filter(x=>x.type==='index').length,triggerCount:schema.filter(x=>x.type==='trigger').length};
+          writeFileSync(process.env.RUNNER_TEMP+'/partners-qa/migrations.json',JSON.stringify(report,null,2));
+          console.log('QA_MIGRATION_MANIFEST '+JSON.stringify(report));
+          db.close();
+          JS
+      - name: Bundle verified Worker source without deployment
+        run: |
+          cd api
+          npx --no-install esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --outfile="$RUNNER_TEMP/partners-qa/worker.mjs"
+      - name: Fingerprint source-only QA preparation
+        run: |
+          cd "$RUNNER_TEMP/partners-qa"
+          sha256sum migrations.json worker.mjs > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partners-qa-prep-${{ env.SOURCE_SHA }}
+          path: ${{ runner.temp }}/partners-qa/
+          if-no-files-found: error
+          retention-days: 7
