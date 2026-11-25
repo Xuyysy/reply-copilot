@@ -107,7 +107,12 @@ jobs:
             tests/extension-identity.test.js \
             api/tests/payment-config.test.mjs \
             api/tests/subscription-policy.test.mjs \
-            api/tests/signup-device-claims.test.mjs
+            api/tests/signup-device-claims.test.mjs \
+            api/tests/partner-policy.test.mjs \
+            api/tests/partner-ledger.test.mjs \
+            api/tests/partner-payout.test.mjs \
+            api/tests/partner-alipay.test.mjs \
+            api/tests/partner-transfer.test.mjs
 
       - name: Build pinned Staging extension
         # Only push artifacts can be promoted by the guarded Staging release.
