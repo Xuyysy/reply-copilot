@@ -65,3 +65,21 @@ test('prospective history, stale writes, pause even after target frozen, immutab
   assert.throws(()=>db.exec("UPDATE partner_policy_versions SET rate_bps=1"),/immutable/);
   assert.throws(()=>db.exec("DELETE FROM partner_policy_versions"),/immutable/);
 });
+
+test('program switch can stop further writes without erasing history',t=>{
+ const db=fixture(t);enable(db);assert.equal(append(db),1);
+ db.exec("UPDATE system_settings SET value='0' WHERE key='partner_program_enabled'");
+ assert.equal(append(db,{now:200,policy:{...policy,expectedVersion:1}}),0);
+ assert.equal(at(db,'p',200).version,1);
+});
+test('new routes preserve original admin guard and require scoped web session',()=>{
+ const source=readFileSync(new URL('../src/partners.ts',import.meta.url),'utf8');
+ const router=readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');
+ assert.match(source,/requireAdminSession\(request,env,write\)/);
+ assert.match(source,/session\.kind!=="web"/);
+ assert.match(source,/current\(env,session\.user_id\)/);
+ assert.match(source,/if\(!await enabled\(env\)\)/);
+ assert.match(source,/result\.meta\.changes!==1/);
+ assert.match(router,/path === "\/v1\/partners\/me"/);
+ assert.match(router,/path === "\/v1\/admin\/partners\/policy"/);
+});
