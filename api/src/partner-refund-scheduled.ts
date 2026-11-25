@@ -3,6 +3,11 @@ import {refundCandidatePlan,confirmedRefundAmount,refundSyncPlan} from "./partne
 import {subscriptionRefundCandidatePlan,subscriptionRefundSyncPlan} from "./partner-subscription-refund.mjs";
 import {refundSweepPagePlan,refundSweepAdvancePlan} from "./partner-refund-sweep.mjs";
 
+// Also recheck the scheduled switch in the same SQL write, not merely
+// at invocation start. Manual reconciliation keeps its own independent gate.
+function scheduledWrite(plan:{sql:string;params:unknown[]}){
+ return {...plan,sql:plan.sql.replace("ON CONFLICT DO NOTHING","AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_scheduled_refund_sync_enabled' AND value='1') ON CONFLICT DO NOTHING")};
+}
 // Internal only. Recheck persisted evidence in the guarded reversal statement.
 // Do not infer partial subscription refunds or turn risk holds into reversals.
 async function syncOne(env:Env,domain:string,orderId:string,now:number){
@@ -11,14 +16,15 @@ async function syncOne(env:Env,domain:string,orderId:string,now:number){
   const rows=(await env.DB.prepare(q.sql).bind(...q.params).all<Record<string,unknown>>()).results;
   const work=await subscriptionRefundSyncPlan({orderId,rows,now});
   if(!work?.write)return;
-  await env.DB.prepare(work.write.sql).bind(...work.write.params).run();
+  const p=scheduledWrite(work.write);
+  await env.DB.prepare(p.sql).bind(...p.params).run();
   return;
  }
  const q=refundCandidatePlan(orderId);
  const rows=(await env.DB.prepare(q.sql).bind(...q.params).all<Record<string,unknown>>()).results;
  if(confirmedRefundAmount(rows)===null)return;
  const work=refundSyncPlan({orderId,rows,now});
- if(work)await env.DB.prepare(work.sql).bind(...work.params).run();
+ if(work){const p=scheduledWrite(work);await env.DB.prepare(p.sql).bind(...p.params).run();}
 }
 
 // No D1 access when absent or production; independent of accrual switches.
