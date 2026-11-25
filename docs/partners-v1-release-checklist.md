@@ -27,3 +27,29 @@ Issue #254 / Draft PR #255. This is a source-review checklist, not an authorizat
 Disable new accrual, discovery and new payout approvals independently when authorized. Preserve immutable financial records. Do not delete payouts or retry unknown transfers. Existing verified outcomes must be reconciled even when new activity is disabled, within the allowed environment. Refund reconciliation is independent of new accrual. Reconcile externally verified payment/refund/transfer evidence before any correction; do not infer success from missing responses.
 
 No remote D1 operations, configuration changes, deployments, merges or real payments performed by this checklist.
+
+## Staging operator-first acceptance (required before owner handoff)
+
+Owner requested that the implementer create and exercise dedicated QA accounts and complete acceptance before asking the owner to test. Do not ask the owner to be the first tester. Record exact release SHA, Worker/Pages version, test time, case results, account aliases (never passwords), defects and retest evidence.
+
+Account matrix (aliases only; not created yet):
+| Alias | Expected behavior |
+| --- | --- |
+| QA partner A | Active partner, authorization history, masked payout destination, eligible order commission, hold, request and reserve |
+| QA buyer B | Attributed new invitee, settled synthetic credit order, partial/full refund and retry |
+| QA buyer C | Attributed subscription purchase/renewal/upgrade, supported full refund and unsupported/ambiguous evidence |
+| QA outsider D | No partner authorization; cannot read A's records or use admin endpoints |
+| QA excluded E | Explicit test-account marker; never cash eligible |
+| QA partner F | Paused partner, prior earnings, insufficient funds, debt and stale recipient version |
+
+Use the existing singleton authorized staging admin; do not create a second admin or relax reauthentication. Do not unset a real test-account marker to bypass the cash eligibility guard. For eligible synthetic cash-flow QA, provision an **isolated staging-only database and isolated Worker/Pages binding**, with exclusively synthetic normal-role users; block all actual provider, email and transfer calls, use non-real recipient information and distinguish every synthetic financial record. This is a proposed approach requiring explicit approval before any remote D1 action, including provisioning, inspection, seed, or migration. Shared Staging may only use clearly marked test accounts for non-financial negative/UI checks unless an independently reviewed isolation plan is approved. Do not seed fabricated provider success into a shared or real payment database.
+
+Before handoff:
+1. Verify final SHA, full Push CI and artifacts, approved configuration, environment isolation and no live payment secrets or outbound transfer capability.
+2. Create QA accounts under approved isolation; record aliases and expected starting balances. Test sign-in, referrals, partner authorization, CSRF and reauth, account ownership, recipient masking and version changes.
+3. Exercise discovery, approval, scheduler, holds, pending/duplicate requests, refund reconciliation (including post-payout debt), manual simulated outcome and unknown transfer lock. Verify DB invariants with the approved test scope; test off switches and recovery.
+4. Test browser flows for both the user and administrator at desktop/mobile widths; verify errors, loading, refresh, disabled states and no plaintext outside the authorized reveal. Do not claim browser testing without actual browser evidence.
+5. Repeat failed cases after fixes, record pass/fail and unresolved issues. If any release-blocking case fails, no owner handoff. Freeze/retain synthetic financial history under the approved retention plan; do not delete financial rows.
+6. Only after all required tests pass, provide owner a concise report, exact Staging URL and approved QA account access through a secure channel, plus a short owner acceptance path. Never place passwords or keys in GitHub or public logs. Owner's acceptance remains separate from production authorization.
+
+Current execution: only isolated local/CI tests, no Staging QA account creation yet. Do not represent these aliases as existing logins.
