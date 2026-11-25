@@ -112,13 +112,14 @@ function payoutReviewFixture(t){
  const db=fixture(t);enable(db);
  db.exec(`UPDATE system_settings SET value='1' WHERE key='partner_payout_review_enabled';
  CREATE TABLE recharge_orders(id TEXT,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER,credits INTEGER);
- CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER);
+ CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER,provider_trade_id TEXT,provider_payment_id TEXT,paid_at INTEGER);
+ CREATE TABLE subscription_payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,provider_trade_id TEXT,provider_payment_id TEXT);
  CREATE TABLE provider_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,currency TEXT);
  CREATE TABLE credit_ledger(kind TEXT,reference_id TEXT,user_id TEXT,paid_delta INTEGER);
  CREATE TABLE credit_batches(source_order_id TEXT,user_id TEXT,source_kind TEXT,grant_credits INTEGER);
  CREATE TABLE payment_refunds(transaction_id TEXT,status TEXT,base_amount_fen INTEGER);
  INSERT INTO recharge_orders VALUES('o','b','paid',10,11,500);
- INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,0);
+ INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,0,'out-r','pay-r',10);
  INSERT INTO provider_payment_events VALUES('tx','xiaodou','PAYMENT_SUCCEEDED',1000,'CNY');
  INSERT INTO credit_ledger VALUES('purchase_grant','o','b',500);
  INSERT INTO credit_batches VALUES('o','b','purchase',500);`);
