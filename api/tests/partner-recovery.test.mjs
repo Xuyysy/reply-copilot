@@ -122,3 +122,40 @@ test('review endpoint prohibits production and requires reauthentication',()=>{
  assert.match(s,/PARTNER_ACCRUAL_REVIEW_ENABLED!=='1'/);
  assert.match(s,/b\.riskReviewed!==true/);
 });
+
+test('discovery keyset pagination includes late entitlement application and excludes pre-window orders',async t=>{
+ const {discoveryPagePlan,discoveryEnqueuePlan,cursorAdvancePlan}=await import('../src/partner-discovery.mjs');
+ const db=fixture(t);enable(db);window(db);
+ db.exec(`CREATE TABLE recharge_orders(id TEXT PRIMARY KEY,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER);
+ INSERT INTO recharge_orders VALUES('old','b','paid',299,350),('a','b','paid',310,350),('z','b','paid',311,350),('late','b','paid',312,NULL);
+ INSERT INTO partner_discovery_cursors VALUES('recharge',300,'',300);`);
+ assert.equal(run(db,discoveryEnqueuePlan({domain:'recharge',orderId:'a',now:360})),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_discovery_enabled'");
+ const page=(afterAt,afterId)=>{const p=discoveryPagePlan({domain:'recharge',afterAt,afterId,now:400,limit:2});return db.prepare(p.sql).all(...p.params);};
+ const p=page(300,'');assert.deepEqual(p.map(r=>r.order_id),['a','old']);
+ assert.equal(run(db,discoveryEnqueuePlan({domain:'recharge',orderId:'a',now:360})),1);
+ assert.equal(run(db,discoveryEnqueuePlan({domain:'recharge',orderId:'old',now:360})),0);
+ const advance=cursorAdvancePlan({domain:'recharge',oldAt:300,oldId:'',nextAt:350,nextId:'old',now:360});
+ assert.equal(run(db,advance),1);assert.equal(run(db,advance),0);
+ db.exec("UPDATE recharge_orders SET credited_at=370 WHERE id='late'");
+ assert.deepEqual(page(350,'old').map(r=>r.order_id),['z','late']);
+ assert.equal(run(db,discoveryEnqueuePlan({domain:'recharge',orderId:'late',now:400})),1);
+ assert.equal(run(db,discoveryEnqueuePlan({domain:'recharge',orderId:'late',now:400})),0);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_accrual_jobs").get().n,2);
+});
+test('confirmed refund sync rejects unknown or stale totals and records cumulative full reversal once',async t=>{
+ const {refundCandidatePlan,confirmedRefundAmount,refundSyncPlan}=await import('../src/partner-refund-sync.mjs');
+ const db=reviewFixture(t);batch(db,reviewBatch(db));
+ const q=refundCandidatePlan('o'),read=()=>db.prepare(q.sql).all(...q.params);
+ assert.equal(confirmedRefundAmount(read()),250);assert.equal(refundSyncPlan({orderId:'o',rows:read(),now:400}),null);
+ db.exec("INSERT INTO payment_refunds VALUES('tx','unknown',750)");
+ assert.equal(refundSyncPlan({orderId:'o',rows:read(),now:400}),null);
+ db.exec("UPDATE payment_refunds SET status='succeeded' WHERE status='unknown'");
+ assert.equal(confirmedRefundAmount(read()),null);
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=1000,status='refunded'; UPDATE recharge_orders SET status='refunded'");
+ const plan=refundSyncPlan({orderId:'o',rows:read(),now:400});assert.ok(plan);assert.equal(run(db,plan),0);
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_refund_sync_enabled'; UPDATE system_settings SET value='0' WHERE key='partner_cash_accrual_enabled'");
+ assert.equal(run(db,plan),1);assert.equal(run(db,plan),0);
+ assert.equal(db.prepare("SELECT SUM(delta_fen) total FROM partner_commission_refunds").get().total,-200);
+ assert.equal(refundSyncPlan({orderId:'o',rows:read(),now:401}),null);
+});
