@@ -17,9 +17,11 @@ export function subscriptionRefundCandidatePlan(orderId){
  WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0) recorded_fen
  FROM partner_commissions c JOIN subscription_orders o ON o.id=c.order_id AND o.user_id=c.buyer_user_id
  JOIN subscription_payment_transactions t ON t.order_id=o.id
+ JOIN partner_payment_identity_claims k ON k.order_domain=c.order_domain AND k.order_id=c.order_id
+ AND k.merchant_provider=t.merchant_provider AND k.provider_trade_id=t.provider_trade_id AND k.provider_payment_id=t.provider_payment_id
  WHERE c.order_domain='subscription' AND c.order_id=? AND o.kind IN ('purchase','renewal','upgrade')
  AND o.status='refunded' AND t.status='refunded' AND t.risk_state='frozen'
- AND o.paid_at=c.paid_at AND o.applied_at=c.applied_at AND t.amount_fen=o.amount_fen AND o.amount_fen=c.principal_fen
+ AND o.paid_at=c.paid_at AND t.paid_at=c.paid_at AND o.applied_at=c.applied_at AND t.amount_fen=o.amount_fen AND o.amount_fen=c.principal_fen
  AND t.currency='CNY' AND t.merchant_provider='mk99'
  AND t.provider_trade_id IS NOT NULL AND t.provider_payment_id IS NOT NULL
  AND EXISTS(SELECT 1 FROM subscription_payment_events e WHERE e.transaction_id=t.id AND e.merchant_provider='mk99'
