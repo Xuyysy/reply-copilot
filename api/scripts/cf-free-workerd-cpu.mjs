@@ -34,11 +34,26 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
     sourcefile:'local-d1-batch-diagnostic.ts',
     contents:`import worker from './index.ts';
       export default {async fetch(request,env,ctx){
-        const tally={calls:0,statements:0,rowsRead:0,rowsWritten:0,missingMetadata:0};
+        const tally={calls:0,statements:0,rowsRead:0,rowsWritten:0,missingMetadata:0,standaloneCalls:0};
         const db=env.DB;
+        // Keep the real prepared statement identity for batch(). A standalone
+        // first() has no D1 row metadata; count calls only, never invent rows.
+        const originals=new WeakMap();
+        const wrap=stmt=>{
+          const proxy=new Proxy(stmt,{get(target,key){
+            if(key==='bind')return (...args)=>wrap(target.bind(...args));
+            if(['first','all','run','raw'].includes(key))return async (...args)=>{
+              tally.standaloneCalls++;return target[key](...args);
+            };
+            const v=Reflect.get(target,key,target);
+            return typeof v==='function'?v.bind(target):v;
+          }});
+          originals.set(proxy,stmt);return proxy;
+        };
         const measured=new Proxy(db,{get(target,key){
+          if(key==='prepare')return sql=>wrap(target.prepare(sql));
           if(key==='batch')return async statements=>{
-            const results=await target.batch(statements);
+            const results=await target.batch(statements.map(s=>originals.get(s)??s));
             tally.calls++;tally.statements+=results.length;
             for(const r of results){
               if(!Number.isSafeInteger(r.meta?.rows_read)||!Number.isSafeInteger(r.meta?.rows_written)){tally.missingMetadata++;continue;}
@@ -233,7 +248,7 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
       let prof;
       try {for(let i=0;i<samples;i++){const result=await invoke(setup.mf,name,warmup+i,ids);elapsed.push(result.elapsed);if(measureBatches){if(!result.batch||result.batch.missingMetadata!==0)throw Error('Missing local D1 batch metadata');batches.push(result.batch);}}}
       finally {if(profile)prof=await inspector.call('Profiler.stop');}
-      rows.push({category:name,wall:summarizeWallMs(elapsed),cpuProfile:profile ? summarizeV8Profile(prof?.profile) : {status:'NOT_REQUESTED'},...(measureBatches?{localD1BatchTotals:Object.fromEntries(['calls','statements','rowsRead','rowsWritten'].map(key=>[key,batches.reduce((n,b)=>n+b[key],0)]))}:{})});
+      rows.push({category:name,wall:summarizeWallMs(elapsed),cpuProfile:profile ? summarizeV8Profile(prof?.profile) : {status:'NOT_REQUESTED'},...(measureBatches?{localD1BatchTotals:Object.fromEntries(['calls','statements','rowsRead','rowsWritten'].map(key=>[key,batches.reduce((n,b)=>n+b[key],0)])),localD1StandaloneCalls:batches.reduce((n,b)=>n+b.standaloneCalls,0)}:{})});
     }
     const a=await setup.db.prepare('SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts WHERE user_id=?').bind(MAIN_USER).first();
     const debit=await setup.db.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE user_id=? AND kind='generation_debit'").bind(MAIN_USER).first();
@@ -249,7 +264,7 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
     if(setup.getExternalCalls()!==0)throw Error('External network was attempted');
     return {status:'SYNTHETIC_LOCAL_ONLY',runtime:'Miniflare/workerd',environment:'isolated, fresh local D1, offline mock AI',
       source,assertionMode,measureBatches,expiryIndex,passwordMode,extendedLogin,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
-      caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit. Optional D1 totals cover successful DB.batch calls only, excluding standalone statements and background work; not cloud billing.',
+      caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit. Optional D1 row totals cover successful DB.batch only; standaloneCalls counts first/all/run/raw invocations (not rows), excluding background work. Not cloud billing.',
       cases:rows,assertions:{realNetworkCalls:0,creditDebits:expectedDebits,subscriptionUsed:sub.used,endingFreeCredits:expectedFree,endingPaidCredits:expectedPaid,endingReservedCredits:0}};
   }finally{if(inspector)inspector.close();await setup.mf.dispose();}
 }

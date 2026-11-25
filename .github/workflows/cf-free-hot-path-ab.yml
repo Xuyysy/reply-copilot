@@ -1,0 +1,50 @@
+name: CF Free hot path before-after local D1 calls
+on:
+  push:
+    branches: ['chatgpt/cf-free-hot-path-20261125']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: a5e17fee4af7c6fb83f6157569a13678bd741321
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact baseline and identical measurement harness
+        run: |
+          test "$(git -C baseline rev-parse HEAD)" = a5e17fee4af7c6fb83f6157569a13678bd741321
+          cp api/scripts/cf-free-workerd-cpu.mjs baseline/api/scripts/cf-free-workerd-cpu.mjs
+          cp api/scripts/cf-free-hot-path-call-counts.mjs baseline/api/scripts/cf-free-hot-path-call-counts.mjs
+          npm --prefix api ci
+          npm --prefix baseline/api ci
+      - name: Compare isolated runtime calls and accounting
+        shell: bash
+        run: |
+          set -euo pipefail
+          node baseline/api/scripts/cf-free-hot-path-call-counts.mjs | tee "$RUNNER_TEMP/base.log"
+          node api/scripts/cf-free-hot-path-call-counts.mjs | tee "$RUNNER_TEMP/candidate.log"
+          python3 - <<'PY'
+          import json,os,pathlib
+          def read(name):
+              p=pathlib.Path(os.environ['RUNNER_TEMP'])/name
+              rows=[json.loads(s.split('CF_FREE_HOT_PATH_FULL_CALLS ',1)[1]) for s in p.read_text().splitlines() if s.startswith('CF_FREE_HOT_PATH_FULL_CALLS ')]
+              assert len(rows)==3
+              return {r['source']:r for r in rows}
+          a,b=read('base.log'),read('candidate.log')
+          for source in ('free','paid','subscription'):
+              assert a[source]['assertions']==b[source]['assertions']
+              delta={k:{'before':v['standalone'],'after':b[source]['routes'][k]['standalone']} for k,v in a[source]['routes'].items()}
+              assert delta['bootstrap']['after']<delta['bootstrap']['before']
+              assert delta['ai_generate_mock']['after']<delta['ai_generate_mock']['before']
+              print('CF_FREE_HOT_PATH_AB '+json.dumps({'source':source,'calls':delta,'accountingMatched':True}))
+          PY
