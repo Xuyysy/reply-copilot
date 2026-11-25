@@ -85,3 +85,6 @@ CREATE TRIGGER partner_discovery_cursor_monotonic BEFORE UPDATE ON partner_disco
 BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.applied_at<OLD.applied_at
  OR (NEW.applied_at=OLD.applied_at AND NEW.order_id<=OLD.order_id) OR NEW.updated_at<OLD.updated_at
  THEN RAISE(ABORT,'discovery cursor must advance') END; END;
+
+-- Optional isolated scheduled discovery, disabled until explicitly configured.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_discovery_enabled','0',0) ON CONFLICT(key) DO NOTHING;
