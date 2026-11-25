@@ -187,6 +187,17 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       oa.before(oa.cloneNode(true));checks.onlyExtraArticle=on().evaluate(os()).state==='rejected';od.querySelector('article').remove();
       oe.value='draft';checks.onlyDraft=on().evaluate(os()).reason==='existing_draft';oe.value='';
       oe.before(oa);oe.after(oa);checks.onlyAfterEditor=on().evaluate(os()).editor===null;oe.before(oa);
+      // Focal detail posts may expose their owned timestamp instead of a
+      // hidden permalink. Do not infer identity from the document URL.
+      const timed=document.createElement('article');timed.innerHTML='<a href="/focal/status/727"><time>now</time></a><div dir="auto" class="whitespace-pre-wrap">Focal body</div>';
+      document.body.append(timed);checks.focalOwnedTime=p.extractPost(timed).statusId==='727';
+      timed.insertAdjacentHTML('beforeend','<div data-testid="quoteTweet"><a href="/quoted/status/919"><time>quoted</time></a><div dir="auto" class="whitespace-pre-wrap">Foreign quote</div></div>');
+      checks.focalQuoteOwnership=p.extractPost(timed).statusId==='727'&&p.extractPost(timed).sourceText==='Focal body';
+      timed.insertAdjacentHTML('beforeend','<a href="/wrong/status/999"><time>wrong</time></a>');
+      checks.focalTimeConflict=!p.extractPost(timed).ok;timed.lastElementChild.remove();
+      const nativeQuery=timed.querySelectorAll;let bodyQueries=0;
+      timed.querySelectorAll=function(selector){if(selector==='div[dir="auto"].whitespace-pre-wrap')bodyQueries++;return nativeQuery.call(this,selector);};
+      checks.modernSingleBodyScan=p.extractPost(timed).ok&&bodyQueries===1;
       $('result').textContent=JSON.stringify(checks);
     };
     const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
@@ -205,7 +216,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,86);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,90);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });

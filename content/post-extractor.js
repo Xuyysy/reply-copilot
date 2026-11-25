@@ -92,17 +92,21 @@
     }
     // A focal post can carry a hidden canonical permalink inside its
     // article; exclude embedded quote and ordinary content links.
-    for(const a of article.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"]')){
-      if(a.closest('article')!==article||a.closest(MODERN_FRAME)||a.closest(MODERN_BODY)||isQuoteContent(a,article))continue;
+    for(const a of article.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"],a[href*="/status/"]:has(time)')){
+      if(!modernOwned(a,article)||a.closest(MODERN_FRAME)||a.closest(MODERN_BODY)||
+         a.closest('[data-engagement-action]'))continue;
       add(a.getAttribute('href'));
     }
     return {identity:!invalid&&ids.size===1?ids.values().next().value:null,
       conflict:invalid||ids.size>1};
   }
+  function modernOwned(node,article) {
+    if(node.closest('article')!==article||isQuoteContent(node,article))return false;
+    const frame=node.closest(MODERN_FRAME);
+    return !frame||!article.contains(frame);
+  }
   function modernBodyNodes(article) {
-    return [...article.querySelectorAll(MODERN_BODY)].filter(node=>
-      node.closest('article')===article &&
-      (!node.closest(MODERN_FRAME)||!article.contains(node.closest(MODERN_FRAME))));
+    return [...article.querySelectorAll(MODERN_BODY)].filter(node=>modernOwned(node,article));
   }
   function modernBody(article) {
     const nodes=modernBodyNodes(article);
@@ -186,8 +190,22 @@
   function extractPost(article) {
     if (!article?.matches?.("article")) return { ok: false, reason: "no-post" };
     const modernLayout=isModernPost(article);
-    if(modernLayout&&(article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]')||modernBodyNodes(article).length>1))
-      return {ok:false,reason:"post-context-incomplete"};
+    // Resolve the modern path once: the hot activation/snapshot path used
+    // to classify the same article repeatedly and scan body nodes twice.
+    // Leave the established legacy extractor below untouched.
+    if(modernLayout){
+      if(article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]'))return {ok:false,reason:"post-context-incomplete"};
+      const bodies=modernBodyNodes(article);
+      if(bodies.length>1)return {ok:false,reason:"post-context-incomplete"};
+      const identity=modernIdentityEvidence(article).identity;
+      if(!identity)return {ok:false,reason:"post-context-incomplete"};
+      const ownText=bodies.length===1?originalPostText(bodies[0]):"";
+      const quotes=ownText?[]:modernQuoteTexts(article);
+      const quotedText=quotes.length===1?quotes[0]:"";
+      const sourceText=ownText||quotedText;
+      if(!sourceText)return {ok:false,reason:"post-context-incomplete"};
+      return {ok:true,article,...identity,sourceText,modernLayout:true,quoteOnly:!ownText&&Boolean(quotedText),quotedText:quotedText||null};
+    }
     const identity = postIdentity(article);
     const ownText = postText(article);
     // A quote-only post has a canonical OUTER post ID but no own tweetText.

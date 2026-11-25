@@ -84,9 +84,10 @@
   // may use a native XDS editor only with an independently verified reply
   // anchor and positive structural evidence; never widen legacy textboxes.
   function hybridNativeEditor(node) {
-    const dialog=node?.closest?.('[role="dialog"]');
+    if(node?.localName!=='textarea')return false;
+    const dialog=node.closest?.('[role="dialog"]');
     const form=node?.closest?.('form');
-    return node?.localName==='textarea'&&Boolean(dialog?.matches?.('[data-slot="xds-modal-surface"]')&&
+    return Boolean(dialog?.matches?.('[data-slot="xds-modal-surface"]')&&
       form&&dialog.contains(form)&&form.closest('[data-media-upload-dropzone]')&&
       dialog.contains(form.closest('[data-media-upload-dropzone]')));
   }
