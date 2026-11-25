@@ -171,3 +171,15 @@ test('payout review endpoint is non-production and reauthenticated; recipient re
  assert.match(s,/openAlipayRecipient/);
  assert.ok(s.lastIndexOf('await env.DB.batch')<s.lastIndexOf('...(recipient?'));
 });
+
+test('fully reversed recharge is evidence for debt review, not new accrual or available funds',t=>{
+ const db=payoutReviewFixture(t);
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=1000,status='refunded'; UPDATE recharge_orders SET status='refunded'; INSERT INTO payment_refunds VALUES('tx','succeeded',1000)");
+ assert.equal(run(db,refundInsertPlan({orderDomain:'recharge',orderId:'o',refundEventId:'full',cumulativePrincipalFen:1000,now:25})),1);
+ const {rows,reviewed}=reviewSnapshot(db);
+ assert.equal(rows[0].remaining_fen,0);assert.equal(allocateReviewedItems(rows,1,30),null);
+ const g=payoutReviewAssertions({partnerId:'p',rows:reviewed,operationId:'opfull'});
+ atomic(db,[...g.checks,g.cleanup]);
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
+ assert.throws(()=>atomic(db,[...g.checks,g.cleanup]));
+});
