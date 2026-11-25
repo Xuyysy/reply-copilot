@@ -29,6 +29,10 @@ jobs:
       # A fast push does NOT produce artifacts and cannot satisfy a deploy's
       # artifact verification. This flag only applies to the push head commit.
       # A final unmarked commit remains subject to the original complete CI.
+      # Temporary candidate-only validation: same-repository Partners PR runs
+      # the complete suite in its merge context for visible release evidence.
+      # PR runs still cannot produce promotable release artifacts.
+      PARTNER_FULL_PR: ${{ github.event_name == 'pull_request' && github.head_ref == 'chatgpt/partners-v1a-foundation-20261125' && github.event.pull_request.head.repo.full_name == github.repository }}
       CI_LITE_PUSH: ${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'ci-lite:') && !startsWith(github.ref, 'refs/heads/release/') && !startsWith(github.ref, 'refs/heads/staging/') }}
     steps:
       - name: Checkout full history for regression baselines
@@ -48,7 +52,7 @@ jobs:
             api/package-lock.json
 
       - name: Install Chrome for isolated browser tests
-        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
+        if: (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
         id: chrome
         uses: browser-actions/setup-chrome@v2
         with:
@@ -57,7 +61,7 @@ jobs:
       # Temporary CI bridge for legacy tests that hard-code macOS paths.
       # Only modifies the disposable GitHub Linux runner, never any user machine.
       - name: Prepare isolated Linux Chrome test compatibility
-        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
+        if: (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
         env:
           REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
         shell: bash
@@ -83,7 +87,7 @@ jobs:
       # Full tests are mandatory on normal/final pushes and manual dispatch.
       # ci-lite: intermediate pushes get ONLY focused checks and no artifacts.
       - name: Run full suite and preserve the exit code
-        if: github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
+        if: (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
         env:
           CHROME_BINARY: ${{ runner.temp }}/ci-chrome/chrome
         shell: bash
@@ -180,14 +184,19 @@ jobs:
           if-no-files-found: error
 
       - name: Explain lightweight run is not release evidence
-        if: github.event_name == 'pull_request' || env.CI_LITE_PUSH == 'true'
+        if: (github.event_name == 'pull_request' && env.PARTNER_FULL_PR != 'true') || env.CI_LITE_PUSH == 'true'
         run: |
           echo '### Lightweight validation only' >> "$GITHUB_STEP_SUMMARY"
           echo 'This run did not execute the full browser suite or generate release artifacts.' >> "$GITHUB_STEP_SUMMARY"
           echo 'For a releasable source SHA, push a final commit without the ci-lite: prefix and require a green full Push CI.' >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Explain full candidate PR validation
+        if: env.PARTNER_FULL_PR == 'true'
+        run: |
+          echo 'Full suite in candidate PR merge context; no promotable release artifacts. Exact-head Push CI remains mandatory.' >> "$GITHUB_STEP_SUMMARY"
+
       - name: Always save full test logs
-        if: always() && github.event_name != 'pull_request' && env.CI_LITE_PUSH != 'true'
+        if: always() && (github.event_name != 'pull_request' || env.PARTNER_FULL_PR == 'true') && env.CI_LITE_PUSH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: test-logs-${{ env.SOURCE_SHA }}-${{ github.run_id }}
