@@ -3,12 +3,9 @@ import {ApiFailure} from "./types";
 import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs,uuid} from "./security";
-import {alipayApprovePlan,alipayStartPlan,alipayOutcomePlan} from "./partner-transfer.mjs";
+import {alipayStartPlan,alipayOutcomePlan} from "./partner-transfer.mjs";
 import {openAlipayRecipient} from "./partner-alipay.mjs";
-import {paymentEvidencePlan} from "./partner-payment-proof.mjs";
-import {subscriptionRefundCandidatePlan} from "./partner-subscription-refund.mjs";
-import {payoutReviewRowsPlan,allocateReviewedItems,payoutEvidenceMatches,payoutReviewAssertions,reversedSubscriptionReviewPlan} from "./partner-payout-review.mjs";
-type Commission={order_domain:string;order_id:string;remaining_fen:number;hold_until:number;buyer_user_id:string;principal_fen:number;paid_at:number;applied_at:number;reversed_principal:number};
+import {allHistoryPayoutGuard,setPayoutApprovePlan} from "./partner-payout-set-review.mjs";
 type RequestRow={id:string;partner_user_id:string;recipient_version:number;amount_fen:number;status:string;payout_id:string|null;payout_status:string|null;started_at:number|null;key_id:string;nonce_hex:string;ciphertext_hex:string};
 function conflict():never{throw new ApiFailure(409,'PARTNER_PAYOUT_REVIEW_CONFLICT','结算状态或证据不符合，请重新核对。');}
 export function payoutReviewPilot(env:Env){return ['development','staging'].includes(env.ENVIRONMENT)&&env.PARTNER_PAYOUT_REVIEW_ENABLED==='1';}
@@ -40,30 +37,11 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
  }
  if(action==='approve'&&(q.status!=='pending'||q.amount_fen<1000))conflict();
  if(action==='start'&&(!q.payout_id||q.payout_status!=='reserved'||q.started_at!==null))conflict();
- const p=payoutReviewRowsPlan(q.partner_user_id);
- const commissions=(await env.DB.prepare(p.sql).bind(...p.params).all<Commission>()).results;
- if(!commissions.length||commissions.length>30)conflict();
- const reviewed=[];
- for(const commission of commissions){
-  if(commission.order_domain==='subscription'&&commission.reversed_principal===commission.principal_fen){
-   const p=subscriptionRefundCandidatePlan(commission.order_id);
-   const rows=(await env.DB.prepare(p.sql).bind(...p.params).all<Record<string,unknown>>()).results;
-   const proof=await reversedSubscriptionReviewPlan(commission,rows);
-   if(!proof||!await env.DB.prepare(proof.sql).bind(...proof.params).first())conflict();
-   reviewed.push({commission,reversedSubscriptionProof:proof});
-   continue;
-  }
-  const e=paymentEvidencePlan(commission.order_domain,commission.order_id);
-  const rows=(await env.DB.prepare(e.sql).bind(...e.params).all<Record<string,unknown>>()).results;
-  if(!payoutEvidenceMatches(commission,rows))conflict();
-  reviewed.push({commission,evidence:rows[0]});
- }
- const guard=payoutReviewAssertions({partnerId:q.partner_user_id,rows:reviewed,operationId:b.operationId});
+ const guard=allHistoryPayoutGuard({partnerId:q.partner_user_id,operationId:b.operationId});
  let work;
  let recipient:{account:string;name:string}|null=null;
  if(action==='approve'){
-  const items=allocateReviewedItems(commissions,q.amount_fen,now);if(!items)conflict();
-  work=alipayApprovePlan({requestId:q.id,recipientVersion:q.recipient_version,payoutId:uuid(),partnerId:q.partner_user_id,actorId:actor.user_id,now,reason:b.reason,items});
+  work=setPayoutApprovePlan({requestId:q.id,recipientVersion:q.recipient_version,payoutId:uuid(),partnerId:q.partner_user_id,actorId:actor.user_id,amountFen:q.amount_fen,now,reason:b.reason});
  }else{
   const key=env.PARTNER_ALIPAY_ENCRYPTION_KEY;
   if(!key||env.PARTNER_ALIPAY_KEY_ID!==q.key_id)conflict();
@@ -80,6 +58,6 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
    {sql:"DELETE FROM partner_recovery_assertions WHERE id IN (?,?)",params:[claim,claim+':done']}
   ];
  }
- try{await env.DB.batch([...guard.checks,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
+ try{await env.DB.batch([guard.check,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
  return response({ok:true,state:action==='approve'?'reserved':'reconciling',pilot:true,...(recipient?{recipient,amountFen:q.amount_fen}: {})},200,env,request);
 }
