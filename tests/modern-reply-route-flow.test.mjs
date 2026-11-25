@@ -33,6 +33,12 @@ test('real Chromium trusted click through content script, portal, generation and
     f.resolve=()=>f.pending.shift()?.({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:answer}}});
     const link=document.querySelector('#reply');
     if(mode==='wrong-link')link.href='/compose/post?in_reply_to=999';
+    if(mode.startsWith('focal-active')){
+      const article=link.closest('article'),wrapper=article.parentElement,body=article.querySelector('[dir="auto"]');
+      wrapper.removeAttribute('data-href');wrapper.removeAttribute('role');wrapper.querySelector('a[aria-hidden="true"]').remove();
+      body.className='';body.setAttribute('lang','en');
+      article.insertAdjacentHTML('afterbegin','<a data-status="active" href="/fixture/status/'+(mode==='focal-active-conflict'?'999':'202')+'">8:58 PM</a>');
+    }
     if(mode.startsWith('hybrid')){const article=link.closest('article'),body=article.querySelector('[dir="auto"]');article.setAttribute('data-testid','tweet');body.setAttribute('data-testid','tweetText');body.removeAttribute('class');article.insertAdjacentHTML('afterbegin','<a href="/fixture/status/202"><time>now</time></a>');}
     if(mode.startsWith('quote-only'))link.closest('article').querySelector('[dir="auto"]').remove();
     if(mode.startsWith('caption-quote')||mode.startsWith('quote-only')){
@@ -135,8 +141,8 @@ test('real Chromium trusted click through content script, portal, generation and
       assert.equal(state.generated,shouldGenerate?1:0,mode+JSON.stringify(state));
       return state;
     }
-    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict','hybrid-good','hybrid-no-proof','quote-only-good','quote-only-conflict']){
-      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good','hybrid-good','quote-only-good'].includes(mode);
+    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict','hybrid-good','hybrid-no-proof','quote-only-good','quote-only-conflict','focal-active-good','focal-active-conflict']){
+      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good','hybrid-good','quote-only-good','focal-active-good'].includes(mode);
       const before=await open(mode,shouldGenerate);
       if(shouldGenerate){
         assert.equal(before.host,true,mode);
@@ -146,9 +152,9 @@ test('real Chromium trusted click through content script, portal, generation and
         await evalIn('fixture.resolve()');await wait(240);
       }
       const state=await evalIn('fixture.result()');
-      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(!['good','caption-quote-good','hybrid-good','quote-only-good'].includes(mode))assert.equal(state.applied,0,mode);
+      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(!['good','caption-quote-good','hybrid-good','quote-only-good','focal-active-good'].includes(mode))assert.equal(state.applied,0,mode);
       assert.equal(state.sourceMatches,true,mode);
-      if(['good','caption-quote-good','hybrid-good','quote-only-good'].includes(mode)){
+      if(['good','caption-quote-good','hybrid-good','quote-only-good','focal-active-good'].includes(mode)){
         const answer=await evalIn('fixture.answer');
         assert.equal(state.inputs,1,JSON.stringify(state));assert.equal(state.value,answer);
         assert.equal(state.model,answer);assert.equal(state.mirror,answer);assert.equal(state.applied,1);assert.match(state.status,/已填入/);

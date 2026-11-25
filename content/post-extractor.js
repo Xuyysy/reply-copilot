@@ -63,6 +63,16 @@
     return ![...(article.querySelectorAll?.('[data-testid="tweetText"]')||[])]
       .some(node=>node.closest('article')===article&&!isQuoteContent(node,article));
   }
+  // Secondary evidence is deliberately local to an independently owned
+  // native Reply anchor. Never derive a post identity from the page URL.
+  function modernNativeReply(article) {
+    const links=[...article.querySelectorAll('[data-engagement-action="reply"] a[href],a[data-engagement-action="reply"][href]')].filter(a=>
+      modernOwned(a,article)&&a.closest('[data-engagement-action]')?.getAttribute('data-engagement-action')==='reply'&&
+      !a.closest('form,[inert],[hidden],[aria-hidden="true"],[data-anchor-to-hovered-child],'+MODERN_BODY+',div[dir="auto"][lang]'));
+    if(links.length!==1)return null;
+    const id=globalThis.ZaneReplyCopilotContent?.replyDetector?.replyTargetId?.(links[0]);
+    return id?{id,node:links[0]}:null;
+  }
   function modernIdentityEvidence(article) {
     const ids=new Map();
     let invalid=false;
@@ -93,9 +103,28 @@
     // A focal post can carry a hidden canonical permalink inside its
     // article; exclude embedded quote and ordinary content links.
     for(const a of article.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"],a[href*="/status/"]:has(time)')){
-      if(!modernOwned(a,article)||a.closest(MODERN_FRAME)||a.closest(MODERN_BODY)||
+      if(!modernOwned(a,article)||a.closest(MODERN_FRAME)||a.closest(MODERN_BODY+',div[dir="auto"][lang]')||
          a.closest('[data-engagement-action]'))continue;
       add(a.getAttribute('href'));
+    }
+    // Focal XDS markup can omit the hidden permalink, tooltip and <time>.
+    // The active timestamp alone is insufficient: require the sole owned
+    // native reply route to independently corroborate it. Fast-path
+    // timeline/legacy evidence never incurs this fallback scan.
+    if(!invalid&&ids.size===0){
+      const links=[...article.querySelectorAll('a[data-status="active"][href*="/status/"]')].filter(a=>
+        modernOwned(a,article)&&!a.closest('form,[inert],[hidden],[aria-hidden="true"],[data-engagement-action],[data-anchor-to-hovered-child],'+MODERN_BODY+',div[dir="auto"][lang]'));
+      if(links.length){
+        const reply=modernNativeReply(article);
+        if(reply&&links.length===1){
+          try{
+            const base=new URL(article.ownerDocument.baseURI),url=new URL(links[0].getAttribute('href'),base);
+            const identity=statusLink({href:url.href});
+            if(url.origin!==base.origin||url.username||url.password||!identity||identity.statusId!==reply.id)invalid=true;
+            else add(url.href);
+          }catch{invalid=true;}
+        }else if(links.length>1)invalid=true;
+      }
     }
     return {identity:!invalid&&ids.size===1?ids.values().next().value:null,
       conflict:invalid||ids.size>1};
@@ -106,7 +135,18 @@
     return !frame||!article.contains(frame);
   }
   function modernBodyNodes(article) {
-    return [...article.querySelectorAll(MODERN_BODY)].filter(node=>modernOwned(node,article));
+    const primary=[...article.querySelectorAll(MODERN_BODY)].filter(node=>modernOwned(node,article));
+    if(primary.length)return primary;
+    // Narrow secondary path for class-renamed feed/focal bodies. Require
+    // positive native action ownership; never guess from arbitrary dir=auto
+    // nodes, dialog contents, profile names, or the inline composer.
+    const possible=[...article.querySelectorAll('div[dir="auto"][lang]')].filter(node=>
+      modernOwned(node,article)&&Boolean(node.getAttribute('lang')?.trim())&&
+      !node.closest('a,button,[role="button"],[role="group"],form,textarea,[contenteditable="true"],[data-media-upload-dropzone],[data-anchor-to-hovered-child],[data-post-avatar],aside,[hidden],[aria-hidden="true"],[inert]')&&
+      node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden');
+    if(possible.length!==1)return possible.length>1?possible:[];
+    const reply=modernNativeReply(article);
+    return reply&&(possible[0].compareDocumentPosition(reply.node)&4)?possible:[];
   }
   function modernBody(article) {
     const nodes=modernBodyNodes(article);
@@ -117,9 +157,7 @@
       a.parentElement?.closest('article')===article);
     return cards.map(modernBody).filter(Boolean);
   }
-  function postIdentity(article) {
-    if (!article?.matches?.("article")) return null;
-    if(isModernPost(article))return modernIdentityEvidence(article).identity;
+  function legacyPostIdentity(article) {
     // The author's timestamp is more reliable than a random /status/ link:
     // quote cards, media and link previews can contain OTHER tweet IDs.
     const timed=new Map();
@@ -143,6 +181,10 @@
       if (identity) candidates.set(identity.statusId, identity);
     }
     return candidates.size === 1 ? candidates.values().next().value : null;
+  }
+  function postIdentity(article) {
+    if (!article?.matches?.("article")) return null;
+    return isModernPost(article)?modernIdentityEvidence(article).identity:legacyPostIdentity(article);
   }
   // In bilingual mode, use the original tweet, not an appended translation.
   // A translation-only rewrite cannot be reversed reliably; never fabricate.
@@ -168,20 +210,17 @@
     }
     return (node.innerText||node.textContent||"").trim();
   }
-  function postText(article) {
-    if(isModernPost(article))return modernBody(article);
+  function legacyPostText(article) {
     // Never select a nested quoted post as the reply target.
     const primary=[...article.querySelectorAll('[data-testid="tweetText"]')]
       .find(node=>node.closest("article")===article&&!isQuoteContent(node,article));
     return originalPostText(primary);
   }
-  function quoteText(article) {
-    // Fast path for normal tweets: only read nested content if a real X
-    // quote card exists. No permalink lookup, network, or unrelated card.
-    if(isModernPost(article)){
-      const texts=modernQuoteTexts(article);
-      return texts.length===1?texts[0]:"";
-    }
+  function postText(article) {
+    return isModernPost(article)?modernBody(article):legacyPostText(article);
+  }
+  function legacyQuoteText(article) {
+    // Only read nested content if a real X quote card exists.
     const card=quoteCard(article);
     if (!card) return "";
     const quoted=card.querySelector?.('[data-testid="tweetText"]');
@@ -206,15 +245,14 @@
       if(!sourceText)return {ok:false,reason:"post-context-incomplete"};
       return {ok:true,article,...identity,sourceText,modernLayout:true,quoteOnly:!ownText&&Boolean(quotedText),quotedText:quotedText||null};
     }
-    const identity = postIdentity(article);
-    const ownText = postText(article);
+    const identity = legacyPostIdentity(article);
+    const ownText = legacyPostText(article);
     // A quote-only post has a canonical OUTER post ID but no own tweetText.
     // Use the visibly attached quote as context, never its ID as the target.
-    const quotedText = ownText ? "" : quoteText(article);
+    const quotedText = ownText ? "" : legacyQuoteText(article);
     const sourceText = ownText || quotedText;
     if (!identity || !sourceText) return { ok: false, reason: "post-context-incomplete" };
     return { ok: true, article, ...identity, sourceText,
-      ...(modernLayout?{modernLayout:true}:{}),
       quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};

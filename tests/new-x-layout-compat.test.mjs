@@ -201,6 +201,26 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       const nativeQuery=timed.querySelectorAll;let bodyQueries=0;
       timed.querySelectorAll=function(selector){if(selector==='div[dir="auto"].whitespace-pre-wrap')bodyQueries++;return nativeQuery.call(this,selector);};
       checks.modernSingleBodyScan=p.extractPost(timed).ok&&bodyQueries===1;
+      // Focal timestamp without <time>, plus a class-renamed body. This
+      // is a synthetic structural variant, not a live capture.
+      const detail=document.createElement('article');
+      detail.innerHTML='<div data-anchor-to-hovered-child><div dir="auto" lang="en">Author name</div></div><div dir="auto" lang="en">Detail body</div><a data-status="active" href="/focal/status/929">8:58 PM</a><div role="group"><div data-engagement-action="reply"><a href="/compose/post?in_reply_to=929">Reply</a></div></div>';
+      document.body.append(detail);
+      const dl=detail.querySelector('a[data-status]'),dr=detail.querySelector('[data-engagement-action] a'),db=detail.querySelector('article > div[lang]');
+      const de=()=>p.extractPost(detail);
+      checks.activeFocal=de().ok&&de().statusId==='929'&&de().sourceText==='Detail body';
+      dr.href='/compose/post?in_reply_to=999';checks.activeFocalConflict=!de().ok;dr.href='/compose/post?in_reply_to=929';
+      dl.href='https://example.com/focal/status/929';checks.activeFocalExternal=!de().ok;dl.href='/focal/status/929';
+      const group=dr.closest('[role="group"]');group.remove();checks.activeFocalNoRoute=!de().ok;detail.append(group);
+      detail.append(dl.cloneNode(true));checks.activeFocalDuplicate=!de().ok;detail.lastElementChild.remove();
+      db.after(db.cloneNode(true));checks.renamedBodyAmbiguous=!de().ok;db.nextElementSibling.remove();
+      db.hidden=true;checks.renamedBodyHidden=!de().ok;db.hidden=false;
+      db.className='whitespace-pre-wrap';const irrelevant=document.createElement('div');irrelevant.setAttribute('dir','auto');irrelevant.setAttribute('lang','en');irrelevant.textContent='unrelated';db.after(irrelevant);
+      checks.primaryBodyWins=de().ok&&de().sourceText==='Detail body';irrelevant.remove();db.className='';
+      const nested=document.createElement('div');nested.setAttribute('data-slot','embedded-tweet-frame');nested.innerHTML='<article><div dir="auto" lang="en">Quoted words</div><a data-status="active" href="/quote/status/999">now</a><div data-engagement-action="reply"><a href="/compose/post?in_reply_to=999">Reply</a></div></article>';db.after(nested);
+      checks.focalIgnoresNestedQuote=de().ok&&de().statusId==='929'&&de().sourceText==='Detail body';nested.remove();
+      const inline=document.createElement('form');inline.innerHTML='<textarea aria-label="Post your reply"></textarea>';detail.append(inline);inline.querySelector('textarea').focus();
+      od.remove();checks.noInlineReplyAssociation=a.snapshot(document,de(),start,start,20).editors.length===0;
       $('result').textContent=JSON.stringify(checks);
     };
     const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
@@ -219,7 +239,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,91);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,101);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });
