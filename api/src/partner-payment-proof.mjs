@@ -30,20 +30,25 @@ export function paymentEvidencePlan(domain,orderId){
 }
 // Conservative preview classification: unknown evidence cannot produce a
 // payable amount. CNY principal is a candidate basis, not merchant net.
-export function classifyPaymentEvidence(domain,rows){
+// The payout-only option admits a fully reversed recharge for debt checks,
+// never for new accrual. All other proof and risk guards still apply.
+export function classifyPaymentEvidence(domain,rows,{allowFullyReversed=false}={}){
  const blocked=reason=>({eligible:false,reason});
  if(!Array.isArray(rows)||rows.length!==1)return blocked(rows?.length?'ambiguous_transaction':'no_fiat_evidence');
  const r=rows[0];
  if(r.transaction_count!==1)return blocked('ambiguous_transaction');
  if(!['mk99','xiaodou'].includes(r.merchant_provider)||r.currency!=='CNY')return blocked('unsupported_provider');
  if(r.risk_state!=='clear'||r.refund_pending!==0)return blocked('risk_or_pending_refund');
- if(r.order_status!=='paid'||r.payment_status!=='paid')return blocked('not_paid');
+ const fullyReversed=allowFullyReversed&&domain==='recharge'&&integer(r.principal_fen)&&r.principal_refunded_fen===r.principal_fen&&r.refund_proof_fen===r.principal_fen;
+ const paid=r.order_status==='paid'&&r.payment_status==='paid';
+ const refunded=fullyReversed&&r.order_status==='refunded'&&r.payment_status==='refunded';
+ if(!paid&&!refunded)return blocked('not_paid');
  if(r.payment_proof!==1||r.applied_proof!==1||!Number.isSafeInteger(r.paid_at)||r.paid_at<=0||
  !Number.isSafeInteger(r.applied_at)||r.applied_at<r.paid_at)return blocked('missing_settlement_proof');
  if(!integer(r.principal_fen)||!integer(r.buyer_fen)||r.principal_fen>r.buyer_fen)return blocked('invalid_amount_snapshot');
  if(domain==='subscription'&&(!['purchase','renewal','upgrade'].includes(r.order_kind)||r.principal_fen!==r.buyer_fen))return blocked('invalid_subscription_amount');
  if(domain==='recharge'&&(!integer(r.principal_refunded_fen,0)||r.refund_proof_fen!==r.principal_refunded_fen||
- r.principal_refunded_fen>=r.principal_fen))return blocked('refund_requires_reconciliation');
+ (r.principal_refunded_fen>r.principal_fen||r.principal_refunded_fen===r.principal_fen&&!fullyReversed)))return blocked('refund_requires_reconciliation');
  return {eligible:true,reason:'candidate_only',principalFen:r.principal_fen,buyerFen:r.buyer_fen,
  refundedPrincipalFen:r.principal_refunded_fen,paidAt:r.paid_at,appliedAt:r.applied_at,provider:r.merchant_provider,kind:r.order_kind};
 }
