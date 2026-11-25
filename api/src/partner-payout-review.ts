@@ -61,10 +61,15 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
   // Decrypt exact immutable request destination, but never return it until
   // the start (which also serves as the reveal audit) is atomically committed.
   try{recipient=await openAlipayRecipient({keyId:q.key_id,nonceHex:q.nonce_hex,ciphertextHex:q.ciphertext_hex},{environment:env.ENVIRONMENT,userId:q.partner_user_id,version:q.recipient_version,keyId:q.key_id},key);}catch{conflict();}
-  work=[alipayStartPlan({payoutId:q.payout_id!,actorId:actor.user_id,now,reason:b.reason})];
-  // A zero-change replay MUST abort the batch, not reveal the recipient.
-  work.push({sql:"INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN changes()=1 THEN 1 ELSE 0 END",params:['start:'+b.operationId]});
-  work.push({sql:"DELETE FROM partner_recovery_assertions WHERE id=?",params:['start:'+b.operationId]});
+  // Prevent a competing start from exposing the recipient twice. Do not
+  // rely on connection-local changes() across D1 statements.
+  const claim='start:'+b.operationId;
+  work=[
+   {sql:"INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN NOT EXISTS(SELECT 1 FROM partner_alipay_transfer_starts WHERE payout_id=?) THEN 1 ELSE 0 END",params:[claim,q.payout_id!]},
+   alipayStartPlan({payoutId:q.payout_id!,actorId:actor.user_id,now,reason:b.reason}),
+   {sql:"INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN EXISTS(SELECT 1 FROM partner_alipay_transfer_starts WHERE payout_id=? AND started_by=? AND started_at=?) THEN 1 ELSE 0 END",params:[claim+':done',q.payout_id!,actor.user_id,now]},
+   {sql:"DELETE FROM partner_recovery_assertions WHERE id IN (?,?)",params:[claim,claim+':done']}
+  ];
  }
  try{await env.DB.batch([...guard.checks,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
  return response({ok:true,state:action==='approve'?'reserved':'reconciling',pilot:true,...(recipient?{recipient,amountFen:q.amount_fen}: {})},200,env,request);
