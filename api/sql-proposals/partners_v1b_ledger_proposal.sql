@@ -3,7 +3,7 @@
 -- Accrual intentionally separate from partner profile switch; exact basis and
 -- commercial rollout must be independently approved before payment wiring.
 INSERT INTO system_settings(key,value,updated_at)
-VALUES('partner_cash_accrual_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+VALUES('partner_cash_accrual_enabled','0',0),('partner_order_preview_enabled','0',0) ON CONFLICT(key) DO NOTHING;
 CREATE TABLE partner_commissions (
   order_domain TEXT NOT NULL CHECK(order_domain IN ('recharge','subscription')),
   order_id TEXT NOT NULL,
