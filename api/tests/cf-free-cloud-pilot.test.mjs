@@ -7,7 +7,7 @@ import {Miniflare} from 'miniflare';
 import {isAllowedCloudUrl,parseCloudArgs,probeCloudPilot,ROUNDS} from '../scripts/cf-free-cloud-pilot-probe.mjs';
 
 const NAME='xrh-cf-free-cpu-pilot-20261120';
-const PILOT_URL='https://'+NAME+'.dedicated-synthetic.workers.dev/';
+const PILOT_URL='https://'+NAME+'.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/';
 const PASSWORD='xrh-cf-free-synthetic-password-2026!';
 const PEPPER='xrh-isolated-free-pilot-pepper-2026-synthetic-only';
 const TOKEN='locally-generated-synthetic-pilot-token-2026-unique-000001';
@@ -62,11 +62,11 @@ test('dedicated Worker config has no production route, D1, triggers or real secr
 });
 test('cloud CLI refuses Production domain, arbitrary hosts, missing consent and weak tokens',()=>{
   assert.equal(isAllowedCloudUrl(PILOT_URL),true);
-  for(const u of ['https://api.x-reply-helper.top/','http://'+NAME+'.dedicated-synthetic.workers.dev/',
+  for(const u of ['https://api.x-reply-helper.top/','http://'+NAME+'.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/',
     'https://'+NAME+'.evil.workers.dev.attacker.test/',
-    'https://'+NAME+'.dedicated-synthetic.workers.dev/probe',
-    'https://'+NAME+'.dedicated-synthetic.workers.dev/?token=x',
-    'https://example.workers.dev/'])
+    'https://'+NAME+'.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/probe',
+    'https://'+NAME+'.x-reply-helper-isolated-workers-free-cpu-pilot.workers.dev/?token=x',
+    'https://example.workers.dev/', 'https://'+NAME+'.other-account.workers.dev/'])
     assert.equal(isAllowedCloudUrl(u),false,u);
   for(const args of [[],['--execute-cloud'],['--confirm-dedicated-free-account'],
     ['--execute-cloud','--confirm-dedicated-free-account','--url','https://api.x-reply-helper.top/'],
@@ -144,4 +144,18 @@ test('cloud response classifier rejects wrong results and non-JSON Cloudflare CP
   assert.equal(r.outcome,'SYNTHETIC_SMOKE_FAIL');
   assert.ok(r.cases.every(x=>x.behavior==='FAILED_OR_RESOURCE_LIMIT'));
   assert.equal(r.freeCertified,false);
+});
+
+test('direct HTTP resource failures are recorded separately from successful DO controls',async()=>{
+  const report=await probeCloudPilot({url:PILOT_URL,token:TOKEN,repeats:1,fetchImpl:async(url,init)=>{
+    assert.equal(init.redirect,'error');
+    if(url.endsWith('/__pilot'))return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',protocol:1,syntheticOnly:true,freeCertified:false});
+    const {mode,rounds,wrong}=JSON.parse(init.body);
+    if(mode==='http'&&rounds>10000)return new Response('<html>Error 1102</html>',{status:500});
+    return Response.json({ok:true,kind:'xrh-cf-free-isolated-probe',mode,rounds,verified:!wrong,syntheticOnly:true,freeCertified:false});
+  }});
+  assert.deepEqual(report.components,{http:{passed:2,total:8,status:'FAILED_OR_RESOURCE_LIMIT'},do:{passed:8,total:8,status:'BEHAVIOR_PASS'}});
+  assert.equal(report.outcome,'SYNTHETIC_SMOKE_FAIL');
+  assert.equal(report.freeCertified,false);
+  assert.equal(report.safeToDowngradeProduction,false);
 });
