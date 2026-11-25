@@ -119,6 +119,13 @@ test('Cloudflare read API refuses writes except scoped delete and never redirect
   await assert.rejects(()=>client('PUT','/accounts/test'));
   await assert.rejects(()=>client('GET','/evil'));
   await assert.rejects(()=>client('GET','/accounts/../../bad'));
+  await assert.rejects(()=>client('DELETE','/accounts/'+PROD+'/workers/scripts/'+NAME+'?force=false'));
+  await assert.rejects(()=>client('DELETE','/accounts/'+ID+'/workers/scripts/unrelated-worker?force=false'));
+  await assert.rejects(()=>client('DELETE','/accounts/'+ID+'/workers/scripts/'+NAME+'?force=true'));
+  await assert.rejects(()=>client('GET','/accounts/'+PROD+'/workers/scripts'));
+  const truncated=makeCloudClient(TOKEN,async()=>({ok:true,status:200,json:async()=>({success:true,result:[],result_info:{total_pages:2,total_count:51}})}));
+  await assert.rejects(()=>truncated('GET','/accounts?page=1&per_page=50'),/CLOUD_API_INVENTORY_TRUNCATED/);
+
 });
 
 test('missing analytics permission after successful synthetic smoke is clearly not Free-certified',async()=>{
