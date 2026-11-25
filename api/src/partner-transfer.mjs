@@ -26,7 +26,7 @@ export function alipayRequestPlan({requestId,partnerId,recipientVersion,amountFe
 // primitive: only explicitly configured minimum and matured net are accepted.
 // This remains an intent, never a withdrawal or risk approval.
 export function alipayAdmissionPlan({requestId,partnerId,recipientVersion,amountFen,now,minFen}){
- if(!pos(minFen)||minFen>1000000000000||amountFen<minFen)fail();
+ if(!pos(minFen)||minFen<1000||minFen>1000000000000||amountFen<minFen)fail();
  const plan=alipayRequestPlan({requestId,partnerId,recipientVersion,amountFen,now});
  return {sql:plan.sql.replace(" ON CONFLICT DO NOTHING",`
  AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_payout_requests_enabled' AND value='1')
