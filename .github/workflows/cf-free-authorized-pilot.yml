@@ -1,0 +1,69 @@
+name: CF Free authorized isolated one-shot pilot
+on:
+  push:
+    branches:
+      - chatgpt/cf-free-authorized-pilot-runner-20261125
+    paths:
+      - .github/workflows/cf-free-authorized-pilot.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cf-free-dedicated-one-shot-pilot
+  cancel-in-progress: false
+jobs:
+  pilot:
+    if: github.ref == 'refs/heads/chatgpt/cf-free-authorized-pilot-runner-20261125' && (github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'ci-lite: prepare authorized isolated pilot runner'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: cf-free-isolated-pilot
+    env:
+      PILOT_SOURCE: '825c4b0fa5fb73c86b7cfaa40ca4367088377cff'
+      PILOT_ACCOUNT: '307563e1fa86940ac46ca4dd78f1f12a'
+    steps:
+      - name: Require dedicated environment credential before any cloud operation
+        env:
+          CF_FREE_PILOT_API_TOKEN: ${{ secrets.CF_FREE_PILOT_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${CF_FREE_PILOT_API_TOKEN:-}" ]]; then
+            echo "Dedicated CF_FREE_PILOT_API_TOKEN is missing. No cloud operations attempted."
+            exit 2
+          fi
+          echo "Dedicated credential present; exact account scope will be checked by pilot."
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PILOT_SOURCE }}
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install exact dependency lock without cloud credentials
+        run: npm --prefix api ci
+      - name: Run local safety checks
+        run: |
+          node --test api/tests/cf-free-cloud-live-run.test.mjs api/tests/cf-free-cloud-pilot.test.mjs api/tests/cf-free-cloud-cpu-evidence.test.mjs
+      - name: Execute bounded authorized synthetic experiment
+        env:
+          CF_FREE_PILOT_API_TOKEN: ${{ secrets.CF_FREE_PILOT_API_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PILOT_SOURCE"
+          node api/scripts/cf-free-cloud-live-run.mjs \
+            --execute-isolated-free-pilot \
+            --confirm-workers-free \
+            --confirm-delete-test-resources \
+            --expected-account-id "$PILOT_ACCOUNT" \
+            --expected-commit "$PILOT_SOURCE" \
+            --repeats 1 > "$RUNNER_TEMP/cf-free-isolated-evidence.json"
+      - name: Preserve sanitized pilot evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isolated-free-pilot-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cf-free-isolated-evidence.json
+          if-no-files-found: ignore
+          retention-days: 14
