@@ -62,6 +62,7 @@ export function alipayStartPlan({payoutId,actorId,now,reason:why}){
 // An unknown result is represented by a start without a final outcome.
 // Never retry or release while unknown. Caller must verify bank/Alipay
 // evidence independently before choosing paid or no_transfer.
+/** @param {{payoutId:string,actorId:string,now:number,outcome:string,amountFen:number,reference?:string|null,reason:string}} input */
 export function alipayOutcomePlan({payoutId,actorId,now,outcome,amountFen,reference=null,reason:why}){
  if(!id(payoutId)||!id(actorId)||!pos(now)||!reason(why)||!['paid','no_transfer'].includes(outcome)||
  (outcome==='paid'?(!pos(amountFen)||typeof reference!=='string'||!reference.trim()||reference.trim().length>160):(amountFen!==0||reference!==null)))fail();
