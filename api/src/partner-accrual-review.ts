@@ -6,6 +6,7 @@ import {response} from "./http";
 import {paymentEvidencePlan,classifyPaymentEvidence} from "./partner-payment-proof.mjs";
 import {accrualEnqueuePlan,recoveryFailurePlan} from "./partner-recovery.mjs";
 import {attributionPlan,reviewedFacts,reviewedAccrualBatch} from "./partner-accrual-review.mjs";
+import {accrualSnapshot,accrualApprovalPlan} from "./partner-accrual-approval.mjs";
 
 // Pilot only: no production execution even if a flag is misconfigured.
 // Explicit runtime binding AND DB switch are required. No live activation here.
@@ -18,7 +19,7 @@ export async function adminPartnerAccrualReview(request:Request,env:Env):Promise
  const b=await jsonBody(request,2048);
  if(Object.keys(b).some(k=>!['domain','orderId','action','operationId','reason','riskReviewed'].includes(k))||
  !['recharge','subscription'].includes(String(b.domain))||typeof b.orderId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(b.orderId)||
- !['enqueue','record'].includes(String(b.action))||typeof b.operationId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(b.operationId)||
+ !['enqueue','record','approve_for_queue'].includes(String(b.action))||typeof b.operationId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/.test(b.operationId)||
  typeof b.reason!=='string'||b.reason.trim().length<8||b.reason.trim().length>500||b.riskReviewed!==true)
  throw new ApiFailure(400,'PARTNER_ACCRUAL_INVALID','订单、人工复核或操作参数无效。');
  const domain=String(b.domain),orderId=b.orderId,now=nowMs();
@@ -43,6 +44,13 @@ export async function adminPartnerAccrualReview(request:Request,env:Env):Promise
   const p=recoveryFailurePlan({orderDomain:domain,orderId,attempts:job.attempts,now,code:'policy_review',review:true});
   await env.DB.prepare(p.sql).bind(...p.params).run();
   return response({ok:false,state:'review'},409,env,request);
+ }
+ if(b.action==='approve_for_queue'){
+  if(env.PARTNER_SCHEDULED_ACCRUAL_ENABLED!=='1')throw new ApiFailure(409,'PARTNER_ACCRUAL_DISABLED','后台计佣测试尚未开启。');
+  const digest=await accrualSnapshot(input,rows[0]);
+  const p=accrualApprovalPlan({input,digest,actorId:actor.user_id,operationId:b.operationId,reason:b.reason,now});
+  const r=await env.DB.prepare(p.sql).bind(...p.params).run();
+  return response({ok:r.meta.changes===1,state:r.meta.changes===1?'approved':'conflict',pilot:true},r.meta.changes===1?200:409,env,request);
  }
  const work=reviewedAccrualBatch({input,row:rows[0],actorId:actor.user_id,reason:b.reason,operationId:b.operationId});
  if(!work){
