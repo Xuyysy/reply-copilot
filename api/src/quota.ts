@@ -10,7 +10,7 @@ import {reserveSubscribedGeneration,confirmSubscribedDelivery,failSubscribedGene
 import { bestEffortReferralAward } from "./referrals";
 
 export type Balance = { freeRemaining: number; paidRemaining: number; totalRemaining: number };
-export type Reservation = { kind: "new" | "replay"; quota: Balance; raw?: string };
+export type Reservation = { kind: "new"; quota?: Balance } | { kind: "replay"; quota: Balance; raw: string };
 type StoredRequest = { status: string; generation_phase?: string; request_hash: string; raw_response: string | null; response_expires_at: number | null };
 type CreditBatch = { id: string; bucket: "free" | "paid"; source_kind: string };
 
@@ -97,7 +97,7 @@ export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generati
   )) needs_cleanup
   FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
 
-export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean} = {}): Promise<Reservation> {
+export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean;omitNewQuota?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
   if(!options.prechecked){
     await releaseExpiredDeliveryReservations(env, now, session.user_id);
@@ -108,7 +108,7 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   if(subscription.status==='active' && subscription.remainingToday>0){
     try{
       if(await reserveSubscribedGeneration(env,session.user_id,requestId,requestHash,budgetReserve,providerSnapshot,now))
-        return {kind:'new',quota:await balance(env,session.user_id)};
+        return options.omitNewQuota ? {kind:'new'} : {kind:'new',quota:await balance(env,session.user_id)};
     }catch(error){
       const concurrent=await existing(env,session.user_id,requestId);
       if(concurrent)return replay(env,session.user_id,requestId,requestHash,concurrent,now);
@@ -182,7 +182,9 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
         {...options,prechecked:true,creditLotRetried:true});
     throw new ApiFailure(409,"GENERATION_RESERVATION_CONFLICT","额度状态刚刚变化，请重新生成。");
   }
-  return { kind: "new", quota: await balance(env, session.user_id) };
+  // The HTTP generation path reads the balance only after provider settlement.
+  // Preserve the original return contract for other callers by default.
+  return options.omitNewQuota ? {kind:"new"} : {kind:"new", quota:await balance(env,session.user_id)};
 }
 
 export async function checkGenerationReplay(env: Env, session: Session, requestId: string, requestHash: string): Promise<Reservation | null> {
