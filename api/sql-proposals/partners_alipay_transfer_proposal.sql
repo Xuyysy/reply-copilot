@@ -17,11 +17,14 @@ CREATE TABLE partner_alipay_requests (
  reason TEXT,
  FOREIGN KEY(partner_user_id,recipient_version) REFERENCES partner_alipay_recipients(user_id,version),
  CHECK((status='pending' AND payout_id IS NULL AND reviewed_by IS NULL AND reviewed_at IS NULL AND reason IS NULL)
- OR (status='approved' AND payout_id IS NOT NULL AND reviewed_by IS NOT NULL AND reviewed_at>=created_at AND length(trim(reason))>=8)
- OR (status='rejected' AND payout_id IS NULL AND reviewed_by IS NOT NULL AND reviewed_at>=created_at AND length(trim(reason))>=8))
+ OR (status='approved' AND payout_id IS NOT NULL AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND reviewed_at>=created_at AND reason IS NOT NULL AND length(trim(reason)) BETWEEN 8 AND 500)
+ OR (status='rejected' AND payout_id IS NULL AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL AND reviewed_at>=created_at AND reason IS NOT NULL AND length(trim(reason)) BETWEEN 8 AND 500))
 );
 CREATE UNIQUE INDEX partner_alipay_request_open ON partner_alipay_requests(partner_user_id) WHERE status='pending';
 CREATE INDEX partner_alipay_request_owner ON partner_alipay_requests(partner_user_id,created_at DESC,id);
+CREATE TRIGGER partner_alipay_request_initial_state BEFORE INSERT ON partner_alipay_requests
+WHEN NEW.status<>'pending'
+BEGIN SELECT RAISE(ABORT,'new request must be pending'); END;
 CREATE TRIGGER partner_alipay_request_no_delete BEFORE DELETE ON partner_alipay_requests
 BEGIN SELECT RAISE(ABORT,'request history immutable'); END;
 CREATE TRIGGER partner_alipay_request_transition BEFORE UPDATE ON partner_alipay_requests
