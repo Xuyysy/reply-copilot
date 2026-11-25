@@ -72,3 +72,16 @@ CREATE TRIGGER partner_review_audit_no_update BEFORE UPDATE ON partner_accrual_r
 BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
 CREATE TRIGGER partner_review_audit_no_delete BEFORE DELETE ON partner_accrual_review_audits
 BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
+
+-- Explicit non-production pilot start point; no cursor is seeded.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_discovery_enabled','0',0),('partner_refund_sync_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_discovery_cursors (
+ order_domain TEXT PRIMARY KEY CHECK(order_domain IN ('recharge','subscription')),
+ applied_at INTEGER NOT NULL CHECK(typeof(applied_at)='integer' AND applied_at>=0),
+ order_id TEXT NOT NULL CHECK(length(order_id)<=80),
+ updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at>=applied_at)
+);
+CREATE TRIGGER partner_discovery_cursor_monotonic BEFORE UPDATE ON partner_discovery_cursors
+BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.applied_at<OLD.applied_at
+ OR (NEW.applied_at=OLD.applied_at AND NEW.order_id<=OLD.order_id) OR NEW.updated_at<OLD.updated_at
+ THEN RAISE(ABORT,'discovery cursor must advance') END; END;
