@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 20
     environment: cf-free-isolated-pilot
     env:
-      PILOT_SOURCE: '648e263abe377d679cb58206440c6cce12214564'
+      PILOT_SOURCE: 'f84a5b248047832a7c778a4f824cfff174b549ec'
       PILOT_ACCOUNT: '307563e1fa86940ac46ca4dd78f1f12a'
     steps:
       - name: Require dedicated environment credential before any cloud operation
