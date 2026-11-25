@@ -19,17 +19,19 @@ import { requestConfiguredModel, serializeModelOutput } from "./ai-model-provide
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
 async function activeProvider(env: Env): Promise<{ config: any; apiKey: string } | null> {
-  const pointer = await env.DB.prepare("SELECT active_config_id,active_version FROM ai_provider_runtime WHERE id=1").first<{active_config_id:string|null;active_version:number|null}>();
-  if (!pointer?.active_config_id || !pointer.active_version) return null;
+  // Read the active pointer and its immutable version in one D1 snapshot.
+  // LEFT JOIN is deliberate: a broken active pointer must fail closed rather
+  // than silently falling back to the legacy provider.
+  const row = await env.DB.prepare(`SELECT p.active_config_id,p.active_version,c.archived,v.provider,v.protocol,v.base_url,v.model_id,v.api_key_ciphertext,v.input_rate_micro_usd_per_million,v.output_rate_micro_usd_per_million,v.max_output_tokens,v.timeout_ms,v.options_json,v.endpoint_addresses_json
+    FROM ai_provider_runtime p LEFT JOIN ai_provider_configs c ON c.id=p.active_config_id LEFT JOIN ai_provider_config_versions v ON v.config_id=p.active_config_id AND v.version=p.active_version WHERE p.id=1`).first<any>();
+  if (!row?.active_config_id || !row.active_version) return null;
   if (!env.AI_CONFIG_ENCRYPTION_KEY) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型的加密配置不可用，请联系管理员。");
-  const row = await env.DB.prepare(`SELECT c.archived,v.provider,v.protocol,v.base_url,v.model_id,v.api_key_ciphertext,v.input_rate_micro_usd_per_million,v.output_rate_micro_usd_per_million,v.max_output_tokens,v.timeout_ms,v.options_json,v.endpoint_addresses_json
-    FROM ai_provider_configs c JOIN ai_provider_config_versions v ON v.config_id=c.id AND v.version=? WHERE c.id=?`).bind(pointer.active_version,pointer.active_config_id).first<any>();
-  if (!row || row.archived || !row.api_key_ciphertext) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。");
+  if (row.archived!==0 || !row.api_key_ciphertext) throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。");
   let options: Record<string, unknown>, endpointAddresses: string[];
   try { options=JSON.parse(row.options_json); endpointAddresses=JSON.parse(row.endpoint_addresses_json); } catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型配置不可用，请联系管理员。"); }
-  const config={configId:pointer.active_config_id,version:pointer.active_version,provider:row.provider,protocol:row.protocol,baseUrl:row.base_url,modelId:row.model_id,maxOutputTokens:row.max_output_tokens,timeoutMs:row.timeout_ms,options,endpointAddresses,inputRateMicroUsdPerMillion:row.input_rate_micro_usd_per_million,outputRateMicroUsdPerMillion:row.output_rate_micro_usd_per_million};
+  const config={configId:row.active_config_id,version:row.active_version,provider:row.provider,protocol:row.protocol,baseUrl:row.base_url,modelId:row.model_id,maxOutputTokens:row.max_output_tokens,timeoutMs:row.timeout_ms,options,endpointAddresses,inputRateMicroUsdPerMillion:row.input_rate_micro_usd_per_million,outputRateMicroUsdPerMillion:row.output_rate_micro_usd_per_million};
   let apiKey: string;
-  try { apiKey=await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY,pointer.active_config_id,pointer.active_version,row.api_key_ciphertext,env); }
+  try { apiKey=await decryptProviderApiKey(env.AI_CONFIG_ENCRYPTION_KEY,row.active_config_id,row.active_version,row.api_key_ciphertext,env); }
   catch { throw new ApiFailure(503,"AI_PROVIDER_CONFIG_ERROR","当前模型加密配置不可用，请联系管理员。"); }
   return {config,apiKey};
 }
