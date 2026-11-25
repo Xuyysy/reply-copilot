@@ -140,6 +140,48 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       qe.value='draft';checks.quoteDraft=qnew().evaluate(qs()).reason==='existing_draft';qe.value='';
       checks.quoteWithoutCapturedEvidence=qnew().evaluate(qs({...qp,modernCaptionQuote:null})).state==='rejected';
       const qBound=qnew();qBound.evaluate(qs());qt.textContent='Changed quote';checks.quoteChangedAfterBind=qBound.evaluate(qs()).state==='rejected';qt.textContent='Quoted body';
+      qd.remove();
+      // Independently rolled-out native editor on a legacy post. Strong
+      // structure + trusted route required; old paths remain identical.
+      const mixedAnchor=document.createElement('div');mixedAnchor.setAttribute('data-engagement-action','reply');
+      mixedAnchor.innerHTML='<a href="/compose/post?in_reply_to=101">Reply</a>';legacy.append(mixedAnchor);
+      checks.hybridReply=r.isReplyControl(mixedAnchor.firstElementChild)&&r.replyTargetId(mixedAnchor.firstElementChild)==='101';
+      const mixedPost=a.capturePost({...p.extractPost(legacy),replyRouteVerified:true});
+      const mixedBase=a.baseline(document,mixedPost);
+      const md=document.createElement('div');md.setAttribute('role','dialog');md.setAttribute('data-slot','xds-modal-surface');
+      md.innerHTML='<div data-testid="tweetText">Legacy body</div><div data-media-upload-dropzone><form><textarea aria-label="Reply"></textarea></form></div>';
+      document.body.append(md);const me=md.querySelector('textarea');me.focus();
+      const ms=(post=mixedPost,url='https://x.com/compose/post?in_reply_to=101')=>a.snapshot(document,post,start,url,20);
+      const mn=()=>a.create({trusted:true,statusId:'101',requestId:'mixed',now:0,...mixedBase});
+      checks.hybridNative=mn().evaluate(ms()).editor===me;
+      checks.hybridNoTrustedRoute=ms({...mixedPost,replyRouteVerified:false}).editors.length===0;
+      checks.hybridWrongRoute=mn().evaluate(ms(mixedPost,'https://x.com/compose/post?in_reply_to=999')).state==='rejected';
+      md.removeAttribute('data-slot');checks.hybridNoComposerProof=ms().editors.length===0;md.setAttribute('data-slot','xds-modal-surface');
+      me.value='draft';checks.hybridDraft=mn().evaluate(ms()).reason==='existing_draft';me.value='';
+      const mb=md.querySelector('[data-testid="tweetText"]');mb.textContent='Other post';checks.hybridStale=mn().evaluate(ms()).state==='waiting';mb.textContent='Legacy body';
+      md.remove();
+      // Quote-only feed has a separate outer ID, but modal can omit its
+      // marked frame and display only the unlinked embedded article.
+      qWrap.querySelector('article > div[dir="auto"]').remove();
+      const only=a.capturePost({...p.extractPost(qWrap.querySelector('article')),replyRouteVerified:true});
+      const ob=a.baseline(document,only);
+      const od=document.createElement('div');od.setAttribute('role','dialog');
+      od.innerHTML='<article><div dir="auto" class="whitespace-pre-wrap">Quoted body</div></article><textarea aria-label="Reply"></textarea>';
+      document.body.append(od);const oe=od.querySelector('textarea'),oa=od.querySelector('article'),ot=oa.firstElementChild;oe.focus();
+      const os=(post=only,url=qr,quarantine=[])=>a.snapshot(document,post,start,url,20,quarantine);
+      const on=()=>a.create({trusted:true,statusId:'818',requestId:'only',now:0,...ob});
+      checks.onlyCaptured=only.quoteOnly&&only.modernQuoteOnly?.id==='919';
+      checks.onlyUnmarked=on().evaluate(os()).editor===oe&&os().editors[0].contextStatusId==='818';
+      checks.onlyWrongRoute=on().evaluate(os(only,'https://x.com/compose/post?in_reply_to=919')).state==='rejected';
+      checks.onlyNoCapture=on().evaluate(os({...only,modernQuoteOnly:null})).editor===null;
+      ot.textContent='Wrong quote';checks.onlyWrongBody=on().evaluate(os()).editor===null;ot.textContent='Quoted body';
+      const ol=document.createElement('a');ol.setAttribute('aria-hidden','true');ol.href='/other/status/999';oa.prepend(ol);
+      checks.onlyWrongId=on().evaluate(os()).state==='rejected';ol.href='/quoted/status/919';
+      checks.onlyMatchingId=on().evaluate(os()).editor===oe;ol.remove();
+      checks.onlyQuarantined=on().evaluate(os(only,qr,[{statusId:'999',sourceText:'Quoted body'}])).editor===null;
+      oa.before(oa.cloneNode(true));checks.onlyExtraArticle=on().evaluate(os()).state==='rejected';od.querySelector('article').remove();
+      oe.value='draft';checks.onlyDraft=on().evaluate(os()).reason==='existing_draft';oe.value='';
+      oe.before(oa);oe.after(oa);checks.onlyAfterEditor=on().evaluate(os()).editor===null;oe.before(oa);
       $('result').textContent=JSON.stringify(checks);
     };
     const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
@@ -158,7 +200,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,65);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,83);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });

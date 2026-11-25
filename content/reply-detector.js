@@ -41,6 +41,16 @@
       return ownAction==="reply" && Boolean(article) &&
         !article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]');
     }
+    // A native anchor can roll out on a legacy article. Only accept an
+    // explicit own reply wrapper, independently parsed exact native href;
+    // legacy label/testid behavior stays unchanged.
+    if(!modern&&article&&element.localName==='a'&&replyTargetId(element)){
+      const hybridOwner=element.closest('[data-engagement-action="reply"]');
+      if(hybridOwner?.closest('article')===article&&
+         !element.closest('[data-slot="embedded-tweet-frame"],[data-testid="quoteTweet"],[data-testid="card.wrapper"]')&&
+         !article.parentElement?.closest('article,[data-slot="embedded-tweet-frame"]')&&
+         !globalThis.ZaneReplyCopilotContent?.postExtractor?.isQuoteContent?.(element,article))return true;
+    }
     const owner=modern?element.closest?.('[data-engagement-action]'):null;
     const action=modern&&(ownAction||owner?.getAttribute?.("data-engagement-action"));
     if(action) {

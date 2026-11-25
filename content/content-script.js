@@ -520,7 +520,7 @@
       }else locate();
     });
     const observedAttributes=['contenteditable','role','aria-hidden','hidden','data-testid','href','data-href','data-engagement-action','data-slot','disabled','readonly'];
-    if(post.modernLayout)observedAttributes.push('inert','aria-disabled','aria-readonly');
+    if(post.modernLayout||post.replyRouteVerified)observedAttributes.push('inert','aria-disabled','aria-readonly');
     active.observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true,attributeFilter:observedAttributes});
     locate();
   }
@@ -650,7 +650,7 @@
       current.assistant?.setStatus("回复框已被修改，请核对草稿；建议仍可复制。"); return;
     }
     if (!current.editor?.isConnected || api.composerAdapter.readText(current.editor) !== candidate.trim() ||
-        (current.post.modernLayout&&(current.editor!==insertedEditor||
+        ((current.post.modernLayout||insertedEditor.localName==='textarea')&&(current.editor!==insertedEditor||
           matchedComposer(current.post).editor!==insertedEditor||
           !api.composerAdapter.verifyReadback(insertedEditor,candidate)))) {
       // A translator can mutate one editor. Fence THIS request, not all future posts.
@@ -1067,7 +1067,7 @@
       // pending reply. A second real composer action still cancels safely.
       if(active&&!active.cancelled&&!active.editor&&
          (event.target?.closest?.('[contenteditable="true"][role="textbox"],[data-testid="tweetTextarea_0"][contenteditable="true"]')||
-          (active.post?.modernLayout&&event.target?.closest?.('[role="dialog"] textarea'))))
+          ((active.post?.modernLayout||active.post?.replyRouteVerified)&&event.target?.closest?.('[role="dialog"] textarea'))))
         rejectAssociation('competing_activation');
       return;
     }
@@ -1086,8 +1086,9 @@
     }
     // For a modern link, independently compare the target encoded in the
     // native Reply anchor with the extracted canonical outer post.
-    if(post.modernLayout&&control.localName==='a'){
-      if(api.replyDetector.replyTargetId(control)!==post.statusId){
+    const nativeReplyId=api.replyDetector.replyTargetId(control);
+    if((post.modernLayout&&control.localName==='a')||nativeReplyId){
+      if(nativeReplyId!==post.statusId){
         traceAssociation('capture_failed','post-context-incomplete');pendingActivation=null;return;
       }
       post.replyRouteVerified=true;
@@ -1109,6 +1110,7 @@
     }
     const live=api.postExtractor.extractPost(control.closest('article'));
     if (!live.ok || live.statusId!==activation.post.statusId ||
+        (activation.post.replyRouteVerified&&live.sourceText!==activation.post.sourceText) ||
         (activation.post.replyRouteVerified&&api.replyDetector.replyTargetId(control)!==activation.post.statusId)) {
       traceAssociation("click_failed",!live.ok?(live.reason||"unverified_post"):"source_id_changed");
       return;
