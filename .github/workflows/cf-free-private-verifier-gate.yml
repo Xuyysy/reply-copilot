@@ -20,7 +20,7 @@ jobs:
       - name: Test private RPC, long keys, rollback and dry-run
         run: |
           npm --prefix api run typecheck
-          node --test api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs
+          node --test api/tests/cf-free-private-release-gate.test.mjs api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs
       - name: Rebuild exact locked RustCrypto artifact and collect dependency license evidence
         shell: bash
         run: |

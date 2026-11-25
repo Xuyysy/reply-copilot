@@ -24,7 +24,7 @@ function bundle(path,extra={}){
 function manifest(contents,legacyCompat=false){const modules={'index.js':{type:'esm',contents}};if(legacyCompat)modules['legacy-210k.wasm']={type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-private-verifier/src/legacy-210k.wasm',import.meta.url)))};return {mainModule:'index.js',modules};}
 const hash=(n,password=PASSWORD)=>'pbkdf2-sha256:'+n+':'+('ab'.repeat(16))+':'+pbkdf2Sync(password+'\0'+PEPPER,Buffer.alloc(16,0xab),n,32,'sha256').toString('hex');
 
-async function setup(offload,legacyCompat=false){
+async function setup(offload,legacyCompat=false,rollbackMatrix=false){
   let outbound=0;
   const deny=()=>{outbound++;throw Error('External network forbidden');};
   const vars={ENVIRONMENT:'staging',WEB_ORIGIN:WEB,API_ORIGIN:API,EXTENSION_ORIGIN:'chrome-extension://'+'a'.repeat(32),
@@ -40,6 +40,17 @@ async function setup(offload,legacyCompat=false){
     manifest:manifest(bundle(legacyCompat?'../prototypes/cf-free-private-verifier/src/index.ts':'../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers','./legacy-210k.wasm']}),legacyCompat),
     exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
     dev:{outboundService:{type:'fetcher',handler:deny}}});
+  if(rollbackMatrix){
+    // Same synthetic D1 and secrets, separate API isolates; never a cloud rollout.
+    for(const [name,enabled] of [['cf-free-local-rollback',false],['cf-free-local-missing-verifier',true]]){
+      const isolated={...env, PASSWORD_VERIFY_DO_ENABLED:{type:'text',value:enabled?'1':'0'},
+        PASSWORD_FREE_CPU_ENABLED:{type:'text',value:'0'},PASSWORD_FREE_TINY_CPU_ENABLED:{type:'text',value:'0'},
+        PASSWORD_LEGACY_MIGRATION_ENABLED:{type:'text',value:'0'}};
+      delete isolated.PASSWORD_VERIFY_DO;
+      workers.push({config:{name,compatibilityDate:'2026-10-14',env:isolated,
+        manifest:manifest(bundle('../src/index.ts'))},dev:{outboundService:{type:'fetcher',handler:deny}}});
+    }
+  }
   const mf=new Miniflare({workers});
   try{
     const db=await mf.getD1Database('DB');
@@ -136,5 +147,39 @@ test('CF Free actual business login with isolated 210k compatibility candidate p
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM password_resets WHERE user_id=?').bind(user).first()).n,0);
     assert.equal(outbound(),0);
     console.log('CF_FREE_REAL_210K_COMPAT_AUTH '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',loginStatus:accepted.status,wrongStatus:denied.status,legacyHashPreservedBeforeReset:true,resetStatus:reset.status,sessionsRevoked:true,challengeConsumed:true,externalCalls:0,freeCertified:false}));
+  }finally{await mf.dispose();}
+});
+
+test('private candidate rollback and missing binding fail closed against the same synthetic account state',{timeout:120000},async()=>{
+  const {mf,db,outbound}=await setup(true,true,true);
+  try{
+    const rollback=await mf.getWorker('cf-free-local-rollback');
+    const broken=await mf.getWorker('cf-free-local-missing-verifier');
+    const login=(worker,identity,password,ip)=>call({dispatchFetch:(...args)=>worker.fetch(...args)},'/v1/auth/login',{identity,password},ip);
+    const user='test-210000', identity=user+'@example.test', before=hash(210000);
+    const first=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},50);
+    assert.equal(first.status,200);
+    assert.ok(first.cookie?.startsWith('rc_session='));
+    const unavailable=await login(broken,identity,PASSWORD,51);
+    assert.equal(unavailable.status,503);
+    assert.equal(unavailable.code,'PASSWORD_VERIFIER_UNAVAILABLE');
+    assert.equal(unavailable.cookie,null);
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').bind(user).first()).n,1);
+    // Native fallback is tested only with the flag deliberately off on a
+    // separate compatible API isolate. Local native success is NOT Free CPU.
+    for(const [i,n] of FACTORS.entries()){
+      const id='test-'+n, email=id+'@example.test';
+      const denied=await login(rollback,email,'wrong-synthetic-password',60+i);
+      assert.equal(denied.status,401,'rollback must reject invalid credentials '+n);
+      assert.equal(denied.cookie,null);
+      const accepted=await login(rollback,email,PASSWORD,70+i);
+      assert.equal(accepted.status,200,'compatible rollback must accept '+n);
+      assert.ok(accepted.cookie?.startsWith('rc_session='));
+      assert.equal((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(id).first()).password_hash,hash(n));
+    }
+    assert.equal((await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash,before);
+    assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').bind(user).first()).n,2);
+    assert.equal(outbound(),0);
+    console.log('CF_FREE_PRIVATE_ROLLBACK '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',sameSyntheticD1:true,missingBindingFailClosed:true,rollbackFactors:FACTORS,legacyHashesUnchanged:true,externalCalls:0,paidRollbackRehearsed:false,freeCertified:false}));
   }finally{await mf.dispose();}
 });
