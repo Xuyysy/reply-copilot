@@ -147,8 +147,9 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   const { balance } = await import("./quota");
   // A new successful reservation already established its funding in the
   // atomic transaction; only replay paths need an authoritative lookup.
-  const quotaFields=execution.funding==="subscription"?{}:
-    execution.funding==="free"||execution.funding==="paid"?{quota:await balance(env,session.user_id)}:
+  const funding="funding" in execution?execution.funding:undefined;
+  const quotaFields=funding==="subscription"?{}:
+    funding==="free"||funding==="paid"?{quota:await balance(env,session.user_id)}:
     await wireQuota(()=>balance(env,session.user_id));
   return response(withTimings({ requestId: input.requestId, raw: execution.raw, ...quotaFields }), 200, env, request);
 }
