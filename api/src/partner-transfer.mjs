@@ -22,6 +22,20 @@ export function alipayRequestPlan({requestId,partnerId,recipientVersion,amountFe
 // Must be run in a single atomic transaction, with every affected row checked.
 // Guard the parent insert against stale request data; if it inserts zero rows,
 // the following item insert aborts and rolls back the batch.
+// Public request admission is intentionally more restrictive than the fixture
+// primitive: only explicitly configured minimum and matured net are accepted.
+// This remains an intent, never a withdrawal or risk approval.
+export function alipayAdmissionPlan({requestId,partnerId,recipientVersion,amountFen,now,minFen}){
+ if(!pos(minFen)||minFen>1000000000000||amountFen<minFen)fail();
+ const plan=alipayRequestPlan({requestId,partnerId,recipientVersion,amountFen,now});
+ return {sql:plan.sql.replace(" ON CONFLICT DO NOTHING",`
+ AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_payout_requests_enabled' AND value='1')
+ AND EXISTS(SELECT 1 FROM system_settings WHERE key='partner_payout_min_fen' AND value=?)
+ AND ? <= COALESCE((SELECT SUM(c.commission_fen+COALESCE((SELECT SUM(r.delta_fen) FROM partner_commission_refunds r WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0))
+ FROM partner_commissions c WHERE c.partner_user_id=u.id AND c.hold_until<=?),0)
+ -COALESCE((SELECT SUM(p.amount_fen) FROM partner_payouts p WHERE p.partner_user_id=u.id AND p.status IN ('reserved','paid')),0)
+ ON CONFLICT DO NOTHING`),params:[...plan.params,String(minFen),amountFen,now]};
+}
 export function alipayApprovePlan({requestId,recipientVersion,payoutId,partnerId,actorId,now,reason:why,items}){
  if(!id(requestId)||!id(payoutId)||!id(partnerId)||!id(actorId)||!pos(recipientVersion)||!pos(now)||!reason(why))fail();
  const reserve=payoutReservePlan({payoutId,partnerId,actorId,now,reason:why,items});
