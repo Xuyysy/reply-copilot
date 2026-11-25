@@ -6,7 +6,7 @@ import WebSocket from 'ws';
 import {createHash, pbkdf2Sync, randomUUID} from 'node:crypto';
 import {readFileSync, readdirSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
-import {pathToFileURL} from 'node:url';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 import {ROUTES, parseOptions, migrationStatements, summarizeWallMs, summarizeV8Profile} from './lib/workerd-cpu-evidence.mjs';
 
 const API = 'https://isolated-api.example.test';
@@ -18,16 +18,45 @@ const PASSWORD = 'local-synthetic-password-123456!';
 const WEB_TOKEN = 'a'.repeat(64), EXT_TOKEN = 'e'.repeat(64);
 const MAIN_USER = 'benchmark-main-user';
 
-export async function setupSyntheticWorkerd({profile = false, source = 'free'} = {}) {
+export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false} = {}) {
+  if(!['legacy','select'].includes(assertionMode))throw Error('Unknown assertion mode');
   if(!['free','paid','subscription'].includes(source))throw Error('Unknown synthetic funding source');
   let external = 0;
-  const bundle = buildSync({entryPoints:[new URL('../src/index.ts', import.meta.url).pathname], bundle:true, write:false,
-    platform:'browser', format:'esm', target:'es2022', sourcemap:false}).outputFiles[0].text;
+  // Diagnostic-only wrapper around real local D1.batch; no changes to the
+  // application Worker or its public responses. Do not compare wall times
+  // from this instrumented runtime with the uninstrumented profiler.
+  const entry=measureBatches?{stdin:{
+    resolveDir:fileURLToPath(new URL('../src/',import.meta.url)),
+    sourcefile:'local-d1-batch-diagnostic.ts',
+    contents:`import worker from './index.ts';
+      export default {async fetch(request,env,ctx){
+        const tally={calls:0,statements:0,rowsRead:0,rowsWritten:0,missingMetadata:0};
+        const db=env.DB;
+        const measured=new Proxy(db,{get(target,key){
+          if(key==='batch')return async statements=>{
+            const results=await target.batch(statements);
+            tally.calls++;tally.statements+=results.length;
+            for(const r of results){
+              if(!Number.isSafeInteger(r.meta?.rows_read)||!Number.isSafeInteger(r.meta?.rows_written)){tally.missingMetadata++;continue;}
+              tally.rowsRead+=r.meta.rows_read;tally.rowsWritten+=r.meta.rows_written;
+            }
+            return results;
+          };
+          const value=Reflect.get(target,key,target);
+          return typeof value==='function'?value.bind(target):value;
+        }});
+        const response=await worker.fetch(request,{...env,DB:measured},ctx);
+        const headers=new Headers(response.headers);
+        headers.set('X-CF-Free-Local-Batch',JSON.stringify(tally));
+        return new Response(response.body,{status:response.status,statusText:response.statusText,headers});
+      }};`
+  }}:{entryPoints:[new URL('../src/index.ts', import.meta.url).pathname]};
+  const bundle = buildSync({...entry,bundle:true,write:false,platform:'browser',format:'esm',target:'es2022',sourcemap:false}).outputFiles[0].text;
   const vars = {
     ENVIRONMENT:'staging', WEB_ORIGIN:WEB, API_ORIGIN:API, EXTENSION_ORIGIN:EXT,
     AUTH_HASH_SECRET:AUTH, PASSWORD_PEPPER:PEPPER, AI_MODE:'mock', AI_MOCK_COST_MICRO_USD:'0',
     AI_MOCK_DELAY_MS:'0', SUBSCRIPTIONS_ENABLED:'1', PAYMENTS_ENABLED:'0',
-    ADMIN_PORTAL_ENABLED:'0'
+    ADMIN_PORTAL_ENABLED:'0', CF_FREE_ZERO_WRITE_ASSERTIONS:assertionMode==='select'?'1':'0'
   };
   const env = Object.fromEntries(Object.entries(vars).map(([key,value]) => [key,{type:'text',value}]));
   env.DB = {type:'d1',id:'cf-free-offline-synthetic-d1'};
@@ -161,12 +190,13 @@ async function invoke(mf,label,index,pendingIds) {
   }
   if(label==='ai_generate_mock' && typeof data.raw!=='string')throw Error('Synthetic AI result missing');
   if(label==='ai_delivery_ack' && data.ok!==true)throw Error('Synthetic ACK failed');
-  return elapsed;
+  const raw=response.headers.get('X-CF-Free-Local-Batch');
+  return {elapsed,batch:raw?JSON.parse(raw):null};
 }
 
-export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free'}={}) {
+export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,source='free',assertionMode='legacy',measureBatches=false}={}) {
   if(!Number.isInteger(samples)||samples<1||samples>4||!Number.isInteger(warmup)||warmup<0||warmup>1)throw Error('Synthetic request cap exceeded');
-  const setup=await setupSyntheticWorkerd({profile,source});
+  const setup=await setupSyntheticWorkerd({profile,source,assertionMode,measureBatches});
   let inspector;
   const rows=[],ids=[];
   try {
@@ -181,11 +211,11 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
     for(const name of ROUTES) {
       for(let i=0;i<warmup;i++)await invoke(setup.mf,name,i,ids);
       if(profile)await inspector.call('Profiler.start');
-      const elapsed=[];
+      const elapsed=[],batches=[];
       let prof;
-      try {for(let i=0;i<samples;i++)elapsed.push(await invoke(setup.mf,name,warmup+i,ids));}
+      try {for(let i=0;i<samples;i++){const result=await invoke(setup.mf,name,warmup+i,ids);elapsed.push(result.elapsed);if(measureBatches){if(!result.batch||result.batch.missingMetadata!==0)throw Error('Missing local D1 batch metadata');batches.push(result.batch);}}}
       finally {if(profile)prof=await inspector.call('Profiler.stop');}
-      rows.push({category:name,wall:summarizeWallMs(elapsed),cpuProfile:profile ? summarizeV8Profile(prof?.profile) : {status:'NOT_REQUESTED'}});
+      rows.push({category:name,wall:summarizeWallMs(elapsed),cpuProfile:profile ? summarizeV8Profile(prof?.profile) : {status:'NOT_REQUESTED'},...(measureBatches?{localD1BatchTotals:Object.fromEntries(['calls','statements','rowsRead','rowsWritten'].map(key=>[key,batches.reduce((n,b)=>n+b[key],0)]))}:{})});
     }
     const a=await setup.db.prepare('SELECT free_balance,paid_balance,free_generation_reserved,paid_generation_reserved FROM credit_accounts WHERE user_id=?').bind(MAIN_USER).first();
     const debit=await setup.db.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE user_id=? AND kind='generation_debit'").bind(MAIN_USER).first();
@@ -200,8 +230,8 @@ export async function runWorkerdCpuExperiment({samples=3,warmup=1,profile=false,
       throw Error('Synthetic generation/ACK credit accounting regression');
     if(setup.getExternalCalls()!==0)throw Error('External network was attempted');
     return {status:'SYNTHETIC_LOCAL_ONLY',runtime:'Miniflare/workerd',environment:'isolated, fresh local D1, offline mock AI',
-      source,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
-      caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit.',
+      source,assertionMode,measureBatches,freeCertified:false,productionHotspotsConfirmed:false,sampleCountPerCase:samples,warmupCountPerCase:warmup,
+      caveat:'Wall metrics include I/O and scheduling, not CPU. V8 profiles are sampled and may include idle/GC, not per-request CPU percentiles. Never compare these numbers directly to the 10ms Workers Free CPU limit. Optional D1 totals cover successful DB.batch calls only, excluding standalone statements and background work; not cloud billing.',
       cases:rows,assertions:{realNetworkCalls:0,creditDebits:expectedDebits,subscriptionUsed:sub.used,endingFreeCredits:expectedFree,endingPaidCredits:expectedPaid,endingReservedCredits:0}};
   }finally{if(inspector)inspector.close();await setup.mf.dispose();}
 }
