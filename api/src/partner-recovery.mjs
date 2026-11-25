@@ -45,11 +45,20 @@ export function recoveredAccrualPlan({facts,windowId,attempts,refundPrincipalFen
  AND (w.ends_at IS NULL OR j.paid_at<w.ends_at) AND ?=CAST(? AS INTEGER)+w.hold_ms)
  ON CONFLICT(order_domain,order_id) DO NOTHING`);
  p.params.push(orderDomain,orderId,paidAt,windowId,attempts,now,holdUntil,appliedAt);
- const statements=[p];
+ const assertionId=orderDomain+':'+orderId+':'+attempts;
+ const pre={sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN ${gate}
+ AND EXISTS(SELECT 1 FROM partner_accrual_jobs j JOIN partner_accrual_windows w ON w.id=j.window_id
+ WHERE j.order_domain=? AND j.order_id=? AND j.window_id=? AND j.paid_at=? AND j.state='pending'
+ AND j.attempts=? AND j.next_attempt_at<=? AND w.starts_at<=j.paid_at AND (w.ends_at IS NULL OR j.paid_at<w.ends_at)
+ AND ?=CAST(? AS INTEGER)+w.hold_ms)
+ AND NOT EXISTS(SELECT 1 FROM partner_commissions c WHERE c.order_domain=? AND c.order_id=?)
+ THEN 1 ELSE 0 END`,params:[assertionId,orderDomain,orderId,windowId,paidAt,attempts,now,holdUntil,appliedAt,orderDomain,orderId]};
+ // Pre-existing ledger is deliberately sent to manual reconciliation rather
+ // than silently mutating it; the normal atomic path cannot leave one behind.
+ const statements=[pre,p];
  if(refundPrincipalFen>0){
  const refund=refundInsertPlan({orderDomain,orderId,refundEventId:'recovery:'+refundPrincipalFen,cumulativePrincipalFen:refundPrincipalFen,now});
- // Require a matching newly created gross row or exact prior gross snapshot.
- // Any stale refund total is rejected by the final completion check.
+ // Any missing gross row or stale refund total is rejected by the final completion check.
  statements.push(refund);
  }
  statements.push({sql:`UPDATE partner_accrual_jobs SET state='done',attempts=attempts+1,next_attempt_at=?,last_code='recorded',updated_at=?
@@ -59,5 +68,9 @@ export function recoveredAccrualPlan({facts,windowId,attempts,refundPrincipalFen
  AND c.principal_fen=? AND c.rate_bps=? AND c.hold_until=?
  AND COALESCE((SELECT MAX(r.cumulative_principal_fen) FROM partner_commission_refunds r WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0)=?)`,
  params:[now,now,orderDomain,orderId,windowId,attempts,now,orderDomain,orderId,paidAt,appliedAt,facts.partnerUserId,facts.buyerUserId,facts.policyVersion,facts.principalFen,facts.rateBps,holdUntil,refundPrincipalFen]});
+ statements.push({sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN EXISTS(
+ SELECT 1 FROM partner_accrual_jobs WHERE order_domain=? AND order_id=? AND window_id=? AND state='done'
+ AND attempts=? AND updated_at=?) THEN 1 ELSE 0 END`,params:[assertionId+':done',orderDomain,orderId,windowId,attempts+1,now]});
+ statements.push({sql:'DELETE FROM partner_recovery_assertions WHERE id IN (?,?)',params:[assertionId,assertionId+':done']});
  return statements;
 }
