@@ -70,11 +70,12 @@ export function payoutReviewAssertions({partnerId,rows,operationId}){
  AND c.buyer_user_id=? AND c.principal_fen=? AND c.paid_at=? AND c.applied_at=?
  AND COALESCE((SELECT MAX(r.cumulative_principal_fen) FROM partner_commission_refunds r WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0)=?)
  AND EXISTS(SELECT 1 FROM (${proof.sql}) e WHERE e.transaction_count=1 AND e.transaction_id=? AND e.merchant_provider=?
+ AND e.provider_trade_id=? AND e.provider_payment_id=? AND e.identity_count=1 AND e.transaction_paid_at=e.paid_at
  AND e.order_status=? AND e.payment_status=? AND e.risk_state='clear' AND e.currency='CNY' AND e.refund_pending=0
  AND e.payment_proof=1 AND e.applied_proof=1 AND e.buyer_id=? AND e.principal_fen=? AND e.buyer_fen=?
  AND e.paid_at=? AND e.applied_at=? AND e.principal_refunded_fen=? AND e.refund_proof_fen=?)
  THEN 1 ELSE 0 END`,params:[prefix+':'+i,partnerId,c.order_domain,c.order_id,c.buyer_user_id,c.principal_fen,c.paid_at,c.applied_at,c.reversed_principal,
- ...proof.params,e.transaction_id,e.merchant_provider,e.order_status,e.payment_status,c.buyer_user_id,c.principal_fen,e.buyer_fen,c.paid_at,c.applied_at,c.reversed_principal,c.reversed_principal]});
+ ...proof.params,e.transaction_id,e.merchant_provider,e.provider_trade_id,e.provider_payment_id,e.order_status,e.payment_status,c.buyer_user_id,c.principal_fen,e.buyer_fen,c.paid_at,c.applied_at,c.reversed_principal,c.reversed_principal]});
  }
  const keys=[prefix+':count',...rows.map((_,i)=>prefix+':'+i)];
  return {checks,cleanup:{sql:'DELETE FROM partner_recovery_assertions WHERE id IN ('+keys.map(()=>'?').join(',')+')',params:keys}};
