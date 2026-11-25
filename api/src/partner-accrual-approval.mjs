@@ -18,7 +18,7 @@ export function accrualApprovalPlan({input,digest,actorId,operationId,reason,now
  if(!id(actorId)||!id(operationId)||!int(now)||! /^[a-f0-9]{64}$/.test(digest)||typeof reason!=='string'||reason.trim().length<8||reason.trim().length>500)fail();
  const f=input.facts;
  return {sql:`INSERT INTO partner_accrual_approvals(operation_id,order_domain,order_id,attempt,actor_id,reason,snapshot_sha256,approved_at,expires_at)
- SELECT ?,j.order_domain,j.order_id,j.attempts,?,?,?,?,?,? FROM partner_accrual_jobs j
+ SELECT ?,j.order_domain,j.order_id,j.attempts,?,?,?,?,? FROM partner_accrual_jobs j
  WHERE j.order_domain=? AND j.order_id=? AND j.window_id=? AND j.paid_at=? AND j.state='pending' AND j.attempts=? AND j.next_attempt_at<=?
  AND ${gate} AND EXISTS(SELECT 1 FROM site_administrator a JOIN users u ON u.id=a.user_id WHERE a.id=1 AND a.user_id=? AND u.role='admin'
  AND u.status='active' AND u.email_verified_at IS NOT NULL AND u.archived_at IS NULL AND u.is_test_account=0)
