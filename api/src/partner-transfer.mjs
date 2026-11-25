@@ -20,14 +20,24 @@ export function alipayRequestPlan({requestId,partnerId,recipientVersion,amountFe
  ON CONFLICT DO NOTHING`,params:[requestId,recipientVersion,amountFen,now,partnerId,now,recipientVersion]};
 }
 // Must be run in a single atomic transaction, with every affected row checked.
-// The final statement aborts the whole batch if the pending request changed.
+// Guard the parent insert against stale request data; if it inserts zero rows,
+// the following item insert aborts and rolls back the batch.
 export function alipayApprovePlan({requestId,recipientVersion,payoutId,partnerId,actorId,now,reason:why,items}){
  if(!id(requestId)||!id(payoutId)||!id(partnerId)||!id(actorId)||!pos(recipientVersion)||!pos(now)||!reason(why))fail();
  const reserve=payoutReservePlan({payoutId,partnerId,actorId,now,reason:why,items});
+ reserve[0].sql+=` AND ${gate} AND EXISTS(SELECT 1 FROM partner_alipay_requests q
+ WHERE q.id=? AND q.partner_user_id=? AND q.recipient_version=? AND q.status='pending'
+ AND q.amount_fen=?)`;
+ reserve[0].params.push(requestId,partnerId,recipientVersion,items.reduce((n,i)=>n+i.amountFen,0));
  return [...reserve,alipayDestinationPlan({payoutId,userId:partnerId,version:recipientVersion}),
  {sql:`UPDATE partner_alipay_requests SET status='approved',payout_id=?,reviewed_by=?,reviewed_at=?,reason=?
  WHERE id=? AND partner_user_id=? AND recipient_version=? AND status='pending' AND ${gate} AND ${admin}`,
  params:[payoutId,actorId,now,why.trim(),requestId,partnerId,recipientVersion,actorId]}];
+}
+export function alipayRejectPlan({requestId,actorId,now,reason:why}){
+ if(!id(requestId)||!id(actorId)||!pos(now)||!reason(why))fail();
+ return {sql:`UPDATE partner_alipay_requests SET status='rejected',reviewed_by=?,reviewed_at=?,reason=?
+ WHERE id=? AND status='pending' AND created_at<=? AND ${admin}`,params:[actorId,now,why.trim(),requestId,now,actorId]};
 }
 export function alipayStartPlan({payoutId,actorId,now,reason:why}){
  if(!id(payoutId)||!id(actorId)||!pos(now)||!reason(why))fail();
