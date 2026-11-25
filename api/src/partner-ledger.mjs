@@ -69,10 +69,10 @@ export function refundInsertPlan(f){
   const sql=`INSERT INTO partner_commission_refunds
     (order_domain,order_id,refund_event_id,cumulative_principal_fen,cumulative_reversal_fen,delta_fen,recorded_at)
     SELECT c.order_domain,c.order_id,?,?,
-      c.commission_fen-((c.principal_fen-?)*c.rate_bps)/10000,
+      c.commission_fen-((c.principal_fen-CAST(? AS INTEGER))*c.rate_bps)/10000,
       COALESCE((SELECT MAX(r.cumulative_reversal_fen) FROM partner_commission_refunds r
         WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0)
-        -(c.commission_fen-((c.principal_fen-?)*c.rate_bps)/10000),?
+        -(c.commission_fen-((c.principal_fen-CAST(? AS INTEGER))*c.rate_bps)/10000),?
     FROM partner_commissions c WHERE c.order_domain=? AND c.order_id=? AND ?<=c.principal_fen
       AND ?>COALESCE((SELECT MAX(r.cumulative_principal_fen) FROM partner_commission_refunds r
         WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0)
