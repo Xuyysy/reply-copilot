@@ -268,7 +268,10 @@ export async function acknowledgeDelivery(request:Request,env:Env,requestId:stri
     if(current?.status==="succeeded"&&current.delivery_confirmation_id){await bestEffortReferralAward(env,userId);return response({ok:true,alreadyConfirmed:true,requestId},200,env,request);}
     throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   }
-  if(batch[5].meta.changes!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
+  // The read-only assertion has no write count. Its success is enforced by
+  // the batch itself; confirm the unique request claim instead.
+  const confirmedChanges=env.CF_FREE_ZERO_WRITE_ASSERTIONS==="1"?batch[0].meta.changes:batch[5].meta.changes;
+  if(confirmedChanges!==1)throw new ApiFailure(409,"DELIVERY_CONFIRMATION_CONFLICT","额度状态已变化，请检查回复状态后再试。");
   await bestEffortReferralAward(env,userId);
   return response({ok:true,alreadyConfirmed:false,requestId,quota:await balance(env,userId)},200,env,request);
 }
