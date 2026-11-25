@@ -1,0 +1,31 @@
+name: CF Free offline business route profiles
+on:
+  push:
+    branches:
+      - chatgpt/cf-free-rustcrypto-wasm-cloud-20261125
+permissions:
+  contents: read
+jobs:
+  profile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install locked local runtime
+        run: npm --prefix api ci
+      - name: Validate offline pilot evidence assessment
+        run: node --test api/tests/cf-free-cloud-pilot-assessment.test.mjs
+      - name: Profile actual API routes with fresh local D1 and mock AI
+        run: |
+          node --input-type=module <<'JS'
+          import {runWorkerdCpuExperiment} from './api/scripts/cf-free-workerd-cpu.mjs';
+          for(const source of ['free','paid','subscription']){
+            const report=await runWorkerdCpuExperiment({source,samples:2,warmup:1,profile:true,assertionMode:'select',expiryIndex:'partial'});
+            console.log('CF_FREE_OFFLINE_BUSINESS_CPU_PROFILE '+JSON.stringify(report));
+          }
+          JS
