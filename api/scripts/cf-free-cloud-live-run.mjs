@@ -49,14 +49,21 @@ function git(args){
 export function verifySource(commit){
   if(!HEX40.test(commit||'')||git(['rev-parse','HEAD']).toLowerCase()!==commit.toLowerCase())
     throw Error('GIT_SHA_MISMATCH');
-  if(git(['status','--porcelain','--untracked-files=no'])!=='')
+  if(git(['status','--porcelain','--untracked-files=all'])!=='')
     throw Error('GIT_CHECKOUT_NOT_CLEAN');
   validatePilotConfig(JSON.parse(readFileSync(resolve(ROOT,'prototypes/cf-free-cloud-pilot/wrangler.jsonc'),'utf8')));
 }
 export function makeCloudClient(token,fetchImpl=fetch){
   return async(method,path)=>{
-    if(!['GET','DELETE'].includes(method)||!path.startsWith('/accounts')||path.includes('..'))
-      throw Error('CLOUD_API_PATH_NOT_ALLOWLISTED');
+    // Defense in depth: even a direct caller of the client cannot delete a
+    // different script or query a different account. Reject before fetch.
+    const account=/^\/accounts\/([a-f0-9]{32})\/workers\/(scripts|durable_objects\/namespaces|subdomain)(?:\/(xrh-cf-free-cpu-pilot-20261120)\?force=false)?$/i.exec(path);
+    const permitted=method==='GET'&&path==='/accounts?page=1&per_page=50' ||
+      Boolean(account&&approvedAccount(account[1])&&(
+        method==='GET'&&!account[3] ||
+        method==='DELETE'&&account[2]==='scripts'&&account[3]===NAME
+      ));
+    if(!permitted)throw Error('CLOUD_API_PATH_NOT_ALLOWLISTED');
     let response;
     try{
       response=await fetchImpl(API+path,{method,redirect:'error',
@@ -66,13 +73,16 @@ export function makeCloudClient(token,fetchImpl=fetch){
     const body=await response.json().catch(()=>null);
     if(!response.ok||body?.success!==true)
       throw Error('CLOUD_API_HTTP_'+response.status);
+    if(Array.isArray(body.result)&&(body.result_info?.total_pages>1||body.result_info?.total_count>body.result.length))
+      throw Error('CLOUD_API_INVENTORY_TRUNCATED');
     return body.result;
   };
 }
 export function makeWranglerExecutor(accountId,token){
   const bin=resolve(ROOT,'node_modules/.bin/wrangler');
   const config='prototypes/cf-free-cloud-pilot/wrangler.jsonc';
-  const env={...process.env,CLOUDFLARE_ACCOUNT_ID:accountId,CLOUDFLARE_API_TOKEN:token,
+  if(!approvedAccount(accountId)||typeof token!=='string'||token.length<20)throw Error('TEST_TARGET_REJECTED');
+  const env={PATH:process.env.PATH||'',HOME:process.env.HOME||'',TMPDIR:process.env.TMPDIR||'/tmp',CLOUDFLARE_ACCOUNT_ID:accountId,CLOUDFLARE_API_TOKEN:token,
     WRANGLER_SEND_METRICS:'false',CI:'true'};
   return async(action,secret)=>{
     const args=action==='deploy'?['deploy','--config',config]:
@@ -103,7 +113,7 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
 }={}){
   if(!approvedAccount(accountId)||!HEX40.test(commit||'')||
     !Number.isInteger(repeats)||repeats<1||repeats>2)throw Error('TEST_TARGET_REJECTED');
-  const o=result(),base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
+  const o={...result(),sourceCommit:commit},base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
   let isolated=false,deployStarted=false,namespaceId=null,startedAt=null,completedAt=null;
   try{
     source(commit);
