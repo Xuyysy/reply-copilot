@@ -1,0 +1,26 @@
+{
+  "name": "xrh-password-verifier-offline-candidate",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-10-14",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "PASSWORD_VERIFY_DO",
+        "class_name": "PasswordVerifierDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "private-verifier-v1",
+      "new_sqlite_classes": [
+        "PasswordVerifierDO"
+      ]
+    }
+  ]
+}

@@ -21,7 +21,7 @@ function bundle(path,extra={}){
   return buildSync({entryPoints:[new URL(path,import.meta.url).pathname],bundle:true,write:false,
     platform:'browser',format:'esm',target:'es2022',...extra}).outputFiles[0].text;
 }
-function manifest(contents,legacyCompat=false){const modules={'index.js':{type:'esm',contents}};if(legacyCompat)modules['legacy-210k.wasm']={type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-cloud-pilot/src/legacy-210k.wasm',import.meta.url)))};return {mainModule:'index.js',modules};}
+function manifest(contents,legacyCompat=false){const modules={'index.js':{type:'esm',contents}};if(legacyCompat)modules['legacy-210k.wasm']={type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-private-verifier/src/legacy-210k.wasm',import.meta.url)))};return {mainModule:'index.js',modules};}
 const hash=(n,password=PASSWORD)=>'pbkdf2-sha256:'+n+':'+('ab'.repeat(16))+':'+pbkdf2Sync(password+'\0'+PEPPER,Buffer.alloc(16,0xab),n,32,'sha256').toString('hex');
 
 async function setup(offload,legacyCompat=false){
@@ -37,7 +37,7 @@ async function setup(offload,legacyCompat=false){
     manifest:manifest(bundle('../src/index.ts'))},dev:{outboundService:{type:'fetcher',handler:deny}}}];
   if(offload)workers.push({config:{name:VERIFIER,compatibilityDate:'2026-10-14',
     env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},
-    manifest:manifest(bundle(legacyCompat?'../prototypes/cf-free-cloud-pilot/src/index.ts':'../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers','./legacy-210k.wasm']}),legacyCompat),
+    manifest:manifest(bundle(legacyCompat?'../prototypes/cf-free-private-verifier/src/index.ts':'../prototypes/cf-free-password-do/src/index.ts',{external:['cloudflare:workers','./legacy-210k.wasm']}),legacyCompat),
     exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}}},
     dev:{outboundService:{type:'fetcher',handler:deny}}});
   const mf=new Miniflare({workers});
@@ -112,7 +112,7 @@ test('CF Free actual local workerd password RPC and legacy compatibility matrix'
   console.log('CF_FREE_REAL_PASSWORD_RPC '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',freeCertified:false,results}));
 });
 
-// Real production HTTP handler + candidate synthetic verifier + real local D1.
+// Real production HTTP handler + private candidate verifier + real local D1.
 // This is not an authorization to deploy or a cloud CPU measurement.
 test('CF Free actual business login with isolated 210k compatibility candidate preserves sessions and legacy hashes',{timeout:120000},async()=>{
   const {mf,db,outbound}=await setup(true,true);
