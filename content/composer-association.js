@@ -139,7 +139,31 @@
       if(a.closest('article')!==post.article)return false;
       try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
     });
-    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto};
+    // The rebuilt feed marks the quoted card, but its reply dialog may
+    // render that same card as a plain article without a frame/permalink.
+    // Capture only a single explicit immediate quote with its own identity.
+    let modernCaptionQuote=null;
+    if(post.modernLayout&&post.replyRouteVerified&&!post.quoteOnly&&post.article){
+      const frames=[...post.article.querySelectorAll(MODERN_FRAME)];
+      if(frames.length===1){
+        const frame=frames[0],articles=[...frame.querySelectorAll('article')];
+        const bodies=[...frame.querySelectorAll(MODERN_BODY)];
+        if(articles.length===1&&bodies.length===1&&articles[0].contains(bodies[0])&&
+           frame.closest('article')===post.article&&frame.matches('[role="link"][data-href]')){
+          try{
+            const base=new URL(post.article.ownerDocument.baseURI),url=new URL(frame.getAttribute('data-href'),base);
+            const id=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/)?.[1];
+            const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(bodies[0]));
+            if(url.origin===base.origin&&url.protocol==='https:'&&id&&id!==post.statusId&&text&&text!==normalized(post.sourceText)){
+              const links=[...frame.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"]')].filter(a=>!a.closest(MODERN_BODY));
+              if(links.every(a=>{const u=new URL(a.getAttribute('href'),base);return u.origin===base.origin&&u.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/)?.[1]===id;}))
+                modernCaptionQuote=Object.freeze({id,text});
+            }
+          }catch{}
+        }
+      }
+    }
+    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto,...(modernCaptionQuote?{modernCaptionQuote}:{})};
   }
   function sameContext(post,text) {
     const source=normalized(post.sourceText),copy=normalized(text);
@@ -201,7 +225,7 @@
       // Quoted posts/media can add extra article nodes in the modal.
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
-      const candidates=articles.map(article=>({
+      let candidates=articles.map(article=>({
         article, id:contextId(article,post.modernLayout===true), text:api.postExtractor.postText(article)
       }));
       // On some rich-media reply modals X renders the original tweetText
@@ -221,7 +245,34 @@
         if(!beforeEditor(textNode,node,dialog)||textNode.closest('article')||
            textNode.closest(MODERN_FRAME)||inQuotedCard(textNode))continue;
         const text=normalized(api.postExtractor.readOriginalText(textNode));
-        if(text)candidates.push({article:null,id:null,text});
+        if(text)candidates.push({article:null,id:null,text,node:textNode});
+      }
+      // Real captioned quote reply: linkless outer caption + one plain
+      // embedded article BEFORE the same textarea. Do not discard arbitrary
+      // extra articles. Require the trusted native route, exact two texts,
+      // distinct captured quote ID, no conflicting canonical identity and
+      // caption-before-quote ordering. Keep all ordinary/legacy rules intact.
+      const routeQuote=post.modernLayout&&post.replyRouteVerified&&!post.quoteOnly&&post.modernCaptionQuote;
+      if(routeQuote&&api.replyDetector.replyRouteId(currentUrl,initialUrl)===post.statusId&&
+         candidates.length===2&&articles.length===1){
+        const quoted=candidates.find(c=>c.article),caption=candidates.find(c=>!c.article);
+        const article=quoted?.article;
+        if(article&&caption?.node&&caption.id===null&&sameContext(post,caption.text)&&
+           normalized(quoted.text)===routeQuote.text&&
+           (quoted.id===null||quoted.id===routeQuote.id)&&
+           beforeEditor(article,node,dialog)&&!article.querySelector('article,[data-slot="embedded-tweet-frame"]')&&
+           !article.contains(caption.node)&&Boolean(caption.node.compareDocumentPosition(article)&4)&&
+           !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,caption.text))){
+          const bodies=[...article.querySelectorAll(MODERN_BODY)];
+          const links=[...article.querySelectorAll('a[aria-hidden="true"][href*="/status/"],a[data-base-ui-tooltip-trigger][href*="/status/"],[data-href*="/status/"]')].filter(a=>!a.closest(MODERN_BODY));
+          const linksAgree=links.every(a=>{
+            try{
+              const url=new URL(a.getAttribute('data-href')||a.getAttribute('href'),initialUrl);
+              return url.origin===new URL(initialUrl).origin&&url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/)?.[1]===routeQuote.id;
+            }catch{return false;}
+          });
+          if(bodies.length===1&&linksAgree)candidates=[caption];
+        }
       }
       const matching=candidates.filter(item=>item.id===post.statusId);
       // Only quote-only posts need this extra DOM check. X can show the

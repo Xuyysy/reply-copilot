@@ -33,6 +33,11 @@ test('real Chromium trusted click through content script, portal, generation and
     f.resolve=()=>f.pending.shift()?.({ok:true,result:{recommendation:'reply',defaultStyle:'natural',replies:{natural:answer}}});
     const link=document.querySelector('#reply');
     if(mode==='wrong-link')link.href='/compose/post?in_reply_to=999';
+    if(mode.startsWith('caption-quote')){
+      const frame=document.createElement('div');frame.setAttribute('role','link');frame.setAttribute('data-slot','embedded-tweet-frame');frame.setAttribute('data-href','/quoted/status/303');
+      frame.innerHTML='<a aria-hidden="true" href="/quoted/status/303"></a><article><div dir="auto" class="whitespace-pre-wrap">Synthetic quoted content</div></article>';
+      link.closest('[data-engagement-action]').before(frame);
+    }
     link.addEventListener('click',event=>{
       event.preventDefault();f.events.push(event.isTrusted);
       const route=mode==='wrong-route'?'/compose/post?in_reply_to=999':
@@ -42,6 +47,10 @@ test('real Chromium trusted click through content script, portal, generation and
       setTimeout(()=>{
         const portal=document.createElement('div');portal.setAttribute('data-base-ui-portal','');
         portal.innerHTML='<div role="dialog" data-slot="xds-modal-surface" style="background:white;position:fixed;top:90px;left:100px;width:560px;padding:20px;z-index:100"><div id="preview" dir="auto" class="whitespace-pre-wrap">'+(mode==='stale-preview'?'Previous recipient':source)+'</div><div data-media-upload-dropzone><form><div style="position:relative"><div id="mirror" aria-hidden="true" dir="auto" class="whitespace-pre-wrap" style="white-space:pre-wrap"></div><textarea aria-label="Post your reply" style="color:transparent;width:100%;height:90px"></textarea></div><div id="uploads"></div><button type="submit" disabled>Reply</button></form></div></div>';
+        if(mode.startsWith('caption-quote')){
+          const quote=document.createElement('article');quote.innerHTML='<div dir="auto" class="whitespace-pre-wrap">'+(mode==='caption-quote-conflict'?'Unrelated embedded content':'Synthetic quoted content')+'</div>';
+          portal.querySelector('#preview').after(quote);
+        }
         document.body.append(portal);
         const editor=portal.querySelector('textarea'),mirror=portal.querySelector('#mirror'),button=portal.querySelector('button');
         const native=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value');
@@ -119,8 +128,8 @@ test('real Chromium trusted click through content script, portal, generation and
       assert.equal(state.generated,shouldGenerate?1:0,mode+JSON.stringify(state));
       return state;
     }
-    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject']){
-      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject'].includes(mode);
+    for(const mode of ['good','wrong-link','wrong-route','duplicate-route','missing-route','stale-preview','draft','attachment','late-draft','late-media','late-route','mirror-reject','caption-quote-good','caption-quote-conflict']){
+      const shouldGenerate=['good','late-draft','late-media','late-route','mirror-reject','caption-quote-good'].includes(mode);
       const before=await open(mode,shouldGenerate);
       if(shouldGenerate){
         assert.equal(before.host,true,mode);
@@ -130,9 +139,9 @@ test('real Chromium trusted click through content script, portal, generation and
         await evalIn('fixture.resolve()');await wait(240);
       }
       const state=await evalIn('fixture.result()');
-      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(mode!=='good')assert.equal(state.applied,0,mode);
+      assert.equal(state.submits,0,mode);assert.equal(state.generated,shouldGenerate?1:0,mode);if(!['good','caption-quote-good'].includes(mode))assert.equal(state.applied,0,mode);
       assert.equal(state.sourceMatches,true,mode);
-      if(mode==='good'){
+      if(['good','caption-quote-good'].includes(mode)){
         const answer=await evalIn('fixture.answer');
         assert.equal(state.inputs,1,JSON.stringify(state));assert.equal(state.value,answer);
         assert.equal(state.model,answer);assert.equal(state.mirror,answer);assert.equal(state.applied,1);assert.match(state.status,/已填入/);

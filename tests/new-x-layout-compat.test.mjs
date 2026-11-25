@@ -110,6 +110,36 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
       checks.controlledMirror=c.focusEmpty(e)&&c.insertOnce(e,'native-mirror','Hello 中文 😀\nline',safe)&&events===1&&model===e.value&&c.verifyReadback(e,'Hello 中文 😀\nline');
       mirror.textContent='not synchronized';checks.mirrorMismatch=!c.verifyReadback(e,e.value);
       e.value='';mirror.textContent='';checks.noDuplicateNative=!c.insertOnce(e,'native-mirror','again',safe)&&events===1;
+      // Actual captioned quote report: the modal has one plain article
+      // for the embedded content, and one bare outer caption. No frame.
+      portal.remove();
+      const qWrap=document.createElement('div');qWrap.setAttribute('role','link');qWrap.setAttribute('data-href','/outer/status/818');
+      qWrap.innerHTML='<article><div dir="auto" class="whitespace-pre-wrap">Outer caption</div><div role="link" data-slot="embedded-tweet-frame" data-href="/quoted/status/919"><a aria-hidden="true" href="/quoted/status/919"></a><article><div dir="auto" class="whitespace-pre-wrap">Quoted body</div></article></div><div data-engagement-action="reply"><a href="/compose/post?in_reply_to=818">Reply</a></div></article>';
+      document.body.append(qWrap);
+      const qp=a.capturePost({...p.extractPost(qWrap.querySelector('article')),replyRouteVerified:true});
+      const qb=a.baseline(document,qp),qd=document.createElement('div');qd.setAttribute('role','dialog');
+      qd.innerHTML='<form><div dir="auto" class="whitespace-pre-wrap">Outer caption</div><article><div dir="auto" class="whitespace-pre-wrap">Quoted body</div></article><textarea aria-label="Reply"></textarea></form>';
+      document.body.append(qd);const qe=qd.querySelector('textarea'),qa=qd.querySelector('article'),qc=qd.querySelector('form > div'),qt=qa.firstElementChild;
+      qe.focus();
+      const qr='https://x.com/compose/post?in_reply_to=818';
+      const qs=(post=qp,url=qr,quarantine=[])=>a.snapshot(document,post,start,url,20,quarantine);
+      const qnew=()=>a.create({trusted:true,statusId:'818',requestId:'quote',now:0,...qb});
+      checks.quoteCaptured=qp.modernCaptionQuote?.id==='919'&&qp.modernCaptionQuote?.text==='Quoted body'&&qp.sourceText==='Outer caption';
+      checks.unmarkedQuote=qnew().evaluate(qs()).editor===qe;
+      checks.quoteOuterId=qs().editors[0].contextStatusId==='818'&&qs().editors[0].contextDetail==='verified_route_preview';
+      checks.quoteWrongRoute=qnew().evaluate(qs(qp,'https://x.com/compose/post?in_reply_to=919')).state==='rejected';
+      checks.quoteNoTrustedLink=qnew().evaluate(qs({...qp,replyRouteVerified:false})).state==='rejected';
+      qt.textContent='Unrelated quote';checks.quoteWrongText=qnew().evaluate(qs()).state==='rejected';qt.textContent='Quoted body';
+      qc.textContent='Unrelated caption';checks.quoteWrongCaption=qnew().evaluate(qs()).state==='rejected';qc.textContent='Outer caption';
+      const qaLink=document.createElement('a');qaLink.setAttribute('aria-hidden','true');qaLink.href='/other/status/999';qa.prepend(qaLink);
+      checks.quoteWrongId=qnew().evaluate(qs()).state==='rejected';qaLink.href='/quoted/status/919';
+      checks.quoteMatchingId=qnew().evaluate(qs()).editor===qe;qaLink.remove();
+      qa.before(qa.cloneNode(true));checks.quoteExtraArticle=qnew().evaluate(qs()).state==='rejected';qd.querySelector('article').remove();
+      qe.before(qc);checks.quoteReversedOrder=qnew().evaluate(qs()).state==='rejected';qa.before(qc);
+      checks.quoteQuarantined=qnew().evaluate(qs(qp,qr,[{statusId:'999',sourceText:'Outer caption'}])).state==='rejected';
+      qe.value='draft';checks.quoteDraft=qnew().evaluate(qs()).reason==='existing_draft';qe.value='';
+      checks.quoteWithoutCapturedEvidence=qnew().evaluate(qs({...qp,modernCaptionQuote:null})).state==='rejected';
+      const qBound=qnew();qBound.evaluate(qs());qt.textContent='Changed quote';checks.quoteChangedAfterBind=qBound.evaluate(qs()).state==='rejected';qt.textContent='Quoted body';
       $('result').textContent=JSON.stringify(checks);
     };
     const html='<!doctype html><html data-app-version="fixture"><head><base href="https://x.com/home"></head><body>'+
@@ -128,7 +158,7 @@ test('real Chrome: legacy and rebuilt X coexist; modern replies require exact pa
     assert.equal(result.status,0,result.stderr);
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
-    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,50);
+    const checks=JSON.parse(match[1]);assert.equal(Object.keys(checks).length,65);
     assert.deepEqual(Object.entries(checks).filter(([,v])=>!v),[]);
   }finally{rmSync(dir,{recursive:true,force:true})}
 });
