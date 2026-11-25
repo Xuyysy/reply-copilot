@@ -13,6 +13,8 @@ export interface Env {
   /** Separate per-environment 256-bit key; no existing secret reuse. */
   PARTNER_ALIPAY_ENCRYPTION_KEY?: string;
   PARTNER_ALIPAY_KEY_ID?: string;
+  /** Non-production single-order accrual review; absent by default. */
+  PARTNER_ACCRUAL_REVIEW_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
