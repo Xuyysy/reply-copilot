@@ -88,7 +88,7 @@ export async function probeCloudPilot({url,token,repeats=1,fetchImpl=fetch}){
     syntheticRequests:cases.length,components,freeCertified:false,
     httpCpuInCloudMs:null,doCpuInCloudMs:null,freeAccountPlanIndependentlyVerified:false,
     safeToDowngradeProduction:false,
-    caveat:'HTTP/DO CPU budgets must be verified through genuine account, plan, version and Cloudflare per-invocation evidence. Client wall time is not CPU. A Paid account cannot prove Free limits. HTTP control failure does not imply DO failure, and neither component's behavioral pass certifies CPU.',
+    caveat:'HTTP/DO CPU budgets must be verified through genuine account, plan, version and Cloudflare per-invocation evidence. Client wall time is not CPU. A Paid account cannot prove Free limits. HTTP control failure does not imply DO failure, and neither component certifies CPU through behavioral success alone.',
     cases};
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
