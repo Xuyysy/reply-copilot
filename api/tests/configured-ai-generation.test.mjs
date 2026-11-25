@@ -30,6 +30,8 @@ async function saveModel(f, overrides={}){
 
 test('managed AI generation pins its provider version through a switch, charges once, and replays without another call',async()=>{
  const f=setup();await saveModel(f);const requestId=randomUUID(),headers={Cookie:'',Authorization:`Bearer ${extensionToken}`};let switched=false,modelCalls=0;const original=globalThis.fetch;
+ const providerReads=[];const prepare=f.env.DB.prepare.bind(f.env.DB);
+ f.env.DB.prepare=sql=>{if(/^\s*SELECT\b/i.test(sql)&&/\bFROM ai_provider_(?:runtime|configs)\b/i.test(sql))providerReads.push(sql);return prepare(sql);};
  globalThis.fetch=async(url,init={})=>{
   const parsed=new URL(String(url));
   if(parsed.hostname==='cloudflare-dns.com'){
@@ -44,6 +46,8 @@ test('managed AI generation pins its provider version through a switch, charges 
  try{
   const body={requestId,post:{text:'A representative public post for the Staging model test.',url:'https://x.com/example/status/123'}};
   const generated=await f.call('/v1/ai/generate',{headers,body});assert.equal(generated.status,200,JSON.stringify(generated.body));assert.equal(modelCalls,1);assert.equal(switched,true);
+  assert.equal(providerReads.length,1,'active provider resolution uses one D1 statement');
+  assert.match(providerReads[0],/LEFT JOIN ai_provider_config_versions/);
   assert.equal(generated.body.performance,undefined,'diagnostics are absent by default');
   const pinned=f.sql.prepare('SELECT provider_config_id,provider_config_version,status,generation_phase FROM ai_requests WHERE request_id=?').get(requestId);
   assert.deepEqual({...pinned},{provider_config_id:configId,provider_config_version:1,status:'reserved',generation_phase:'awaiting_delivery'});
@@ -52,6 +56,7 @@ test('managed AI generation pins its provider version through a switch, charges 
   const ack=await f.call(`/v1/ai/requests/${requestId}/delivered`,{headers,body:{requestId}});assert.equal(ack.status,200,JSON.stringify(ack.body));
   const replay=await f.call('/v1/ai/generate',{headers,body});assert.equal(replay.status,200,JSON.stringify(replay.body));assert.equal(replay.body.raw,generated.body.raw);
   assert.equal(modelCalls,1);assert.equal(f.sql.prepare('SELECT free_balance FROM credit_accounts WHERE user_id=?').get('test-user').free_balance,199);
+  assert.equal(providerReads.length,1,'replay does not resolve provider again');
   assert.equal(f.sql.prepare("SELECT count(*) n FROM credit_ledger WHERE kind='generation_debit' AND reference_id=?").get(`test-user:${requestId}`).n,1);
  }finally{globalThis.fetch=original;f.sql.close();}
 });
