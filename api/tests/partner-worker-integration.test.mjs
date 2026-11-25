@@ -126,3 +126,27 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  assert.equal(summary.totals.outstanding_fen,-1000);
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
 });
+
+test('staging test-account marker and production pilot isolation remain enforced',async t=>{
+ const {f,db,call,ok,reauth,enable,policy}=setup(t);enable();reauth();
+ // A real test-account marker must never be weakened merely to demonstrate
+ // the cash flow. Eligible synthetic users are permitted only in this
+ // isolated memory database, with no provider/network access.
+ db.exec("UPDATE users SET is_test_account=1 WHERE id='p'");
+ assert.equal((await call('a',root+'policy',policy)).status,409);
+ assert.equal((await ok('p',me+'me')).policy,null);
+ assert.equal((await call('p',me+'alipay-recipient',{expectedVersion:0,account:'fixture@example.test',name:'测试账户'})).status,403);
+ assert.equal((await call('p',me+'alipay-requests',{amountFen:1000,recipientVersion:1})).status,403);
+ db.exec("UPDATE users SET role='admin' WHERE id='q'");
+ assert.equal((await call('q',root+'policy?q=p')).status,403);
+ // Even with every pilot binding/DB switch enabled, the actual Worker
+ // must not execute production pilot review or discovery.
+ f.env.ENVIRONMENT='production';
+ assert.equal((await call('a',root+'accrual-review?state=pending')).status,404);
+ assert.equal((await call('a',root+'discovery',{action:'discover',domain:'recharge'})).status,404);
+ assert.equal((await call('a',root+'payout-review',{action:'approve',requestId:'fixture',operationId:randomUUID(),reason,reviewed:true})).status,404);
+ await worker.scheduled({},f.env);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_accrual_jobs").get().n,0);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,0);
+});
