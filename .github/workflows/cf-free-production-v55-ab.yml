@@ -1,0 +1,60 @@
+name: CF Free production V5.5 end-to-end offline A/B
+on:
+  push:
+    branches: ['chatgpt/cf-free-production-v55-ab-20261125']
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 96a3adde9e81d74d49e54b18a354dc68bf766fa7
+          path: baseline
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Pin deployed Production baseline and shared local harness
+        run: |
+          set -euo pipefail
+          test "$(git -C baseline rev-parse HEAD)" = 96a3adde9e81d74d49e54b18a354dc68bf766fa7
+          npm --prefix api ci
+          test ! -e baseline/api/node_modules
+          ln -s "$GITHUB_WORKSPACE/api/node_modules" baseline/api/node_modules
+          mkdir -p baseline/api/scripts/lib
+          cp api/scripts/cf-free-workerd-cpu.mjs baseline/api/scripts/cf-free-workerd-cpu.mjs
+          cp api/scripts/lib/workerd-cpu-evidence.mjs baseline/api/scripts/lib/workerd-cpu-evidence.mjs
+          cp api/tests/cf-free-production-v55-local.test.mjs baseline/api/tests/cf-free-production-v55-local.test.mjs
+      - name: Compare actual Production mode with blocked external network
+        shell: bash
+        run: |
+          set -euo pipefail
+          CF_FREE_LAB_BASELINE=1 node --test baseline/api/tests/cf-free-production-v55-local.test.mjs | tee "$RUNNER_TEMP/base.log"
+          CF_FREE_LAB_BASELINE=0 node --test api/tests/cf-free-production-v55-local.test.mjs | tee "$RUNNER_TEMP/candidate.log"
+          python3 - <<'PY'
+          import json,os,pathlib
+          def read(name):
+              p=pathlib.Path(os.environ['RUNNER_TEMP'])/name
+              lines=[json.loads(s.split('CF_FREE_PRODUCTION_V55_LOCAL ',1)[1]) for s in p.read_text().splitlines() if 'CF_FREE_PRODUCTION_V55_LOCAL {' in s]
+              assert len(lines)==6
+              return {(r['source'],r['productionProvider']):r for r in lines}
+          a,b=read('base.log'),read('candidate.log')
+          assert a.keys()==b.keys()
+          for key in sorted(a):
+              x,y=a[key],b[key]
+              for field in ('promptHash','outputHash','account','daily','usage','syntheticModelCalls','unexpectedOutbound'):
+                  assert x[field]==y[field], (key,field)
+              assert x['unexpectedOutbound']==0
+              routes={}
+              for route in ('generate','replay','ack','confirmedReplay'):
+                  routes[route]={field:[x['calls'][route][field],y['calls'][route][field]] for field in ('standaloneCalls','calls','statements','rowsRead','rowsWritten')}
+              assert routes['generate']['standaloneCalls'][1]<routes['generate']['standaloneCalls'][0],key
+              assert sum(y['calls'][r]['rowsWritten'] for r in ('generate','ack'))<sum(x['calls'][r]['rowsWritten'] for r in ('generate','ack')),key
+              print('CF_FREE_PRODUCTION_V55_AB '+json.dumps({'source':key[0],'provider':key[1],'routes':routes,'promptOutputAndAccountingMatched':True,'scope':'LOCAL_ONLY'}))
+          PY

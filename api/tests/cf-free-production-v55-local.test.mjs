@@ -13,7 +13,7 @@ const hash=s=>createHash('sha256').update(s).digest('hex');
 for(const source of ['free','paid','subscription'])for(const productionProvider of ['legacy','managed']){
  test('Production V5.5 actual workerd HTTP + D1 + intercepted '+productionProvider+' '+source,{timeout:120000},async()=>{
   let calls=0,invalid=false,expectedPrompt=null;
-  const f=await setupSyntheticWorkerd({source,productionProvider,assertionMode:'select',expiryIndex:'partial',measureBatches:true,syntheticUpstream:payload=>{
+  const f=await setupSyntheticWorkerd({source,productionProvider,assertionMode:process.env.CF_FREE_LAB_BASELINE==='1'?'legacy':'select',expiryIndex:process.env.CF_FREE_LAB_BASELINE==='1'?'full':'partial',measureBatches:true,syntheticUpstream:payload=>{
    calls++;
    assert.deepEqual(payload.messages,[{role:'system',content:expectedPrompt.system},{role:'user',content:expectedPrompt.user}]);
    assert.match(payload.messages[0].content,/SOCIAL TONE:/);
