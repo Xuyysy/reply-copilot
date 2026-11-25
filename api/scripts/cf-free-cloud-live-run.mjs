@@ -113,10 +113,11 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
 }={}){
   if(!approvedAccount(accountId)||!HEX40.test(commit||'')||
     !Number.isInteger(repeats)||repeats<1||repeats>2)throw Error('TEST_TARGET_REJECTED');
-  const o={...result(),sourceCommit:commit},base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
+  const o={...result(),sourceCommit:commit,stage:'source',identityAttempts:[]},base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
   let isolated=false,deployStarted=false,namespaceId=null,startedAt=null,completedAt=null;
   try{
     source(commit);
+    o.stage='account_preflight';
     const accounts=await cloud('GET','/accounts?page=1&per_page=50');
     if(!Array.isArray(accounts)||accounts.length!==1||accounts[0]?.id!==accountId||
       accounts[0]?.name!==ACCOUNT_NAME)throw Error('ACCOUNT_SCOPE_OR_IDENTITY_REJECTED');
@@ -128,6 +129,7 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
       subdomain?.subdomain!==SUBDOMAIN)
       throw Error('ISOLATED_ACCOUNT_NOT_EMPTY');
     isolated=true;
+    o.stage='dry_run';
     const bundle=dryRun();
     if(bundle?.status!=='ISOLATED_WRANGLER_DRY_RUN_PASS'||bundle.deployed!==false)
       throw Error('LOCAL_BUNDLE_NOT_VERIFIED');
@@ -135,10 +137,13 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
     if(typeof password!=='string'||password.length<40||password.length>256)
       throw Error('RANDOM_PILOT_TOKEN_INVALID');
     // Treat even a failed deploy command as potentially having created a Worker.
+    o.stage='deploy';
     deployStarted=true;
     await wrangler('deploy');
     o.uploaded=true;
+    o.stage='secret';
     await wrangler('secret',password);
+    o.stage='namespace';
     const after=await cloud('GET',base+'/durable_objects/namespaces');
     const ns=Array.isArray(after)?after:[];
     const named=ns.filter(v=>v?.name===NAME+'_PasswordVerifierDO');
@@ -147,12 +152,19 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
     namespaceId=named[0].id;
     startedAt=new Date(clock()-1000).toISOString();
     const url='https://'+NAME+'.'+SUBDOMAIN+'.workers.dev/';
+    o.stage='probe';
     o.smoke=await probe({url,token:password,repeats});
+    o.identityAttempts=o.smoke?.identityAttempts??[];
     completedAt=new Date(Math.max(clock(),Date.parse(startedAt)+1)).toISOString();
     if(o.smoke?.kind!=='SYNTHETIC_CF_FREE_ACCOUNT_PILOT'||o.smoke.syntheticRequests!==repeats*16||
       !['SYNTHETIC_SMOKE_PASS','SYNTHETIC_SMOKE_FAIL'].includes(o.smoke.outcome))
       throw Error('INVALID_PILOT_HTTP_REPORT');
-  }catch(e){o.errors.push(codeOf(e));}
+    o.stage='probe_complete';
+  }catch(e){
+    o.errors.push(codeOf(e));
+    if(startedAt&&!completedAt)completedAt=new Date(Math.max(clock(),Date.parse(startedAt)+1)).toISOString();
+    if(Array.isArray(e?.identityAttempts))o.identityAttempts=e.identityAttempts.slice(0,4).map(x=>({attempt:x.attempt,status:x.status,ray:x.ray,code:x.code}));
+  }
   finally{
     if(isolated&&deployStarted){
       o.cleanup.attempted=true;
