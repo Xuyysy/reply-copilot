@@ -7,6 +7,8 @@ import { verifyLegacy210k } from "./legacy-210k";
 // Production's PasswordVerifierDO and all native control cases stay unchanged.
 export class PasswordVerifierDO extends NativePasswordVerifierDO {
   async verify(password: string, stored: string): Promise<boolean> {
+    const rounds=Number(stored.split(":")[1]);
+    if([10000,60000,100000,210000].includes(rounds))console.log("XRH_PILOT_CPU","do_rpc",rounds);
     if (typeof stored === "string" && stored.startsWith("pbkdf2-sha256:210000:"))
       return verifyLegacy210k(this.env.PASSWORD_PEPPER, password, stored);
     return super.verify(password, stored);
@@ -94,6 +96,7 @@ export default {
          typeof input.wrong!=="boolean")
         return json({ok:false,code:"BAD_INPUT"},400);
       const rounds=input.rounds as number;
+      console.log("XRH_PILOT_CPU",input.mode,rounds);
       const password=input.wrong ? BAD_PASSWORD : KNOWN_PASSWORD;
       // This map is entirely synthetic: the caller cannot submit a hash,
       // password, username or configurable work factor.

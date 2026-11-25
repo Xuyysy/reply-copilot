@@ -9,6 +9,7 @@ import {fileURLToPath,pathToFileURL} from 'node:url';
 import {probeCloudPilot} from './cf-free-cloud-pilot-probe.mjs';
 import {runPilotDryRun,validatePilotConfig} from './cf-free-cloud-pilot-dry-run.mjs';
 import {collectCpuEvidence,validWindow} from './cf-free-cloud-cpu-evidence.mjs';
+import {openPilotTail} from './cf-free-cloud-live-tail.mjs';
 
 const ROOT=fileURLToPath(new URL('../',import.meta.url));
 const REPO=resolve(ROOT,'..');
@@ -109,12 +110,13 @@ function codeOf(error){
 export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
   cloud=makeCloudClient(token),wrangler=makeWranglerExecutor(accountId,token),
   probe=probeCloudPilot,source=verifySource,dryRun=runPilotDryRun,
-  cpu=collectCpuEvidence,clock=()=>Date.now(),secret=()=>randomBytes(48).toString('hex')
+  cpu=collectCpuEvidence,clock=()=>Date.now(),secret=()=>randomBytes(48).toString('hex'),tailOpen=null
 }={}){
   if(!approvedAccount(accountId)||!HEX40.test(commit||'')||
     !Number.isInteger(repeats)||repeats<1||repeats>2)throw Error('TEST_TARGET_REJECTED');
   const o={...result(),sourceCommit:commit,stage:'source',identityAttempts:[]},base='/accounts/'+accountId+'/workers',path=base+'/scripts/'+NAME;
-  let isolated=false,deployStarted=false,namespaceId=null,startedAt=null,completedAt=null;
+  let isolated=false,deployStarted=false,namespaceId=null,startedAt=null,completedAt=null,tail=null;
+  o.liveTail=null;o.tailErrors=[];
   try{
     source(commit);
     o.stage='account_preflight';
@@ -150,6 +152,7 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
     if(ns.length!==1||named.length!==1||!/^[a-f0-9]{32}$/i.test(named[0].id||''))
       throw Error('ISOLATED_SQLITE_NAMESPACE_NOT_VERIFIED');
     namespaceId=named[0].id;
+    if(tailOpen){try{tail=await tailOpen({accountId,token});}catch(e){o.tailErrors.push(codeOf(e));}}
     startedAt=new Date(clock()-1000).toISOString();
     const url='https://'+NAME+'.'+SUBDOMAIN+'.workers.dev/';
     o.stage='probe';
@@ -166,6 +169,10 @@ export async function runIsolatedFreePilot({accountId,commit,repeats=1,token},{
     if(Array.isArray(e?.identityAttempts))o.identityAttempts=e.identityAttempts.slice(0,4).map(x=>({attempt:x.attempt,status:x.status,ray:x.ray,code:x.code}));
   }
   finally{
+    if(tail){
+      try{await new Promise(resolve=>setTimeout(resolve,2000));o.liveTail=tail.report();}catch{o.tailErrors.push('TAIL_REPORT_FAILED');}
+      try{await tail.close();}catch{o.tailErrors.push('TAIL_DELETE_FAILED');}
+    }
     if(isolated&&deployStarted){
       o.cleanup.attempted=true;
       try{await cloud('DELETE',path+'?force=false');}
@@ -200,7 +207,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href){
   catch{console.error('No cloud calls: dedicated Free account, exact clean Git SHA, explicit flags and CF_FREE_PILOT_API_TOKEN required.');process.exitCode=2;}
   if(args){
     const r=await runIsolatedFreePilot({accountId:args.accountId,commit:args.commit,
-      repeats:args.repeats,token:args.token});
+      repeats:args.repeats,token:args.token},{tailOpen:openPilotTail});
     process.stdout.write(JSON.stringify(r,null,2)+'\n');
     if(r.smoke?.outcome!=='SYNTHETIC_SMOKE_PASS'||
        r.cpuAnalytics?.status!=='BOTH_COMPONENTS_OBSERVED_NOT_CERTIFIED'||
