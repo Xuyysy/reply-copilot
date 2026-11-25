@@ -112,7 +112,8 @@ jobs:
             api/tests/partner-ledger.test.mjs \
             api/tests/partner-payout.test.mjs \
             api/tests/partner-alipay.test.mjs \
-            api/tests/partner-transfer.test.mjs
+            api/tests/partner-transfer.test.mjs \
+            api/tests/partner-payment-proof.test.mjs
 
       - name: Build pinned Staging extension
         # Only push artifacts can be promoted by the guarded Staging release.
