@@ -88,3 +88,18 @@ BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.applied_at<OLD.
 
 -- Optional isolated scheduled discovery, disabled until explicitly configured.
 INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_discovery_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+
+-- Refund reconciliation is independent of accrual. Source-only pilot.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_refund_sync_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_refund_sweep_cursors (
+ order_domain TEXT PRIMARY KEY CHECK(order_domain IN ('recharge','subscription')),
+ order_id TEXT NOT NULL DEFAULT '' CHECK(length(order_id)<=80),
+ generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(generation)='integer' AND generation>=0),
+ updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at>=0)
+);
+INSERT INTO partner_refund_sweep_cursors(order_domain,updated_at) VALUES('recharge',0),('subscription',0);
+CREATE TRIGGER partner_refund_sweep_cursor_guard BEFORE UPDATE ON partner_refund_sweep_cursors
+BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.updated_at<OLD.updated_at OR NOT (
+ (NEW.generation=OLD.generation AND NEW.order_id>OLD.order_id) OR
+ (NEW.generation=OLD.generation+1 AND NEW.order_id='' AND OLD.order_id<>'')
+ ) THEN RAISE(ABORT,'invalid refund sweep cursor') END; END;
