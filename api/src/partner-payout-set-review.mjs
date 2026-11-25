@@ -21,6 +21,7 @@ function evidence(domain){
  AND e.currency='CNY' AND e.risk_state='clear' AND e.refund_pending=0 AND e.payment_proof=1 AND e.applied_proof=1
  AND e.buyer_id=ledger.buyer_user_id AND e.paid_at=ledger.paid_at AND e.applied_at=ledger.applied_at AND e.principal_fen=ledger.principal_fen
  AND typeof(e.buyer_fen)='integer' AND e.buyer_fen>=ledger.principal_fen AND e.buyer_fen<=1000000000000
+ AND typeof(e.principal_refunded_fen)='integer' AND e.principal_refunded_fen BETWEEN 0 AND ledger.principal_fen
  AND e.principal_refunded_fen=${reversal} AND e.refund_proof_fen=e.principal_refunded_fen
  AND (e.order_status='paid' AND e.payment_status='paid' ${domain==='recharge'?"OR (e.order_status='refunded' AND e.payment_status='refunded' AND e.principal_refunded_fen=ledger.principal_fen)":""})
  ${domain==='subscription'?"AND e.order_kind IN ('purchase','renewal','upgrade') AND e.buyer_fen=ledger.principal_fen":""})`;
@@ -43,7 +44,8 @@ function reversedSubscription(){
  AND length(ev.body_sha256)=64 AND ev.body_sha256 NOT GLOB '*[^0-9a-f]*'
  AND ledger.commission_fen+COALESCE((SELECT SUM(r2.delta_fen) FROM partner_commission_refunds r2 WHERE r2.order_domain=ledger.order_domain AND r2.order_id=ledger.order_id),0)=0
  AND NOT EXISTS(SELECT 1 FROM payment_transactions t WHERE t.merchant_provider='mk99' AND (t.provider_trade_id=k.provider_trade_id OR t.provider_payment_id=k.provider_payment_id))
- AND (SELECT COUNT(*) FROM subscription_payment_transactions t WHERE t.merchant_provider='mk99' AND (t.provider_trade_id=k.provider_trade_id OR t.provider_payment_id=k.provider_payment_id))=1)`;
+ AND (SELECT COUNT(*) FROM subscription_payment_transactions t WHERE t.merchant_provider='mk99' AND (t.provider_trade_id=k.provider_trade_id OR t.provider_payment_id=k.provider_payment_id))=1
+ AND EXISTS(SELECT 1 FROM subscription_payment_transactions t WHERE t.id=e.transaction_id AND t.paid_at=ledger.paid_at))`;
 }
 export function allHistoryPayoutGuard({partnerId,operationId}){
  if(!id(partnerId)||!id(operationId))fail();
