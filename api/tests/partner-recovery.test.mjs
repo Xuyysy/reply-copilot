@@ -76,13 +76,14 @@ function reviewFixture(t){
  INSERT INTO site_administrator VALUES(1,'a');
  UPDATE system_settings SET value='1' WHERE key='partner_accrual_review_enabled';
  CREATE TABLE recharge_orders(id TEXT,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER,credits INTEGER);
- CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER);
+ CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER,provider_trade_id TEXT,provider_payment_id TEXT,paid_at INTEGER);
+ CREATE TABLE subscription_payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,provider_trade_id TEXT,provider_payment_id TEXT);
  CREATE TABLE provider_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,currency TEXT);
  CREATE TABLE credit_ledger(kind TEXT,reference_id TEXT,user_id TEXT,paid_delta INTEGER);
  CREATE TABLE credit_batches(source_order_id TEXT,user_id TEXT,source_kind TEXT,grant_credits INTEGER);
  CREATE TABLE payment_refunds(transaction_id TEXT,status TEXT,base_amount_fen INTEGER);
  INSERT INTO recharge_orders VALUES('o','b','paid',350,351,500);
- INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,250);
+ INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,250,'out-r','pay-r',350);
  INSERT INTO provider_payment_events VALUES('tx','xiaodou','PAYMENT_SUCCEEDED',1000,'CNY');
  INSERT INTO credit_ledger VALUES('purchase_grant','o','b',500);
  INSERT INTO credit_batches VALUES('o','b','purchase',500);
@@ -331,4 +332,11 @@ test('queue approval binds the inspected snapshot and admin reauthentication',()
  assert.match(s,/requireAdminSession\(request,env,request.method==="POST"\)/);
  assert.match(s,/b\.expectedSnapshot!==digest/);
  assert.match(s,/accrualQueuePlan\(state\)/);
+});
+
+test('cross-domain payment identity conflict discovered after approval aborts accrual',t=>{
+ const db=reviewFixture(t),work=reviewBatch(db);
+ db.exec("INSERT INTO subscription_payment_transactions VALUES('other','s','xiaodou','out-other','pay-r')");
+ assert.throws(()=>batch(db,work));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
 });
