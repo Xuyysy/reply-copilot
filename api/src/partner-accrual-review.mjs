@@ -50,5 +50,6 @@ export function reviewedAccrualBatch({input,row,actorId,reason,operationId}){
  facts.principalFen,row.buyer_fen,refundPrincipalFen,refundPrincipalFen]};
  const audit={sql:`INSERT INTO partner_accrual_review_audits(operation_id,order_domain,order_id,actor_id,reason,reviewed_at)
  VALUES(?,?,?,?,?,?)`,params:[operationId,facts.orderDomain,facts.orderId,actorId,reason.trim(),facts.now]};
- return [check,...work,audit,{sql:'DELETE FROM partner_recovery_assertions WHERE id=?',params:[assertId]}];
+ const identity={sql:`INSERT INTO partner_payment_identity_claims(merchant_provider,provider_trade_id,provider_payment_id,order_domain,order_id,created_at) VALUES(?,?,?,?,?,?)`,params:[row.merchant_provider,row.provider_trade_id,row.provider_payment_id,facts.orderDomain,facts.orderId,facts.now]};
+ return [check,...work,identity,audit,{sql:'DELETE FROM partner_recovery_assertions WHERE id=?',params:[assertId]}];
 }
