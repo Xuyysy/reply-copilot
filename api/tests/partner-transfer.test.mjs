@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
+import {payoutReviewRowsPlan,allocateReviewedItems,payoutEvidenceMatches,payoutReviewAssertions} from '../src/partner-payout-review.mjs';
+import {paymentEvidencePlan} from '../src/partner-payment-proof.mjs';
 import {alipayAdmissionPlan,alipayRequestPlan,alipayApprovePlan,alipayRejectPlan,alipayStartPlan,alipayOutcomePlan} from '../src/partner-transfer.mjs';
 import {refundInsertPlan} from '../src/partner-ledger.mjs';
 import {partnerSummaryPlan,payoutResolvePlan} from '../src/partner-payout.mjs';
@@ -13,7 +15,7 @@ function fixture(t){
  CREATE TABLE system_settings(key TEXT PRIMARY KEY,value TEXT,updated_at INTEGER);
  INSERT INTO users VALUES('a','admin','active',1,NULL,0),('p','user','active',1,NULL,0),('q','user','active',1,NULL,0),('b','user','active',1,NULL,0);
  INSERT INTO site_administrator VALUES(1,'a');`);
- for(const name of ['partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql'])
+ for(const name of ['partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1b_recovery_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql'])
  db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
  db.exec(`INSERT INTO partner_policy_versions VALUES('p',1,'active','standard',2000,12,1,'a','test only');
  INSERT INTO partner_commissions VALUES('recharge','o','p','b',1,10,11,'product_principal','CNY',1000,2000,200,20,11);
@@ -104,4 +106,68 @@ test('request routes use session-owned reads, CSRF and reauthenticated admin wri
  assert.match(source,/WHERE q\.partner_user_id=\? ORDER BY q\.created_at DESC,q\.id DESC LIMIT 30"\)\.bind\(session\.user_id\)/);
  assert.match(source,/requireAdminSession\(request,env,write\)/);
  assert.doesNotMatch(source,/openAlipayRecipient|alipayStartPlan|alipayOutcomePlan/);
+});
+
+function payoutReviewFixture(t){
+ const db=fixture(t);enable(db);
+ db.exec(`UPDATE system_settings SET value='1' WHERE key='partner_payout_review_enabled';
+ CREATE TABLE recharge_orders(id TEXT,user_id TEXT,status TEXT,paid_at INTEGER,credited_at INTEGER,credits INTEGER);
+ CREATE TABLE payment_transactions(id TEXT,order_id TEXT,merchant_provider TEXT,status TEXT,risk_state TEXT,currency TEXT,amount_fen INTEGER,base_amount_fen INTEGER,service_fee_fen INTEGER,principal_refunded_fen INTEGER);
+ CREATE TABLE provider_payment_events(transaction_id TEXT,merchant_provider TEXT,event_type TEXT,amount_fen INTEGER,currency TEXT);
+ CREATE TABLE credit_ledger(kind TEXT,reference_id TEXT,user_id TEXT,paid_delta INTEGER);
+ CREATE TABLE credit_batches(source_order_id TEXT,user_id TEXT,source_kind TEXT,grant_credits INTEGER);
+ CREATE TABLE payment_refunds(transaction_id TEXT,status TEXT,base_amount_fen INTEGER);
+ INSERT INTO recharge_orders VALUES('o','b','paid',10,11,500);
+ INSERT INTO payment_transactions VALUES('tx','o','xiaodou','paid','clear','CNY',1000,1000,0,0);
+ INSERT INTO provider_payment_events VALUES('tx','xiaodou','PAYMENT_SUCCEEDED',1000,'CNY');
+ INSERT INTO credit_ledger VALUES('purchase_grant','o','b',500);
+ INSERT INTO credit_batches VALUES('o','b','purchase',500);`);
+ return db;
+}
+function reviewSnapshot(db){
+ const p=payoutReviewRowsPlan('p'),rows=db.prepare(p.sql).all(...p.params);
+ const reviewed=rows.map(commission=>{
+  const q=paymentEvidencePlan(commission.order_domain,commission.order_id);
+  const evidence=db.prepare(q.sql).all(...q.params);
+  assert.equal(payoutEvidenceMatches(commission,evidence),true);
+  return {commission,evidence:evidence[0]};
+ });
+ return {rows,reviewed};
+}
+function atomic(db,ps){db.exec('BEGIN');try{for(const p of ps)run(db,p);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
+test('payout review allocates mature funds and checks current evidence in same transaction',t=>{
+ const db=payoutReviewFixture(t);
+ assert.equal(run(db,alipayRequestPlan(request)),1);
+ const {rows,reviewed}=reviewSnapshot(db);
+ assert.equal(allocateReviewedItems(rows,200,19),null);
+ assert.equal(allocateReviewedItems(rows,201,30),null);
+ const items=allocateReviewedItems(rows,200,30);
+ assert.deepEqual(items,approve.items);
+ const g=payoutReviewAssertions({partnerId:'p',rows:reviewed,operationId:'op'});
+ const work=[...g.checks,...alipayApprovePlan({...approve,items}),g.cleanup];
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
+ assert.throws(()=>atomic(db,work));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,0);
+ db.exec("UPDATE payment_transactions SET risk_state='clear'");
+ atomic(db,work);
+ assert.equal(state(db),'reserved');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_recovery_assertions").get().n,0);
+});
+test('unposted refund stops payout review even before ledger refund synchronization',t=>{
+ const db=payoutReviewFixture(t);
+ const {rows,reviewed}=reviewSnapshot(db);
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=100; INSERT INTO payment_refunds VALUES('tx','succeeded',100)");
+ const q=paymentEvidencePlan('recharge','o');
+ assert.equal(payoutEvidenceMatches(rows[0],db.prepare(q.sql).all(...q.params)),false);
+ const g=payoutReviewAssertions({partnerId:'p',rows:reviewed,operationId:'op'});
+ assert.throws(()=>atomic(db,[...g.checks,g.cleanup]));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_recovery_assertions").get().n,0);
+});
+test('payout review endpoint is non-production and reauthenticated; recipient revealed only after batch',()=>{
+ const s=readFileSync(new URL('../src/partner-payout-review.ts',import.meta.url),'utf8');
+ assert.match(s,/requireAdminSession\(request,env,true\)/);
+ assert.match(s,/PARTNER_PAYOUT_REVIEW_ENABLED==='1'/);
+ assert.match(s,/\['development','staging'\]\.includes\(env\.ENVIRONMENT\)/);
+ assert.match(s,/openAlipayRecipient/);
+ assert.ok(s.lastIndexOf('await env.DB.batch')<s.lastIndexOf('...(recipient?'));
 });
