@@ -16,7 +16,7 @@ export async function adminPartnerOrderPreview(request:Request,env:Env):Promise<
  const plan=paymentEvidencePlan(domain,id);
  const result=await env.DB.prepare(plan.sql).bind(...plan.params).all<{buyer_id:string;paid_at:number}>();
  const evidence=classifyPaymentEvidence(domain,result.results);
- if(!evidence.eligible)return response({enabled:true,evidence},200,env,request);
+ if(!evidence.eligible||!('principalFen' in evidence)||!('refundedPrincipalFen' in evidence))return response({enabled:true,evidence},200,env,request);
  const row=result.results[0];
  const attribution=await env.DB.prepare(`SELECT r.inviter_user_id,r.registered_at,p.version,p.status,p.rate_bps,p.term_months,
  (SELECT MIN(v.effective_at) FROM partner_policy_versions v WHERE v.user_id=p.user_id AND v.status='active') first_authorized_at
