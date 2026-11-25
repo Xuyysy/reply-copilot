@@ -5,6 +5,7 @@ import { requireAdminSession } from "./admin-auth";
 import { response } from "./http";
 import { jsonBody, nowMs, uuid } from "./security";
 import { alipayAdmissionPlan, alipayRejectPlan } from "./partner-transfer.mjs";
+import {payoutReviewPilot} from "./partner-payout-review";
 
 // Separate request-acceptance gate. Owner-approved minimum is CNY 10 (1000 fen).
 // All money movement and approval remain unwired until provider risk evidence
@@ -63,7 +64,7 @@ export async function adminAlipayRequests(request:Request,env:Env):Promise<Respo
   if(q.length>80)throw new ApiFailure(400,"INVALID_REQUEST","查询参数无效。");
   // Bounded exact partner ID lookup, no plaintext or payout destination reveal.
   const rows=await env.DB.prepare(stateSql+" WHERE q.partner_user_id=? ORDER BY q.created_at DESC,q.id DESC LIMIT 30").bind(q).all();
-  return response({enabled:true,requests:rows.results},200,env,request);
+  return response({enabled:true,requests:rows.results,pilotReview:payoutReviewPilot(env),pilotReconcile:['development','staging'].includes(env.ENVIRONMENT)},200,env,request);
  }
  const b=await jsonBody(request,2048);
  if(Object.keys(b).some(k=>!['requestId','action','reason','operationId'].includes(k))||b.action!=='reject'||typeof b.requestId!=='string'||! /^[A-Za-z0-9_-]{1,80}$/.test(b.requestId)||
