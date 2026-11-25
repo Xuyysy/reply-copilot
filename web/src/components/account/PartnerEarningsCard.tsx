@@ -2,6 +2,7 @@ import {useEffect,useState} from "react";
 import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
+import PartnerAlipayRecipient from "./PartnerAlipayRecipient";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
 type Result={enabled:boolean;policy?:{status:"active"|"paused";level:string;rate_bps:number;term_months:number|null}|null;
@@ -35,5 +36,6 @@ export default function PartnerEarningsCard({language,owner}:{language:Language;
  {s&&<p>{t("计佣订单","Commission orders")}: {s.orders} · {t("计佣客户","Commission customers")}: {s.buyers}</p>}
  {p&&<p className="text-sm text-muted-foreground">{t("金额仅为账本记录，不代表可提现余额。付款仍需人工核对，当前不开放结算申请。","Ledger records are not withdrawable balances. Manual verification is required; payout requests are not enabled.")}</p>}
  {result?.orders?.length? <div className="space-y-2"><h3>{t("最近 30 笔佣金","Latest 30 commissions")}</h3>{result.orders.map((o,i)=><div key={i} className="rounded border p-2 text-sm">{new Date(o.paid_at).toLocaleString()} · {o.order_domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {money(o.net_fen)}<p>{t("原始佣金","Original commission")}: {money(o.commission_fen)}</p></div>)}</div>:null}
+ {p&&<PartnerAlipayRecipient key={owner} language={language}/>}
  </CardContent></Card>;
 }
