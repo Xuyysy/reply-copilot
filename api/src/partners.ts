@@ -4,6 +4,7 @@ import { requireAdminSession } from "./admin-auth";
 import { sessionFor } from "./auth";
 import { response } from "./http";
 import { jsonBody, nowMs } from "./security";
+import { partnerSummaryPlan } from "./partner-payout.mjs";
 import { parsePartnerPolicy, partnerPolicyAppendPlan, partnerPolicyAtPlan } from "./partner-policy.mjs";
 
 async function enabled(env: Env): Promise<boolean> {
@@ -25,7 +26,15 @@ export async function myPartnerPolicy(request:Request,env:Env):Promise<Response>
   if(session.kind!=="web")throw new ApiFailure(403,"FORBIDDEN","请使用网页登录账户。");
   if(!await enabled(env))return response({enabled:false},200,env,request);
   const user=await env.DB.prepare("SELECT 1 FROM users WHERE id=? AND role='user' AND status='active' AND email_verified_at IS NOT NULL AND archived_at IS NULL AND is_test_account=0").bind(session.user_id).first();
-  return response({enabled:true,policy:user?await current(env,session.user_id):null},200,env,request);
+  const policy=user?await current(env,session.user_id):null;
+  if(!policy)return response({enabled:true,policy:null},200,env,request);
+  const summary=partnerSummaryPlan(session.user_id,nowMs());
+  const totals=await env.DB.prepare(summary.sql).bind(...summary.params).first();
+  const orders=await env.DB.prepare(`SELECT c.order_domain,c.paid_at,c.principal_fen,c.commission_fen,c.hold_until,
+    c.commission_fen+COALESCE((SELECT SUM(r.delta_fen) FROM partner_commission_refunds r
+    WHERE r.order_domain=c.order_domain AND r.order_id=c.order_id),0) net_fen
+    FROM partner_commissions c WHERE c.partner_user_id=? ORDER BY c.paid_at DESC,c.order_domain,c.order_id LIMIT 30`).bind(session.user_id).all();
+  return response({enabled:true,policy,totals,orders:orders.results,payoutAvailable:false},200,env,request);
 }
 export async function adminPartnerPolicy(request:Request,env:Env):Promise<Response>{
   const write=request.method==="POST";
