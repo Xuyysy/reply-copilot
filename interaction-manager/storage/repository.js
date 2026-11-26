@@ -47,12 +47,12 @@ export async function commitBatch(db,session,inputs,{source,cursor=null,reason='
   return transaction(db,['session','events','coverage'],'readwrite',async tx=>{
     await assertSession(tx,session);
     const events=tx.objectStore('events');
-    let inserted=0;
-    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old)inserted++;await req(events.put(mergeEvent(old,e)));}
+    let inserted=0,sourceNew=0;
+    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old)inserted++;if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
     // Never label a source exhaustion as complete account history.
     const coverage=tx.objectStore('coverage'),key=[session.ownerUserId,source];
     const old=await req(coverage.get(key));
-    await req(coverage.put({ownerUserId:session.ownerUserId,source,cursor,reason,lastObservedAt:observedAt,uniqueEvents:(old?.uniqueEvents??0)+inserted,rejected:(old?.rejected??0)+rejected,historyComplete:false}));
+    await req(coverage.put({ownerUserId:session.ownerUserId,source,cursor,reason,lastObservedAt:observedAt,uniqueEvents:(old?.uniqueEvents??0)+sourceNew,rejected:(old?.rejected??0)+rejected,historyComplete:false}));
     return {inserted,accepted:records.size,rejected};
   });
 }
