@@ -60,7 +60,8 @@ test('actual Worker routes enforce disabled gates, ownership, CSRF, reauthentica
  assert.equal((await call('p',me+'alipay-requests',{amountFen:1000,recipientVersion:1})).status,409);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_alipay_requests').get().n,0);
 });
-test('actual Worker review, scheduled accrual, payout reserve and reconciliation use real migration tables',async t=>{
+for(const mode of ['manual','scheduled']){
+test(`actual Worker ${mode} discovery, accrual, payout and refund use real migration tables`,async t=>{
  const {f,db,call,ok,reauth,enable,policy}=setup(t);enable();reauth();
  await ok('a',root+'policy',policy);
  await ok('p',me+'alipay-recipient',{expectedVersion:0,account:'fixture@example.test',name:'测试账户'});
@@ -78,16 +79,25 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  db.exec("UPDATE credit_accounts SET paid_balance=500 WHERE user_id='b'");
  const command={domain:'recharge',orderId:'o',operationId:randomUUID(),reason,riskReviewed:true};
  db.exec("INSERT INTO partner_discovery_cursors VALUES('recharge',0,'',0),('subscription',0,'',0)");
- // Scheduled discovery, not a direct job insertion, creates the candidate.
- await worker.scheduled({},f.env);
+ if(mode==='scheduled')await worker.scheduled({},f.env);
+ else{
+  const state=await ok('p',me+'me');
+  assert.equal(state.policy.version,1);assert.equal(state.policy.rate_bps,2000);assert.equal(state.totals.orders,0);
+  const requests=await ok('p',me+'alipay-requests');
+  assert.equal(requests.accepting,true);assert.equal(requests.minFen,1000);
+  const found=await ok('a',root+'discovery',{action:'discover',domain:'recharge'});
+  assert.deepEqual([found.scanned,found.enqueued],[1,1]);
+ }
  assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs WHERE order_id='o'").get().state,'pending');
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commissions").get().n,0);
  assert.equal(db.prepare("SELECT order_id FROM partner_discovery_cursors WHERE order_domain='recharge'").get().order_id,'o');
  const preview=await ok('a',root+'accrual-review?action=inspect&domain=recharge&orderId=o');
- assert.equal(preview.ok,true);assert.equal(preview.candidateFen,2000);
- assert.equal((await call('a',root+'accrual-review',{...command,action:'approve_for_queue',expectedSnapshot:'0'.repeat(64)})).status,409);
- await ok('a',root+'accrual-review',{...command,action:'approve_for_queue',expectedSnapshot:preview.snapshot});
- await worker.scheduled({},f.env);
+ assert.equal(preview.ok,true);
+ assert.deepEqual([preview.principalFen,preview.refundedFen,preview.rateBps,preview.policyVersion,preview.candidateFen],[10000,0,2000,1,2000]);
+ const accrual={...command,action:mode==='scheduled'?'approve_for_queue':'record'};
+ assert.equal((await call('a',root+'accrual-review',{...accrual,expectedSnapshot:'0'.repeat(64)})).status,409);
+ await ok('a',root+'accrual-review',{...accrual,expectedSnapshot:preview.snapshot});
+ if(mode==='scheduled')await worker.scheduled({},f.env);
  // Ensure the fixture-only one-millisecond hold has elapsed.
  if(Date.now()<=applied+1)await new Promise(resolve=>setTimeout(resolve,2));
  assert.equal(db.prepare("SELECT state FROM partner_accrual_jobs WHERE order_id='o'").get().state,'done');
@@ -116,16 +126,24 @@ test('actual Worker review, scheduled accrual, payout reserve and reconciliation
  db.exec("UPDATE payment_transactions SET status='refunded',principal_refunded_fen=10000 WHERE id='tx'; UPDATE recharge_orders SET status='refunded' WHERE id='o'");
  f.env.PARTNER_SCHEDULED_REFUND_SYNC_ENABLED='1';
  db.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_refund_sync_enabled','partner_scheduled_refund_sync_enabled')");
- await worker.scheduled({},f.env);
+ if(mode==='scheduled')await worker.scheduled({},f.env);
+ else{
+  const refund={action:'refund_sync',domain:'recharge',orderId:'o'};
+  assert.equal((await ok('a',root+'discovery',refund)).state,'recorded');
+  assert.equal((await ok('a',root+'discovery',refund)).state,'unchanged');
+ }
  assert.equal(db.prepare("SELECT SUM(delta_fen) total FROM partner_commission_refunds").get().total,-2000);
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
- await worker.scheduled({},f.env);await worker.scheduled({},f.env);
+ if(mode==='scheduled'){await worker.scheduled({},f.env);await worker.scheduled({},f.env);}
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commission_refunds").get().n,1);
  db.exec("UPDATE system_settings SET value='1' WHERE key='partner_program_enabled'");
  const summary=await ok('p',me+'me');
- assert.equal(summary.totals.outstanding_fen,-1000);
+ const {gross_fen,net_fen,paid_fen,reserved_fen,outstanding_fen}=summary.totals;
+ assert.deepEqual([gross_fen,net_fen,paid_fen,reserved_fen,outstanding_fen],[2000,0,1000,0,-1000]);
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
 });
+
+}
 
 test('staging test-account marker and production pilot isolation remain enforced',async t=>{
  const {f,db,call,ok,reauth,enable,policy}=setup(t);enable();reauth();
