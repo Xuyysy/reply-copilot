@@ -1,5 +1,7 @@
 import {openInteractionDB,beginSession,endSession,readOwnerDataset,clearOwner} from '../interaction-manager/storage/repository.js';
 import {syncInteractions} from '../interaction-manager/sync/engine.js';
+import {openProviderSession} from '../interaction-manager/sync/provider-session.js';
+import {createXInteractionProviderFactory} from './interaction-provider.js';
 import {validId} from '../interaction-manager/core/events.js';
 const TYPE='XRH_STAGING_ACCOUNT_WORKBENCH';
 const PATHS=Object.freeze({interaction:'staging/interaction-workbench.html',follow:'staging/follow-workbench.html'});
@@ -11,7 +13,7 @@ const errors=new Set(['owner_unverified','identity_changed','source_unavailable'
 export function createAccountWorkbenchController({chromeApi=chrome,openDB=openInteractionDB,providerFactory=null}={}){
  const c=chromeApi,locks=new Map(),jobs=new Map();let db,dbQueue=Promise.resolve();
  const taskKey=owner=>'xrh-interaction-task-'+owner;
- const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed','source_error','response_mismatch','invalid_pagination','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint']);
+ const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed','source_error','session_limit','owner_unverified','endpoint_not_observed','open_notifications','invalid_cursor','ambiguous_cursor','terminal_unverified','response_mismatch','invalid_pagination','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint']);
  const inDB=fn=>{const p=dbQueue.then(fn,fn);dbQueue=p.catch(()=>{});return p;};
  const key=f=>'xrh-workbench-'+f;
  const store=c.storage.session;
@@ -62,8 +64,8 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    }finally{await endSession(db,session);}
    });
  }
- // An approved provider is a separate dependency. The shipping candidate has
- // none, and cannot start a network task. The job never depends on page lifetime.
+ // Only the Staging registration injects the read-only X provider. Test callers
+ // remain fail-closed without an explicit factory. Tasks outlive the workbench page.
  async function startSync(f,sender,authorized){
    const b=await verified(f,sender);
    if(f!=='interaction'||!providerFactory)fail('source_unavailable');
@@ -74,14 +76,14 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    let progress={pages:0,inserted:0};
    const write=async(state,reason=null)=>saveTask(b.ownerUserId,{runId:task.runId,state,reason,...progress,updatedAt:Date.now()});
    try{await write('running');}catch(e){jobs.delete(b.ownerUserId);throw e;}
-   task.promise=inDB(async()=>{let reason='sync_failed';try{
+   task.promise=inDB(async()=>{let reason='sync_failed',provider;try{
      const verifyBound=async()=>{
        if(task.controller.signal.aborted)fail('cancelled');
        const bound=await get(f);if(bound?.bindingId!==b.bindingId)fail('identity_changed');
        const current=await identity(bound.sourceTabId);if(!same(b,current))fail('identity_changed');
      };
      await verifyBound();
-     const provider=await providerFactory(b,{signal:task.controller.signal});
+     provider=await openProviderSession(providerFactory,b,{signal:task.controller.signal});
      if(!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function')fail('source_unavailable');
      const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
      // One owner-bound task can cover both timeline kinds. Each kind retains an
@@ -92,21 +94,28 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      const session=await beginSession(db,b.ownerUserId);
      let prior;
      try{prior=await readOwnerDataset(db,session);}finally{await endSession(db,session);}
-     let completedPages=0,completedInserted=0;
-     for(const source of sources){
+     let completedPages=0,completedInserted=0,partialReason=null;
+     // Incomplete/oldest sources get a turn before refreshing completed history.
+     const checkpoint=source=>prior.jobs.find(j=>j.providerId===provider.id&&j.source===source);
+     const ordered=[...sources].sort((a,b)=>Number(checkpoint(a)?.done===true)-Number(checkpoint(b)?.done===true)||(checkpoint(a)?.updatedAt??0)-(checkpoint(b)?.updatedAt??0));
+     const pagesPerSource=Math.floor(30/sources.length),msPerSource=Math.floor(80000/sources.length);
+     for(const source of ordered){
        await verifyBound();
        const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
-       const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:30,maxMs:90000,signal:task.controller.signal,onProgress:p=>{
+       const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
          progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
        }});
        completedPages+=result.committed;completedInserted+=result.inserted;
        progress={pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
-       // A partial/failed source must not be hidden behind success in another.
-       if(reason!=='source_exhausted')break;
+       // A page budget boundary has no in-flight read. Allow the other source
+       // its reserved pages, but never hide the partial result behind success.
+       if(reason==='page_limit')partialReason='page_limit';
+       if(!['source_exhausted','page_limit'].includes(reason))break;
      }
+     if(reason==='source_exhausted'&&partialReason)reason=partialReason;
    }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';}
-   finally{try{await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}}});
+   finally{try{await provider?.close();await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}}});
    task.promise.catch(()=>{});
    return {running:true};
  }
@@ -131,4 +140,4 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  };
  return {listener,dispatch};
 }
-export function registerAccountWorkbench(){const controller=createAccountWorkbenchController();chrome.runtime.onMessage.addListener(controller.listener);}
+export function registerAccountWorkbench(){const controller=createAccountWorkbenchController({providerFactory:createXInteractionProviderFactory(chrome)});chrome.runtime.onMessage.addListener(controller.listener);}

@@ -10,3 +10,39 @@ test('background task lifecycle with native checkpoints: resume, refresh, dedup 
  assert.equal(result.denied,true);assert.deepEqual(result.calls,[['notification',null],['post',null],['notification',null],['post',null]]);assert.deepEqual(result.firstJobs,['notification','post']);assert.deepEqual(result.firstSources,['notification','post']);assert.deepEqual(result.secondSources,['notification','post']);assert.equal(result.first,1);assert.equal(result.firstReason,'source_exhausted');assert.equal(result.second,1);assert.equal(result.secondReason,'source_exhausted');assert.equal(result.restarted,'interrupted');
  });
 });
+
+test('cancelled factory cannot block a later dual-source sync; provider closes after committed pages',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={};let attempts=0,closed=0;
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'provider-cancellation'),providerFactory:async()=>{attempts++;if(attempts===1)return new Promise(()=>{});return {id:'authorized-reader-v1',sources:['notification','post'],identify:async()=>({ownerUserId:'111',sessionId:'session'}),readPage:async({source,cursor})=>({status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:true,nextCursor:null,terminalEvidence:'explicit',payload:{data:[]},posts:[]}),close:async()=>closed++}}});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   await msg('open',side);await msg('sync',page,{authorized:true});
+   while(!attempts)await new Promise(r=>setTimeout(r,5));await msg('stop');
+   const wait=async()=>{for(let i=0;i<200;i++){const r=await msg('view');if(!r.running&&!r.busy)return r;await new Promise(r=>setTimeout(r,5))}throw Error('slot remained occupied')};
+   const stopped=await wait();await msg('sync',page,{authorized:true});const success=await wait();
+   return {attempts,closed,stopped:stopped.task.reason,reason:success.task.reason,jobs:success.dataset.jobs.map(j=>j.source).sort()};
+  })()`);
+  assert.equal(r.attempts,2);assert.equal(r.closed,1);assert.equal(r.stopped,'cancelled');assert.equal(r.reason,'source_exhausted');assert.deepEqual(r.jobs,['notification','post']);
+ });
+});
+
+
+test('bounded dual-source scans advance both partial checkpoints and preserve partial status',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={},calls=[];
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'source-fairness'),providerFactory:async()=>({id:'test-reader',sources:['notification','post'],identify:async()=>({ownerUserId:'111',sessionId:'session'}),readPage:async({source,cursor})=>{calls.push(source);return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:source==='post',nextCursor:source==='post'?null:String(Number(cursor??0)+1),terminalEvidence:source==='post'?'explicit':null,payload:{data:[]},posts:[]}}})});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const run=async()=>{await msg('sync',page,{authorized:true});for(let i=0;i<300;i++){const r=await msg('view');if(!r.running&&!r.busy)return r;await new Promise(r=>setTimeout(r,5))}throw Error('not done')};
+   await msg('open',side);const first=await run(),second=await run();return {calls,firstReason:first.task.reason,secondReason:second.task.reason,jobs:second.dataset.jobs.map(j=>({source:j.source,pages:j.pages,done:j.done}))};
+  })()`);
+  assert.equal(r.firstReason,'page_limit');assert.equal(r.secondReason,'page_limit');
+  assert.equal(r.calls.filter(s=>s==='notification').length,30);assert.equal(r.calls.filter(s=>s==='post').length,2);
+  assert.deepEqual(r.jobs.map(j=>j.source).sort(),['notification','post']);assert.equal(r.jobs.find(j=>j.source==='post').done,true);
+ });
+});
