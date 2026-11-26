@@ -1,9 +1,8 @@
 // Isolated QA wrapper only. Never attach to shared Staging or production.
 import api from './worker.mjs';
 import assets from './assets.mjs';
-import {qaGrant,temporaryQaAccess} from './qa-oidc.mjs';
 const origin='https://reply-copilot-api-partners-qa.yyx0149.workers.dev';
-const read=new Set(['/health','/v1/site','/v1/me','/v1/activity','/v1/auth/csrf','/v1/referrals/me','/v1/partners/me','/v1/partners/alipay-recipient','/v1/partners/alipay-requests','/v1/subscriptions/orders','/v1/subscriptions/plans','/v1/boltutil/orders','/v1/boltutil/availability','/v1/admin/dashboard','/v1/admin/users','/v1/admin/packages','/v1/admin/orders','/v1/admin/settings','/v1/admin/commerce/summary','/v1/admin/ops-insights','/v1/admin/referrals','/v1/admin/partners/policy','/v1/admin/partners/order-preview','/v1/admin/partners/accrual-review','/v1/admin/partners/alipay-requests']);
+const read=new Set(['/health','/v1/site','/v1/me','/v1/usage','/v1/activity','/v1/auth/csrf','/v1/referrals/me','/v1/partners/me','/v1/partners/alipay-recipient','/v1/partners/alipay-requests','/v1/subscriptions/orders','/v1/subscriptions/plans','/v1/boltutil/orders','/v1/boltutil/availability','/v1/admin/dashboard','/v1/admin/users','/v1/admin/packages','/v1/admin/orders','/v1/admin/settings','/v1/admin/commerce/summary','/v1/admin/ops-insights','/v1/admin/referrals','/v1/admin/partners/policy','/v1/admin/partners/order-preview','/v1/admin/partners/accrual-review','/v1/admin/partners/alipay-requests']);
 const write=new Set(['/v1/auth/login','/v1/auth/logout','/v1/admin/reauth','/v1/referrals/link','/v1/partners/alipay-recipient','/v1/partners/alipay-requests','/v1/admin/partners/policy','/v1/admin/partners/accrual-review','/v1/admin/partners/alipay-requests','/v1/admin/partners/payout-review','/v1/admin/partners/discovery']);
 function headers(extra={}){return {'Cache-Control':'private, no-store','X-Robots-Tag':'noindex, nofollow, noarchive','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','X-Frame-Options':'DENY',...extra};}
 function deny(status,msg,extra={}){return new Response(msg,{status,headers:headers(extra)});}
@@ -12,10 +11,9 @@ export default {
  async fetch(req,env){
   const u=new URL(req.url);
   if(u.origin!==origin||env.ENVIRONMENT!=='staging'||env.WEB_ORIGIN!==origin||env.API_ORIGIN!==origin||env.PAYMENTS_ENABLED!=='0'||env.AI_MODE!=='mock'||env.QA_ISOLATION!=='partners-qa-20261125'||!env.QA_ACCESS_SECRET||env.QA_ACCESS_SECRET.length<40)return deny(503,'QA isolation not configured');
-  if(u.pathname==='/internal-qa/exchange'||u.pathname==='/internal-qa/close')return qaGrant(req,env,u.pathname);
   // Outer access is independent of the application's real user/administrator
   // session. All paths, including assets, fail closed without the secret.
-  if(!equal(req.headers.get('Authorization')||'','Basic '+btoa('qa:'+env.QA_ACCESS_SECRET))&&!await temporaryQaAccess(req,env))return deny(401,'Private QA only',{'WWW-Authenticate':'Basic realm="Private Partners QA", charset="UTF-8"'});
+  if(!equal(req.headers.get('Authorization')||'','Basic '+btoa('qa:'+env.QA_ACCESS_SECRET)))return deny(401,'Private QA only',{'WWW-Authenticate':'Basic realm="Private Partners QA", charset="UTF-8"'});
   if(u.pathname.startsWith('/v1/')||u.pathname==='/health'){
    const allowed=(req.method==='GET'&&read.has(u.pathname))||(req.method==='POST'&&write.has(u.pathname));
    if(!allowed)return deny(403,'Outside independent QA route allowlist');
