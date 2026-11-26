@@ -210,9 +210,18 @@ export async function checkGenerationReplay(env: Env, session: Session, requestI
 
 export async function finishGeneration(env: Env, userId: string, requestId: string, raw: string | null, usage?: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number;usageQuality?:"verified"|"estimated"}): Promise<boolean | void> {
   const now=nowMs(), ref=uuid();
-  const row=await env.DB.prepare("SELECT budget_reserved_micro_usd,provider_config_id,provider_config_version FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(userId,requestId).first<{budget_reserved_micro_usd:number;provider_config_id:string|null;provider_config_version:number|null}>();
-  if(!row)return false;
-  const actual=usage&&Number.isSafeInteger(usage.costMicroUsd)&&usage.costMicroUsd>=0?usage.costMicroUsd:row.budget_reserved_micro_usd;
+  const verifiedCost=usage&&Number.isSafeInteger(usage.costMicroUsd)&&usage.costMicroUsd>=0?usage.costMicroUsd:null;
+  // For a successful result with an explicit cost, the existing guarded
+  // batch itself establishes ownership of the generating row. No pre-read
+  // is needed; a stale/abandoned result changes zero rows and returns false.
+  // Unknown-cost and failure paths retain the authoritative reservation read.
+  let actual:number;
+  if(raw&&verifiedCost!==null)actual=verifiedCost;
+  else{
+    const row=await env.DB.prepare("SELECT budget_reserved_micro_usd,provider_config_id,provider_config_version FROM ai_requests WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(userId,requestId).first<{budget_reserved_micro_usd:number;provider_config_id:string|null;provider_config_version:number|null}>();
+    if(!row)return false;
+    actual=verifiedCost??row.budget_reserved_micro_usd;
+  }
   if(raw){
     const settled=await env.DB.batch([
       env.DB.prepare("UPDATE ai_requests SET raw_response=?,generation_phase='awaiting_delivery',response_expires_at=?,budget_finalization_ref=? WHERE user_id=? AND request_id=? AND status='reserved' AND generation_phase='generating'").bind(raw,now+10*60_000,ref,userId,requestId),

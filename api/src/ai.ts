@@ -5,7 +5,7 @@ import { sessionFor, takeRate } from "./auth";
 import { jsonBody, nowMs, sha256 } from "./security";
 import { subscriptionsEnabled } from "./subscription-account";
 import { response } from "./http";
-import { finishGeneration, reserveGeneration, checkGenerationReplay } from "./quota";
+import { finishGeneration, reserveGeneration, checkGenerationReplay, balance } from "./quota";
 import { buildPrompts } from "../../prompts/prompt-builder.js";
 import { buildProductionV55NoCorpusPrompts } from "../../prompts/prompt-v5-no-corpus.js";
 import { rerankV5DefaultStyle } from "../../prompts/reply-v5-quality.js";
@@ -14,7 +14,7 @@ import { executeAiGeneration } from "./ai-generation-flow.js";
 
 import { normalizeAiInput } from "./ai-input.js";
 import { decryptProviderApiKey } from "./ai-model-crypto";
-import { requestConfiguredModel, serializeModelOutput } from "./ai-model-provider.js";
+import { requestConfiguredModel, serializeModelOutput, validateParsedModelOutput, serializeValidatedModelOutput } from "./ai-model-provider.js";
 
 export const DEEPSEEK_MODEL = "deepseek-flash";
 
@@ -127,13 +127,21 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true,omitSubscriptionReplayQuota:true})),
     provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
-    if(mode==="real"&&!configuredModel) {
-      try { validateDeepSeekResult(result); }
-      catch { throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","AI 服务返回格式无效，请重试。"); }
-    }
-    // Validate the full shared contract for legacy and managed providers and
-    // persist a wire representation accepted by both released client parsers.
-    result.raw = serializeModelOutput(result.raw);
+      if(mode==="real"&&!configuredModel) {
+        let decoded;
+        try { decoded=validateDeepSeekResult(result); }
+        catch { throw new ApiFailure(503,"AI_PROVIDER_UNAVAILABLE","AI 服务返回格式无效，请重试。"); }
+        // Preserve both legacy candidate checks and shared normalized contract.
+        if(result.raw.length>20_000)throw new Error("invalid_output");
+        result.raw=serializeValidatedModelOutput(validateParsedModelOutput(decoded));
+      }else if(configuredModel){
+        // requestConfiguredModel's default validateOutput=true has already
+        // validated and serialized the same response. Keep the prior second
+        // pass's canonical wire size limit (aliases can expand provider JSON).
+        if(typeof result.raw!=="string"||!result.raw.trim()||result.raw.length>20_000)throw new Error("invalid_output");
+      }else{
+        result.raw=serializeModelOutput(result.raw);
+      }
       result.raw = rerankV5DefaultStyle(result.raw,env,input.outputSchemaVersion);
     },
     finish: (raw: string | null, usage: {model:string;inputTokens:number;outputTokens:number;costMicroUsd:number}|undefined) => trace.measure("worker_finish",()=>finishGeneration(env, session.user_id, input.requestId, raw, usage)),
@@ -144,7 +152,6 @@ export async function generate(request: Request, env: Env): Promise<Response> {
     const error = execution.error;
     throw error instanceof ApiFailure ? error : new ApiFailure(503, "AI_PROVIDER_UNAVAILABLE", "AI 服务暂时不可用，请稍后重试。");
   }
-  const { balance } = await import("./quota");
   // A new successful reservation already established its funding in the
   // atomic transaction; only replay paths need an authoritative lookup.
   const funding="funding" in execution?execution.funding:undefined;
