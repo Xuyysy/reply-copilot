@@ -43,13 +43,14 @@ if (packagedChannel) {
   if (channel === "staging") {
     manifest.background.service_worker = "staging/service-worker.js";
     manifest.content_scripts[0].js.unshift("staging/momentum-content.js");
+    cpSync(path.join(root,"interaction-manager"),path.join(output,"interaction-manager"),{recursive:true});
     // Isolated interaction pilot: no Production/development changes or new permissions.
     manifest.content_scripts[0].js.push("staging/interaction-capture.js");
     const panelPath=path.join(output,"sidepanel","sidepanel.html");
     const panel=readFileSync(panelPath,"utf8");
     const marker='<details class="dashboard-card quick-settings"';
     if(!panel.includes(marker))throw new Error("Staging interaction panel anchor changed");
-    const interaction='<details class="dashboard-card" id="staging-interactions"><summary>互动助手（实验）</summary><p class="muted-note">打开 X 通知页，点击读取；可手动滚动后再次读取。仅本机当前侧栏会话，不上传、不后台同步。结果仅代表已观察条目，不是完整历史。</p><div class="dashboard-actions"><button id="interaction-read" class="button" type="button">读取已加载通知</button><button id="interaction-clear" class="button secondary" type="button">清除会话</button></div><label class="setting-row">排行榜<select id="interaction-mode"><option value="snapshot">本次观察</option><option value="confirmed">累计可去重记录</option></select></label><p class="muted-note" id="interaction-status" role="status">尚未读取。</p><ol id="interaction-results"></ol></details>';
+    const interaction='<details class="dashboard-card" id="staging-interactions"><summary>互动助手（实验）</summary><p><a href="../interaction-manager/ui/index.html" target="_blank" rel="noopener noreferrer">打开离线互动分析工作台</a></p><p class="muted-note">打开 X 通知页，点击读取；可手动滚动后再次读取。仅本机当前侧栏会话，不上传、不后台同步。结果仅代表已观察条目，不是完整历史。</p><div class="dashboard-actions"><button id="interaction-read" class="button" type="button">读取已加载通知</button><button id="interaction-clear" class="button secondary" type="button">清除会话</button></div><label class="setting-row">排行榜<select id="interaction-mode"><option value="snapshot">本次观察</option><option value="confirmed">累计可去重记录</option></select></label><p class="muted-note" id="interaction-status" role="status">尚未读取。</p><ol id="interaction-results"></ol></details>';
     writeFileSync(panelPath,panel.replace(marker,interaction+marker).replace("</body>",'<script type="module" src="../staging/interaction-panel.js"></script></body>'));
 
   }

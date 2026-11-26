@@ -81,3 +81,15 @@ export async function readCoverage(db,session){
     return (await req(tx.objectStore('coverage').getAll(IDBKeyRange.bound([session.ownerUserId],[session.ownerUserId,[]]))));
   });
 }
+
+export async function clearOwner(db,session){
+  return transaction(db,['session','events','coverage'],'readwrite',async tx=>{
+    await assertSession(tx,session);
+    const store=tx.objectStore('events');
+    const keys=await req(store.index('owner').getAllKeys(IDBKeyRange.only(session.ownerUserId)));
+    for(const key of keys)await req(store.delete(key));
+    const coverage=tx.objectStore('coverage');
+    const ckeys=await req(coverage.getAllKeys(IDBKeyRange.bound([session.ownerUserId],[session.ownerUserId,[]])));
+    for(const key of ckeys)await req(coverage.delete(key));
+  });
+}
