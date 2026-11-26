@@ -5,11 +5,11 @@ import {readFileSync} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 const code=readFileSync(new URL('../staging/interaction-interface.js',import.meta.url),'utf8');
 const origin='https://x.com',url=origin+'/i/api/2/notifications/all.json?count=20';
-function fixture({responseStatus=200,changeAccount=false}={}){
+function fixture({responseStatus=200,changeAccount=false,noEndpoint=false}={}){
  let listener,handle='me';const requests=[],doc={visibilityState:'visible',cookie:'twid=u%3D111; ct0=fixture-csrf',querySelectorAll:()=>[{href:origin+'/'+handle,getClientRects:()=>[{}],closest:()=>null}]};
  const sender={id:'test',url:'chrome-extension://test/sidepanel/sidepanel.html'};
  const body={globalObjects:{notifications:{},tweets:{},users:{}},timeline:{instructions:[{terminateTimeline:{direction:'Bottom'}}]}};
- vm.runInNewContext(code,{URL,URLSearchParams,AbortController,TextDecoder,Uint8Array,Set,Map,Promise,JSON,Date,Error,Object,Array,Number,String,RegExp,decodeURIComponent,setTimeout,clearTimeout,crypto:{randomUUID},location:{origin,pathname:'/notifications'},document:doc,performance:{getEntriesByType:()=>[{name:url}]},addEventListener:()=>{},chrome:{runtime:{id:'test',getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>{listener=fn;}}}},fetch:async(u,opts)=>{requests.push({url:u,method:opts.method,credentials:opts.credentials,redirect:opts.redirect,csrf:opts.headers['x-csrf-token']});if(changeAccount){doc.cookie='twid=u%3D333; ct0=fixture-csrf';handle='other';}return new Response(JSON.stringify(body),{status:responseStatus});}});
+ vm.runInNewContext(code,{URL,URLSearchParams,AbortController,TextDecoder,Uint8Array,Set,Map,Promise,JSON,Date,Error,Object,Array,Number,String,RegExp,decodeURIComponent,setTimeout,clearTimeout,crypto:{randomUUID},location:{origin,pathname:'/notifications'},document:doc,performance:{getEntriesByType:()=>noEndpoint?[]:[{name:url}]},addEventListener:()=>{},chrome:{runtime:{id:'test',getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>{listener=fn;}}}},fetch:async(u,opts)=>{requests.push({url:u,method:opts.method,credentials:opts.credentials,redirect:opts.redirect,csrf:opts.headers['x-csrf-token']});if(changeAccount){doc.cookie='twid=u%3D333; ct0=fixture-csrf';handle='other';}return new Response(JSON.stringify(body),{status:responseStatus});}});
  const send=(action,extra={},from=sender)=>new Promise(resolve=>{const returned=listener({type:'XRH_STAGING_INTERACTION_INTERFACE',action,...extra},from,resolve);if(returned!==true)resolve(null);});
  return {send,requests};
 }
@@ -35,4 +35,14 @@ test('account switch during request returns no data',async()=>{
  const f=fixture({changeAccount:true});const start=(await f.send('start',{authorized:true})).value;
  const r=await f.send('page',{sessionId:start.sessionId,ownerUserId:'111',cursor:null});
  assert.equal(r.ok,false);assert.equal(r.error,'identity_changed');assert.equal(r.value,undefined);
+});
+
+test('read-only cache authorization works without endpoint observation and cannot request pages',async()=>{
+ const f=fixture({noEndpoint:true});
+ assert.equal((await f.send('start',{authorized:true})).error,'endpoint_not_observed');
+ const start=await f.send('start',{authorized:true,readOnly:true});
+ assert.equal(start.ok,true);assert.equal(start.value.kind,null);
+ assert.equal((await f.send('identity',{sessionId:start.value.sessionId})).ok,true);
+ assert.equal((await f.send('page',{sessionId:start.value.sessionId,ownerUserId:'111',cursor:null})).error,'session_limit');
+ assert.equal(f.requests.length,0);
 });

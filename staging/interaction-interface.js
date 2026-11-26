@@ -180,7 +180,7 @@
  function cancel(){if(active)active.controller.abort();active=null;}
  async function readPage(m){
    const i=validate(m.sessionId),s=active;
-   if(m.ownerUserId!==i.ownerUserId||s.blocked||s.busy||s.pages>=30||Date.now()-s.startedAt>=90000)fail('session_limit');
+   if(!s.endpoint||m.ownerUserId!==i.ownerUserId||s.blocked||s.busy||s.pages>=30||Date.now()-s.startedAt>=90000)fail('session_limit');
    s.busy=true;
    const c=new AbortController(),abort=()=>c.abort(),timer=setTimeout(abort,12000);
    s.controller.signal.addEventListener('abort',abort,{once:true});
@@ -211,9 +211,9 @@
    (async()=>{
      if(m.action==='start'){
        const i=liveIdentity();if(m.authorized!==true)fail('unauthenticated');
-       const endpoint=endpointFrom(performance.getEntriesByType('resource'),location.origin);
+       const endpoint=m.readOnly===true?null:endpointFrom(performance.getEntriesByType('resource'),location.origin);
        cancel();active={...i,endpoint,sessionId:crypto.randomUUID(),controller:new AbortController(),startedAt:Date.now(),pages:0,busy:false,blocked:false,lastRequestAt:0};
-       return {ownerUserId:i.ownerUserId,handle:i.handle,sessionId:active.sessionId,kind:endpoint.kind};
+       return {ownerUserId:i.ownerUserId,handle:i.handle,sessionId:active.sessionId,kind:endpoint?.kind??null};
      }
      if(m.action==='cancel'){if(active?.sessionId===m.sessionId)cancel();return {};}
      const i=validate(m.sessionId);

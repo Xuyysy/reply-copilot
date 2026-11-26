@@ -62,8 +62,11 @@ export async function commitBatch(db,session,inputs,{source,cursor=null,reason='
       if(job.pages>=1000)throw Error('history_limit');
     }
     const events=tx.objectStore('events');
+    // Cap the live synchronized account transactionally, not only at render time.
+    // If the page exceeds the cap, the whole page and checkpoint roll back.
+    const existingCount=checkpoint?await req(events.index('owner').count(IDBKeyRange.only(session.ownerUserId))):0;
     let inserted=0,sourceNew=0;
-    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old)inserted++;if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
+    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old){inserted++;if(checkpoint&&existingCount+inserted>50000)throw Error('workspace_limit');}if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
     const participants=new Set([...records.values()].flatMap(e=>[e.actorUserId,e.targetUserId]));
     const userStore=tx.objectStore('users');
     for(const u of users){if(!u||!participants.has(u.userId)||typeof u.handle!=='string'||! /^[A-Za-z0-9_]{1,15}$/.test(u.handle)||!Number.isSafeInteger(u.observedAt)||u.observedAt<=0||u.observedAt>observedAt)continue;const key=[session.ownerUserId,u.userId],old=await req(userStore.get(key));if(!old||old.observedAt<=u.observedAt)await req(userStore.put({ownerUserId:session.ownerUserId,userId:u.userId,handle:u.handle,observedAt:u.observedAt}));}
@@ -129,5 +132,22 @@ export async function openSyncJob(db,session,{providerId,source,refresh=false}={
     // Explicit refresh starts from the head, without deleting previously committed events.
     const job={ownerUserId:session.ownerUserId,providerId,source,revision:(old?.revision??-1)+1,cursor:null,seen:[],pages:0,done:false,updatedAt:Date.now()};
     await req(store.put(job));return job;
+  });
+}
+
+// A consistent owner-scoped view; events, participant names and coverage are
+// from the same read transaction. Never expose opaque continuation cursors.
+export async function readOwnerDataset(db,session){
+  return transaction(db,['session','events','users','coverage','syncJobs'],'readonly',async tx=>{
+    await assertSession(tx,session);
+    const owner=session.ownerUserId,range=IDBKeyRange.only(owner);
+    const store=tx.objectStore('events').index('owner');
+    if(await req(store.count(range))>50000)throw Error('workspace_limit');
+    const rows=await req(store.getAll(range));
+    const users=await req(tx.objectStore('users').index('owner').getAll(range));
+    const ownerRange=IDBKeyRange.bound([owner],[owner,[]]);
+    const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected})=>({source,reason,lastObservedAt,uniqueEvents,rejected,historyComplete:false}));
+    const jobs=(await req(tx.objectStore('syncJobs').getAll(ownerRange))).map(({providerId,source,pages,done,updatedAt})=>({providerId,source,pages,done,updatedAt}));
+    return {ownerUserId:owner,rows,users,coverage,jobs};
   });
 }

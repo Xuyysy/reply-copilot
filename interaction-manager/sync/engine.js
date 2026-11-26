@@ -39,7 +39,7 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
     parsed.users=[...(parsed.users??[]),...(Array.isArray(page.users)?page.users:[]).map(u=>({...u,observedAt}))];
   }
   if(parsed.stats?.truncated||parsed.events.length>1000)fail('page_limit');
-  if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows&&!parsed.events.length)fail('schema_changed');
+  if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows)fail('schema_changed');
   return {...parsed,nextCursor:page.nextCursor,done:page.done,observedAt};
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
@@ -65,7 +65,7 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
     return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,historyComplete:false};
   }catch(e){
     // Return only known status codes, not provider error bodies, cursors or credentials.
-    const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified']);
+    const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified','workspace_limit']);
     return {reason:known.has(e?.message)?e.message:'sync_failed',committed,inserted,historyComplete:false};
   }finally{if(session)await endSession(db,session).catch(()=>{});}
 }
