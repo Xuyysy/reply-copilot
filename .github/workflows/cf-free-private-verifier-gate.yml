@@ -21,7 +21,7 @@ jobs:
       - name: Test private RPC, long keys, rollback and dry-run
         run: |
           npm --prefix api run typecheck
-          node --test tests/production-v55-no-corpus.test.mjs tests/cf-free-readiness.test.mjs api/tests/cf-free-migration-evidence.test.mjs api/tests/cf-free-private-release-gate.test.mjs api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs api/tests/cf-free-hot-path-contract.test.mjs api/tests/cf-free-production-v55-local.test.mjs api/tests/mk99-payments.test.mjs api/tests/signup-compatible-rollback.test.mjs
+          node --test tests/production-v55-no-corpus.test.mjs tests/cf-free-readiness.test.mjs api/tests/cf-free-migration-evidence.test.mjs api/tests/cf-free-private-release-gate.test.mjs api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs api/tests/cf-free-hot-path-contract.test.mjs api/tests/generation-hot-path.test.mjs api/tests/admin-auth-cpu-readiness.test.mjs api/tests/cf-free-production-v55-local.test.mjs api/tests/mk99-payments.test.mjs api/tests/signup-compatible-rollback.test.mjs
       - name: Rebuild exact locked RustCrypto artifact and collect dependency license evidence
         shell: bash
         run: |

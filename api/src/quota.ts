@@ -105,6 +105,18 @@ export const GENERATION_PREFLIGHT_SQL = `SELECT r.request_id,r.status,r.generati
   )) needs_cleanup
   FROM (SELECT 1) anchor LEFT JOIN ai_requests r ON r.user_id=? AND r.request_id=?`;
 
+// An anchor row preserves error precedence even when the settings or account
+// row is missing. The lot ordering is identical to the old standalone query.
+export const PERMANENT_RESERVATION_PREFLIGHT_SQL=`SELECT
+  (SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd') AS budget_value,
+  a.user_id AS account_id,b.id,b.bucket,b.source_kind
+  FROM (SELECT 1) AS anchor
+  LEFT JOIN credit_accounts a ON a.user_id=?
+  LEFT JOIN credit_batches b ON b.id=(SELECT id FROM credit_batches
+    WHERE user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
+    ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
+      CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
+      COALESCE(paid_at,granted_at),granted_at,id LIMIT 1)`;
 export async function reserveGeneration(env: Env, session: Session, requestId: string, requestHash: string, budgetReserve: number, providerSnapshot: {id:string;version:number}|null = null, options: {prechecked?:boolean;cleanupRetried?:boolean;creditLotRetried?:boolean;omitNewQuota?:boolean;omitSubscriptionReplayQuota?:boolean} = {}): Promise<Reservation> {
   const now = nowMs();
   if(!options.prechecked){
@@ -127,16 +139,16 @@ export async function reserveGeneration(env: Env, session: Session, requestId: s
   const date = shanghaiDay(now);
   const budgetDay = new Date(now).toISOString().slice(0, 10);
   if (!Number.isSafeInteger(budgetReserve) || budgetReserve < 0) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预留无效。");
-  const setting = await env.DB.prepare("SELECT value FROM system_settings WHERE key='daily_cost_limit_micro_usd'").first<{value:string}>();
-  const budgetLimit = Number(setting?.value);
+  // Read the budget setting, account existence and ordered eligible lot in a
+  // single D1 snapshot. The following atomic batch remains authoritative;
+  // this does not cache balances or skip reservation/nonce/provider guards.
+  const preflight = await env.DB.prepare(PERMANENT_RESERVATION_PREFLIGHT_SQL)
+    .bind(session.user_id,session.user_id).first<{budget_value:string|null;account_id:string|null;id:string|null;bucket:CreditBatch["bucket"]|null;source_kind:CreditBatch["source_kind"]|null}>();
+  const budgetLimit = Number(preflight?.budget_value);
   if (!Number.isSafeInteger(budgetLimit) || budgetLimit < 1) throw new ApiFailure(503, "BUDGET_NOT_CONFIGURED", "AI 成本预算尚未配置。");
-  const account = await env.DB.prepare("SELECT free_generation_reserved,paid_generation_reserved,paid_reserved_for_refunds FROM credit_accounts WHERE user_id=?").bind(session.user_id).first<{free_generation_reserved:number;paid_generation_reserved:number;paid_reserved_for_refunds:number}>();
-  if (!account) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
-  const lot = await env.DB.prepare(`SELECT id,bucket,source_kind FROM credit_batches
-    WHERE user_id=? AND status='active' AND remaining_credits-generation_reserved_credits-refund_reserved_credits>0
-    ORDER BY CASE bucket WHEN 'free' THEN 0 ELSE 1 END,
-      CASE source_kind WHEN 'legacy_paid' THEN 0 WHEN 'purchase' THEN 1 ELSE 2 END,
-      COALESCE(paid_at,granted_at),granted_at,id LIMIT 1`).bind(session.user_id).first<CreditBatch>();
+  if (preflight?.account_id == null) throw new ApiFailure(402, "INSUFFICIENT_CREDITS", "生成次数已用完，请购买永久额度包，或等待订阅每日额度重置。");
+  const lot:CreditBatch|null=preflight.id!==null&&preflight.bucket!==null&&preflight.source_kind!==null?
+    {id:preflight.id,bucket:preflight.bucket,source_kind:preflight.source_kind}:null;
   if (!lot) {
     // A replay window can expire between preflight and allocation. Retry only
     // the reservation after bounded cleanup, never repeat an upstream call.

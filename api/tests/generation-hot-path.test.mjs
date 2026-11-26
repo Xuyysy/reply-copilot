@@ -4,3 +4,21 @@ test('normal generate runs no full cleanup and does not duplicate the request lo
 test('expired undelivered credit is released before a normal new request even with ample balance',async()=>{const f=setup();try{const r=await f.generate();assert.equal(r.status,200);f.sql.prepare('UPDATE ai_requests SET response_expires_at=?').run(Date.now()-1);const next=await f.generate();assert.equal(next.status,200,JSON.stringify(next.body));assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM credit_ledger WHERE kind='generation_release'").get().n,1);assert.equal(f.sql.prepare('SELECT free_generation_reserved n FROM credit_accounts').get().n,1);assert.equal(f.sql.prepare('SELECT free_balance n FROM credit_accounts').get().n,200);}finally{f.sql.close();}});
 
 test('replayed generation remains idempotent; AI disabled and hash conflict still reject',async()=>{const f=setup();try{const first=await f.generate();assert.equal(first.status,200);const requestId=first.body.requestId;const headers={Cookie:'',Origin:f.env.EXTENSION_ORIGIN,Authorization:'Bearer '+'f'.repeat(64)};const body={requestId,post:{text:'Synthetic normal post.'}};const replay=()=>f.call('/v1/ai/generate',{headers,body});const second=await replay();assert.equal(second.status,200);assert.equal(second.body.raw,first.body.raw);assert.equal(f.sql.prepare('SELECT COUNT(*) n FROM ai_requests').get().n,1);const conflict=await f.call('/v1/ai/generate',{headers,body:{requestId,post:{text:'Different content'}}});assert.equal(conflict.status,409);assert.equal(conflict.body.code,'IDEMPOTENCY_CONFLICT');f.sql.exec("UPDATE system_settings SET value='0' WHERE key='ai_enabled'");const disabled=await replay();assert.equal(disabled.status,503);assert.equal(disabled.body.code,'AI_DISABLED');}finally{f.sql.close();}});
+
+test('permanent reservation preflight preserves budget and missing account rejection precedence',async()=>{
+ const f=setup();try{
+  f.sql.exec("DELETE FROM credit_accounts WHERE user_id='test-user'; UPDATE system_settings SET value='bad' WHERE key='daily_cost_limit_micro_usd'");
+  const invalid=await f.generate();assert.equal(invalid.status,503);assert.equal(invalid.body.code,'BUDGET_NOT_CONFIGURED');
+  f.sql.exec("UPDATE system_settings SET value='100000000' WHERE key='daily_cost_limit_micro_usd'");
+  const missing=await f.generate();assert.equal(missing.status,402);assert.equal(missing.body.code,'INSUFFICIENT_CREDITS');
+  assert.equal(f.sql.prepare("SELECT COUNT(*) n FROM ai_requests").get().n,0);
+ }finally{f.sql.close();}
+});
+test('normal permanent reservation uses one snapshot for budget, account and ordered lot',async()=>{
+ const f=setup();try{
+  const r=await f.generate();assert.equal(r.status,200,JSON.stringify(r.body));
+  assert.equal(f.calls.filter(s=>s.includes('AS budget_value')&&s.includes('AS account_id')&&s.includes('LEFT JOIN credit_batches')).length,1);
+  assert.equal(f.calls.filter(s=>s.startsWith('SELECT free_generation_reserved,paid_generation_reserved,paid_reserved_for_refunds')).length,0);
+  assert.equal(f.calls.filter(s=>s.startsWith('SELECT id,bucket,source_kind FROM credit_batches')).length,0);
+ }finally{f.sql.close();}
+});
