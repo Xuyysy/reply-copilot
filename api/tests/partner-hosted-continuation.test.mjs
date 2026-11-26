@@ -8,7 +8,7 @@ const workflow=readFileSync(new URL('../../.github/workflows/partners-hosted-fin
 const script=workflow.split("node --input-type=module <<'JS'\n")[1].split('\n          JS')[0]
  .split('\n').map(line=>line.slice(10)).join('\n').replace("import {randomUUID} from 'node:crypto';",'');
 const id='11111111-1111-4111-8111-111111111111';
-async function resume({wrongId=false,wrongAmount=false,unknown=false,failStart=false}={}){
+async function resume({wrongId=false,wrongAmount=false,unknown=false,failStart=false,previewEnabled=true}={}){
  const calls=[],logs=[],errors=[];
  let state=unknown?'reconciling':'pending';
  const totals=()=>({orders:1,gross_fen:2000,net_fen:2000,held_fen:0,paid_fen:state==='paid'?1000:0,reserved_fen:['reserved','reconciling'].includes(state)?1000:0,outstanding_fen:state==='pending'?2000:1000});
@@ -31,7 +31,7 @@ async function resume({wrongId=false,wrongAmount=false,unknown=false,failStart=f
   else if(path.endsWith('/alipay-requests')){
    if(body)status=409;
    else value={enabled:true,accepting:true,minFen:1000,pilotReview:true,recipient:{version:1,account_mask:'q***@***',name_mask:'测*'},requests:[row()]};
-  }else if(path.endsWith('/order-preview'))value={enabled:true,evidence:{eligible:true,principalFen:10000,refundedPrincipalFen:0},policyEligible:true,candidateFen:2000,policyVersion:1};
+  }else if(path.endsWith('/order-preview'))value=previewEnabled?{enabled:true,evidence:{eligible:true,principalFen:10000,refundedPrincipalFen:0},policyEligible:true,candidateFen:2000,policyVersion:1}:{enabled:false};
   else if(path.endsWith('/payout-review')){
    if(cookie.includes('outsider'))status=403;
    else if(body.action==='approve'&&state==='pending'){state='reserved';value={state};}
@@ -71,4 +71,13 @@ test('ambiguous start failure stops without an outcome or blind retry and logs o
  assert.equal(result.calls.filter(c=>c.body?.action==='start').length,1);
  assert.equal(result.calls.some(c=>c.body?.action==='paid'),false);
  assert.equal(result.revoked.size,3);
+});
+
+test('disabled order preview fails closed before financial writes, preserving history and revoking sessions',async()=>{
+ const result=await resume({previewEnabled:false});
+ assert.equal(result.code,1);
+ assert.equal(result.state,'pending');
+ assert.equal(result.calls.some(c=>c.body&&/payout-review|alipay-requests/.test(c.path)),false);
+ assert.equal(result.revoked.size,3);
+ assert.ok(result.errors.some(s=>s==='QA_FINANCE_FAIL ledger-resume resume-order-preview'));
 });

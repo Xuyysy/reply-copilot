@@ -78,6 +78,9 @@ jobs:
               const state=await read(partnerPath+'me');
               check(state.enabled===true&&state.policy===null&&!state.totals,'outsider financial access');
               check((await req(partnerPath+'alipay-requests',knownCookie)).status===403,'outsider request access');
+              await click(['查询推广伙伴资格','Check partner eligibility']);
+              await visibleText(['目前未开放推广伙伴资格或尚未获得授权。','Partner eligibility is unavailable or not granted.']);
+              check(await ev('(()=>{const title=[...document.querySelectorAll("[data-slot=card-title]")].find(e=>["推广伙伴 · 收益记录","Partner · Earnings history"].includes(e.textContent.trim()));const card=title?.closest("[data-slot=card]");return card&&!card.querySelector("strong,input,form")&&![...card.querySelectorAll("button,h3")].some(e=>["查询申请记录","Load requests","支付宝结算申请","Alipay settlement requests","支付宝收款信息","Alipay receiving details","查看或设置收款信息","View or set receiving details"].includes(e.textContent.trim()))&&!card.innerText.includes('+JSON.stringify(expected)+')})()'),'outsider financial UI exposed');
               return;
             }
             const path=id==='qa-admin'?'/v1/admin/partners/alipay-requests?q=qa-partner-a':partnerPath+'alipay-requests';
@@ -91,6 +94,7 @@ jobs:
               const totals=summary.totals;
               check(totals?.orders===1&&totals.gross_fen===2000&&totals.net_fen===0&&totals.paid_fen===1000&&totals.reserved_fen===0&&totals.outstanding_fen===-1000,'desktop refund totals mismatch');
               stage('desktop-earnings');
+              await click(['查询推广伙伴资格','Check partner eligibility']);
               const expectedCards=[['累计佣金','Gross commission',2000],['退款后佣金','Net commission',0],['已结算','Paid',1000],['结算预留','Reserved',0],['待核对净额（含欠款）','Outstanding net (including debt)',-1000]];
               await until(()=>ev('('+JSON.stringify(expectedCards)+').every(([zh,en,fen])=>{const label=[...document.querySelectorAll("p")].find(e=>e.textContent.trim()===zh||e.textContent.trim()===en);const amount=label?.parentElement.querySelector("strong")?.textContent.replace(/[^0-9.−-]/g,"").replace("−","-");return amount&&Number(amount)===fen/100})'),'desktop earnings mismatch');
               await click(['查询申请记录','Load requests']);

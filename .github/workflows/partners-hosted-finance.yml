@@ -127,8 +127,10 @@ jobs:
               check(valid(owner.requests[0])&&valid(admin.requests[0]),'resume request mismatch');
               const row=owner.requests[0];
               check(row.account_mask===owner.recipient.account_mask&&row.name_mask===owner.recipient.name_mask&&row.account_mask===admin.requests[0].account_mask&&row.name_mask===admin.requests[0].name_mask,'resume recipient mismatch');
+              mark('resume-order-preview');
               const preview=await call(a,root+'order-preview?domain=recharge&id='+orderId);
-              check(preview.enabled===true&&preview.evidence?.eligible===true&&preview.evidence.principalFen===10000&&preview.evidence.refundedPrincipalFen===0&&preview.policyEligible===true&&preview.candidateFen===2000&&preview.policyVersion===1,'resume original order mismatch');
+              check(preview.enabled===true,'resume preview gate disabled; separate QA-only approval required');
+              check(preview.evidence?.eligible===true&&preview.evidence.principalFen===10000&&preview.evidence.refundedPrincipalFen===0&&preview.policyEligible===true&&preview.candidateFen===2000&&preview.policyVersion===1,'resume original order mismatch');
               mark('resume-denials');
               await call(p,me+'alipay-requests',{amountFen:1000,recipientVersion:1},409);
               const action={requestId:expected,reason,reviewed:true};
