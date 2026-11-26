@@ -83,13 +83,21 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(jobs.has(b.ownerUserId))return {running:true};
    if(jobs.size)fail('busy');
    const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0}};jobs.set(b.ownerUserId,task);
-   const write=async(state,reason=null)=>saveTask(b.ownerUserId,{runId:task.runId,state,reason,...task.progress,updatedAt:Date.now()});
+   // Preserve write order so a late progress update cannot overwrite final status.
+   let taskWrites=Promise.resolve();
+   const write=(state,reason=null)=>{
+     const value={runId:task.runId,state,reason,...task.progress,updatedAt:Date.now()};
+     const pending=taskWrites.then(()=>saveTask(b.ownerUserId,value));
+     taskWrites=pending.catch(()=>{});
+     return pending;
+   };
    try{await write('running');}catch(e){jobs.delete(b.ownerUserId);throw e;}
    task.promise=inDB(async()=>{let reason='sync_failed',provider;try{
      const verifyBound=async()=>{
        if(task.controller.signal.aborted)fail('cancelled');
-       const bound=await get(f);if(bound?.bindingId!==b.bindingId)fail('identity_changed');
-       const current=await identity(bound.sourceTabId);if(!same(b,current))fail('identity_changed');
+       const bound=await get(f);if(bound?.bindingId!==b.bindingId||bound.sourceTabId!==b.sourceTabId)fail('identity_changed');
+       const current=await identity(b.sourceTabId);if(!same(b,current))fail('identity_changed');
+       const after=await get(f);if(after?.bindingId!==b.bindingId||after.sourceTabId!==b.sourceTabId)fail('identity_changed');
      };
      await verifyBound();
      provider=await openProviderSession(providerFactory,b,{signal:task.controller.signal});
@@ -113,6 +121,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
        const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
          task.progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
+         void write('running').catch(()=>{});
        }});
        completedPages+=result.committed;completedInserted+=result.inserted;
        task.progress={pages:completedPages,inserted:completedInserted};

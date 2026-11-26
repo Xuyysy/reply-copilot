@@ -71,3 +71,37 @@ test('task summary survives browser session loss; new binding required and cache
   assert.equal(r.first,'source_exhausted');assert.equal(r.staleDenied,true);assert.equal(r.restored,'interrupted');assert.equal(r.rows,1);assert.equal(r.readsBefore,1);assert.equal(r.calls,1);assert.equal(r.otherTask,null);assert.equal(r.otherRows,0);assert.equal(r.cleared,'idle');assert.equal(r.clearedRows,0);assert.equal(r.bindingPersisted,false);assert.deepEqual(r.savedKeys,['inserted','ownerUserId','pages','reason','runId','state','updatedAt']);
  });
 });
+
+
+test('committed progress persists during run and final cancellation wins',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',local={},session={},writes=[];let calls=0;
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:session[k]}),set:async v=>Object.assign(session,v)},local:{get:async k=>({[k]:local[k]}),set:async v=>{await new Promise(r=>setTimeout(r,20));Object.assign(local,v);writes.push(...Object.values(v).map(x=>[x.state,x.pages]));}}},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'during-run-progress'),providerFactory:async()=>({id:'fixture-reader',identify:async()=>({ownerUserId:'111',sessionId:'fixture-session'}),readPage:async({source,cursor})=>{calls++;if(cursor!==null)return new Promise(()=>{});return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:false,nextCursor:'fixture-next',payload:{data:[]},posts:[{postId:'777',authorUserId:'222',replyToUserId:'111',replyToPostId:'555',createdAt:Date.now()-5000}]};}})});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const key='xrh-interaction-task-111';await msg('open',side);await msg('sync',page,{authorized:true});
+   for(let i=0;i<300&&!(local[key]?.pages===1&&calls===2);i++)await new Promise(r=>setTimeout(r,10));
+   const saved={...local[key]},running=await msg('view');await msg('stop');
+   let final;for(let i=0;i<300;i++){final=await msg('view');if(!final.busy&&!final.running)break;await new Promise(r=>setTimeout(r,10));}
+   return {saved,running:running.task,final:final.task,rows:final.dataset.rows.length,writes,calls};
+  })()`);
+  assert.equal(r.saved.state,'running');assert.equal(r.saved.pages,1);assert.equal(r.saved.inserted,1);assert.equal(r.running.pages,1);assert.equal(r.final.state,'stopped');assert.equal(r.final.reason,'cancelled');assert.equal(r.final.pages,1);assert.equal(r.rows,1);assert.deepEqual(r.writes,[['running',0],['running',1],['stopped',1]]);assert.equal(r.calls,2);
+ });
+});
+
+test('same owner rebinding to another tab invalidates pending task before commit',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={};let tab=1,release,started=false;
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:tab}],get:async id=>({id}),sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'rebound-task'),providerFactory:async()=>({id:'fixture-reader',identify:async()=>({ownerUserId:'111',sessionId:'fixture-session'}),readPage:async({source,cursor})=>{started=true;await new Promise(r=>release=r);return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:true,nextCursor:null,terminalEvidence:'explicit',payload:{data:[]},posts:[{postId:'777',authorUserId:'222',replyToUserId:'111',replyToPostId:'555',createdAt:Date.now()-5000}]};}})});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   await msg('open',side);await msg('sync',page,{authorized:true});for(let i=0;i<300&&!started;i++)await new Promise(r=>setTimeout(r,5));if(!started)throw Error('fixture never started');tab=2;await msg('open',side);release();
+   for(let i=0;i<300;i++){const v=await msg('view');if(!v.running&&!v.busy)return {reason:v.task.reason,rows:v.dataset.rows.length};await new Promise(r=>setTimeout(r,10));}throw Error('task did not stop');
+  })()`);
+  assert.equal(r.reason,'identity_changed');assert.equal(r.rows,0);
+ });
+});
