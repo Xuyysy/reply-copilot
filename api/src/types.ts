@@ -12,6 +12,20 @@ export interface Env {
   AUTH_HASH_SECRET?: string;
   DEEPSEEK_API_KEY?: string;
   AI_CONFIG_ENCRYPTION_KEY?: string;
+  /** Separate per-environment 256-bit key; no existing secret reuse. */
+  PARTNER_ALIPAY_ENCRYPTION_KEY?: string;
+  PARTNER_ALIPAY_KEY_ID?: string;
+  /** Non-production single-order accrual review; absent by default. */
+  PARTNER_ACCRUAL_REVIEW_ENABLED?: string;
+  /** Non-production manual payout review only, absent by default. */
+  PARTNER_PAYOUT_REVIEW_ENABLED?: string;
+  /** Non-production bounded discovery/refund sync pilot, absent by default. */
+  PARTNER_DISCOVERY_ENABLED?: string;
+  /** Optional non-production scheduled discovery, absent by default. */
+  PARTNER_SCHEDULED_DISCOVERY_ENABLED?: string;
+  /** Optional non-production scheduled refund sync, absent by default. */
+  PARTNER_SCHEDULED_REFUND_SYNC_ENABLED?: string;
+  PARTNER_SCHEDULED_ACCRUAL_ENABLED?: string;
   AI_MOCK?: string;
   AI_MOCK_COST_MICRO_USD?: string;
   AI_MOCK_DELAY_MS?: string;
