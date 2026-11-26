@@ -44,9 +44,9 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   }
   parsed.users=[...(parsed.users??[]),...(decoded?.users??[]),...(Array.isArray(page.users)?page.users:[]).map(u=>({...u,observedAt}))];
   if(parsed.stats?.truncated||parsed.events.length>1000)fail('page_limit');
-  if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows)fail('schema_changed');
+  if(source==='notification'&&parsed.stats.unsupported>0&&parsed.stats.unsupported+parsed.stats.outOfScope===parsed.stats.rows)fail('schema_changed');
   const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=100000?v:0;
-  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored))};
+  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored)+count(parsed.stats?.outOfScope))};
   return {...parsed,quality,nextCursor:page.nextCursor,done:page.done,observedAt};
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){

@@ -16,8 +16,13 @@ function modernTweet(raw){
   const owner=stable(user?.rest_id,user?.legacy?.id_str,t.legacy?.user_id_str);
   return id&&owner?{id,owner}:null;
 }
+// Known out-of-scope follow notices are not malformed interaction rows.
+// Require an explicit actor shape and no target posts; ambiguous/unknown kinds
+// remain unsupported. Icon mapping corroborated by X-Insights notification parser.
+const noTargets=v=>v===undefined||Array.isArray(v)&&v.length===0;
 function modern(row){
   const type=typeOf(row.notification_icon), template=obj(row.template);
+  if(row.notification_icon==='person_icon'&&template&&noTargets(template.target_objects)&&Array.isArray(template.from_users)&&template.from_users.length>0&&template.from_users.length<=1000&&template.from_users.every(u=>{const v=u?.user_results?.result;return !!stable(v?.rest_id,v?.legacy?.id_str);}))return {outOfScope:true};
   if(!type||!template||arr(template.target_objects).length!==1)return null;
   const target=modernTweet(template.target_objects[0]?.tweet_results?.result);
   if(!target)return null;
@@ -26,6 +31,7 @@ function modern(row){
 }
 function legacy(row,tweets,users){
   const type=typeOf(row?.icon?.id), agg=obj(row?.template?.aggregateUserActionsV1);
+  if(row?.icon?.id==='person_icon'&&agg&&noTargets(agg.targetObjects)&&Array.isArray(agg.fromUsers)&&agg.fromUsers.length>0&&agg.fromUsers.length<=1000&&agg.fromUsers.every(u=>!!stable(u?.user?.id,u?.user?.id_str)))return {outOfScope:true};
   if(!type||!agg||arr(agg.targetObjects).length!==1)return null;
   const id=agg.targetObjects[0]?.tweet?.id;
   if(!validId(id)||!Object.hasOwn(tweets,id))return null;
@@ -36,10 +42,11 @@ function legacy(row,tweets,users){
 }
 export function parseNotificationPayload(payload,{ownerUserId,observedAt=Date.now()}={}){
   if(!validId(ownerUserId)||!Number.isSafeInteger(observedAt)||observedAt<=0||!obj(payload))throw Error('invalid_notification_context');
-  const records=new Map(), people=new Map(), stats={rows:0,unsupported:0,unresolvedActors:0,foreignTargets:0,truncated:false};
+  const records=new Map(), people=new Map(), stats={rows:0,unsupported:0,outOfScope:0,unresolvedActors:0,foreignTargets:0,truncated:false};
   function add(item){
     stats.rows++;
     if(!item){stats.unsupported++;return;}
+    if(item.outOfScope){stats.outOfScope++;return;}
     if(item.target.owner!==ownerUserId){stats.foreignTargets++;return;}
     if(!item.actors.length){stats.unresolvedActors++;return;}
     if(item.actors.length>1000){stats.truncated=true;return;}
