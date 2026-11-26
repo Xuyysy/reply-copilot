@@ -1,0 +1,15 @@
+name: Paid Staging safe smoke checks
+on:
+  push:
+    branches: ['chatgpt/paid-staging-smoke-20261126']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 scripts/paid-staging-safe-smoke-20261126.py
