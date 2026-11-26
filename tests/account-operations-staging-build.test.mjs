@@ -28,15 +28,17 @@ test("joint account tools appear only in actual staging build, preserving base p
     assert.equal(m.devtools_page,"follow-manager/v2/devtools.html");
     assert.ok(existsSync(path.join(out,m.devtools_page)));
     assert.deepEqual(m.host_permissions,["https://api-staging.x-reply-helper.top/*"]);
-    assert.deepEqual(m.content_scripts[0].js,["staging/momentum-content.js",...base.content_scripts[0].js,"staging/interaction-capture.js"]);
+    assert.deepEqual(m.content_scripts[0].js,["staging/momentum-content.js",...base.content_scripts[0].js,"staging/interaction-capture.js","staging/interaction-interface.js"]);
     assert.equal(Object.hasOwn(m,"key"),false);
-    for(const target of ["follow-manager/v2/workbench.html","follow-manager/v2/history.html","interaction-manager/ui/index.html","staging/interaction-panel.js"])assert.ok(existsSync(path.join(out,target)),target);
+    for(const target of ["follow-manager/v2/workbench.html","follow-manager/v2/history.html","interaction-manager/ui/index.html","staging/interaction-panel.js","staging/interaction-interface.js","staging/interaction-interface-panel.js","interaction-manager/sync/engine.js","interaction-manager/analytics/live-view.js"])assert.ok(existsSync(path.join(out,target)),target);
     assert.ok(!existsSync(path.join(out,"follow-manager","manager.html")));
     assert.equal((panel.match(/id="joint-follow-preview"/g)||[]).length,1);
     assert.equal((panel.match(/id="staging-interactions"/g)||[]).length,1);
     assert.match(panel,/互关助手 V2（模拟数据预览）/);
     assert.match(panel,/interaction-manager\/ui\/index\.html/);
     assert.match(panel,/staging\/interaction-panel\.js/);
+    assert.equal((panel.match(/id="interaction-interface"/g)||[]).length,1);
+    assert.match(panel,/staging\/interaction-interface-panel\.js/);
    }else{
     for(const name of ["follow-manager","interaction-manager","staging"])assert.equal(existsSync(path.join(out,name)),false,name);
     assert.equal(panel,sourcePanel);
