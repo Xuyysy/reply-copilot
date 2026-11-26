@@ -8,7 +8,8 @@ function error(code){throw Error(code)}
 function user(result,observedAt){
  if(!object(result)||result.__typename!=="User"||!stableId(result.rest_id))error("unresolved_user");
  const core=object(result.core)?result.core:{},legacy=object(result.legacy)?result.legacy:{};
- const verificationType=result.verified_type==="Business"?"gold":result.verified_type==="Government"?"grey":result.is_blue_verified===true?"blue":null;
+ const verifiedType=result.verified_type??legacy.verified_type;
+ const verificationType=verifiedType==="Business"?"gold":verifiedType==="Government"?"grey":result.is_blue_verified===true?"blue":null;
  return userRef({userId:result.rest_id,handle:core.screen_name??legacy.screen_name,displayName:core.name??legacy.name,
   avatarUrl:result.avatar?.image_url??legacy.profile_image_url_https,description:legacy.description,followersCount:legacy.followers_count,
   followingCount:legacy.friends_count,postsCount:legacy.statuses_count,createdAt:core.created_at??legacy.created_at,
@@ -50,12 +51,27 @@ export function parseRelationshipResponse({ownerUserId,kind,cursor,expected,obse
     if(c.cursorType!=="Bottom"||hasBottom||typeof c.value!=="string"||!c.value.length||c.value.length>512)error("ambiguous_cursor");
     hasBottom=true;nextCursor=c.value;continue;
    }
-   if(c.entryType!=="TimelineTimelineItem"||c.itemContent?.itemType!=="TimelineUser")error("unknown_entry");
-   let u;try{u=user(c.itemContent.user_results?.result,observedAt)}catch(e){if(e.message!=="unresolved_user")throw e;unresolved++;continue;}
-   // An unresolved or conflicting identity is evidence of missing coverage.
-   if(entry.entryId!=="user-"+u.userId)error("user_entry_mismatch");
-   if(users.has(u.userId)){const prior=users.get(u.userId);if(prior.handle!==u.handle||prior.isBlueVerified!==u.isBlueVerified)error("conflicting_user");}
-   else users.set(u.userId,u);
+   // Historical own-project tests documented direct, nested item and module shapes.
+   // Only explicit user objects are accepted; unexpected branches are never silently skipped.
+   let items;
+   if(c.entryType==="TimelineTimelineModule"&&Array.isArray(c.items)&&c.items.length>0){
+    items=c.items.map(m=>({entryId:m?.entryId,piece:m?.item?.itemContent??m?.item?.content?.itemContent??m?.itemContent??m?.content?.itemContent,module:true}));
+   }else if(c.entryType===undefined||c.entryType==="TimelineTimelineItem"){
+    const candidates=[c.itemContent,c.item?.itemContent,c.item?.content?.itemContent,c.content?.itemContent].filter(object);
+    if(candidates.length!==1)error("unknown_entry");
+    items=[{entryId:entry.entryId,piece:candidates[0],module:false}];
+   }else error("unknown_entry");
+   if(items.length>1100||entryCount+items.length-1>1100)error("page_capacity");
+   entryCount+=items.length-1;
+   for(const {entryId,piece,module} of items){
+    if(!object(piece)||!(piece.itemType==="TimelineUser"||piece.itemType===undefined&&object(piece.user_results)))error("unknown_entry");
+    let u;try{u=user(piece.user_results?.result,observedAt)}catch(e){if(e.message!=="unresolved_user")throw e;unresolved++;continue;}
+    if(typeof entryId!=="string"||entryId.length>256||!entryId.length)error("user_entry_mismatch");
+    if(entryId.startsWith("user-")&&entryId!=="user-"+u.userId)error("user_entry_mismatch");
+    if(!module&&entryId!=="user-"+u.userId&&!(entryId==="module-item"&&object(c.item)))error("user_entry_mismatch");
+    if(users.has(u.userId)){const prior=users.get(u.userId);if(prior.handle?.toLowerCase()!==u.handle?.toLowerCase()||prior.isBlueVerified!==u.isBlueVerified)error("conflicting_user");}
+    else users.set(u.userId,u);
+   }
   }
  }
  if(terminal&&hasBottom)error("ambiguous_terminal");
