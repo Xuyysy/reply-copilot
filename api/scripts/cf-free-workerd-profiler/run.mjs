@@ -5,11 +5,11 @@ import {createHash,createHmac,pbkdf2Sync,randomBytes,randomUUID,generateKeyPairS
 import {readFileSync,readdirSync,writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-import {createProfiler,mergeProfiles} from './profile.mjs';
+import {createProfiler,mergeProfiles,classifyBundleFrames} from './profile.mjs';
 import {migrationStatements} from '../lib/workerd-cpu-evidence.mjs';
 import {encryptProviderApiKey} from '../../src/ai-model-crypto.js';
 const SOURCE='c1e5b32f3663d19e2bb9af6e590285800770b8c9',NAME='xrh-local-cpu-profile',OWNER=NAME+'-verifier';
-const out=process.argv[2];assert.ok(out,'OUTPUT_PATH_REQUIRED');
+const out=process.argv[2],logging=process.argv[3]||'on';assert.ok(out,'OUTPUT_PATH_REQUIRED');assert.ok(['on','off'].includes(logging));
 const ROOT=fileURLToPath(new URL('../../',import.meta.url));
 const WEB='https://isolated-web.example.test',EXT='chrome-extension://'+'a'.repeat(32);
 const PASS='SyntheticBusinessPassword123!',NEW='SyntheticNewPassword456!';
@@ -144,6 +144,7 @@ async function exercise({sql,send,origin,repeats}){
 async function offline(){
  report.scope='LOCAL_WORKERD_ONLY';
  const origin='https://isolated-api.example.test',env=Object.fromEntries(Object.entries(vars(origin)).map(([k,v])=>[k,{type:'text',value:v}]));
+ env.XRH_LOCAL_MARKER_LOGGING={type:'text',value:logging};
  env.DB={type:'d1',id:'synthetic-business-cloud-rehearsal'};env.PASSWORD_VERIFY_DO={type:'durable-object',worker:OWNER,exportName:'PasswordVerifierDO'};
  let escaped=0;const deny=()=>{escaped++;throw Error('NETWORK_ESCAPE');};
  const mf=new Miniflare({inspectorPort:0,inspectorHost:'127.0.0.1',workers:[
@@ -151,22 +152,23 @@ async function offline(){
  {config:{name:OWNER,compatibilityDate:'2026-10-14',env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}},manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:verifier},'legacy-210k.wasm':{type:'wasm',contents:new Uint8Array(wasm)}}}},dev:{outboundService:{type:'fetcher',handler:deny}}}
  ]});
  let profiler;
- const profiles=new Map(),errors=new Set(),selected=s=>/^(generate-|invalid-model-output-|payment-create-synthetic$|verify-registration$|admin-reauth$|login-10000-correct$|me$|cleanup-http-not-cron$)/.test(s);
+ const profiles=new Map(),errors=new Set(),durations=new Map(),selected=s=>/^(generate-|invalid-model-output-|payment-create-synthetic$|verify-registration$|admin-reauth$|login-10000-correct$|me$|cleanup-http-not-cron$)/.test(s);
  try{
   const db=await mf.getD1Database('DB',NAME);
-  profiler=await createProfiler(mf,NAME);
+  profiler=await createProfiler(mf,NAME,250);report.samplingIntervalUs=profiler.interval;report.markerLogging=logging;
   await exercise({origin,repeats:10,send:async(url,init,scenario)=>{
    init.headers['Accept-Encoding']='identity';
    if(!selected(scenario))return mf.dispatchFetch(url,init);
    let started=false;
    try{await profiler.start();started=true;}catch{errors.add('PROFILER_START_FAILED');}
+   const begin=performance.now();
    try{return await mf.dispatchFetch(url,init);}
-   finally{if(started)try{const p=await profiler.stop();const a=profiles.get(scenario)||[];a.push(p);profiles.set(scenario,a);}catch{errors.add('PROFILER_STOP_FAILED');}}
+   finally{const a=durations.get(scenario)||[];a.push(performance.now()-begin);durations.set(scenario,a);if(started)try{const p=await profiler.stop();const a=profiles.get(scenario)||[];a.push(p);profiles.set(scenario,a);}catch{errors.add('PROFILER_STOP_FAILED');}}
   },sql:async(s,p=[])=> (await db.prepare(s).bind(...p).all()).results});
   assert.equal(escaped,0);assert.equal(report.cases.length,571);
   // Warm and cold requests are both represented. V8 samples are a diagnostic,
   // not Cloudflare CPU billing or native/crypto elapsed time measurements.
-  report.profileGroups=[...profiles].map(([scenario,p])=>({scenario,...mergeProfiles(p)}));
+  report.profileGroups=classifyBundleFrames([...profiles].map(([scenario,p])=>({scenario,...mergeProfiles(p),localWallMedianMs:durations.get(scenario)?.slice().sort((a,b)=>a-b)[Math.floor(p.length/2)]??null})),code);
   report.profileBlockers=[...errors];
   if(!report.profileGroups.length)report.profileBlockers.push('NO_PROFILE_SAMPLES');
   if(report.profileGroups.some(p=>p.sampleCount===0))report.profileBlockers.push('EMPTY_PROFILE_GROUP');
@@ -177,6 +179,6 @@ try{await offline();report.behaviorPassed=true;}catch(e){report.behaviorPassed=f
 finally{
  report.scope='LOCAL_WORKERD_V8_DIAGNOSTIC_ONLY';report.freeCertified=false;
  writeFileSync(out,JSON.stringify(report,null,2));
- console.log('XRH_WORKERD_PROFILE '+JSON.stringify({sourceCommit:SOURCE,scope:report.scope,behaviorPassed:report.behaviorPassed,cases:report.cases.length,blockers:report.blockers,profileBlockers:report.profileBlockers,profileGroups:report.profileGroups}));
+ console.log('XRH_WORKERD_PROFILE '+JSON.stringify({sourceCommit:SOURCE,scope:report.scope,behaviorPassed:report.behaviorPassed,cases:report.cases.length,blockers:report.blockers,profileBlockers:report.profileBlockers,samplingIntervalUs:report.samplingIntervalUs,markerLogging:report.markerLogging,profileGroups:report.profileGroups}));
  if(report.profileBlockers?.length)process.exitCode=2;
 }

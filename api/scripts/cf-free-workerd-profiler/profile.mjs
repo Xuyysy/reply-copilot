@@ -3,7 +3,8 @@
 // raw debugger frames are exported. Samples represent JS profiling, not billed CPU.
 import WebSocket from 'ws';
 import assert from 'node:assert/strict';
-export async function createProfiler(mf,name){
+export async function createProfiler(mf,name,interval=250){
+ assert.ok(Number.isSafeInteger(interval)&&interval>=100&&interval<=1000);
  const root=await mf.getInspectorURL();
  assert.equal(root.hostname,'127.0.0.1');assert.equal(root.protocol,'ws:');
  const url=new URL(root);url.protocol='http:';url.pathname='/json';
@@ -23,8 +24,8 @@ export async function createProfiler(mf,name){
   const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('INSPECTOR_COMMAND_TIMEOUT'));},10000);
   pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));
  });
- try{await send('Profiler.enable');}catch(e){ws.terminate();throw e;}
- return {start:()=>send('Profiler.start'),stop:async()=>{const r=await send('Profiler.stop');assert.ok(r?.profile?.nodes);return r.profile;},close:()=>ws.terminate()};
+ try{await send('Profiler.enable');await send('Profiler.setSamplingInterval',{interval});}catch(e){ws.terminate();throw e;}
+ return {interval,start:()=>send('Profiler.start'),stop:async()=>{const r=await send('Profiler.stop');assert.ok(r?.profile?.nodes);return r.profile;},close:()=>ws.terminate()};
 }
 export function mergeProfiles(profiles){
  const totals=new Map();let sampleCount=0,activeSamples=0,idleSamples=0,unknownSamples=0;
@@ -43,4 +44,14 @@ export function mergeProfiles(profiles){
   }
  }
  return {profiles:profiles.length,sampleCount,activeSamples,idleSamples,unknownSamples,hotspots:[...totals.values()].sort((a,b)=>b.samples-a.samples).slice(0,20)};
+}
+
+export function classifyBundleFrames(groups,bundle){
+ const lines=bundle.split('\n'),sections=[];let section='(bundle runtime)';
+ for(const line of lines){
+  const m=line.match(/^\/\/ ((?:\.\.\/)*[A-Za-z0-9_./@-]+\.(?:ts|js|mjs|cjs))$/);
+  if(m)section=m[1];
+  sections.push(section);
+ }
+ return groups.map(g=>({...g,hotspots:g.hotspots.map(h=>({...h,sourceSection:h.bundleLine&&sections[h.bundleLine-1]||null}))}));
 }
