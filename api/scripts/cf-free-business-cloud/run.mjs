@@ -175,6 +175,10 @@ async function cloud(){
   await cf('PUT',workers+'/'+name,form);
  }
  const secret=(name,text)=>({name,type:'secret_text',text});
+  async function closeTail(){
+   if(ws){ws.terminate();ws=null;}
+   if(tailId){await cf('DELETE',workers+'/'+NAME+'/tails/'+tailId);tailId=null;}
+  }
  try{
   stage='cloud-preflight';const accounts=await cf('GET','/accounts?page=1&per_page=50');
   assert.equal(accounts.length,1);assert.equal(accounts[0].id,ACCOUNT);assert.equal(accounts[0].name,ACCOUNT_NAME);
@@ -191,10 +195,6 @@ async function cloud(){
   await cf('POST',workers+'/'+NAME+'/subdomain',{enabled:true,previews_enabled:false});
   const binding=await cf('GET',workers+'/'+NAME+'/settings');assert.ok(binding.bindings.some(x=>x.name==='DB'&&x.id===dbId));assert.ok(binding.bindings.some(x=>x.name==='PASSWORD_VERIFY_DO'&&x.type==='durable_object_namespace'));
   const deployments=await cf('GET',workers+'/'+NAME+'/deployments');report.cloudVersion=deployments.deployments?.[0]?.versions?.[0]?.version_id??null;
-  async function closeTail(){
-   if(ws){ws.terminate();ws=null;}
-   if(tailId){await cf('DELETE',workers+'/'+NAME+'/tails/'+tailId);tailId=null;}
-  }
   async function openTail(){
    if(ws||tailId)await closeTail();
    try{
