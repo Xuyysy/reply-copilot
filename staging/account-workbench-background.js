@@ -17,10 +17,20 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  const inDB=fn=>{const p=dbQueue.then(fn,fn);dbQueue=p.catch(()=>{});return p;};
  const key=f=>'xrh-workbench-'+f;
  const store=c.storage.session;
+ // Only noncredential task summaries persist across a browser restart.
+ // Tab bindings stay session-only; opening a new workbench rechecks identity.
+ const taskStore=c.storage.local??store;
  const get=async f=>(await store.get(key(f)))[key(f)]??null;
  const put=(f,v)=>store.set({[key(f)]:v});
- const readTask=async owner=>{const v=(await store.get(taskKey(owner)))[taskKey(owner)];if(!v||v.ownerUserId!==owner)return null;return v.state==='running'&&!jobs.has(owner)?{...v,state:'interrupted',reason:'interrupted'}:v;};
- const saveTask=(owner,v)=>store.set({[taskKey(owner)]:{ownerUserId:owner,...v}});
+ const readTask=async owner=>{
+   const k=taskKey(owner);
+   const v=(await taskStore.get(k))[k]??(taskStore!==store?(await store.get(k))[k]:null);
+   if(!v||v.ownerUserId!==owner)return null;
+   const active=jobs.get(owner);
+   if(v.state==='running')return active?{...v,...active.progress}:{...v,state:'interrupted',reason:'interrupted'};
+   return v;
+ };
+ const saveTask=(owner,v)=>taskStore.set({[taskKey(owner)]:{ownerUserId:owner,...v}});
  const path=f=>c.runtime.getURL(PATHS[f]);
  async function identity(tabId){
    if(!idOk(tabId))fail('owner_unverified');
@@ -72,9 +82,8 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(authorized!==true)fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
    if(jobs.size)fail('busy');
-   const task={controller:new AbortController(),runId:crypto.randomUUID()};jobs.set(b.ownerUserId,task);
-   let progress={pages:0,inserted:0};
-   const write=async(state,reason=null)=>saveTask(b.ownerUserId,{runId:task.runId,state,reason,...progress,updatedAt:Date.now()});
+   const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0}};jobs.set(b.ownerUserId,task);
+   const write=async(state,reason=null)=>saveTask(b.ownerUserId,{runId:task.runId,state,reason,...task.progress,updatedAt:Date.now()});
    try{await write('running');}catch(e){jobs.delete(b.ownerUserId);throw e;}
    task.promise=inDB(async()=>{let reason='sync_failed',provider;try{
      const verifyBound=async()=>{
@@ -103,10 +112,10 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        await verifyBound();
        const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
        const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
-         progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
+         task.progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
        }});
        completedPages+=result.committed;completedInserted+=result.inserted;
-       progress={pages:completedPages,inserted:completedInserted};
+       task.progress={pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
        // A page budget boundary has no in-flight read. Allow the other source
        // its reserved pages, but never hide the partial result behind success.

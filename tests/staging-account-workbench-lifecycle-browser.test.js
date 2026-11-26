@@ -46,3 +46,28 @@ test('bounded dual-source scans advance both partial checkpoints and preserve pa
   assert.deepEqual(r.jobs.map(j=>j.source).sort(),['notification','post']);assert.equal(r.jobs.find(j=>j.source==='post').done,true);
  });
 });
+
+
+test('task summary survives browser session loss; new binding required and cached progress is retained',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',local={},session={};let calls=0,owner='111',serial=10;
+   const area=s=>({get:async k=>({[k]:s[k]}),set:async v=>Object.assign(s,v)});
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:area(session),local:area(local)},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:owner,handle:'me'}}),create:async()=>({id:++serial}),update:async()=>({})}};
+   const factory=async()=>({id:'fixture-progress',identify:async()=>({ownerUserId:owner,sessionId:'fixture-session'}),readPage:async({source,cursor})=>{calls++;return {status:200,ownerUserId:owner,source,requestCursor:cursor,structureVerified:true,done:true,nextCursor:null,terminalEvidence:'explicit',payload:{data:[]},posts:[{postId:'777',authorUserId:'222',replyToUserId:owner,replyToPostId:'555'}]}}});
+   const opts={chromeApi:c,openDB:()=>openDB(indexedDB,'persistent-task-summary'),providerFactory:factory};let ctl=C(opts);
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'};const page=id=>({id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id}});
+   const msg=(action,sender,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const wait=async p=>{for(let i=0;i<200;i++){const v=await msg('view',p);if(!v.running&&!v.busy)return v;await new Promise(r=>setTimeout(r,5))}throw Error('sync timeout')};
+   await msg('open',side);await msg('sync',page(11),{authorized:true});const first=await wait(page(11));
+   const key='xrh-interaction-task-111',saved=local[key];local[key]={...saved,state:'running',reason:null};
+   for(const k of Object.keys(session))delete session[k];ctl=C(opts);
+   let staleDenied=false;try{await msg('view',page(11))}catch{staleDenied=true}
+   await msg('open',side);const restored=await msg('view',page(12));const readsBefore=calls;
+   owner='333';await msg('open',side);const other=await msg('view',page(13));
+   owner='111';await msg('open',side);const cleared=await msg('clear',page(14),{confirmed:true});
+   return {staleDenied,savedKeys:Object.keys(saved).sort(),bindingPersisted:Object.keys(local).some(k=>k.startsWith('xrh-workbench-')),first:first.task.reason,restored:restored.task.state,rows:restored.dataset.rows.length,readsBefore,calls,otherTask:other.task,otherRows:other.dataset.rows.length,cleared:cleared.task.state,clearedRows:cleared.dataset.rows.length};
+  })()`);
+  assert.equal(r.first,'source_exhausted');assert.equal(r.staleDenied,true);assert.equal(r.restored,'interrupted');assert.equal(r.rows,1);assert.equal(r.readsBefore,1);assert.equal(r.calls,1);assert.equal(r.otherTask,null);assert.equal(r.otherRows,0);assert.equal(r.cleared,'idle');assert.equal(r.clearedRows,0);assert.equal(r.bindingPersisted,false);assert.deepEqual(r.savedKeys,['inserted','ownerUserId','pages','reason','runId','state','updatedAt']);
+ });
+});
