@@ -8,13 +8,12 @@ export async function requireAdminSession(request: Request, env: Env, write = fa
   }
   const { session, token } = await sessionFor(request, env);
   if (session.kind !== "web") throw new ApiFailure(403, "FORBIDDEN", "管理员需要网页登录。");
-  const user = await env.DB.prepare("SELECT role,status,email_verified_at FROM users WHERE id=?")
-    .bind(session.user_id).first<{ role: string; status: string; email_verified_at: number | null }>();
+  const user = await env.DB.prepare("SELECT u.role,u.status,u.email_verified_at,s.user_id AS bound_user_id FROM users u LEFT JOIN site_administrator s ON s.id=1 WHERE u.id=?")
+    .bind(session.user_id).first<{ role: string; status: string; email_verified_at: number | null; bound_user_id:string|null }>();
   if (user?.role !== "admin" || user.status !== "active" || !user.email_verified_at) {
     throw new ApiFailure(403, "FORBIDDEN", "没有管理员权限。");
   }
-  const binding = await env.DB.prepare("SELECT user_id FROM site_administrator WHERE id=1").first<{user_id:string}>();
-  if (binding?.user_id !== session.user_id) throw new ApiFailure(403,"FORBIDDEN","没有管理员权限。");
+  if (user.bound_user_id !== session.user_id) throw new ApiFailure(403,"FORBIDDEN","没有管理员权限。");
   if (write) {
     await requireCsrf(request, env, token);
     const proof = await env.DB.prepare("SELECT expires_at FROM admin_reauth_sessions WHERE session_id=?").bind(session.id).first<{expires_at:number}>();

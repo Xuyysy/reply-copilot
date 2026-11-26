@@ -39,7 +39,13 @@ test('Production retains single provider call and canonical validation before pr
  const source=readFileSync(new URL('../api/src/ai.ts',import.meta.url),'utf8');
  assert.equal((source.match(/await executeAiGeneration\(/g)||[]).length,1);
  assert.equal((source.match(/provider: \(\) => configuredModel \?/g)||[]).length,1);
- assert.match(source,/result\.raw = serializeModelOutput\(result\.raw\);\s*result\.raw = rerankV5DefaultStyle\(result\.raw,env,input\.outputSchemaVersion\);/);
+ // All three paths must finish canonical validation before the single preference
+ // adjustment. The real HTTP/D1 regression matrix independently checks valid
+ // output byte parity, invalid duplicate rejection and cost/refund settlement.
+ const validator=source.slice(source.indexOf('    validate: (result:'),source.indexOf('    finish: (raw:'));
+ assert.match(source,/provider: \(\) => configuredModel \? requestConfiguredModel\(\{[^\n]*validateOutput:true/);
+ assert.match(validator,/if\(mode==="real"&&!configuredModel\)\s*\{[\s\S]*decoded=validateDeepSeekResult\(result\);[\s\S]*result\.raw=serializeValidatedModelOutput\(validateParsedModelOutput\(decoded\)\);[\s\S]*\}else if\(configuredModel\)\{[\s\S]*result\.raw\.length>20_000[\s\S]*\}else\{\s*result\.raw=serializeModelOutput\(result\.raw\);\s*\}\s*result\.raw = rerankV5DefaultStyle\(result\.raw,env,input\.outputSchemaVersion\);/);
+ assert.equal((validator.match(/rerankV5DefaultStyle\(/g)||[]).length,1);
  const prompt=readFileSync(new URL('../prompts/prompt-v5-no-corpus.js',import.meta.url),'utf8');
  assert.doesNotMatch(prompt,/REPLY_V5_EXAMPLES|selectReplyV5Examples|reply-v5-examples\.js/);
 });

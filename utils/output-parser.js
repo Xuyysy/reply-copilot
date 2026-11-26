@@ -7,6 +7,12 @@ const LEGACY_STYLE_MAP = Object.freeze({ natural: "natural", funny: "light_humor
 export function parseAIOutput(content) {
   let data;
   try { data = JSON.parse(content); } catch { throw new InvalidAIResponseError("DeepSeek returned invalid JSON. Try again."); }
+  return parseAIOutputValue(data);
+}
+
+// Shared normalization of a value already parsed from JSON. The string
+// entrypoint above remains unchanged for released clients.
+export function parseAIOutputValue(data) {
   const fail = () => { throw new InvalidAIResponseError("DeepSeek returned an invalid structured response. Try again."); };
   if (!data || typeof data !== "object" || Array.isArray(data)) fail();
   if (!RECOMMENDATIONS.includes(data.recommendation)) fail();

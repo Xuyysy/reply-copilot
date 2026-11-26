@@ -42,13 +42,18 @@ export async function paymentProviderCredentialsConfigured(env:Env,provider:Paym
 
 function enabled(value:string|undefined):boolean { return value==='1'; }
 
-export async function paymentControl(env:Env){
+export async function paymentControl(env:Env,options:{checkoutOnly?:boolean}={}){
  const values=await settings(env),environmentReady=env.PAYMENTS_ENABLED==='1',operatorEnabled=enabled(values.purchase_enabled);
- const [rsa2Credentials,epayCredentials]=await Promise.all([
-  paymentProviderCredentialsConfigured(env,'xiaodou'),paymentProviderCredentialsConfigured(env,'xiaodou_epay'),
- ]);
- const mk99=await mk99Readiness(env);
  const activeMerchant=['xiaodou','mk99','none'].includes(values.active_merchant??'xiaodou')?(values.active_merchant??'xiaodou'):'none';
+ // Only the private checkout caller opts in: methods for inactive merchants
+ // can never be returned. Full admin diagnostics and operator pilot retain
+ // complete credential probing; no caching of mutable flags or keys.
+ const checkout=options.checkoutOnly===true;
+ const [rsa2Credentials,epayCredentials,mk99]=await Promise.all([
+  !checkout||activeMerchant==='xiaodou'?paymentProviderCredentialsConfigured(env,'xiaodou'):false,
+  !checkout||(activeMerchant==='xiaodou'&&env.ENVIRONMENT==='staging'&&env.API_ORIGIN==='https://api-staging.example.test'&&env.XIAODOU_EPAY_TEST_COMPAT==='1')?paymentProviderCredentialsConfigured(env,'xiaodou_epay'):false,
+  !checkout||activeMerchant==='mk99'?mk99Readiness(env):{credentialsConfigured:false,protocolConfirmed:env.MK99_PROTOCOL_CONFIRMED==='1',amountContractConfirmed:env.MK99_AMOUNT_CONTRACT==='CNY_EXACT_BUYER_TOTAL'},
+ ]);
  const mk99Channels={alipay:{enabled:enabled(values.payment_mk99_alipay_enabled),platformReleased:enabled(values.payment_mk99_alipay_released)},wechat:{enabled:enabled(values.payment_mk99_wechat_enabled),platformReleased:enabled(values.payment_mk99_wechat_released)}};
  const providers={
   mk99:{enabled:enabled(values.payment_mk99_enabled),...mk99},

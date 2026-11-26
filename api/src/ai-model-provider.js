@@ -1,4 +1,4 @@
-import { parseAIOutput } from "../../utils/output-parser.js";
+import { parseAIOutput, parseAIOutputValue } from "../../utils/output-parser.js";
 
 const BUILTIN_HOSTS = {
   deepseek: new Set(["api.deepseek.com"]),
@@ -24,7 +24,15 @@ export function validateModelOutput(raw) {
   // The website and extension share this exact parser contract. Parsing and
   // serializing also strips markdown fences and normalizes legacy aliases only
   // where the existing parser explicitly permits them.
-  const parsed = parseAIOutput(raw.trim());
+  return assertDistinctModelReplies(parseAIOutput(raw.trim()));
+}
+
+// Legacy DeepSeek first checks its stricter raw JSON candidate contract.
+// Reuse that exact parsed value rather than decoding the same JSON again.
+export function validateParsedModelOutput(value) {
+  return assertDistinctModelReplies(parseAIOutputValue(value));
+}
+function assertDistinctModelReplies(parsed) {
   const replies = [parsed.replies.natural, parsed.replies.light_humor, parsed.replies.thoughtful]
     .map((value) => value.normalize("NFKC").trim().toLocaleLowerCase());
   if (new Set(replies).size !== 3) throw new Error("duplicate_replies");
@@ -34,7 +42,7 @@ export function validateModelOutput(raw) {
 /** Keep the optional score absent on the wire for released 0.3.1 clients.
  * Internally the parser still normalizes absence to null. Never strip any
  * required field or an invalid score to make an invalid response pass. */
-function serializeValidatedModelOutput(parsed) {
+export function serializeValidatedModelOutput(parsed) {
   if (parsed.score === null) {
     const { score, ...compatible } = parsed;
     return JSON.stringify(compatible);

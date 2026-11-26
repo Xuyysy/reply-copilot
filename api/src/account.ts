@@ -43,17 +43,17 @@ export async function extensionBootstrap(request: Request, env: Env): Promise<Re
     throw new ApiFailure(404, "NOT_FOUND", "接口不存在。");
   const {session}=await sessionFor(request,env);
   if(session.kind!=="extension")throw new ApiFailure(403,"FORBIDDEN","仅限插件账户使用。");
-  const [state,user]=await Promise.all([
-    accountState(env,session),
-    env.DB.prepare("SELECT username,email,role,status,email_verified_at FROM users WHERE id=?")
-      .bind(session.user_id).first<{username:string|null;email:string;role:string;status:string;email_verified_at:number}>()
-  ]);
+  const [quota,subscription]=await Promise.all([balance(env,session.user_id),subscriptionAccount(env,session.user_id)]);
+  // Read the fresh account projection once, AFTER the balances. Do not use
+  // cached identity/status or weaken the final active-account guard.
+  const user=await env.DB.prepare("SELECT username,email,role,status,email_verified_at FROM users WHERE id=?")
+      .bind(session.user_id).first<{username:string|null;email:string;role:string;status:string;email_verified_at:number}>();
   if(!user||user.status!=="active")throw new ApiFailure(401,"AUTH_REQUIRED","登录已失效，请重新登录。");
   return response({
     user:{userId:session.user_id,username:user.username,email:user.email,role:user.role,status:user.status,emailVerified:Boolean(user.email_verified_at)},
-    status:state.status,
-    entitlement:{entitlementStatus:state.status==="credits_available"?"active":"inactive"},
-    quota:state.quota,subscription:state.subscription
+    status:availableNow(quota,subscription)>0?"credits_available":"credits_exhausted",
+    entitlement:{entitlementStatus:availableNow(quota,subscription)>0?"active":"inactive"},
+    quota,subscription
   },200,env,request);
 }
 export async function licenseDevices(request: Request, env: Env): Promise<Response> {

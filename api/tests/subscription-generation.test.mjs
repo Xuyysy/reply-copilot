@@ -235,15 +235,36 @@ test('0.3.5 wire path receives three candidates and never recaches exhausted per
   const headers={Authorization:'Bearer '+'b'.repeat(64),Origin:f.env.EXTENSION_ORIGIN};
   const requestId=id(800);
   const body={requestId,post:{text:'A public post for isolated testing.',url:'https://x.com/example/status/123'}};
+  const balanceReads=[],eligibilityReads=[],fundingReads=[];
+  const prepare=f.env.DB.prepare.bind(f.env.DB);
+  f.env.DB.prepare=sql=>{
+    const statement=prepare(sql);
+    if(sql.includes('SELECT p.id,p.daily_limit,p.start_at,p.end_at,v.plan_code'))eligibilityReads.push(sql);
+    if(sql.includes('SELECT 1 FROM subscription_ai_allocations WHERE user_id=? AND request_id=?'))fundingReads.push(sql);
+    if(sql.includes('free_remaining')&&sql.includes('paid_remaining')){
+      const first=statement.first.bind(statement);
+      statement.first=async(...args)=>{balanceReads.push(sql);return first(...args);};
+    }
+    return statement;
+  };
   const first=await f.call('/v1/ai/generate',{headers,body});
   assert.equal(first.status,200,JSON.stringify(first.body));
   assert.deepEqual(Object.keys(JSON.parse(first.body.raw).replies).sort(),['light_humor','natural','thoughtful']);
+  assert.equal(balanceReads.length,0,'new subscription generation never reads unused permanent quota');
+  assert.equal(eligibilityReads.length,1,'subscription proof read once before reservation');
+  assert.equal(fundingReads.length,0,'new subscription funding is already committed');
   assert.equal(first.body.quota,undefined);
   const received=await ack(f,800);
   assert.equal(received.status,200);
   assert.equal(received.body.quota,undefined);
   assert.equal(received.body.subscription.remainingToday,499);
-  assert.equal((await f.call('/v1/ai/generate',{headers,body})).body.raw,first.body.raw);
+  balanceReads.length=0;fundingReads.length=0;
+  const replayed=await f.call('/v1/ai/generate',{headers,body});
+  assert.equal(replayed.status,200);
+  assert.equal(replayed.body.raw,first.body.raw);
+  assert.equal(replayed.body.quota,undefined);
+  assert.equal(balanceReads.length,0,"subscription replay never builds unused permanent quota");
+  assert.equal(fundingReads.length,1,"subscription replay identifies committed funding once");
   assert.equal((await ack(f,800)).body.alreadyConfirmed,true);
   assert.equal(daily(f).used,1);
  }finally{f.sql.close();}
