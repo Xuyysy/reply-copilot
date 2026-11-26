@@ -3,7 +3,7 @@ import {ApiFailure} from './types';
 import {requireAdminSession} from './admin-auth';
 import {sessionFor,requireCsrf,takeRate} from './auth';
 import {operation,commitOperation} from './admin-operations';
-import {hashPassword,verifyPassword} from './password-auth';
+import {createPasswordHash,verifyAccountPassword} from './password-auth';
 import {jsonBody,nowMs} from './security';
 import {response} from './http';
 import {paymentControl} from './payment-policy';
@@ -99,9 +99,9 @@ export async function adminChangePassword(request:Request,env:Env):Promise<Respo
  const password=body.newPassword;
  if(typeof password!=='string'||password.length<12||new TextEncoder().encode(password).length>256||[ /\p{L}/u,/\p{N}/u,/[^\p{L}\p{N}\s]/u ].filter(re=>re.test(password)).length<2||password!==body.confirmPassword)throw new ApiFailure(400,'INVALID_PASSWORD','新密码至少12位，需含字母、数字、符号中的两类，并与确认密码一致。');
  const user=await env.DB.prepare('SELECT password_hash FROM users WHERE id=?').bind(actor.user_id).first<{password_hash:string}>();
- if(typeof body.oldPassword!=='string'||body.oldPassword.length>256||!await verifyPassword(env,body.oldPassword,user?.password_hash??null))throw new ApiFailure(401,'INVALID_CREDENTIALS','原密码错误。');
+ if(typeof body.oldPassword!=='string'||body.oldPassword.length>256||!await verifyAccountPassword(env,actor.user_id,body.oldPassword,user?.password_hash??null))throw new ApiFailure(401,'INVALID_CREDENTIALS','原密码错误。');
  if(password===body.oldPassword)throw new ApiFailure(400,'INVALID_PASSWORD','新密码需要与原密码不同。');
- const hash=await hashPassword(env,password),now=nowMs();
+ const hash=await createPasswordHash(env,password,actor.user_id,'admin'),now=nowMs();
  await commitOperation(env,op,[
  env.DB.prepare('UPDATE users SET password_hash=? WHERE id=? AND password_hash=?').bind(hash,actor.user_id,user!.password_hash),
  // A failed CAS aborts the complete D1 batch, including its operation and audit record.

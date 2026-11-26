@@ -41,14 +41,15 @@ test('10ms Free CPU is per-invocation: low P95 never excuses CPU maximum >10ms',
  assert.equal(result.metrics.production.maxCpuMs,16.5);
 });
 
-test('Cron CPU is not falsely classified as an HTTP request over the 10ms budget',()=>{
+test('Cron has its own 10ms Free CPU gate and is not misclassified as fetch',()=>{
  const cron={...makeWorker(prod,1,50_000),dimensions:{...makeWorker(prod,1,50_000).dimensions,eventType:'cron'}};
  const raw={workers:[makeWorker(prod,20,4000),cron],d1:[makeDb(db,300,2)]};
  const result=evaluateDay(raw,opts);
  assert.equal(result.metrics.account.requests,21,'keep conservative total across all events');
  assert.equal(result.metrics.production.requests,20,'fetch request count excludes Cron');
  assert.equal(result.metrics.production.maxCpuMs,4);
- assert.equal(result.verdict,'REVIEW_REQUIRED');
+ assert.equal(result.metrics.account.maxCronCpuMs,50);
+ assert.equal(result.verdict,'NO_GO');assert.match(result.causes.join(';'),/Cron invocation/);
 });
 
 test('all-D1-read 5M, write 100k, all-Worker requests 100k and errors each block',()=>{
@@ -113,4 +114,11 @@ test('CLI input limits and invalid release timestamp fail closed',()=>{
 test('incomplete Cloudflare response fails rather than reporting false Free clearance',()=>{
  assert.throws(()=>evaluateDay({workers:null,d1:[]},opts),/Missing/);
  assert.throws(()=>evaluateDay({workers:[makeWorker(prod,2,1200)],d1:[{sum:{rowsWritten:1}}]},opts),/Invalid aggregate/);
+});
+
+test('missing CPU in one nonempty event group and mixed versions are never silently cleared',()=>{
+ const absent=makeWorker(prod,20,4000);delete absent.max;
+ const mixed=makeWorker(prod,2,4000);mixed.dimensions.scriptVersion='other';
+ const r=evaluateDay({workers:[makeWorker(prod,1,4000),absent,mixed],d1:[makeDb(db,20,1)]},opts);
+ assert.equal(r.verdict,'INSUFFICIENT');assert.match(r.uncertainties.join(';'),/mixed production/);assert.match(r.uncertainties.join(';'),/CPU sample missing/);
 });

@@ -197,7 +197,7 @@ export async function verifyRegistration(request: Request,env: Env): Promise<Res
  * ordinary reset uses the existing internal user ID. No PII in object names.
  * A missing or invalid DO response fails closed without local PBKDF2 fallback.
  */
-async function createPasswordHash(env: Env, password: string, identity: string, purpose: "register"|"reset"): Promise<string> {
+export async function createPasswordHash(env: Env, password: string, identity: string, purpose: "register"|"reset"|"admin"): Promise<string> {
   if (env.PASSWORD_VERIFY_DO_ENABLED !== "1") return hashPassword(env,password);
   if (!env.PASSWORD_VERIFY_DO) throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户服务暂时不可用，请稍后重试。");
   const workFactor=creationIterations(env);
@@ -213,7 +213,8 @@ async function createPasswordHash(env: Env, password: string, identity: string, 
   throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户服务暂时不可用，请稍后重试。");
 }
 
-async function verifyLoginPassword(env: Env, userId: string, password: string, stored: string): Promise<boolean> {
+export async function verifyAccountPassword(env: Env, userId: string, password: string, stored: string | null): Promise<boolean> {
+  if (!stored) return false;
   if (env.PASSWORD_VERIFY_DO_ENABLED !== "1") return verifyPassword(env,password,stored);
   if (!env.PASSWORD_VERIFY_DO) throw new ApiFailure(503,"PASSWORD_VERIFIER_UNAVAILABLE","账户登录暂时不可用，请稍后重试。");
   try {
@@ -232,7 +233,7 @@ export async function passwordLogin(request: Request,env: Env): Promise<Response
   if (!identity || password.length>256) throw new ApiFailure(400,"INVALID_CREDENTIALS","账号或密码错误。");
   const now=nowMs(); await rate(request,env,"login",identity,now);
   const user=await env.DB.prepare(LOGIN_USER_SQL).bind(identity,identity).first<{id:string;password_hash:string|null;status:string}>();
-  if (!user?.password_hash || !await verifyLoginPassword(env,user.id,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
+  if (!user?.password_hash || !await verifyAccountPassword(env,user.id,password,user.password_hash)) throw new ApiFailure(401,"INVALID_CREDENTIALS","账号或密码错误。");
   if (user.status==="frozen") throw new ApiFailure(403,"ACCOUNT_FROZEN","账户已暂停，请联系支持。");
   const session=await newSession(env,user.id); await session.statement.run();
   // Paid-only staged rehash to the currently selected lower-cost verifier,

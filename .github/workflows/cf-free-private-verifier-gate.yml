@@ -20,7 +20,7 @@ jobs:
       - name: Test private RPC, long keys, rollback and dry-run
         run: |
           npm --prefix api run typecheck
-          node --test api/tests/cf-free-private-release-gate.test.mjs api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs
+          node --test tests/cf-free-readiness.test.mjs api/tests/cf-free-migration-evidence.test.mjs api/tests/cf-free-private-release-gate.test.mjs api/tests/cf-free-private-verifier.test.mjs api/tests/cf-free-real-password-rpc.test.mjs api/tests/cf-free-password-do.test.mjs
       - name: Rebuild exact locked RustCrypto artifact and collect dependency license evidence
         shell: bash
         run: |
@@ -39,3 +39,45 @@ jobs:
               if pkg['source']:
                   print('CF_FREE_RUST_LICENSE '+json.dumps({k:pkg[k] for k in ('name','version','license','license_file','repository')}))
           PY
+
+  npm-advisory-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Collect locked npm advisory evidence without installing or fixing
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/npm-advisories"
+          for project in api web; do
+            for scope in all production; do
+              args=(--json --package-lock-only --audit-level=low)
+              if [[ "$scope" == production ]]; then args+=(--omit=dev); fi
+              set +e
+              npm --prefix "$project" audit "${args[@]}" > "$RUNNER_TEMP/npm-advisories/$project-$scope.json"
+              rc=$?
+              set -e
+              python3 - "$RUNNER_TEMP/npm-advisories/$project-$scope.json" "$project" "$scope" "$rc" <<'PY'
+          import json,sys
+          p,project,scope,rc=sys.argv[1:]
+          d=json.load(open(p))
+          if d.get('error') or not isinstance(d.get('vulnerabilities'),dict) or not isinstance(d.get('metadata',{}).get('vulnerabilities'),dict):
+              raise SystemExit('Incomplete npm audit evidence')
+          print('CF_FREE_NPM_AUDIT '+json.dumps({'project':project,'scope':scope,'exit':int(rc),'counts':d['metadata']['vulnerabilities'],'packages':[{ 'name':k,'severity':v.get('severity'),'direct':v.get('isDirect'),'fixAvailable':v.get('fixAvailable'),'advisories':[{ 'title':a.get('title'),'url':a.get('url'),'range':a.get('range')} for a in v.get('via',[]) if isinstance(a,dict)]} for k,v in d['vulnerabilities'].items()]}))
+          if int(rc) not in (0,1): raise SystemExit('Unexpected npm audit exit')
+          PY
+            done
+          done
+      - name: Preserve advisory evidence for manual triage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cf-free-npm-advisories
+          path: ${{ runner.temp }}/npm-advisories
+          retention-days: 14

@@ -36,11 +36,12 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  const totalRequests=sum(workers,x=>x.sum?.requests);
  const allErrors=sum(workers,x=>x.sum?.errors);
  const read=sum(d1,x=>x.sum?.rowsRead),written=sum(d1,x=>x.sum?.rowsWritten);
- // Free's 10ms request budget is checked for HTTP fetch invocations.
- // Cron triggers are separately classified (and still included in conservative
- // account-wide invocation tallies), not mislabelled as a failing fetch.
+ // Free has a separate 10ms ceiling for HTTP fetch AND Cron Trigger CPU.
+ // Keep fetch and scheduled metrics distinct; include both in the CPU gate.
  const fetchWorkers=workers.filter(x=>x.dimensions?.eventType==='fetch');
  const prodWorkers=fetchWorkers.filter(x=>x.dimensions?.scriptName===script);
+ const cronWorkers=workers.filter(x=>['cron','scheduled'].includes(x.dimensions?.eventType));
+ const cronCpuMicros=Math.max(0,...cronWorkers.map(x=>safeNumber(x.max?.cpuTime)??0));
  const prodRows=d1.filter(x=>x.dimensions?.databaseId===database);
  const prodRequests=sum(prodWorkers,x=>x.sum?.requests);
  const prodReads=sum(prodRows,x=>x.sum?.rowsRead);
@@ -52,12 +53,15 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  if(read>=LIMITS.rowsRead)causes.push('account D1 reads exceed 5,000,000/day');
  if(written>=LIMITS.rowsWritten)causes.push('account D1 writes exceed 100,000/day');
  if(totalRequests>=LIMITS.requests)causes.push('account Worker requests exceed 100,000/day');
- if(maxCpuMicros>=LIMITS.cpuMicros)causes.push('sampled invocation exceeded 10ms CPU');
+ if(maxCpuMicros>=LIMITS.cpuMicros)causes.push('sampled HTTP invocation reached 10ms CPU');
+ if(cronCpuMicros>=LIMITS.cpuMicros)causes.push('sampled Cron invocation reached 10ms CPU');
  if(prodErrors>0||allErrors>0)causes.push('Worker execution errors observed');
  const uncertainties=[];
  if(fetchWorkers.length===0||d1.length===0||prodRequests===0)uncertainties.push('missing or insufficient fetch/D1 samples');
  if(workers.length>=5000||d1.length>=2000)uncertainties.push('analytics query hit dataset row limit');
  if(expectedVersion&&!versions.includes(expectedVersion))uncertainties.push('expected Worker version not observed');
+ if(expectedVersion&&versions.some(v=>v!==expectedVersion))uncertainties.push('mixed production Worker versions');
+ if([...fetchWorkers,...cronWorkers].some(x=>safeNumber(x.max?.cpuTime)===null))uncertainties.push('HTTP or Cron CPU sample missing');
  if(releaseAt){
   const t=Date.parse(releaseAt);
   if(!Number.isFinite(t))throw Error('Invalid release timestamp');
@@ -69,7 +73,7 @@ export function evaluateDay(data,{day,script=DEFAULT_SCRIPT,database=DEFAULT_DB,
  // behavior for unsampled routes, storage capacity, or account entitlements.
  const verdict=causes.length?'NO_GO':uncertainties.length?'INSUFFICIENT':'REVIEW_REQUIRED';
  return {day,verdict,limits:LIMITS,metrics:{
-  account:{requests:totalRequests,errors:allErrors,d1RowsRead:read,d1RowsWritten:written,maxCpuMs:maxCpuMicros/1000},
+  account:{requests:totalRequests,errors:allErrors,d1RowsRead:read,d1RowsWritten:written,maxCpuMs:maxCpuMicros/1000,maxCronCpuMs:cronCpuMicros/1000},
   production:{requests:prodRequests,errors:prodErrors,d1RowsRead:prodReads,maxCpuMs:prodCpuMicros/1000,versions}
  },causes,uncertainties,certifiedForFree:false,sampledMetricsOnly:true};
 }

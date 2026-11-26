@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {buildSync} from 'esbuild';
 import {Miniflare} from 'miniflare';
-import {pbkdf2Sync,createHmac} from 'node:crypto';
+import {pbkdf2Sync,createHmac,randomUUID} from 'node:crypto';
 import {readFileSync,readdirSync} from 'node:fs';
 import {performance} from 'node:perf_hooks';
 import {migrationStatements,summarizeWallMs} from '../scripts/lib/workerd-cpu-evidence.mjs';
@@ -24,12 +24,12 @@ function bundle(path,extra={}){
 function manifest(contents,legacyCompat=false){const modules={'index.js':{type:'esm',contents}};if(legacyCompat)modules['legacy-210k.wasm']={type:'wasm',contents:new Uint8Array(readFileSync(new URL('../prototypes/cf-free-private-verifier/src/legacy-210k.wasm',import.meta.url)))};return {mainModule:'index.js',modules};}
 const hash=(n,password=PASSWORD)=>'pbkdf2-sha256:'+n+':'+('ab'.repeat(16))+':'+pbkdf2Sync(password+'\0'+PEPPER,Buffer.alloc(16,0xab),n,32,'sha256').toString('hex');
 
-async function setup(offload,legacyCompat=false,rollbackMatrix=false){
+async function setup(offload,legacyCompat=false,rollbackMatrix=false,adminEnabled=false){
   let outbound=0;
   const deny=()=>{outbound++;throw Error('External network forbidden');};
   const vars={ENVIRONMENT:'staging',WEB_ORIGIN:WEB,API_ORIGIN:API,EXTENSION_ORIGIN:'chrome-extension://'+'a'.repeat(32),
     AUTH_HASH_SECRET:AUTH,PASSWORD_PEPPER:PEPPER,AI_MODE:'mock',SUBSCRIPTIONS_ENABLED:'0',PAYMENTS_ENABLED:'0',
-    ADMIN_PORTAL_ENABLED:'0',PASSWORD_VERIFY_DO_ENABLED:offload?'1':'0'};
+    ADMIN_PORTAL_ENABLED:adminEnabled?'1':'0',PASSWORD_VERIFY_DO_ENABLED:offload?'1':'0'};
   const env=Object.fromEntries(Object.entries(vars).map(([key,value])=>[key,{type:'text',value}]));
   env.DB={type:'d1',id:'synthetic-password-rpc'};
   if(offload)env.PASSWORD_VERIFY_DO={type:'durable-object',worker:VERIFIER,exportName:'PasswordVerifierDO'};
@@ -187,5 +187,49 @@ test('private candidate rollback and missing binding fail closed against the sam
     assert.equal((await db.prepare('SELECT COUNT(*) n FROM sessions WHERE user_id=?').bind(user).first()).n,2);
     assert.equal(outbound(),0);
     console.log('CF_FREE_PRIVATE_ROLLBACK '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',sameSyntheticD1:true,missingBindingFailClosed:true,rollbackFactors:FACTORS,legacyHashesUnchanged:true,externalCalls:0,paidRollbackRehearsed:false,freeCertified:false}));
+  }finally{await mf.dispose();}
+});
+
+test('private verifier handles real administrator reauthentication and password change with unchanged audit and session safety',{timeout:120000},async()=>{
+  const {mf,db,outbound}=await setup(true,true,true,true);
+  try{
+    const user='test-210000',identity=user+'@example.test';
+    await db.prepare("UPDATE users SET role='admin' WHERE id=?").bind(user).run();
+    await db.prepare("INSERT INTO site_administrator(id,user_id,created_at) VALUES(1,?,1)").bind(user).run();
+    const a=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},80);
+    const b=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},81);
+    assert.equal(a.status,200);assert.equal(b.status,200);
+    const cookie=a.cookie.split(';')[0],token=decodeURIComponent(cookie.slice('rc_session='.length));
+    const csrf=createHmac('sha256',AUTH).update('csrf:'+token).digest('hex');
+    const request=async(path,body,target='candidate',csrfToken=csrf)=>{
+      const response=await mf.dispatchFetch(API+path,{method:'POST',headers:{Origin:WEB,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.82',Cookie:cookie,'X-CSRF-Token':csrfToken,'x-local-test-target':target},body:JSON.stringify(body)});
+      return {status:response.status,body:await response.json()};
+    };
+    const readHash=async()=> (await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash;
+    const count=async(sql)=> (await db.prepare(sql).first()).n;
+    assert.equal((await request('/v1/admin/reauth',{password:PASSWORD},'candidate','')).status,403);
+    assert.equal((await request('/v1/admin/reauth',{password:'wrong-synthetic-password'})).status,401);
+    const denied=await request('/v1/admin/reauth',{password:PASSWORD},'broken');
+    assert.equal(denied.status,503);assert.equal(denied.body.code,'PASSWORD_VERIFIER_UNAVAILABLE');
+    assert.equal(await count('SELECT count(*) n FROM admin_reauth_sessions'),0);
+    assert.equal((await request('/v1/admin/reauth',{password:PASSWORD})).status,200);
+    const body={operationId:randomUUID(),reason:'Synthetic admin password migration test',oldPassword:PASSWORD,newPassword:NEW_PASSWORD,confirmPassword:NEW_PASSWORD};
+    assert.equal((await request('/v1/admin/security/password',body,'broken')).status,503);
+    assert.equal(await readHash(),hash(210000));
+    assert.equal(await count('SELECT count(*) n FROM admin_operations'),0);
+    assert.equal(await count('SELECT count(*) n FROM admin_audit_logs'),0);
+    assert.equal((await request('/v1/admin/security/password',body)).status,200);
+    const stored=await readHash(),[,factor,salt,digest]=stored.split(':');
+    assert.equal(factor,'100000');assert.equal(digest,pbkdf2Sync(NEW_PASSWORD+'\0'+PEPPER,Buffer.from(salt,'hex'),100000,32,'sha256').toString('hex'));
+    assert.equal(await count('SELECT count(*) n FROM admin_reauth_sessions'),0);
+    assert.equal(await count('SELECT count(*) n FROM sessions WHERE revoked_at IS NULL'),1);
+    assert.equal(await count('SELECT count(*) n FROM admin_operations'),1);
+    assert.equal(await count('SELECT count(*) n FROM admin_audit_logs'),1);
+    assert.equal((await request('/v1/admin/security/password',body)).status,200);
+    assert.equal(await count('SELECT count(*) n FROM admin_audit_logs'),1);
+    assert.equal((await call(mf,'/v1/auth/login',{identity,password:PASSWORD},83)).status,401);
+    assert.equal((await call(mf,'/v1/auth/login',{identity,password:NEW_PASSWORD},84)).status,200);
+    assert.equal(outbound(),0);
+    console.log('CF_FREE_PRIVATE_ADMIN_RPC '+JSON.stringify({scope:'LOCAL_WORKERD_ONLY',reauth:true,passwordChange:true,missingBindingFailClosed:true,legacy210k:true,creationFactor:100000,externalCalls:0,freeCertified:false}));
   }finally{await mf.dispose();}
 });

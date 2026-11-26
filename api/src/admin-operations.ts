@@ -3,7 +3,7 @@ import {ApiFailure} from './types';
 import {jsonBody,sha256,nowMs} from './security';
 import {requireAdminSession} from './admin-auth';
 import {sessionFor,requireCsrf,takeRate} from './auth';
-import {verifyPassword} from './password-auth';
+import {verifyAccountPassword} from './password-auth';
 import {response} from './http';
 
 export async function adminReauth(request:Request,env:Env):Promise<Response>{
@@ -12,7 +12,7 @@ export async function adminReauth(request:Request,env:Env):Promise<Response>{
  if(!await takeRate(env,`admin-reauth:${actor.user_id}`,5,900000,nowMs()))throw new ApiFailure(429,'RATE_LIMITED','请稍后重新验证。');
  const body=await jsonBody(request,2048);
  const user=await env.DB.prepare('SELECT password_hash FROM users WHERE id=?').bind(actor.user_id).first<{password_hash:string}>();
- if(typeof body.password!=='string'||body.password.length>256||!await verifyPassword(env,body.password,user?.password_hash??null))throw new ApiFailure(401,'INVALID_CREDENTIALS','密码验证失败。');
+ if(typeof body.password!=='string'||body.password.length>256||!await verifyAccountPassword(env,actor.user_id,body.password,user?.password_hash??null))throw new ApiFailure(401,'INVALID_CREDENTIALS','密码验证失败。');
  const expiresAt=nowMs()+900000;
  await env.DB.prepare('INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES(?,?) ON CONFLICT(session_id) DO UPDATE SET expires_at=excluded.expires_at').bind(actor.id,expiresAt).run();
  return response({ok:true,expiresAt},200,env,request);
