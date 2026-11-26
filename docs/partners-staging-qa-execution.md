@@ -1,0 +1,94 @@
+# Independent Partners Staging QA — execution record
+
+Authorization: owner explicitly authorized isolated Staging deployment, D1 read/write and internal testing on 2026-11-25. Scope excludes existing Staging and production resources, real provider traffic and actual funds. Do not hand off to owner before internal hosted QA passes.
+
+## Verified candidate
+- Exact source: ff8a2e2c7e85f2faf56232739d280415f964ef9d.
+- PR full CI 45630519954 passed 1575/1575, focused 91/91 and Chrome QA.
+- Exact-head Push CI 45630510461 passed full suite, browser acceptance and package.
+- Artifacts 15030861412 (Staging Pages), 15030951296 (Staging extension), 15030223537 (logs).
+- Existing Staging artifact is built for the shared Staging API. **Do not deploy that artifact as an isolated QA site**; rebuild from the pinned source with the isolated API origin.
+- Prep CI 45631608855 passed; artifact 15031605539 contains migration manifest and bundled Worker (no deployment).
+
+## Actual new D1
+Created only reply-copilot-partners-qa-20261125 (UUID 22f7a8f1-28c1-42ad-a69d-54ee8bc7e5dc) in the verified account hosting the existing application. No existing D1 was queried.
+- Applied 33 exact-source SQL files in verified order, each recorded in QA-only qa_schema_migrations.
+- 81 application tables, 73 explicit indexes, 44 triggers, plus QA migration journal. Counts match local manifest. Foreign key check empty.
+- 13 partner feature flags off, payout minimum 1000 fen.
+- Disabled registration, purchase, AI and payment enable/release settings in QA only.
+- Seeded 7 synthetic profiles with zero balances, no password hashes and no sessions: qa-admin, qa-partner-a, qa-buyer-b, qa-buyer-c, qa-outsider-d, qa-excluded-e (marked test account), qa-partner-f. Exactly one singleton admin in the isolated database. These are not usable logins yet. No real payments, orders, or commissions.
+- Both discovery query plans use their new applied-time indexes in actual D1. The zero-state invariant query read 48 rows, wrote 0, D1 duration 0.2024 ms. This is not a load or CPU benchmark.
+
+## Next hosted deployment gate
+Use a new protected Worker/website target only, never the existing protected staging deployment workflow or credentials. Verify exact build SHA, new D1 binding ID, private access control before enabling an endpoint, dedicated keys/password hashes via an approved secure mechanism, and no actual payment/AI/email credentials. Existing source excludes production pilot writes; keep this unchanged. Test user and admin sign-in, all six roles, discovery/accrual/refunds/payout, browser flows and actual resource metrics. Retain financial test records in the isolated QA DB only. Stop on any failure; no owner handoff until passed.
+
+Current state: remote schema and account profiles initialized; no hosted Worker/Pages deployed, no user login credentials initialized, no QA endpoint exposed. Available GitHub deployment credentials are gated for existing Staging; do not bypass that boundary. Prepare isolated artifact upload/credential path before deployment. No merge, shared Staging/production changes, provider calls or real transfers.
+
+## Hosted deployment checkpoint (2026-11-26)
+
+- QA build CI 45739027167 passed: exact candidate ff8a2e2c, 48 assets, isolated same-origin API, verified no shared/production API strings.
+- Direct connector artifact retrieval by Cloudflare returned HTTP 403. Transferred 64 compressed chunks via temporary QA-only D1 table; verified raw and compressed SHA-256 of both modules before upload (worker.mjs facb149dba42d6d858dcb47a7143076cfaeed93733a2cea48e5137a84b893079; assets.mjs 80dc7d088b317977eb1386bd5c33455ef21cca70d9b0958ee4f28d7b7113ff02). Removed temporary transfer table after upload and binding verification.
+- Uploaded new Worker reply-copilot-api-partners-qa; initial deployment/version response 1240595cd8344b2aa94d9a0849aa700c. Its wrapper is versioned at api/qa/partners-hosted-wrapper.mjs. Same-origin HTML and API, secret outer Basic gate for every route, exact host check, explicit API allowlist, no live payment/registration/email/provider routes, no shared credentials. Secret generated within Cloudflare; no plaintext in GitHub logs. Separate Pages project unnecessary for this QA architecture.
+- Verified actual deployment settings: dedicated D1 UUID, environment staging, payment ceiling off, AI mock, scheduled off, 4 separate secret bindings, workers.dev enabled and previews disabled. QA_ACCESS_SECRET rotated once for browser attempt.
+- **Hosted verification remains blocked**: Cloudflare execution fetch returns 403 "Forbidden: requests to [QA host] are not allowed" even with authorization; Browser Rendering returns access-denied HTML rather than Astro page; local container DNS resolution fails. This is not an application response/acceptance result. Added independent no-credential GitHub runner connectivity probe (must return exact 401 and QA Basic realm); results pending. For subsequent internal QA use a secure approved short-lived test credential mechanism, not plaintext in repository/logs. A narrowly scoped GitHub OIDC-based QA access design is a possible option, not implemented/approved by CI yet.
+- Current QA D1: 33 migrations, 7 synthetic profiles, 0 initialized passwords, 0 sessions, 0 commissions, 0 enabled partner flags, FK check clean, no transfer table. No account handoff, no actual hosted browser/business QA pass, no real provider calls or funds. Shared Staging and production untouched.
+
+
+## Temporary account retirement boundary
+
+Owner requested disposable QA identities, frozen after testing. Reuse the existing authorized lifecycle, never unfreeze historical shared/production test accounts. Log out and verify session revocation before freezing; freeze alone is not session revocation. Preserve all synthetic financial records. Existing archive rejects accounts with payment/order history; these remain frozen, not archived. Do not change test-account markers during financial acceptance to evade eligibility checks. The singleton admin cannot freeze itself through the admin API; its final credential removal and endpoint retirement remain operator-reviewed. Individual archive/status routes require UUIDs, whereas the isolated QA aliases are not UUIDs; do not expose extra admin routes or change production semantics for cleanup. The QA wrapper intentionally does not allow general user-administration writes. This branch extends only local disposable SQLite authentication acceptance to verify logout, bulk freeze, CSRF, singleton protection, and frozen-password denial. It is not permission for remote credential provisioning or cleanup. Hosted cleanup is not executed and remains part of the approved independent-environment procedure.
+
+
+## Hosted login acceptance — 2026-11-26
+
+Owner completed the manual isolated Secret and password-hash initialization. Exact-tree trigger b306ecd77281320c4f8e92d03d1e11cd0ca50f92, protected GitHub run 45752508695 / job 139683373238, completed successfully at 04:01:45 UTC. Seven actual hosted password logins, bad-password/origin denial, CSRF, reauthentication, role separation, private Basic gate, HTML, blocked registration/payment routes, logout and revoked-session denial passed. No secrets were retrieved by the operator. Cloudflare metadata independently confirmed QA Worker version f795368a-8a76-4dbb-ba24-ae5edc3bb961 at 100%, exact isolated D1 binding, payment and scheduled ceilings 0, no cron, no provider secrets. Post-test read-only aggregate on authorized isolated D1: 33 migrations, 7 profiles, 7 initialized passwords, 0 active sessions, 0 commissions/payouts/recharge/subscription orders, 0 enabled partner DB flags; 94 rows read, 0 written. No shared environment queried. Hosted browser and synthetic financial lifecycle remain separate gates.
+
+## Finance QA review checkpoints
+
+Each phase requires its own approved marker and the protected `partners-qa` environment. Verify the hosted QA wrapper revision allows the existing discovery and payout-review routes before approval. Check the pinned QA D1 binding, hosted login and admin reauthentication, dedicated recipient encryption key, payments and scheduling off, and zero real provider access. Review fixture preparation separately; the workflow only consumes existing fixtures. If a phase fails after a write, inspect current QA state before approving a retry.
+
+| Phase | Operator-reviewed prerequisites | Expected results (CNY fen) |
+| --- | --- | --- |
+| Policy | Enable only the QA program flag for this phase. Verify eligible `qa-partner-a` has no policy or commissions. Keep the exclusion marker on `qa-excluded-e`. | Version 1, 2,000 bps, 12 months, opening net 0. Excluded user, non-admin and stale-version writes fail. |
+| Ledger | Policy phase accepted. In isolated QA only, prepare the single `qa-synthetic-recharge-20261126` fixture with `qa-buyer-b` attributed to `qa-partner-a` by payment time. Use matching synthetic order, transaction, paid proof and applied credit evidence. Payment and application must be inside the authorized accrual window, with the discovery cursor before the fixture and the configured hold already elapsed. No refund, recipient or payout yet. Review runtime gates `PARTNER_DISCOVERY_ENABLED`, `PARTNER_ACCRUAL_REVIEW_ENABLED`, `PARTNER_PAYOUT_REVIEW_ENABLED`, and QA D1 gates `partner_program_enabled`, `partner_cash_accrual_enabled`, `partner_discovery_enabled`, `partner_accrual_review_enabled`, `partner_alipay_recipient_enabled`, `partner_payout_enabled`, `partner_payout_requests_enabled`. Set the QA minimum to 1,000. | Principal 10,000 × 20% = 2,000 commission. Reject 999, accept one 1,000 request, reserve/start/reconcile that amount once using only the synthetic outcome. Net 2,000, paid 1,000, reserved 0, outstanding 1,000. |
+| Refund | Ledger phase accepted. Enable the QA manual refund-sync flag and prepare persisted synthetic succeeded refund evidence for the same transaction. Confirm its cumulative refunded principal and succeeded refund principal both equal 10,000, and the existing commission and payment identity still match. | One reversal of 2,000, duplicate sync unchanged. Gross 2,000, net 0, historical paid 1,000, reserved 0, outstanding −1,000. This validates partner ledger reconciliation. Buyer credit reversal and provider refund execution are outside this phase. |
+
+
+## Hosted financial recovery checkpoint — 2026-11-26
+
+- A: actual hosted policy run 45788084321 / job 139799871460 passed. Policy version 1, 20%, 12 months; excluded account retained. Sessions revoked.
+- B: actual hosted run 45789221147 / job 139803694787 reached payout after successful discovery, commission, recipient and minimum-amount denial. Isolated D1 independently confirmed one immutable 2,000-fen commission, one pending 1,000-fen request, zero payouts/starts/outcomes/refunds and zero active sessions. No rerun from zero, no deleting history.
+- Root cause reproduced on actual D1: combined all-history evidence expression exceeded depth 100. Source fix f79973771fa9e3db6e3329d1277139a0f82ac6aa splits assertions by domain inside the existing atomic batch; no evidence or authorization guard removed. Exact source CI 45790642241 passed. All three replacement statements compiled on actual D1 (EXPLAIN, no writes).
+- QA-only content update verified at version c6ef85dc-bbc6-473a-be58-204ca2b81fc8, 100%; Worker SHA-256 0d2a06c42fee62385afad38e76c31a90e299895b15946772c6cd6df54bd69779; build run 45791891276 / artifact 15102862297. Wrapper/assets and four Secret binding names unchanged; dedicated DB and all payment/scheduled ceilings verified. Temporary artifact transfer table removed; FK check clean. No shared deployment.
+
+### Remaining operator-reviewed gates
+
+1. B continuation: review the protected finance workflow change before submission. A separately approved resume phase must query the existing request through both owner and admin read routes, require exactly one pending request (1,000 fen, recipient v1, no payout), one 2,000-fen commission, no reserve/paid/refund, and the expected policy. Recheck duplicate request and outsider approval denial, then exercise normal approve/start/synthetic outcome endpoints; assert final state, duplicate denials and logout. No direct settlement SQL, no reset, no auto-resume from unknown state. Safe logs may contain fixed stage labels and HTTP status only; no credentials, cookies, response bodies or recipient plaintext. Keep exact repo/branch, protected environment, existing credential references, permissions, explicit phase approval and private origin. Retain original fresh-ledger phase.
+2. C: only after B success and independent D1 readback. Insert synthetic confirmed full refund evidence on the same transaction in the isolated QA DB, verify payment/order/refund identity and total, enable only manual refund-sync gate, use existing separately approved refund phase. Expected gross 2,000, net 0, paid 1,000, reserved 0, outstanding -1,000; replay unchanged. No real provider refund or buyer-credit reversal is implied.
+3. D: only after C success. Desktop hosted readback using existing protected browser authentication, exact isolated origin, no financial writes. Owner account earnings card must show gross CNY 20, net 0, paid CNY 10, reserved 0, outstanding -CNY 10; request list shows one paid request with masked recipient. Admin Partners requests view shows same paid request, no approve/start controls for it; outsider lacks partner authorization and admin access. Verify logout and revoked session. No screenshots, raw DOM, cookies or recipient plaintext in logs. Mobile remains deferred. Existing local browser suite now also covers post-refund readback; local success is not hosted acceptance.
+4. Preserve all financial history. Account retirement remains a separate operator-reviewed step; do not freeze the singleton admin or bypass wrapper routes.
+
+## B continuation and D desktop candidate review
+
+The independent markers are `ci-lite: qa-finance-ledger-resume approved` and `ci-lite: qa-browser-finance-desktop approved`. Each still requires the exact repository/branch and protected `partners-qa` environment. Existing phase markers retain their original meaning. This source change does not approve either hosted run.
+
+Before either phase is separately approved, an operator must set the non-secret Environment variable `PARTNERS_QA_EXPECTED_REQUEST_ID` to the existing synthetic request UUID from the reviewed B recovery record. The latest centralized review identifies synthetic request `863f5cf7-c701-46c0-8d7c-59dbf38c5038` (1,000 fen, recipient v1, pending, no payout); independently recheck that record before setting the variable. A missing, malformed or different ID blocks continuation. No new credential is required.
+
+B reads the owner and admin request views and the existing order preview before any financial write. It requires one pending request, recipient version 1, 1,000 fen, matching masked recipient, one mature 2,000-fen commission, 10,000-fen original principal, zero refunds, paid and reserves, policy v1 at 20%, and accepting QA request gates. It rechecks duplicate submission and outsider denial, then uses approve, start and synthetic paid reconciliation. It never repeats discovery, accrual or recipient creation. Any failure stops, attempts logout, and requires review of the actual state before further approval.
+
+D is approved only after B and C have passed and the operator has independently checked their balances. It uses the existing three roles at 1440×1000. It verifies the single reviewed paid request, masked recipient and 2,000/0/1,000/0/−1,000-fen gross/net/paid/reserved/outstanding values in the partner read API and visible earnings cards. The admin searches the same record and must have no approval or reveal controls for it. The outsider must have no partner earnings or request access and must be denied admin access. Browser interception permits GET plus login/logout only, blocking financial mutation requests. Every role logs out and checks session revocation. Original browser authentication cases, including the deferred mobile case, are unchanged.
+
+### B read-preview gate (separate operator approval required)
+
+The existing QA `partner_order_preview_enabled` gate is currently off. The wrapper already allows the read-only route; no wrapper expansion is needed. Before approving B continuation, separately approve temporarily enabling **only this QA read-preview gate** using the existing audited operator process. Record its original value/configuration version, approval, and restoration plan. Keep payments, external providers and scheduled actions off. Never infer approval from the workflow marker or enable any gate automatically.
+
+The workflow explicitly requires `enabled === true` before checking original payment evidence or making financial mutations. A disabled gate stops, preserves the pending request and commission, and revokes sessions; it must not be treated as missing evidence or bypassed. Restore the gate to its recorded original value after the approved acceptance scope, including failure; record restoration in the operator audit. Resuming after any partial financial write requires fresh state review, never a reset or blind rerun.
+
+D now clicks the actual initially collapsed eligibility control before inspecting owner earnings. The outsider must also open it and see the not-authorized UI, with no earnings amounts, settlement/recipient controls or reviewed request ID. These are read-only interactions. Local browser regression mounts the real React components; it does not stand in for protected hosted acceptance.
+
+
+### Hosted B outcome mismatch and repair
+
+Run 45817533791: approval and start passed; first paid outcome returned 409 despite one immutable paid outcome and payout being committed (1000 fen). D1 readback verified one matching start, outcome and paid payout; no duplicates, 2000 commission, no refund, no reserve, no sessions. Read-preview gate restored to 0. Do not replay this completed payment.
+
+A separate nonfinancial D1 probe used an INSERT with an AFTER INSERT UPDATE trigger: actual D1 meta.changes=2 for one inserted event and one updated parent; duplicate returned 0. Temporary objects removed and FK check clean. Local SQLite reports only the direct insert. Business repair uses an atomic precondition assertion, existing outcome INSERT, exact persisted outcome/payout assertion and assertion cleanup in one batch; no change-count dependency or policy relaxation. Applies to paid and no_transfer. Require fresh QA acceptance of the corrected API using an independently reviewed separate synthetic case or approved safe acceptance approach; existing paid record stays immutable. C and D remain gated; no production or shared Staging changes.

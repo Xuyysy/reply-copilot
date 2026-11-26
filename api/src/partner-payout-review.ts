@@ -3,7 +3,7 @@ import {ApiFailure} from "./types";
 import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs,uuid} from "./security";
-import {alipayStartPlan,alipayOutcomePlan} from "./partner-transfer.mjs";
+import {alipayStartPlan,alipayOutcomeBatchPlan} from "./partner-transfer.mjs";
 import {openAlipayRecipient} from "./partner-alipay.mjs";
 import {allHistoryPayoutGuard,setPayoutApprovePlan} from "./partner-payout-set-review.mjs";
 type RequestRow={id:string;partner_user_id:string;recipient_version:number;amount_fen:number;status:string;payout_id:string|null;payout_status:string|null;started_at:number|null;key_id:string;nonce_hex:string;ciphertext_hex:string};
@@ -30,9 +30,8 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
   if(!q.payout_id||q.payout_status!=='reserved'||!q.started_at)conflict();
   if(action==='paid'&&(typeof b.amountFen!=='number'||b.amountFen!==q.amount_fen||typeof b.reference!=='string'||!b.reference.trim()||b.reference.trim().length>160))conflict();
   if(action==='no_transfer'&&(b.amountFen!==0||b.reference!==null))conflict();
-  const p=alipayOutcomePlan({payoutId:q.payout_id,actorId:actor.user_id,now,outcome:action,amountFen:action==='paid'?q.amount_fen:0,reference:action==='paid'?String(b.reference):null,reason:b.reason});
-  try{const r=await env.DB.prepare(p.sql).bind(...p.params).run();if(r.meta.changes!==1)conflict();}
-  catch{conflict();}
+  const work=alipayOutcomeBatchPlan({payoutId:q.payout_id,actorId:actor.user_id,now,outcome:action,amountFen:action==='paid'?q.amount_fen:0,reference:action==='paid'?String(b.reference):null,reason:b.reason});
+  try{await env.DB.batch(work.map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
   return response({ok:true,state:action==='paid'?'paid':'cancelled',pilot:true},200,env,request);
  }
  if(action==='approve'&&(q.status!=='pending'||q.amount_fen<1000))conflict();
@@ -58,6 +57,6 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
    {sql:"DELETE FROM partner_recovery_assertions WHERE id IN (?,?)",params:[claim,claim+':done']}
   ];
  }
- try{await env.DB.batch([guard.check,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
+ try{await env.DB.batch([...guard.checks,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
  return response({ok:true,state:action==='approve'?'reserved':'reconciling',pilot:true,...(recipient?{recipient,amountFen:q.amount_fen}: {})},200,env,request);
 }

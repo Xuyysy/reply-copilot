@@ -1,0 +1,26 @@
+name: Partners offline authentication safety
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+permissions:
+  contents: read
+jobs:
+  offline-safety:
+    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm --prefix api ci
+      - name: Actual password authentication and offline fail-closed checks
+        run: node --test --test-concurrency=1 api/tests/partner-password-acceptance.test.mjs api/tests/partner-hosted-denial.test.mjs
+      - name: Explicitly mark hosted acceptance as blocked
+        if: always()
+        run: echo 'Offline authentication tests only. Hosted acceptance requires separately configured partners-qa environment secrets.' >> "$GITHUB_STEP_SUMMARY"

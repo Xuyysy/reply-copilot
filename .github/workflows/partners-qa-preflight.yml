@@ -1,0 +1,53 @@
+name: Partners independent QA resource preflight
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+  push:
+    branches: ['chatgpt/partners-staging-qa-20261125']
+permissions:
+  contents: read
+jobs:
+  offline:
+    if: github.repository == 'Xuyysy/reply-copilot' && (github.event_name == 'push' || (github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --test api/tests/partner-qa-preflight.test.mjs
+  protected-preflight:
+    needs: offline
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' && github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && startsWith(github.event.head_commit.message, 'ci-lite: qa-preflight approved')
+    environment: partners-qa
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify exact isolated Worker and D1 (read only)
+        env:
+          PARTNERS_QA_CF_READ_TOKEN: ${{ secrets.PARTNERS_QA_CF_READ_TOKEN }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import {preflight,cloudflareReadClient} from './api/qa/partners-qa-preflight.mjs';
+          try {
+            const report=await preflight(cloudflareReadClient(process.env.PARTNERS_QA_CF_READ_TOKEN));
+            console.log('QA_RESOURCE_PREFLIGHT_PASS '+JSON.stringify(report));
+            console.log('This is not hosted login, business or owner acceptance.');
+          } catch(e) {
+            const code=e instanceof Error && /^QA_[A-Z0-9_]+$/.test(e.message)?e.message:'QA_PREFLIGHT_FAILED';
+            console.error(code);
+            process.exitCode=1;
+          }
+          JS

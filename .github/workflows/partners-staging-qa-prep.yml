@@ -1,0 +1,132 @@
+name: Partners isolated Staging preparation
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+permissions:
+  contents: read
+concurrency:
+  group: partners-staging-prep-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  prepare:
+    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_SHA: a3e3910a184709fe0818e02c04c6dc36b0a9d9a2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            api/package-lock.json
+      - name: Install exact candidate dependencies
+        run: |
+          npm --prefix web ci
+          npm --prefix api ci
+      - name: Verify migration order against an empty local SQLite fixture
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/partners-qa"
+          node --input-type=module <<'JS'
+          import {DatabaseSync} from 'node:sqlite';
+          import {readFileSync,readdirSync,writeFileSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const db=new DatabaseSync(':memory:');
+          const paths=readdirSync('api/migrations').filter(x=>x.endsWith('.sql')).sort().map(x=>'api/migrations/'+x);
+          paths.push(...['0025_subscription_xiaodou_rsa2.sql','0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_v1b_ledger_proposal.sql','partners_v1b_recovery_proposal.sql','partners_v1d_payout_proposal.sql','partners_alipay_recipient_proposal.sql','partners_alipay_transfer_proposal.sql','partners_query_indexes_proposal.sql'].map(x=>'api/sql-proposals/'+x));
+          const manifest=[];
+          for(const path of paths){
+            const sql=readFileSync(path,'utf8');
+            db.exec(sql);
+            manifest.push({path,sha256:createHash('sha256').update(sql).digest('hex'),bytes:Buffer.byteLength(sql)});
+          }
+          assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+          assert.equal(db.prepare('SELECT COUNT(*) n FROM users').get().n,0);
+          assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_commissions').get().n,0);
+          const flags=db.prepare("SELECT key,value FROM system_settings WHERE key LIKE 'partner_%' ORDER BY key").all();
+          assert.ok(flags.length>=10);
+          for(const f of flags)assert.equal(f.value,f.key==='partner_payout_min_fen'?'1000':'0');
+          const schema=db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
+          const report={sourceSha:process.env.SOURCE_SHA,manifest,flags,tableCount:schema.filter(x=>x.type==='table').length,indexCount:schema.filter(x=>x.type==='index').length,triggerCount:schema.filter(x=>x.type==='trigger').length};
+          writeFileSync(process.env.RUNNER_TEMP+'/partners-qa/migrations.json',JSON.stringify(report,null,2));
+          console.log('QA_MIGRATION_MANIFEST '+JSON.stringify(report));
+          db.close();
+          JS
+      - name: Bundle verified Worker source without deployment
+        run: |
+          cd api
+          npx --no-install esbuild src/index.ts --bundle --format=esm --platform=browser --target=es2022 --outfile="$RUNNER_TEMP/partners-qa/worker.mjs"
+      - name: Build independent same-origin QA website
+        env:
+          PUBLIC_API_BASE_URL: https://reply-copilot-api-partners-qa.yyx0149.workers.dev
+          ASTRO_TELEMETRY_DISABLED: '1'
+        run: npm --prefix web run build
+      - name: Prepare bounded private artifact transport (no credentials)
+        env:
+          PUBLIC_API_BASE_URL: https://reply-copilot-api-partners-qa.yyx0149.workers.dev
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import {readFileSync,readdirSync,writeFileSync,statSync} from 'node:fs';
+          import {join,relative} from 'node:path';
+          import {gzipSync} from 'node:zlib';
+          import {createHash} from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const out=process.env.RUNNER_TEMP+'/partners-qa',root='web/dist';
+          const assets={};
+          const types={html:'text/html; charset=utf-8',js:'text/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json',svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',jpeg:'image/jpeg',webp:'image/webp',ico:'image/x-icon',woff2:'font/woff2',woff:'font/woff',txt:'text/plain; charset=utf-8',xml:'application/xml',map:'application/json'};
+          function walk(dir){
+            for(const e of readdirSync(dir,{withFileTypes:true})){
+              assert.ok(!e.isSymbolicLink());const p=join(dir,e.name);
+              if(e.isDirectory()){walk(p);continue;}
+              if(!e.isFile())throw Error('non-file asset');
+              const url='/'+relative(root,p).replaceAll('\\','/');
+              assert.ok(!url.includes('..')&&!url.includes('/_worker.js')&&!url.includes('/_routes.json'));
+              const body=readFileSync(p);
+              const ext=p.split('.').pop().toLowerCase();
+              if(['js','html'].includes(ext)){
+                const str=body.toString('utf8');
+                // Build configuration must not target the shared API. Static
+                // marketing links are permitted but API origins are not.
+                assert.ok(!str.includes('https://api-staging.x-reply-helper.top')&&!str.includes('https://api.x-reply-helper.top'),'shared API origin in '+url);
+              }
+              assets[url]=[types[ext]||'application/octet-stream',gzipSync(body,{level:9}).toString('base64')];
+            }
+          }
+          walk(root);
+          assert.ok(assets['/index.html']&&assets['/admin/index.html']&&assets['/account/index.html']&&assets['/login/index.html']);
+          const js=Object.keys(assets).filter(p=>p.endsWith('.js'));
+          assert.ok(js.length>0);
+          assert.ok(js.some(p=>readFileSync(root+p,'utf8').includes(process.env.PUBLIC_API_BASE_URL)),'isolated API missing');
+          const body=Buffer.from('export default '+JSON.stringify(assets)+';\n');
+          writeFileSync(out+'/assets.mjs',body);
+          const sha=b=>createHash('sha256').update(b).digest('hex');
+          // Private repository logs contain only deterministic non-secret
+          // compiled source. No account credentials or user data are included.
+          for(const name of ['worker.mjs','assets.mjs']){
+            const raw=readFileSync(out+'/'+name),packed=gzipSync(raw,{level:9}),b64=packed.toString('base64'),size=12000;
+            assert.ok(packed.length<=2500000,'QA artifact exceeds transfer budget');
+            const chunks=Math.ceil(b64.length/size);
+            console.log('QA_TRANSFER_MANIFEST '+JSON.stringify({sourceSha:process.env.SOURCE_SHA,name,rawSha256:sha(raw),gzipSha256:sha(packed),rawBytes:raw.length,gzipBytes:packed.length,chunks,assets:Object.keys(assets).length}));
+            for(let i=0;i<chunks;i++)console.log('QA_TRANSFER_CHUNK '+name+' '+i+' '+b64.slice(i*size,(i+1)*size));
+          }
+          JS
+      - name: Fingerprint source-only QA preparation
+        run: |
+          cd "$RUNNER_TEMP/partners-qa"
+          sha256sum migrations.json worker.mjs > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partners-qa-prep-${{ env.SOURCE_SHA }}
+          path: ${{ runner.temp }}/partners-qa/
+          if-no-files-found: error
+          retention-days: 7

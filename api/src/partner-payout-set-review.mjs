@@ -50,13 +50,22 @@ function reversedSubscription(){
 export function allHistoryPayoutGuard({partnerId,operationId}){
  if(!id(partnerId)||!id(operationId))fail();
  const claim='set-payout:'+operationId;
- return {check:{sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN ${gate}
+ const checks=[
+  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN ${gate}
  AND EXISTS(SELECT 1 FROM partner_commissions WHERE partner_user_id=?)
- AND NOT EXISTS(SELECT 1 FROM partner_commissions ledger WHERE ledger.partner_user_id=? AND NOT (
- (ledger.order_domain='recharge' AND ${evidence('recharge')}) OR
- (ledger.order_domain='subscription' AND (${evidence('subscription')} OR ${reversedSubscription()}))
- )) THEN 1 ELSE 0 END`,params:[claim,partnerId,partnerId]},
- cleanup:{sql:'DELETE FROM partner_recovery_assertions WHERE id=?',params:[claim]}};
+ AND NOT EXISTS(SELECT 1 FROM partner_commissions WHERE partner_user_id=? AND order_domain NOT IN ('recharge','subscription'))
+ THEN 1 ELSE 0 END`,params:[claim,partnerId,partnerId]},
+  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN NOT EXISTS(
+ SELECT 1 FROM partner_commissions ledger WHERE ledger.partner_user_id=? AND ledger.order_domain='recharge'
+ AND NOT (${evidence('recharge')})) THEN 1 ELSE 0 END`,params:[claim+':recharge',partnerId]},
+  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN NOT EXISTS(
+ SELECT 1 FROM partner_commissions ledger WHERE ledger.partner_user_id=? AND ledger.order_domain='subscription'
+ AND NOT (${evidence('subscription')} OR ${reversedSubscription()})) THEN 1 ELSE 0 END`,params:[claim+':subscription',partnerId]}
+ ];
+ // D1 limits expression depth to 100. Keep the independent domain proofs
+ // inside the same atomic batch as the reservation/start; never pre-authorize
+ // a payout using an earlier read or omit evidence from either domain.
+ return {checks,cleanup:{sql:'DELETE FROM partner_recovery_assertions WHERE id IN (?,?,?)',params:[claim,claim+':recharge',claim+':subscription']}};
 }
 // Allocate all required mature positive balances using an integer window sum.
 // Existing per-item and global balance triggers are still active.

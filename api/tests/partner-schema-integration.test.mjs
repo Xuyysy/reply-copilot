@@ -56,7 +56,7 @@ test('real migration stack plus source-only proposals compiles all partner SQL p
   subscriptionRefundCandidatePlan('o'),subscriptionRefundProofPlan('o',{transaction_id:'tx',provider_trade_id:'out',provider_payment_id:'trade',principal_fen:1000,recorded_fen:0},'a'.repeat(64)),
   recipientAppendPlan({userId:'p',expectedVersion:0,now,sealed:{keyId:'fixture',nonceHex:'0'.repeat(24),ciphertextHex:'0'.repeat(32),accountMask:'a***',nameMask:'b**'}}),
   alipayAdmissionPlan({...args,minFen:1000}),alipayRejectPlan(args),alipayStartPlan(args),alipayOutcomePlan({...args,outcome:'paid',reference:'fixture'}),
-  guard.check,guard.cleanup,...setPayoutApprovePlan(args),partnerSummaryPlan('p',now)];
+  ...guard.checks,guard.cleanup,...setPayoutApprovePlan(args),partnerSummaryPlan('p',now)];
  for(const domain of ['recharge','subscription'])plans.push(paymentEvidencePlan(domain,'o'),discoveryPagePlan({domain,afterAt:0,afterId:'',now}),discoveryRepairPagePlan({domain,fromAt:0,now}),discoveryEnqueuePlan({domain,orderId:'o',now}),cursorAdvancePlan({domain,oldAt:0,oldId:'',nextAt:350,nextId:'o',now}),refundSweepPagePlan({orderDomain:domain,afterId:''}),refundSweepAdvancePlan({orderDomain:domain,oldId:'',nextId:'o',generation:0,now}));
  for(const p of plans)explain(db,p);
  t.diagnostic('Compiled '+plans.length+' SQL statements on actual migration schema; no remote database');
@@ -80,7 +80,7 @@ test('actual schema supports indexed discovery and 1000-row integer payout alloc
  const request={...args,amountFen:150001};
  assert.equal(run(db,alipayAdmissionPlan({...request,minFen:1000})),1);
  const guard=allHistoryPayoutGuard({partnerId:'p',operationId:'missing-proof'});
- assert.throws(()=>batch(db,[guard.check,...setPayoutApprovePlan(request),guard.cleanup]));
+ assert.throws(()=>batch(db,[...guard.checks,...setPayoutApprovePlan(request),guard.cleanup]));
  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_payouts').get().n,0);
  // Allocation benchmark alone, NOT a passing payment evidence test. This
  // direct fixture-only primitive cannot be invoked by production routes.

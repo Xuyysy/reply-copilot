@@ -1,0 +1,26 @@
+name: Partners hosted connectivity (no credentials)
+on:
+  pull_request:
+    branches: ['chatgpt/partners-v1a-foundation-20261125']
+permissions:
+  contents: read
+jobs:
+  connectivity:
+    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    env:
+      QA_ORIGIN: https://reply-copilot-api-partners-qa.yyx0149.workers.dev
+    steps:
+      - name: Verify hosted wrapper denies unauthenticated HTML and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in / /account/ /admin/ /v1/partners/me; do
+            code=$(curl --proto '=https' --tlsv1.2 --connect-timeout 8 --max-time 15 --max-redirs 0 -sS -D "$RUNNER_TEMP/qa-headers" -o "$RUNNER_TEMP/qa-body" -w '%{http_code}' "$QA_ORIGIN$path")
+            echo "QA_HOSTED_PROBE $path HTTP $code"
+            test "$code" = 401
+            grep -Eiq '^www-authenticate: Basic realm="Private Partners QA"' "$RUNNER_TEMP/qa-headers"
+            test "$(cat "$RUNNER_TEMP/qa-body")" = 'Private QA only'
+          done
+          echo 'QA_HOSTED_AUTH_GATE_PASS: network reached deployed wrapper; no credentials or sessions used'
