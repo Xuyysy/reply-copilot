@@ -43,8 +43,28 @@ def settings():
     return s
 def cron(): return sorted(x['cron'] for x in api('GET','/schedules')['schedules'])
 def health():
-    with urllib.request.urlopen('https://api-staging.x-reply-helper.top/health',timeout=20) as r:
-        assert r.status==200 and json.load(r)=={'ok':True,'service':'reply-copilot-api'},'HEALTH_FAILED'
+    # Same ordinary curl HTTP client used by the repository's existing Staging
+    # release workflows. No WAF bypass, browser impersonation, auth, or alternate host.
+    import subprocess, tempfile
+    with tempfile.TemporaryDirectory() as d:
+        body=pathlib.Path(d)/'body'
+        headers=pathlib.Path(d)/'headers'
+        result=subprocess.run(['curl','--silent','--show-error','--max-time','20',
+            '--dump-header',str(headers),'--output',str(body),'--write-out','%{http_code}',
+            'https://api-staging.x-reply-helper.top/health'],capture_output=True,text=True)
+        status=result.stdout.strip()
+        h={}
+        for line in headers.read_text(errors='replace').splitlines() if headers.exists() else []:
+            if ':' in line:
+                k,v=line.split(':',1);h[k.lower()]=v.strip()
+        ray=h.get('cf-ray','')
+        if not __import__('re').fullmatch(r'[a-fA-F0-9]{8,32}-[A-Z]{3}',ray):ray='unavailable'
+        if result.returncode or status!='200':
+            content=body.read_text(errors='replace')[:20000].lower() if body.exists() else ''
+            kind='cloudflare_challenge' if h.get('cf-mitigated')=='challenge' else 'cloudflare_block_page' if 'cloudflare' in content and ('attention required' in content or 'error 1010' in content or 'you have been blocked' in content or 'error 1020' in content) else 'other'
+            raise RuntimeError(f'HEALTH_FAILED HTTP={status} curl={result.returncode} ray={ray} category={kind}')
+        assert json.loads(body.read_bytes())=={'ok':True,'service':'reply-copilot-api'},'HEALTH_BODY_MISMATCH'
+        print('HEALTH_OK HTTP=200',flush=True)
 def deploy(v,msg):
     return api('POST','/deployments',{'strategy':'percentage','versions':[{'version_id':v,'percentage':100}],'annotations':{'workers/message':msg}})
 def waitactive(v):
