@@ -39,3 +39,9 @@ Automated tests cover connection timeout/cancel/late cleanup, scoped bridge send
 To complete live acceptance, use a dedicated logged-in test profile with the candidate Staging extension. No credentials should be provided in chat or uploaded to GitHub. Open the workbench from that X account, authorize one bounded sync and record only safe results: each source's status/reason, page count, stored relationships and account-isolation result. Inspect pagination against actual current endpoint schemas; stop on any challenge/denial/schema mismatch. Test account switching, manual stop, restart/resume, duplicate refresh and limiter behavior without intentionally exhausting platform quotas. No automatic posts, likes, follows, paid API calls or bulk collection. Existing ranking counts are observed relationships, not complete account totals.
 
 There is no authenticated isolated X profile in the supplied execution context. Live acceptance is pending that test condition, not a claimed pass or a fabricated fixture result. This PR does not deploy Cloudflare, replace an installed extension or publish the store.
+
+## Subsequent candidate work
+
+Task summaries retain separate notification and post outcomes, including not-run sources after failure, with only status and numeric counters persisted. The UI reports these separately.
+
+`interaction-manager/sync/auto-sync-policy.js` is an independently testable, transport-neutral opt-in scheduling state machine. Explicit consent, an independently approved provider, verified matching binding and a valid lease are required. Success or a page budget boundary may schedule the next interval; errors, rate limits, cancellation and interrupted leases pause. **This policy is not wired to a live provider, browser alarms or Staging settings.** No automatic network work or live readiness is claimed. No permissions changed; platform authorization and live acceptance remain independent gates.

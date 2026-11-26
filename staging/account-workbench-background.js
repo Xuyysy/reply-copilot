@@ -82,7 +82,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(authorized!==true)fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
    if(jobs.size)fail('busy');
-   const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0}};jobs.set(b.ownerUserId,task);
+   const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0,sources:[]}};jobs.set(b.ownerUserId,task);
    // Preserve write order so a late progress update cannot overwrite final status.
    let taskWrites=Promise.resolve();
    const write=(state,reason=null)=>{
@@ -116,16 +116,21 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      const checkpoint=source=>prior.jobs.find(j=>j.providerId===provider.id&&j.source===source);
      const ordered=[...sources].sort((a,b)=>Number(checkpoint(a)?.done===true)-Number(checkpoint(b)?.done===true)||(checkpoint(a)?.updatedAt??0)-(checkpoint(b)?.updatedAt??0));
      const pagesPerSource=Math.floor(30/sources.length),msPerSource=Math.floor(80000/sources.length);
+     task.progress={...task.progress,sources:ordered.map(source=>({source,state:'pending',reason:null,pages:0,inserted:0}))};
+     const sourceProgress=(source,fields)=>{task.progress={...task.progress,sources:task.progress.sources.map(s=>s.source===source?{...s,...fields}:s)};};
      for(const source of ordered){
        await verifyBound();
        const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
+       sourceProgress(source,{state:'running'});
        const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
-         task.progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
+         task.progress={...task.progress,pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
+         sourceProgress(source,{pages:p.pages,inserted:p.inserted});
          void write('running').catch(()=>{});
        }});
        completedPages+=result.committed;completedInserted+=result.inserted;
-       task.progress={pages:completedPages,inserted:completedInserted};
+       task.progress={...task.progress,pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
+       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted});
        // A page budget boundary has no in-flight read. Allow the other source
        // its reserved pages, but never hide the partial result behind success.
        if(reason==='page_limit')partialReason='page_limit';
@@ -133,7 +138,10 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      }
      if(reason==='source_exhausted'&&partialReason)reason=partialReason;
    }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';}
-   finally{try{await provider?.close();await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}}});
+   finally{
+     task.progress={...task.progress,sources:task.progress.sources.map(s=>s.state==='running'?{...s,state:'stopped',reason}:s)};
+     try{await provider?.close();await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}
+   }});
    task.promise.catch(()=>{});
    return {running:true};
  }
