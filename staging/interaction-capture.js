@@ -1,6 +1,7 @@
 // Staging only. No observer, timer, network, credential access or page-world hook.
 // Read only when the user presses the button in the extension panel.
 (() => {
+  let documentToken=null;
   const profile = value => {
     try {
       const u = new URL(value, 'https://x.com');
@@ -19,8 +20,8 @@
   };
   const action = text => {
     const s = String(text || '').trim();
-    if (/^(?:liked your (?:post|tweet)|赞了你的(?:帖子|推文)|喜欢了你的(?:帖子|推文))[.!。！]?$/i.test(s)) return 'like';
-    if (/^(?:reposted your (?:post|tweet)|retweeted your (?:post|tweet)|转发了你的(?:帖子|推文)|转载了你的(?:帖子|推文))[.!。！]?$/i.test(s)) return 'repost';
+    if (/^(?:(?:and [1-9]\d{0,5} others? )?liked your (?:post|tweet)|赞了你的(?:帖子|推文)|喜欢了你的(?:帖子|推文))[.!。！]?$/i.test(s)) return 'like';
+    if (/^(?:(?:and [1-9]\d{0,5} others? )?reposted your (?:post|tweet)|retweeted your (?:post|tweet)|转发了你的(?:帖子|推文)|转载了你的(?:帖子|推文))[.!。！]?$/i.test(s)) return 'repost';
     return null;
   };
   function visible(el) {
@@ -32,9 +33,11 @@
     const self = new Set([...doc.querySelectorAll('a[data-testid="AppTabBar_Profile_Link"][href]')].filter(visible).map(a=>profile(a.getAttribute('href'))).filter(Boolean));
     if (self.size !== 1) return {ok:false,reason:'owner_unknown'};
     const owner = [...self][0];
-    const rows = [...doc.querySelectorAll('[data-testid="notification"],article[data-testid="tweet"]')].filter(el=>visible(el)&&!el.parentElement?.closest('[data-testid="notification"],article[data-testid="tweet"]'));
+    const main=doc.querySelector('[data-testid="primaryColumn"]')??doc.querySelector('main');
+    if(!main||!visible(main))return {ok:false,reason:'notification_layout_unknown'};
+    const rows = [...main.querySelectorAll('[data-testid="notification"],article[data-testid="tweet"]')].filter(el=>visible(el)&&!el.parentElement?.closest('[data-testid="notification"],article[data-testid="tweet"]'));
     const events = [];
-    let unresolved = 0;
+    let unresolved = 0,missingTargetRows=0;
     for (const [rowIndex,row] of rows.slice(0,200).entries()) {
       const anchors = [...row.querySelectorAll('a[href]')].filter(visible);
       const refs = anchors.map(a=>status(a.getAttribute('href'))).filter(Boolean);
@@ -48,6 +51,7 @@
         const actors = new Set(anchors.filter(a=>!a.closest('article,[data-testid="tweetText"],[data-testid="card.wrapper"]') && (a.compareDocumentPosition(label)&4)).map(a=>profile(a.getAttribute('href'))).filter(h=>h&&h!==owner));
         if (!actors.size || actors.size>50) { unresolved++; continue; }
         const targets = [...new Set(refs.filter(r=>r.handle===owner).map(r=>r.id))];
+        if(targets.length!==1)missingTargetRows++;
         for (const actor of actors) events.push({actor,type,row:rowIndex,postId:targets.length===1?targets[0]:null});
       } else {
         // Confirm a reply only if the visible reply-context explicitly names the owner.
@@ -59,18 +63,25 @@
           const text=(el.innerText||'').trim();
           return /^(?:Replying to|回复)\s+@/i.test(text)&&text.length<=180&&[...el.querySelectorAll('a[href]')].some(a=>profile(a.getAttribute('href'))===owner);
         });
-        const ids=[...new Set([...row.querySelectorAll('[data-testid="User-Name"] a[href]')].map(a=>status(a.getAttribute('href'))).filter(r=>r?.handle===actor).map(r=>r.id))];
+        const ids=[...new Set(anchors.filter(a=>a.closest('[data-testid="User-Name"]')||a.querySelector('time')).filter(a=>!a.closest('[data-testid="card.wrapper"],[data-testid="tweetText"]')&&a.closest('article[data-testid="tweet"]')===row).map(a=>status(a.getAttribute('href'))).filter(r=>r?.handle===actor).map(r=>r.id))];
         if (!context.length||ids.length!==1) {unresolved++;continue;}
         events.push({actor,type:'reply',row:rowIndex,postId:ids[0]});
       }
     }
-    return {ok:true,owner,events,scanned:Math.min(rows.length,200),unresolved,truncated:rows.length>200};
+    const after=new Set([...doc.querySelectorAll('a[data-testid="AppTabBar_Profile_Link"][href]')].filter(visible).map(a=>profile(a.getAttribute('href'))).filter(Boolean));
+    if(after.size!==1||!after.has(owner))return {ok:false,reason:'owner_changed'};
+    return {ok:true,owner,events,scanned:Math.min(rows.length,200),unresolved,missingTargetRows,truncated:rows.length>200};
   }
   // Expose pure helpers only to the isolated world and local tests.
   globalThis.ReplyCopilotInteractionCapture=Object.freeze({profile,status,action,collect});
   if (typeof chrome!=='undefined'&&chrome.runtime?.onMessage) chrome.runtime.onMessage.addListener((message,sender,respond)=>{
     if (message?.type!=='REPLY_COPILOT_STAGING_READ_VISIBLE_INTERACTIONS') return;
     if (sender.id!==chrome.runtime.id) return;
-    try {respond(collect(document,location));} catch {respond({ok:false,reason:'parse_failed'});}
+    try {
+      if(document.visibilityState!=='visible'){respond({ok:false,reason:'page_not_visible'});return;}
+      const result=collect(document,location);
+      if(result.ok){documentToken??=crypto.randomUUID();result.documentToken=documentToken;}
+      respond(result);
+    } catch {respond({ok:false,reason:'parse_failed'});}
   });
 })();
