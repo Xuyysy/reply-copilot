@@ -10,7 +10,7 @@ concurrency:
 jobs:
   browser:
     if: >-
-      github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && startsWith(github.event.head_commit.message, 'ci-lite: qa-browser approved')
+      github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && (startsWith(github.event.head_commit.message, 'ci-lite: qa-browser approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-browser-finance-desktop approved'))
     environment: partners-qa
     runs-on: ubuntu-24.04
     timeout-minutes: 8
@@ -24,6 +24,9 @@ jobs:
       # secret output. Browser receives auth only for the exact QA origin.
       - name: Actual browser sign-in, account, admin role and sign-out
         env:
+          QA_FINANCE_DESKTOP: >-
+            ${{ startsWith(github.event.head_commit.message, 'ci-lite: qa-browser-finance-desktop approved') }}
+          QA_EXPECTED_REQUEST_ID: ${{ vars.PARTNERS_QA_EXPECTED_REQUEST_ID }}
           PARTNERS_QA_CREDENTIALS: ${{ secrets.PARTNERS_QA_CREDENTIALS }}
         shell: bash
         run: |
@@ -40,6 +43,7 @@ jobs:
           try{g=JSON.parse(process.env.PARTNERS_QA_CREDENTIALS||'null');}catch{g=null;}
           delete process.env.PARTNERS_QA_CREDENTIALS;
           check(g&&/^[a-f0-9]{64}$/.test(g.access)&&Array.isArray(g.accounts)&&g.accounts.length===7,'invalid QA secret');
+          const financeDesktop=process.env.QA_FINANCE_DESKTOP==='true';
           const cases=['qa-admin','qa-partner-a','qa-outsider-d'];
           const accounts=new Map();
           for(const a of g.accounts){check(/^qa-(admin|partner-a|buyer-b|buyer-c|outsider-d|excluded-e|partner-f)$/.test(a.id)&&a.email===a.id+'@example.test'&&/^[a-f0-9]{64}$/.test(a.password)&&!accounts.has(a.id),'invalid QA account');accounts.set(a.id,a);}
@@ -59,6 +63,48 @@ jobs:
           async function fill(selector,value){check(await ev('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');if(!e)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(value)+');e.dispatchEvent(new Event("input",{bubbles:true}));return true})()'),'login input missing');}
           async function click(labels){let point;await until(async()=>{point=await ev('(()=>{const e=[...document.querySelectorAll("button,[role=tab]")].find(e=>'+JSON.stringify(labels)+'.includes(e.textContent.trim())&&!e.disabled&&e.getClientRects().length);if(!e)return false;e.scrollIntoView({block:"center"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()');return Boolean(point);},'expected control missing');await cdp('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await cdp('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});}
           async function visibleText(labels){await until(()=>ev(JSON.stringify(labels)+'.some(x=>document.body.innerText.includes(x))'),'expected UI missing');}
+          async function financeReadback(id){
+            stage('desktop-finance-preflight');
+            const expected=process.env.QA_EXPECTED_REQUEST_ID;
+            check(typeof expected==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(expected),'reviewed request ID required');
+            const read=async path=>{
+              const r=await req(path,knownCookie);
+              console.log('QA_DESKTOP_HTTP '+id+' '+r.status);
+              check(r.status===200,'desktop finance read failed');
+              return r.json();
+            };
+            const partnerPath='/v1/partners/';
+            if(id==='qa-outsider-d'){
+              const state=await read(partnerPath+'me');
+              check(state.enabled===true&&state.policy===null&&!state.totals,'outsider financial access');
+              check((await req(partnerPath+'alipay-requests',knownCookie)).status===403,'outsider request access');
+              return;
+            }
+            const path=id==='qa-admin'?'/v1/admin/partners/alipay-requests?q=qa-partner-a':partnerPath+'alipay-requests';
+            const state=await read(path);
+            check(state.enabled===true&&state.requests?.length===1,'desktop request count');
+            const row=state.requests[0];
+            check(row.id===expected&&row.amount_fen===1000&&row.recipient_version===1&&row.settlement_status==='paid'&&row.account_mask?.includes('*')&&row.name_mask?.includes('*'),'desktop paid request mismatch');
+            if(id==='qa-partner-a'){
+              const summary=await read(partnerPath+'me');
+              check(summary.policy?.status==='active','desktop policy mismatch');
+              const totals=summary.totals;
+              check(totals?.orders===1&&totals.gross_fen===2000&&totals.net_fen===0&&totals.paid_fen===1000&&totals.reserved_fen===0&&totals.outstanding_fen===-1000,'desktop refund totals mismatch');
+              stage('desktop-earnings');
+              const expectedCards=[['累计佣金','Gross commission',2000],['退款后佣金','Net commission',0],['已结算','Paid',1000],['结算预留','Reserved',0],['待核对净额（含欠款）','Outstanding net (including debt)',-1000]];
+              await until(()=>ev('('+JSON.stringify(expectedCards)+').every(([zh,en,fen])=>{const label=[...document.querySelectorAll("p")].find(e=>e.textContent.trim()===zh||e.textContent.trim()===en);const amount=label?.parentElement.querySelector("strong")?.textContent.replace(/[^0-9.−-]/g,"").replace("−","-");return amount&&Number(amount)===fen/100})'),'desktop earnings mismatch');
+              await click(['查询申请记录','Load requests']);
+            }else{
+              stage('desktop-admin-request');
+              await fill('input[aria-label="推广伙伴用户 ID"],input[aria-label="Partner user ID"]','qa-partner-a');
+              const form='document.querySelector('+JSON.stringify('input[aria-label="推广伙伴用户 ID"],input[aria-label="Partner user ID"]')+').closest("form")';
+              check(await ev('(()=>{const f='+form+';if(!f)return false;f.requestSubmit();return true})()'),'admin request search missing');
+              await visibleText([expected]);
+            }
+            const labels=['支付宝结算申请','Alipay settlement requests'];
+            await until(()=>ev('(()=>{const title=[...document.querySelectorAll("h3,[data-slot=card-title]")].find(e=>'+JSON.stringify(labels)+'.includes(e.textContent.trim()));const card=title?.closest("section,[data-slot=card]");return card&&card.innerText.includes('+JSON.stringify(row.account_mask)+')&&card.innerText.includes('+JSON.stringify(row.name_mask)+')&&(card.innerText.includes("已结算")||card.innerText.includes("Paid"))})()'),'desktop masked request missing');
+            if(id==='qa-admin')check(await ev('![...document.querySelectorAll("button")].some(e=>["模拟批准并预留","Simulate approval","锁定转账并查看账号","Lock and reveal"].includes(e.textContent.trim()))'),'paid request has approval controls');
+          }
           try{
             let port;
             await until(()=>{try{port=Number(readFileSync(join(profile,'DevToolsActivePort'),'utf8').split('\n')[0]);return port>0;}catch{return false;}},'Chrome startup failed');
@@ -67,7 +113,8 @@ jobs:
             await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(Error('CDP connect failed')),{once:true});});
             socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error('CDP command failed')):p.resolve(m.result);return;}
               if(m.method==='Network.responseReceived'){try{const u=new URL(m.params.response.url);if(u.origin===origin){const path=u.pathname.startsWith('/v1/')?u.pathname:(/^(\/|\/login\/?|\/account\/?|\/admin\/?)$/.test(u.pathname)?u.pathname:'asset');if(trace.length<300)trace.push([path,m.params.response.status]);}}catch{}}
-              if(m.method==='Fetch.requestPaused'){let allowed=false;try{allowed=new URL(m.params.request.url).origin===origin;}catch{}const headers=allowed?Object.entries(m.params.request.headers).filter(([k])=>k.toLowerCase()!=='authorization').map(([name,value])=>({name,value})):[];if(allowed)headers.push({name:'Authorization',value:outer});void cdp(allowed?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(allowed?{headers}:{errorReason:'BlockedByClient'})}).catch(()=>{failed=true;});}
+              if(m.method==='Fetch.requestPaused'){let allowed=false;try{allowed=new URL(m.params.request.url).origin===origin;}catch{}if(financeDesktop&&allowed&&m.params.request.method!=='GET'&&!['/v1/auth/login','/v1/auth/logout'].includes(new URL(m.params.request.url).pathname)){allowed=false;failed=true;}
+              const headers=allowed?Object.entries(m.params.request.headers).filter(([k])=>k.toLowerCase()!=='authorization').map(([name,value])=>({name,value})):[];if(allowed)headers.push({name:'Authorization',value:outer});void cdp(allowed?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(allowed?{headers}:{errorReason:'BlockedByClient'})}).catch(()=>{failed=true;});}
               if(m.method==='Fetch.authRequired'){const a=m.params.authChallenge;const allowed=a.origin===origin&&a.source==='Server'&&a.scheme.toLowerCase()==='basic'&&a.realm==='Private Partners QA';void cdp('Fetch.continueWithAuth',{requestId:m.params.requestId,authChallengeResponse:allowed?{response:'ProvideCredentials',username:'qa',password:g.access}:{response:'CancelAuth'}}).catch(()=>{failed=true;});}
             });
             for(const method of ['Page.enable','Runtime.enable','Network.enable'])await cdp(method);
@@ -76,14 +123,16 @@ jobs:
               activeId=id;knownCookie=null;
               await cdp('Network.clearBrowserCookies');
               const a=accounts.get(id);
-              await cdp('Emulation.setDeviceMetricsOverride',{width:id==='qa-outsider-d'?390:1440,height:id==='qa-outsider-d'?844:1000,deviceScaleFactor:1,mobile:id==='qa-outsider-d'});
+              await cdp('Emulation.setDeviceMetricsOverride',{width:financeDesktop?1440:id==='qa-outsider-d'?390:1440,height:financeDesktop?1000:id==='qa-outsider-d'?844:1000,deviceScaleFactor:1,mobile:!financeDesktop&&id==='qa-outsider-d'});
               stage('login-page');await navigate('/login/');
               stage('login-form');await fill('input[autocomplete="username"]',a.email);await fill('input[autocomplete="current-password"]',a.password);
               check(await ev('(()=>{const f=document.querySelector("input[autocomplete=current-password]")?.closest("form");if(!f)return false;f.requestSubmit();return true})()'),'login form missing');
               stage('account-load');await until(()=>ev('location.pathname.replace(/\\/$/,"")==="/account"&&document.body.innerText.includes('+JSON.stringify(a.email)+')'),'account login or identity failed');
               knownCookie=await captureCookie();check(knownCookie,'browser session missing');
+              if(financeDesktop&&id!=='qa-admin')await financeReadback(id);
               stage('admin-access');if(id==='qa-admin'){await navigate('/admin/');await visibleText(['推广管理','Partners']);stage('partner-tab');await click(['推广管理','Partners']);await visibleText(['推广伙伴 · 资格与规则','Partners · Eligibility and policy']);}
               else{await navigate('/admin/');await visibleText(['无法访问管理后台','Admin access denied']);}
+              if(financeDesktop&&id==='qa-admin')await financeReadback(id);
               stage('account-return');await navigate('/account/');
               await visibleText([a.email]);stage('logout');await click(['退出登录','Sign out']);
               await until(()=>ev('location.pathname.replace(/\\/$/,"")==="/login"'),'browser logout failed');
@@ -92,7 +141,8 @@ jobs:
               knownCookie=null;activeId=null;
               console.log('QA_HOSTED_BROWSER_PASS '+id);
             }
-            console.log('QA_HOSTED_BROWSER_AUTH_PASS: real Chrome, desktop/mobile, sign-in, identity, admin/ordinary access and sign-out. Financial UI acceptance still required.');
+            if(financeDesktop)console.log('QA_HOSTED_DESKTOP_FINANCE_PASS');
+            else console.log('QA_HOSTED_BROWSER_AUTH_PASS: real Chrome, desktop/mobile, sign-in, identity, admin/ordinary access and sign-out. Financial UI acceptance still required.');
           }catch{console.error('QA_HOSTED_BROWSER_FAIL '+(activeId||'setup')+' '+phase);console.error('QA_BROWSER_HTTP_STATUS '+JSON.stringify(trace.slice(-60)));process.exitCode=1;}
           finally{if(activeId)try{await cleanup();}catch{console.error('QA_HOSTED_BROWSER_CLEANUP_REVIEW '+activeId);process.exitCode=1;}try{socket?.close();}catch{}for(const p of pending.values())clearTimeout(p.timer);child.kill('SIGTERM');await delay(500);rmSync(profile,{recursive:true,force:true});}
           JS

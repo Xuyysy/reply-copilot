@@ -10,7 +10,7 @@ concurrency:
 jobs:
   synthetic:
     if: >-
-      github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && (startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-policy approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-refund approved'))
+      github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && (startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-policy approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-refund approved') || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger-resume approved'))
     environment: partners-qa
     runs-on: ubuntu-24.04
     timeout-minutes: 8
@@ -23,8 +23,9 @@ jobs:
       - name: Hosted synthetic API phase
         env:
           PARTNERS_QA_CREDENTIALS: ${{ secrets.PARTNERS_QA_CREDENTIALS }}
+          QA_EXPECTED_REQUEST_ID: ${{ vars.PARTNERS_QA_EXPECTED_REQUEST_ID }}
           QA_PHASE: >-
-            ${{ startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-policy approved') && 'policy' || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger approved') && 'ledger' || 'refund' }}
+            ${{ startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-policy approved') && 'policy' || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger approved') && 'ledger' || startsWith(github.event.head_commit.message, 'ci-lite: qa-finance-ledger-resume approved') && 'ledger-resume' || 'refund' }}
         shell: bash
         run: |
           node --input-type=module <<'JS'
@@ -50,7 +51,7 @@ jobs:
             let b=null;try{b=await r.json();}catch{}
             return {status:r.status,headers:r.headers,body:b};
           }
-          function expect(r,status){check(r.status===status,'unexpected HTTP status');return r.body;}
+          function expect(r,status){console.log('QA_FINANCE_HTTP '+phase+' '+stage+' '+r.status);check(r.status===status,'unexpected HTTP status');return r.body;}
           async function login(id){
             const a=accounts.get(id),r=await req('/v1/auth/login',{body:{identity:a.email,password:a.password}});expect(r,200);
             const cookie=(r.headers.get('set-cookie')||'').split(';')[0];check(/^rc_session=/.test(cookie),'invalid session cookie');
@@ -63,7 +64,7 @@ jobs:
           const call=(s,path,body,status=200)=>req(path,{session:s,body}).then(r=>expect(r,status));
           const policy=(userId)=>({userId,operationId:randomUUID(),status:'active',level:'standard',rateBps:2000,termMonths:12,expectedVersion:0,reason});
           async function main(){
-            check(['policy','ledger','refund'].includes(phase),'invalid phase');
+            check(['policy','ledger','ledger-resume','refund'].includes(phase),'invalid phase');
             expect(await req('/v1/partners/me',{auth:false}),401);
             expect(await req('/v1/orders',{body:{}}),403);
             expect(await req('/v1/subscriptions/orders',{body:{}}),403);
@@ -109,6 +110,45 @@ jobs:
               await call(a,root+'payout-review',outcome,409);
               const after=(await call(p,me+'me')).totals;check(after.paid_fen===1000&&after.reserved_fen===0&&after.outstanding_fen===1000,'payout totals mismatch');
               console.log('QA_FINANCE_LEDGER_PASS');
+            }else if(phase==='ledger-resume'){
+              mark('resume-preflight');
+              const expected=process.env.QA_EXPECTED_REQUEST_ID;
+              check(typeof expected==='string'&&/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(expected),'reviewed request ID required');
+              const summary=await call(p,me+'me');
+              check(summary.policy?.version===1&&summary.policy.status==='active'&&summary.policy.rate_bps===2000,'resume policy mismatch');
+              const totals=summary.totals;
+              check(totals?.orders===1&&totals.gross_fen===2000&&totals.net_fen===2000&&totals.held_fen===0&&totals.paid_fen===0&&totals.reserved_fen===0&&totals.outstanding_fen===2000,'resume totals mismatch');
+              check(summary.orders?.length===1&&summary.orders[0].order_domain==='recharge'&&summary.orders[0].principal_fen===10000&&summary.orders[0].commission_fen===2000&&summary.orders[0].net_fen===2000,'resume commission mismatch');
+              const owner=await call(p,me+'alipay-requests');
+              const admin=await call(a,root+'alipay-requests?q=qa-partner-a');
+              check(owner.enabled===true&&owner.accepting===true&&owner.minFen===1000&&owner.recipient?.version===1&&admin.enabled===true&&admin.pilotReview===true,'resume gates mismatch');
+              check(owner.requests?.length===1&&admin.requests?.length===1,'resume request count mismatch');
+              const valid=r=>r.id===expected&&r.amount_fen===1000&&r.recipient_version===1&&r.status==='pending'&&r.settlement_status==='pending'&&r.reviewed_at===null;
+              check(valid(owner.requests[0])&&valid(admin.requests[0]),'resume request mismatch');
+              const row=owner.requests[0];
+              check(row.account_mask===owner.recipient.account_mask&&row.name_mask===owner.recipient.name_mask&&row.account_mask===admin.requests[0].account_mask&&row.name_mask===admin.requests[0].name_mask,'resume recipient mismatch');
+              const preview=await call(a,root+'order-preview?domain=recharge&id='+orderId);
+              check(preview.enabled===true&&preview.evidence?.eligible===true&&preview.evidence.principalFen===10000&&preview.evidence.refundedPrincipalFen===0&&preview.policyEligible===true&&preview.candidateFen===2000&&preview.policyVersion===1,'resume original order mismatch');
+              mark('resume-denials');
+              await call(p,me+'alipay-requests',{amountFen:1000,recipientVersion:1},409);
+              const action={requestId:expected,reason,reviewed:true};
+              await call(q,root+'payout-review',{...action,operationId:randomUUID(),action:'approve'},403);
+              mark('resume-approve');
+              check((await call(a,root+'payout-review',{...action,operationId:randomUUID(),action:'approve'})).state==='reserved','resume reserve mismatch');
+              mark('resume-start');
+              const started=await req(root+'payout-review',{session:a,body:{...action,operationId:randomUUID(),action:'start'}});
+              const reveal=expect(started,200);
+              check(reveal.state==='reconciling'&&reveal.amountFen===1000&&reveal.recipient?.account==='qa-fixture@example.test'&&reveal.recipient.name==='测试账户'&&started.headers.get('cache-control')?.includes('no-store'),'resume reveal mismatch');
+              await call(a,root+'payout-review',{...action,operationId:randomUUID(),action:'start'},409);
+              mark('resume-outcome');
+              const outcome={...action,operationId:randomUUID(),action:'paid',amountFen:1000,reference:'QA-SYNTHETIC-NO-TRANSFER-20261126'};
+              check((await call(a,root+'payout-review',outcome)).state==='paid','resume outcome mismatch');
+              await call(a,root+'payout-review',outcome,409);
+              const after=(await call(p,me+'me')).totals;
+              check(after.net_fen===2000&&after.paid_fen===1000&&after.reserved_fen===0&&after.outstanding_fen===1000,'resume closing totals mismatch');
+              const final=await call(p,me+'alipay-requests');
+              check(final.requests?.length===1&&final.requests[0].id===expected&&final.requests[0].settlement_status==='paid','resume final request mismatch');
+              console.log('QA_FINANCE_LEDGER_RESUME_PASS');
             }else{
               mark('refund-preflight');
               const {totals}=await call(p,me+'me');
