@@ -8,7 +8,8 @@ permissions:
   actions: read
 concurrency:
   group: cf-free-dedicated-one-shot-pilot
-  cancel-in-progress: ${{ startsWith(github.event.head_commit.message, 'ci-lite: authorized isolated business acceptance repair tail cleanup') }}
+  cancel-in-progress: >-
+    ${{ startsWith(github.event.head_commit.message, 'ci-lite: authorized isolated business acceptance repair tail cleanup') }}
 jobs:
   offline:
     if: >-
