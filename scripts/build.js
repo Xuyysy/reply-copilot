@@ -22,7 +22,16 @@ const output = path.join(root, "dist", channel);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(output, { recursive: true });
 for (const name of ["background", "config", "content", "domain", "icons", "onboarding", "options", "prompts", "services", "sidepanel", "utils", "manifest.json", "privacy.html"]) cpSync(path.join(root, name), path.join(output, name), { recursive: true });
-if (channel === "staging") cpSync(path.join(root, "staging"), path.join(output, "staging"), {recursive:true});
+if (channel === "staging") {
+  cpSync(path.join(root, "staging"), path.join(output, "staging"), {recursive:true});
+  cpSync(path.join(root, "follow-manager"), path.join(output, "follow-manager"), {recursive:true});
+} else {
+  const sidebar = path.join(output, "sidepanel", "sidepanel.html");
+  const html = readFileSync(sidebar, "utf8");
+  const stripped = html.replace(/<!-- FOLLOW_MANAGER_STAGING_START -->[\s\S]*?<!-- FOLLOW_MANAGER_STAGING_END -->/, "");
+  if (stripped === html) throw new Error("Follow Manager staging boundary missing");
+  writeFileSync(sidebar, stripped);
+}
 if (packagedChannel) {
   const configPath = path.join(output, "config", "runtime.js");
   writeFileSync(configPath, `export const RUNTIME_CONFIG = Object.freeze({ channel: ${JSON.stringify(channel)}, websiteUrl: ${JSON.stringify(websiteUrl)}, hostedApiUrl: ${JSON.stringify(hostedApiUrl)}, allowedHttpHosts: [], requestTimeoutMs: 30000 });\n`);

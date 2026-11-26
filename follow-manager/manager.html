@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>互关助手 · X Reply Helper</title>
+  <link rel="stylesheet" href="../content/design-tokens.css">
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+<main class="container">
+  <header class="page-heading">
+    <img src="../icons/icon-48.png" width="44" height="44" alt="">
+    <div><p class="eyebrow">X REPLY HELPER</p><h1>互关助手</h1><p class="muted">查看未回关账号 · 本地归档分析</p></div>
+  </header>
+
+  <section class="panel" id="import-panel" aria-labelledby="import-heading">
+    <div class="heading-line"><h2 id="import-heading">导入 X 数据归档</h2><span class="tag">仅本地处理</span><button class="secondary" id="close-import" type="button" hidden>返回结果</button></div>
+    <div class="import-steps" aria-label="导入步骤">
+      <div><span>1</span><a href="https://x.com/settings/download_your_data" target="_blank" rel="noopener noreferrer">申请 X 数据归档 ↗</a></div>
+      <div><span>2</span>下载 ZIP</div>
+      <div><span>3</span>导入 ZIP 并分析</div>
+    </div>
+    <p class="muted small">归档很大也没关系：仅分析关注与粉丝文件。首次导入后，重新打开即可直接查看本地结果。</p>
+    <form id="archive-form">
+      <label class="field">归档所属 X 用户名
+        <input id="owner" name="owner" placeholder="例如 @yourhandle" autocomplete="off" maxlength="16" required>
+      </label>
+      <div id="archive-dropzone" class="archive-dropzone" role="region" aria-label="拖入 X 归档 ZIP 或文件夹">
+        <span class="drop-icon" aria-hidden="true">⇧</span>
+        <strong>将 X 归档 ZIP 拖到这里</strong>
+        <p class="muted small">无需解压；也可拖入已解压的归档或 data 文件夹。只查找关注关系文件，不读取图片、视频或私信。</p>
+        <div class="picker-actions">
+          <button id="choose-zip" class="primary" type="button">选择 ZIP 归档</button>
+          <button id="choose-folder" class="secondary" type="button">选择整个文件夹</button>
+          <button id="choose-files" class="secondary" type="button">手动选择 JS 文件</button>
+          <button id="choose-folder-fallback" class="secondary" type="button" hidden>兼容选择 data 文件夹</button>
+          <button id="cancel-scan" class="secondary" type="button" hidden>取消扫描</button>
+        </div>
+      </div>
+      <input id="archive-zip-picker" type="file" accept=".zip,application/zip" hidden aria-label="选择 X 官方 ZIP 归档">
+      <input id="archive-picker" type="file" accept=".js" multiple hidden aria-label="手动选择粉丝与关注归档文件">
+      <input id="archive-folder-picker" type="file" webkitdirectory multiple hidden aria-label="兼容选择 X 归档文件夹">
+      <div class="selected-files" aria-live="polite" aria-label="已选文件">
+        <span id="selected-follower">粉丝文件：未选择</span>
+        <span id="selected-following">关注文件：未选择</span>
+        <button id="clear-selection" class="text-action" type="button">清空待导入文件</button>
+      </div>
+      <p id="selected-size" class="muted small" aria-live="polite">仅分析关注与粉丝文件，不读取整个归档。</p>
+      <details class="file-details"><summary>支持的文件与导入说明</summary><p class="muted small" id="file-tip">支持 data/follower.js、data/following.js 及连续分片。只读取关注关系文件，不上传服务器，支持直接导入 ZIP / ZIP64（非加密、非分卷）。仅索引目录及解压目标 JS；整个 ZIP 大小不限于以下文件限制。超大目录或不支持的压缩格式可解压后手动选择 JS。每文件最多 32 MB、单组最多 128 MB，每组最多 25 万账号。</p></details>
+      <label class="confirmation"><input type="checkbox" id="same-account" required> 我确认两组文件来自同一份、同一个 X 账号的官方归档。</label>
+      <div class="actions">
+        <button class="primary" id="import-button" type="submit">导入并分析</button>
+        <button class="secondary" id="load-saved" type="button">查看此账号的历史结果</button>
+        <button class="danger" id="delete-saved" type="button">删除本地记录</button>
+      </div>
+    </form>
+    <p role="status" aria-live="polite" id="feedback" class="feedback">尚未导入数据。</p>
+  </section>
+
+  <section class="panel" id="results-panel" aria-labelledby="results-heading" hidden>
+    <div class="heading-line"><div><h2 id="results-heading">关注关系分析</h2><p class="muted small result-owner" id="snapshot-owner"></p></div><button id="open-import" class="primary" type="button">导入 / 更新归档</button></div>
+    <p class="muted small" id="snapshot-time"></p>
+    <nav class="tabs stats" aria-label="选择关系类型">
+      <button type="button" class="tab stat-tab" data-kind="notFollowingBack" aria-pressed="true"><span>未回关我</span><strong id="count-not-following-back">0</strong><small>我关注了对方，对方未关注我</small></button>
+      <button type="button" class="tab stat-tab" data-kind="iHaveNotFollowedBack" aria-pressed="false"><span>我未回关</span><strong id="count-i-have-not-followed-back">0</strong><small>对方关注了我，我未关注对方</small></button>
+    </nav>
+    <p class="muted small">互相关注：<strong id="count-mutual">0</strong></p>
+    <details class="file-details"><summary>最近归档差异（最多 5 次）</summary>
+      <p class="muted small">仅比较相邻导入名单，不代表实际取关时间；旧归档也可能在新归档之后导入。重复名单不新增变化记录。</p>
+      <p id="archive-history-empty" class="muted small">暂无可比较的归档差异。</p>
+      <ul id="archive-history"></ul>
+    </details>
+    <p class="snapshot-note">结果以导入的归档为准，并非实时关系。归档仅含账号 ID，打开主页可查看账号信息。</p>
+    <div class="list-tools">
+      <label class="field">筛选账号数字 ID
+        <input id="filter-id" type="search" inputmode="numeric" placeholder="输入用户 ID 中的一部分">
+      </label>
+      <label class="field page-size-field">每页显示<select id="page-size"><option value="25">25 条</option><option value="50" selected>50 条</option><option value="100">100 条</option></select></label>
+      <button id="export-csv" type="button" class="secondary">导出 CSV</button>
+    </div>
+    <p class="muted small" id="result-count" role="status"></p>
+    <div class="result-table-head" aria-hidden="true"><span>账号 ID</span><span>操作</span></div>
+    <div id="result-list" class="result-list" role="list"></div>
+    <div class="pagination">
+      <button type="button" class="secondary" id="page-prev">上一页</button>
+      <span id="page-info" aria-live="polite">1 / 1</span>
+      <button type="button" class="secondary" id="page-next">下一页</button>
+    </div>
+  </section>
+  <footer>归档及分析结果仅保存在本机，不会上传服务器。</footer>
+</main>
+<script type="module" src="manager.js"></script>
+</body>
+</html>
