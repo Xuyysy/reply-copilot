@@ -1,0 +1,78 @@
+name: CF Free authorized isolated business acceptance
+on:
+  push:
+    branches: ['chatgpt/cf-free-authorized-business-v5-20261126']
+    paths: ['.github/workflows/cf-free-authorized-business.yml']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: cf-free-dedicated-one-shot-pilot
+  cancel-in-progress: false
+jobs:
+  offline:
+    if: >-
+      startsWith(github.event.head_commit.message, 'ci-lite: authorized isolated business acceptance')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - name: Rehearse exact cloud wrapper and fixtures with local D1 and private DO
+        run: node api/scripts/cf-free-business-cloud/run.mjs --offline "$RUNNER_TEMP/offline.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: business-offline
+          path: ${{ runner.temp }}/offline.json
+  cloud:
+    needs: offline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    environment: cf-free-isolated-pilot
+    steps:
+      - name: Verify pinned application full CI before any cloud access
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for workflow in ci.yml cf-free-private-verifier-gate.yml; do
+            passed=0
+            for n in $(seq 1 72); do
+              result=$(gh api "repos/Xuyysy/reply-copilot/actions/workflows/$workflow/runs?head_sha=776067f62bc70e6b6f6706b7c5384a24d05c23c2&event=push&per_page=5" --jq '.workflow_runs[0] | [.head_sha,.status,.conclusion] | @tsv')
+              if [[ -z "$result" ]]; then sleep 10; continue; fi
+              read -r sha status conclusion <<< "$result"
+              test "$sha" = "776067f62bc70e6b6f6706b7c5384a24d05c23c2"
+              if [[ "$status" == completed ]]; then test "$conclusion" = success; passed=1; break; fi
+              sleep 10
+            done
+            test "$passed" = 1
+          done
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify only the dedicated harness differs from reviewed application source
+        run: |
+          set -euo pipefail
+          git diff --name-only 776067f62bc70e6b6f6706b7c5384a24d05c23c2 HEAD | awk '!/^(api\/scripts\/cf-free-business-cloud\/|\.github\/workflows\/cf-free-authorized-business\.yml$)/ {bad=1} END{exit bad}'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - name: Execute bounded authorized isolated synthetic business matrix
+        env:
+          CF_FREE_PILOT_API_TOKEN: ${{ secrets.CF_FREE_PILOT_API_TOKEN }}
+          XRH_CLOUD_AUTHORIZATION: '20261126-isolated-synthetic-business-only'
+        run: node api/scripts/cf-free-business-cloud/run.mjs --authorized-cloud "$RUNNER_TEMP/cloud.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: business-cloud-evidence
+          path: ${{ runner.temp }}/cloud.json
+          if-no-files-found: ignore
