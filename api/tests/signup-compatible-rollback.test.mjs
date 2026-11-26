@@ -160,3 +160,21 @@ test("compatible rollback restores legacy registration while retaining pending r
   } finally {f.sql.close();}
 });
 
+
+test('signup policy recovery retains current private-password RPC and all legacy password profiles',async()=>{
+ const f=fixture();try{
+  const {pbkdf2Sync}=await import('node:crypto');
+  const password='synthetic-rollback-password-12345',pepper='synthetic-rollback-pepper-only-long-enough',salt='ab'.repeat(16);
+  f.env.PASSWORD_PEPPER=pepper;
+  for(const rounds of [10000,60000,100000,210000]){
+   const hash='pbkdf2-sha256:'+rounds+':'+salt+':'+pbkdf2Sync(password+'\0'+pepper,Buffer.from(salt,'hex'),rounds,32,'sha256').toString('hex');
+   const id='rollback-'+rounds,email=id+'@example.test';
+   f.sql.prepare('INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash) VALUES(?,?,?,?,?,?)').run(id,email,1,1,id,hash);
+   assert.equal((await f.call('/v1/auth/login',{body:{identity:email,password}})).status,200);
+   assert.equal(f.sql.prepare('SELECT password_hash FROM users WHERE id=?').get(id).password_hash,hash);
+  }
+  f.env.PASSWORD_VERIFY_DO_ENABLED='1';
+  const response=await f.call('/v1/auth/login',{body:{identity:'rollback-210000@example.test',password}});
+  assert.equal(response.status,503);assert.equal(response.body.code,'PASSWORD_VERIFIER_UNAVAILABLE');
+ }finally{f.sql.close();}
+});
