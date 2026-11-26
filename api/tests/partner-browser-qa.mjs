@@ -10,7 +10,7 @@ import {setup,seedPaid} from './helpers/partner-browser-fixture.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const temp=mkdtempSync(path.join(tmpdir(),'partners-browser-'));
 const dist=path.join(temp,'dist'),cleanups=[];
-const {f,db,reauth,enable,tokens}=setup({after:fn=>cleanups.push(fn)});
+const {f,db,reauth,enable,tokens,ok,call}=setup({after:fn=>cleanups.push(fn)});
 const chrome=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const nativeFetch=globalThis.fetch;
 const routeTrace=[];
@@ -119,8 +119,33 @@ try{
  assert.equal(await ev('document.body.innerText.includes("fixture@example.test")'),false);
  await fill('审核原因','isolated browser payout',payoutScope);await check('已人工核对相应订单与转账证据',payoutScope);await fill('确认金额','10');await fill('模拟转账流水号','browser-synthetic-transfer');await click('确认模拟付款',payoutScope);await text('已结算');
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
+ // Reload the actual account page after the completed settlement, then
+ // persist a local-only synthetic full refund and sync through the Worker.
+ async function expectEarnings(values){
+  for(const [label,fen] of values){
+   const formatted=new Intl.NumberFormat('zh-CN',{style:'currency',currency:'CNY'}).format(fen/100);
+   await until(()=>ev('(()=>[...document.querySelectorAll("p")].some(e=>e.textContent.trim()==='+JSON.stringify(label)+'&&e.parentElement.querySelector("strong")?.textContent.trim()==='+JSON.stringify(formatted)+'))()'),label+' '+formatted);
+  }
+ }
+ await as('p','/account/');await click('查询推广伙伴资格');
+ await expectEarnings([['累计佣金',2000],['退款后佣金',2000],['已结算',1000],['结算预留',0],['待核对净额（含欠款）',1000]]);
+ await click('查询申请记录');await text('已结算');
+ const refundAt=Date.now();
+ db.prepare("INSERT INTO payment_refunds(id,transaction_id,out_refund_no,amount_fen,status,reason,credits_reserved,base_amount_fen,service_fee_amount_fen,refund_kind,credits_to_revoke,actor_user_id,reviewer_user_id,reason_category,credit_adjustment_confirmed,credit_batch_id,created_at,updated_at,succeeded_at,resolved_event_id) VALUES('refund','tx','refund-fixture',10000,'succeeded','synthetic confirmed refund',0,10000,0,'special',0,'a','a','merchant_or_legal',1,NULL,?,?,?,'synthetic-refund-event')").run(refundAt,refundAt,refundAt);
+ db.exec("UPDATE payment_transactions SET status='refunded',principal_refunded_fen=10000 WHERE id='tx'; UPDATE recharge_orders SET status='refunded' WHERE id='o'");
+ const refund={action:'refund_sync',domain:'recharge',orderId:'o'};
+ assert.equal((await ok('a','/v1/admin/partners/discovery',refund)).state,'recorded');
+ assert.equal((await ok('a','/v1/admin/partners/discovery',refund)).state,'unchanged');
+ await as('p','/account/');await click('查询推广伙伴资格');
+ await expectEarnings([['累计佣金',2000],['退款后佣金',0],['已结算',1000],['结算预留',0],['待核对净额（含欠款）',-1000]]);
+ await click('查询申请记录');await text('已结算');
+ assert.equal(await ev('document.body.innerText.includes("fixture@example.test")'),false);
+ assert.equal((await call('p','/v1/partners/alipay-requests',{amountFen:1000,recipientVersion:1})).status,409);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_alipay_requests").get().n,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts WHERE status='paid'").get().n,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_commission_refunds").get().n,1);
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
- console.log('PARTNER_BROWSER_QA_PASS: actual Astro account/admin pages; real Worker; synthetic authorization, approval, recipient, request, reserve, reveal, outcome and ownership');
+ console.log('PARTNER_BROWSER_QA_PASS: actual Astro account/admin pages; real Worker; synthetic authorization, approval, recipient, request, reserve, reveal, outcome, ownership, full refund, negative outstanding and duplicate-refund denial');
 }catch(error){
  // Safe diagnostics only: never dump DOM, cookies, or raw financial data.
  console.error('QA route trace',JSON.stringify(routeTrace.slice(-25)));
