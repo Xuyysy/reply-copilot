@@ -58,7 +58,7 @@ export function reviewCloudBusiness(report,{expectedSha,expectedVersion,reportSh
  // DO metrics must be explicitly measured and attributed to this experiment.
  // Empty groups, Worker wall duration and an estimated cost are not evidence.
  const d=independentDo;
- if(d?.source!=='CLOUDFLARE_DO_ANALYTICS'||!uuid(report?.namespaceId)||d.namespaceId!==report.namespaceId||!Number.isSafeInteger(d.requests)||d.requests<=0||!isNum(d.durationGBSeconds)||!isNum(d.cpuP95Ms)||!isNum(d.rowsRead)||!isNum(d.rowsWritten)||!isNum(d.storedBytes)||d.executionErrors!==0)fail('INDEPENDENT_DO_EVIDENCE_INCOMPLETE');
+ if(d?.source!=='CLOUDFLARE_DO_ANALYTICS'||!(/^[0-9a-f]{32}$/.test(report?.namespaceId??''))||d.namespaceId!==report.namespaceId||!Number.isSafeInteger(d.requests)||d.requests<=0||!isNum(d.durationGBSeconds)||!isNum(d.cpuP95Ms)||!isNum(d.rowsRead)||!isNum(d.rowsWritten)||!isNum(d.storedBytes)||d.executionErrors!==0)fail('INDEPENDENT_DO_EVIDENCE_INCOMPLETE');
  else if(d.requests>=100000||d.durationGBSeconds>=13000||d.rowsRead>=5000000||d.rowsWritten>=100000||d.storedBytes>5000000000||d.cpuP95Ms>=30000)fail('DO_RESOURCE_LIMIT_REACHED');
  // These require separate independently reviewed live-account evidence.
  for(const x of ['ACCOUNT_PLAN_ATTESTATION_REQUIRED','THREE_COMPLETE_POST_RELEASE_UTC_DAYS_REQUIRED','PAID_ROLLBACK_REHEARSAL_REQUIRED','PER_INVOCATION_D1_AND_SUBREQUEST_EVIDENCE_REQUIRED','EXPLICIT_RELEASE_AUTHORIZATION_REQUIRED'])fail(x);

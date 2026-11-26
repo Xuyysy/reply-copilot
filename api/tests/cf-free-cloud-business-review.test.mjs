@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {POLICY,reviewCloudBusiness} from '../scripts/lib/cf-free-cloud-business-review.mjs';
-const SHA='a'.repeat(40),VERSION='11111111-2222-3333-4444-555555555555',NS='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',DIGEST='b'.repeat(64);
+const SHA='a'.repeat(40),VERSION='11111111-2222-3333-4444-555555555555',NS='a'.repeat(32),DIGEST='b'.repeat(64);
 const opts={expectedSha:SHA,expectedVersion:VERSION,reportSha256:DIGEST,independentCleanup:{source:'CLOUDFLARE_CONTROL_PLANE',workers:0,d1:0,do:0},independentDo:{source:'CLOUDFLARE_DO_ANALYTICS',namespaceId:NS,requests:100,durationGBSeconds:10,cpuP95Ms:200,rowsRead:0,rowsWritten:0,storedBytes:0,executionErrors:0}};
 function sample(){
  const cases=[],tail=[];let n=0;
