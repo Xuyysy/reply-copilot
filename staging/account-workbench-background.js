@@ -11,7 +11,7 @@ const errors=new Set(['owner_unverified','identity_changed','source_unavailable'
 export function createAccountWorkbenchController({chromeApi=chrome,openDB=openInteractionDB,providerFactory=null}={}){
  const c=chromeApi,locks=new Map(),jobs=new Map();let db,dbQueue=Promise.resolve();
  const taskKey=owner=>'xrh-interaction-task-'+owner;
- const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed']);
+ const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed','source_error','response_mismatch','invalid_pagination','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint']);
  const inDB=fn=>{const p=dbQueue.then(fn,fn);dbQueue=p.catch(()=>{});return p;};
  const key=f=>'xrh-workbench-'+f;
  const store=c.storage.session;
@@ -84,12 +84,27 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      const provider=await providerFactory(b,{signal:task.controller.signal});
      if(!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function')fail('source_unavailable');
      const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
+     // One owner-bound task can cover both timeline kinds. Each kind retains an
+     // independent durable checkpoint in the existing repository.
+     const sources=provider.sources===undefined?['notification']:provider.sources;
+     if(!Array.isArray(sources)||sources.length<1||sources.length>2||new Set(sources).size!==sources.length||sources.some(s=>!['notification','post'].includes(s)))fail('source_unavailable');
      db??=await openDB();
      const session=await beginSession(db,b.ownerUserId);
-     let refresh=false;
-     try{const dataset=await readOwnerDataset(db,session);refresh=dataset.jobs.some(j=>j.providerId===provider.id&&j.source==='notification'&&j.done);}finally{await endSession(db,session);}
-     const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,refresh,maxPages:30,maxMs:90000,signal:task.controller.signal,onProgress:p=>{progress={pages:p.pages,inserted:p.inserted};}});
-     reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
+     let prior;
+     try{prior=await readOwnerDataset(db,session);}finally{await endSession(db,session);}
+     let completedPages=0,completedInserted=0;
+     for(const source of sources){
+       await verifyBound();
+       const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
+       const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:30,maxMs:90000,signal:task.controller.signal,onProgress:p=>{
+         progress={pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
+       }});
+       completedPages+=result.committed;completedInserted+=result.inserted;
+       progress={pages:completedPages,inserted:completedInserted};
+       reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
+       // A partial/failed source must not be hidden behind success in another.
+       if(reason!=='source_exhausted')break;
+     }
    }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';}
    finally{try{await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}}});
    task.promise.catch(()=>{});
