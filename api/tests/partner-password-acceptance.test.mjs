@@ -53,11 +53,27 @@ test('seven synthetic accounts exercise real login, reauthentication and ownersh
  assert.equal((await request('/v1/admin/partners/policy',{id:'a',csrf:auth,body:{...policy,userId:'e',operationId:randomUUID()}})).status,409,'marked account excluded');
  assert.equal((await request('/v1/partners/me',{id:'p'})).body.policy.user_id,'p');
  for(const id of ids.filter(x=>x!=='p'))assert.equal((await request('/v1/partners/me',{id})).body.policy,null,'isolated '+id);
- for(const id of ids){
+ // Local acceptance only: retain the singleton admin until all user cleanup
+ // is verified. Logout first; freezing alone does not revoke the session.
+ const temporaryUsers=ids.filter(id=>id!=='a');
+ for(const id of temporaryUsers){
   const csrf=sessions.get(id).csrf;
   assert.equal((await request('/v1/auth/logout',{id,body:{},csrf})).status,200,'logout '+id);
   assert.equal((await request('/v1/me',{id})).status,401,'revoked '+id);
  }
+ const freeze=(userIds,csrf=auth)=>request('/v1/admin/users/bulk-status',{id:'a',csrf,body:{userIds,status:'frozen',operationId:randomUUID(),reason:'local QA lifecycle cleanup'}});
+ assert.equal((await freeze(['a',...temporaryUsers])).status,400,'singleton admin protected');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM users WHERE status='frozen'").get().n,0);
+ assert.equal((await freeze(temporaryUsers,'invalid')).status,403,'freeze requires CSRF');
+ assert.equal((await freeze(temporaryUsers)).status,200);
+ for(const id of temporaryUsers){
+  assert.equal(db.prepare('SELECT status FROM users WHERE id=?').get(id).status,'frozen');
+  assert.equal((await request('/v1/me',{id})).status,401,'frozen session denied '+id);
+ }
+ assert.equal((await request('/v1/auth/login',{body:{identity:'p@example.test',password:passwords.get('p')}})).status,403,'correct password cannot access frozen partner');
+ assert.equal(db.prepare("SELECT status FROM users WHERE id='a'").get().status,'active');
+ assert.equal((await request('/v1/auth/logout',{id:'a',body:{},csrf:auth})).status,200,'admin logout');
+ assert.equal((await request('/v1/me',{id:'a'})).status,401,'admin session revoked');
  assert.equal(db.prepare("SELECT COUNT(*) n FROM sessions WHERE revoked_at IS NULL").get().n,0);
  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_commissions').get().n,0);
  assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
