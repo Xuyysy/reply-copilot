@@ -10,22 +10,26 @@ const fail=code=>{throw Error(code)};
 const errors=new Set(['owner_unverified','identity_changed','source_unavailable','busy','invalid_context','cancelled','workspace_limit']);
 export function createAccountWorkbenchController({chromeApi=chrome,openDB=openInteractionDB,providerFactory=null}={}){
  const c=chromeApi,locks=new Map(),jobs=new Map();let db,dbQueue=Promise.resolve();
+ const taskKey=owner=>'xrh-interaction-task-'+owner;
+ const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed']);
  const inDB=fn=>{const p=dbQueue.then(fn,fn);dbQueue=p.catch(()=>{});return p;};
  const key=f=>'xrh-workbench-'+f;
  const store=c.storage.session;
  const get=async f=>(await store.get(key(f)))[key(f)]??null;
  const put=(f,v)=>store.set({[key(f)]:v});
+ const readTask=async owner=>{const v=(await store.get(taskKey(owner)))[taskKey(owner)];if(!v||v.ownerUserId!==owner)return null;return v.state==='running'&&!jobs.has(owner)?{...v,state:'interrupted',reason:'interrupted'}:v;};
+ const saveTask=(owner,v)=>store.set({[taskKey(owner)]:{ownerUserId:owner,...v}});
  const path=f=>c.runtime.getURL(PATHS[f]);
  async function identity(tabId){
    if(!idOk(tabId))fail('owner_unverified');
-   const r=await c.tabs.sendMessage(tabId,{type:'XRH_STAGING_WORKBENCH_IDENTITY'});
+   let r,timer;try{r=await Promise.race([c.tabs.sendMessage(tabId,{type:'XRH_STAGING_WORKBENCH_IDENTITY'}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('owner_unverified')),2000);})]);}finally{clearTimeout(timer);}
    if(!r?.ok||!ownerOk(r.value))fail('owner_unverified');return {ownerUserId:r.value.ownerUserId,handle:r.value.handle.toLowerCase()};
  }
  async function verified(f,sender){
    const b=await get(f);if(!b||sender.tab?.id!==b.workbenchTabId||sender.url!==path(f))fail('invalid_context');
    const current=await identity(b.sourceTabId);if(!same(b,current))fail('identity_changed');
    // Re-read binding after async identity probe; a new open may have replaced it.
-   const after=await get(f);if(after?.bindingId!==b.bindingId)fail('identity_changed');return b;
+   const after=await get(f);if(after?.bindingId!==b.bindingId||after.sourceTabId!==b.sourceTabId)fail('identity_changed');return b;
  }
  async function open(f){
    const [tab]=await c.tabs.query({active:true,currentWindow:true});
@@ -42,18 +46,19 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  async function read(f,sender,{clear=false}={}){
    const b=await verified(f,sender);
    if(f==='follow')return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},sourceReady:false};
-   if(jobs.has(b.ownerUserId))return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},running:true,sourceReady:!!providerFactory};
+   const task=await readTask(b.ownerUserId);
+   if(jobs.size){if(clear)fail('busy');return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},running:jobs.has(b.ownerUserId),busy:true,task,sourceReady:!!providerFactory};}
    return inDB(async()=>{
    await verified(f,sender);
-   if(jobs.size)fail('busy');
+   if(jobs.size){if(clear)fail('busy');return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},running:jobs.has(b.ownerUserId),busy:true,task:await readTask(b.ownerUserId),sourceReady:!!providerFactory};}
    db??=await openDB();
    const session=await beginSession(db,b.ownerUserId);
    try{
      await verified(f,sender);
-     if(clear)await clearOwner(db,session);
+     if(clear){await clearOwner(db,session);await saveTask(b.ownerUserId,{state:'idle',updatedAt:Date.now()});}
      const dataset=await readOwnerDataset(db,session);
      await verified(f,sender);
-     return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},dataset,sourceReady:!!providerFactory,running:false};
+     return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},dataset,sourceReady:!!providerFactory,running:false,task:await readTask(b.ownerUserId)};
    }finally{await endSession(db,session);}
    });
  }
@@ -64,12 +69,30 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(f!=='interaction'||!providerFactory)fail('source_unavailable');
    if(authorized!==true)fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
-   const task={controller:new AbortController()};jobs.set(b.ownerUserId,task);
-   task.promise=inDB(async()=>{try{
+   if(jobs.size)fail('busy');
+   const task={controller:new AbortController(),runId:crypto.randomUUID()};jobs.set(b.ownerUserId,task);
+   let progress={pages:0,inserted:0};
+   const write=async(state,reason=null)=>saveTask(b.ownerUserId,{runId:task.runId,state,reason,...progress,updatedAt:Date.now()});
+   try{await write('running');}catch(e){jobs.delete(b.ownerUserId);throw e;}
+   task.promise=inDB(async()=>{let reason='sync_failed';try{
+     const verifyBound=async()=>{
+       if(task.controller.signal.aborted)fail('cancelled');
+       const bound=await get(f);if(bound?.bindingId!==b.bindingId)fail('identity_changed');
+       const current=await identity(bound.sourceTabId);if(!same(b,current))fail('identity_changed');
+     };
+     await verifyBound();
      const provider=await providerFactory(b,{signal:task.controller.signal});
+     if(!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function')fail('source_unavailable');
+     const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
      db??=await openDB();
-     task.result=await syncInteractions(db,provider,{ownerUserId:b.ownerUserId,maxPages:30,maxMs:90000,signal:task.controller.signal});
-   }catch{task.result={reason:'source_unavailable'};}finally{jobs.delete(b.ownerUserId);}});
+     const session=await beginSession(db,b.ownerUserId);
+     let refresh=false;
+     try{const dataset=await readOwnerDataset(db,session);refresh=dataset.jobs.some(j=>j.providerId===provider.id&&j.source==='notification'&&j.done);}finally{await endSession(db,session);}
+     const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,refresh,maxPages:30,maxMs:90000,signal:task.controller.signal,onProgress:p=>{progress={pages:p.pages,inserted:p.inserted};}});
+     reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
+   }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';}
+   finally{try{await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}}});
+   task.promise.catch(()=>{});
    return {running:true};
  }
  async function dispatch(m,sender){
@@ -84,7 +107,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(m.action==='identity'){const b=await verified(f,sender);return {ownerUserId:b.ownerUserId,handle:b.handle,bindingId:b.bindingId};}
    if(m.action==='clear'){if(m.confirmed!==true||f!=='interaction')fail('invalid_context');return read(f,sender,{clear:true});}
    if(m.action==='sync')return startSync(f,sender,m.authorized);
-   if(m.action==='stop'){const b=await verified(f,sender);jobs.get(b.ownerUserId)?.controller.abort();return {stopped:true};}
+   if(m.action==='stop'){const b=await verified(f,sender);if(f!=='interaction')fail('invalid_context');jobs.get(b.ownerUserId)?.controller.abort();return {stopped:true};}
    fail('invalid_context');
  }
  const listener=(m,sender,respond)=>{

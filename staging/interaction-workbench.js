@@ -2,7 +2,7 @@ import {analyzeLiveDataset,interactionDetails} from '../interaction-manager/anal
 import {rankingCsv} from '../interaction-manager/ui/csv.js';
 const $=id=>document.getElementById(id),PAGE=50;
 const labels={like:'点赞',reply:'回复',repost:'转发',quote:'引用',mention:'提及'};
-let data=null,owner=null,people=[],page=0,selected=null,offset=0,busy=false,generation=0;
+let data=null,owner=null,people=[],page=0,selected=null,offset=0,busy=false,generation=0,sourceReady=false,waiting=false;
 const msg=async(action,extra={})=>{const r=await chrome.runtime.sendMessage({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra});if(!r?.ok)throw Error(r?.error??'source_error');return r.value;};
 const settings=()=>({direction:'inbound',type:$('type').value,days:$('days').value?Number($('days').value):null,sort:$('sort').value,query:$('search').value});
 const node=(tag,text)=>{const e=document.createElement(tag);e.textContent=text;return e;};
@@ -18,15 +18,15 @@ function render(){if(!data)return;const v=analyzeLiveDataset(data,settings());pe
  $('empty').hidden=people.length>0;$('pagination').hidden=people.length<=PAGE;$('page').textContent=(page+1)+' / '+Math.max(1,Math.ceil(people.length/PAGE));$('prev').disabled=page===0;$('next').disabled=(page+1)*PAGE>=people.length;$('export').disabled=!people.length;
  $('quality').textContent='已存 '+v.stored+' 条，未知时间 '+v.unknownTime+' 条（日期筛选排除 '+v.excludedUnknownTime+' 条）。'+v.coverage.map(c=>c.source+'：'+c.uniqueEvents+' 条，'+new Date(c.lastObservedAt).toLocaleString()).join('；')+'。非完整历史。';
 }
-async function load(action='view',extra={}){if(busy)return;busy=true;$('refresh').disabled=true;const g=++generation;try{const v=await msg(action,extra);if(g!==generation)return;if(v.running){$('status').textContent='后台同步进行中，已保存的进度不会丢失。';return;}if(!v.dataset||v.dataset.ownerUserId!==v.identity?.ownerUserId)throw Error('identity_changed');
+async function load(action='view',extra={}){if(busy)return;busy=true;$('refresh').disabled=true;const g=++generation;try{const v=await msg(action,extra);if(g!==generation)return;if(v.busy||v.running){if(owner&&v.identity?.ownerUserId!==owner.ownerUserId)hide('账号已变化，请重新打开。');waiting=true;$('status').textContent=v.running?'后台同步进行中，已提交进度保留。':'后台正在处理其他任务。';$('refresh').textContent=v.running?'停止':'刷新';return;}waiting=false;sourceReady=v.sourceReady===true;$('refresh').textContent='刷新';if(!v.dataset||v.dataset.ownerUserId!==v.identity?.ownerUserId)throw Error('identity_changed');
  owner=v.identity;data=v.dataset;page=0;selected=null;$('detail').replaceChildren();$('detail-title').textContent='互动明细';$('detail-empty').hidden=false;$('more').hidden=true;
- $('owner').textContent='@'+owner.handle;$('source-note').textContent=v.sourceReady?'本地存储；后台同步需授权。':'当前仅支持读取已有本地缓存，实时后台数据源尚未接入。';$('status').textContent=v.sourceReady?'本地缓存':'本地缓存 · 实时同步尚未接入';$('content').hidden=false;$('clear').disabled=false;render();
+ $('owner').textContent='@'+owner.handle;$('source-note').textContent=v.sourceReady?'本地存储；后台同步需授权。':'当前仅支持读取已有本地缓存，实时后台数据源尚未接入。';$('status').textContent=v.sourceReady?(v.task?.state==='interrupted'?'上次同步已中断，刷新可继续':v.task?.reason==='rate_limited'?'接口限流，稍后手动刷新':'本地缓存'):'本地缓存 · 实时同步尚未接入';$('content').hidden=false;$('clear').disabled=false;render();
  }catch{if(g===generation)hide('无法确认当前 X 账号。请从已登录的 X 页面侧边栏打开。');}finally{busy=false;$('refresh').disabled=false;}}
- $('refresh').onclick=()=>load();$('clear').onclick=async()=>{if(await guard()&&confirm('清除当前 X 账号本地互动记录？'))void load('clear',{confirmed:true});};
+ $('refresh').onclick=async()=>{if(busy)return;if(waiting&&$('refresh').textContent==='停止'){try{await msg('stop');}catch{}return;}if(!sourceReady||!owner)return load();if(!await guard())return;if(!confirm('同步当前 X 账号的互动数据？仅通过已授权的数据源，记录保存在本机。'))return;try{await msg('sync',{authorized:true});waiting=true;await load();}catch{$('status').textContent='同步暂不可用，已有缓存保留。';}};$('clear').onclick=async()=>{if(await guard()&&confirm('清除当前 X 账号本地互动记录？'))void load('clear',{confirmed:true});};
  $('export').onclick=async()=>{if(!await guard())return;const url=URL.createObjectURL(new Blob(['\uFEFF'+rankingCsv(people)],{type:'text/csv;charset=utf-8'})),a=node('a','');a.href=url;a.download='interaction-ranking.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
  for(const id of ['search','type','days','sort'])$(id).addEventListener(id==='search'?'input':'change',async()=>{if(!await guard())return;page=0;selected=null;$('detail').replaceChildren();$('detail-title').textContent='互动明细';$('detail-empty').hidden=false;$('more').hidden=true;render();});
  $('prev').onclick=async()=>{if(await guard()&&page>0){page--;render();}};$('next').onclick=async()=>{if(await guard()&&(page+1)*PAGE<people.length){page++;render();}};$('more').onclick=async()=>{if(await guard())details(false);};
- const timer=setInterval(()=>{if(!busy&&owner&&document.visibilityState==='visible')void guard();},1500);
+ const timer=setInterval(()=>{if(!busy&&document.visibilityState==='visible'){if(waiting)void load();else if(owner)void guard();}},1500);
  window.addEventListener('pagehide',()=>{clearInterval(timer);generation++;},{once:true});
  // A newly created inactive tab can finish loading before its binding is saved.
  (async()=>{await new Promise(r=>setTimeout(r,150));await load();})();
