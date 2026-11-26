@@ -11,7 +11,8 @@ concurrency:
   cancel-in-progress: false
 jobs:
   offline:
-    if: startsWith(github.event.head_commit.message, 'ci-lite: authorized isolated business acceptance')
+    if: >-
+      startsWith(github.event.head_commit.message, 'ci-lite: authorized isolated business acceptance')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
