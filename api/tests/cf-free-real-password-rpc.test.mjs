@@ -202,12 +202,13 @@ test('private verifier handles real administrator reauthentication and password 
     const cookie=a.cookie.split(';')[0],token=decodeURIComponent(cookie.slice('rc_session='.length));
     const csrf=createHmac('sha256',AUTH).update('csrf:'+token).digest('hex');
     const request=async(path,body,target='candidate',csrfToken=csrf)=>{
-      const response=await mf.dispatchFetch(API+path,{method:'POST',headers:{Origin:WEB,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.82',Cookie:cookie,'X-CSRF-Token':csrfToken,'x-local-test-target':target},body:JSON.stringify(body)});
+      const response=await mf.dispatchFetch(API+path,{method:'POST',headers:{Origin:WEB,'Content-Type':'application/json','CF-Connecting-IP':'192.0.2.82',Cookie:cookie,'X-CSRF-Token':csrfToken,'X-Reply-Copilot-Action':'1','x-local-test-target':target},body:JSON.stringify(body)});
       return {status:response.status,body:await response.json()};
     };
     const readHash=async()=> (await db.prepare('SELECT password_hash FROM users WHERE id=?').bind(user).first()).password_hash;
     const count=async(sql)=> (await db.prepare(sql).first()).n;
-    assert.equal((await request('/v1/admin/reauth',{password:PASSWORD},'candidate','')).status,403);
+    const badCsrf=await request('/v1/admin/reauth',{password:PASSWORD},'candidate','');
+    assert.equal(badCsrf.status,403);assert.equal(badCsrf.body.code,'CSRF_DENIED');
     assert.equal((await request('/v1/admin/reauth',{password:'wrong-synthetic-password'})).status,401);
     const denied=await request('/v1/admin/reauth',{password:PASSWORD},'broken');
     assert.equal(denied.status,503);assert.equal(denied.body.code,'PASSWORD_VERIFIER_UNAVAILABLE');
