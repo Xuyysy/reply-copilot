@@ -1,0 +1,71 @@
+name: Approved Staging Worker only — Paid performance
+on:
+  push:
+    branches: ['chatgpt/staging-paid-worker-approved-20261126']
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xrh-staging-worker-release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Verify exact successful CI and specialist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for run in 45769992516 45769992580; do
+            gh api repos/Xuyysy/reply-copilot/actions/runs/$run --jq '.head_sha + " " + .status + " " + .conclusion' | grep -Fx 'bd3c42bedeccfbdd973ebd7a28c2d2b828cfafc5 completed success'
+          done
+      - uses: actions/checkout@v4
+        with:
+          ref: 'bd3c42bedeccfbdd973ebd7a28c2d2b828cfafc5'
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - run: npm --prefix api run typecheck
+      - name: Compile exact Staging source without deployment
+        working-directory: api
+        run: |
+          ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/worker-artifact"
+          python3 - <<'PY'
+          import os, pathlib, hashlib, json
+          p=pathlib.Path(os.environ['RUNNER_TEMP'])/'worker-artifact'
+          assert (p/'index.js').is_file()
+          assert not any(x.suffix in ('.wasm','.mjs') or x.suffix=='.js' and x.name!='index.js' for x in p.rglob('*') if x.is_file())
+          (p/'manifest.json').write_text(json.dumps({'sourceSha':'bd3c42bedeccfbdd973ebd7a28c2d2b828cfafc5','sha256':hashlib.sha256((p/'index.js').read_bytes()).hexdigest(),'target':'reply-copilot-api-staging'}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: approved-staging-worker-bd3c42bedeccfbdd973ebd7a28c2d2b828cfafc5
+          path: |
+            ${{ runner.temp }}/worker-artifact/index.js
+            ${{ runner.temp }}/worker-artifact/manifest.json
+          if-no-files-found: error
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    environment:
+      name: staging
+      url: https://api-staging.x-reply-helper.top
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: approved-staging-worker-bd3c42bedeccfbdd973ebd7a28c2d2b828cfafc5
+          path: ${{ runner.temp }}/worker-artifact
+      - name: Upload, validate inherited bindings, activate and verify Staging only
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: python3 scripts/approved-staging-worker-20261126.py
