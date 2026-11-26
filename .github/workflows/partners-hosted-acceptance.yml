@@ -32,7 +32,10 @@ jobs:
           const fields=['iss','aud','repository','repository_id','event_name','ref','head_ref','base_ref','sha','workflow_ref','workflow_sha','run_id','run_attempt','runner_environment'];
           console.log('QA_OIDC_CLAIMS '+JSON.stringify(Object.fromEntries(fields.map(k=>[k,claims[k]]))));
           JS
+      # Not authorized for execution until a reviewed credential channel is installed.
+      # Retain the proposed scenario without retrying the blocked provisioning.
       - name: Run hosted acceptance through exact-run short-lived grant
+        if: ${{ false }}
         shell: bash
         run: |
           node --input-type=module <<'JS'
@@ -81,3 +84,23 @@ jobs:
             assert.equal(close.status,200,'QA grant cleanup');
           }
           JS
+
+  offline-safety:
+    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm --prefix api ci
+      - name: Actual password authentication and offline fail-closed checks
+        run: node --test --test-concurrency=1 api/tests/partner-password-acceptance.test.mjs api/tests/partner-hosted-denial.test.mjs
+      - name: Explicitly mark hosted acceptance as blocked
+        if: always()
+        run: echo 'Hosted grant and login acceptance NOT executed. Requires separately reviewed protected credential provisioning.' >> "$GITHUB_STEP_SUMMARY"
