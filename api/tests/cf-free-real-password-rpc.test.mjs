@@ -195,7 +195,7 @@ test('private verifier handles real administrator reauthentication and password 
   try{
     const user='test-210000',identity=user+'@example.test';
     await db.prepare("UPDATE users SET role='admin' WHERE id=?").bind(user).run();
-    await db.prepare("INSERT INTO site_administrator(id,user_id,created_at) VALUES(1,?,1)").bind(user).run();
+    await db.prepare("INSERT INTO site_administrator VALUES(1,?,1)").bind(user).run();
     const a=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},80);
     const b=await call(mf,'/v1/auth/login',{identity,password:PASSWORD},81);
     assert.equal(a.status,200);assert.equal(b.status,200);

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DAILY_LIMITS,REQUIRED_SCENARIOS,assessFreeMigrationEvidence} from '../scripts/lib/cf-free-migration-evidence.mjs';
-const options={expectedCandidateSha:'a'.repeat(40),expectedVersion:'candidate-version',now:Date.UTC(2026,10,26,2)};
-const complete=()=>({candidateSha:options.expectedCandidateSha,candidateVersion:options.expectedVersion,source:'ISOLATED_CLOUD_SYNTHETIC_PLUS_ACCOUNT_ANALYTICS',
+const options={expectedCandidateSha:'a'.repeat(40),expectedVersion:'candidate-version',expectedCloudVersion:'isolated-cloud-version',now:Date.UTC(2026,10,26,2)};
+const complete=()=>({candidateSha:options.expectedCandidateSha,candidateVersion:options.expectedVersion,cloudCandidateVersion:options.expectedCloudVersion,source:'ISOLATED_CLOUD_SYNTHETIC_PLUS_ACCOUNT_ANALYTICS',
  isolatedSyntheticOnly:true,unexpectedOutbound:0,productionDataUntouched:true,accountCandidateReleaseAt:'2026-11-22T12:00:00Z',
- scenarios:REQUIRED_SCENARIOS.map(scenario=>({scenario,source:'CLOUDFLARE_INVOCATION_CPU_MS',allExpectedOutcomes:true,completeCoverage:true,samples:Array(10).fill(3),maxSubrequests:30,maxD1Statements:20})),
+ scenarios:REQUIRED_SCENARIOS.map(scenario=>({scenario,candidateSha:options.expectedCandidateSha,cloudVersion:options.expectedCloudVersion,source:'CLOUDFLARE_INVOCATION_CPU_MS',allExpectedOutcomes:true,completeCoverage:true,samples:Array(10).fill(3),maxSubrequests:30,maxD1Statements:20})),
  inventory:{complete:true,allDoSQLite:true,workerCount:5,cronCount:2,doClassCount:3,d1DatabaseBytes:[1000],doStoredBytes:0},
  days:['2026-11-23','2026-11-24','2026-11-25'].map(day=>({day,completeAccount:true,candidateVersion:options.expectedVersion,mixedVersions:false,source:'CLOUDFLARE_ACCOUNT_USAGE',truncated:false,
  metrics:{...Object.fromEntries(Object.keys(DAILY_LIMITS).map(k=>[k,100])),maxHttpCpuMs:4,maxCronCpuMs:4,executionErrors:0}})),
@@ -13,6 +13,7 @@ test('complete evidence still never certifies Free or authorizes deployment',()=
 test('final evidence rejects missing routes, wall-time substitutions, missing samples, quota and storage gaps, mixed versions and unsafe rollback',()=>{
  const cases=[
  [e=>e.scenarios.pop(),'ROUTE_MISSING:payment-replay-synthetic'],
+ [e=>e.scenarios[0].cloudVersion='wrong-version','ROUTE_EVIDENCE_INCOMPLETE:login-10000-correct'],
  [e=>e.scenarios[0].source='LOCAL_WALL_TIME','ROUTE_EVIDENCE_INCOMPLETE:login-10000-correct'],
  [e=>e.scenarios[0].samples[0]=9,'ROUTE_CPU_MARGIN_EXCEEDED:login-10000-correct'],
  [e=>e.scenarios[0].maxD1Statements=51,'ROUTE_D1_QUERY_BUDGET_UNVERIFIED_OR_EXCEEDED:login-10000-correct'],

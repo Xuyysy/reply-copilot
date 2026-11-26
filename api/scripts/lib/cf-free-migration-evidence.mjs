@@ -15,11 +15,11 @@ const integer=x=>num(x)&&Number.isSafeInteger(x);
 const date=x=>typeof x==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(x)&&Number.isFinite(Date.parse(x+'T00:00:00Z'))&&new Date(Date.parse(x+'T00:00:00Z')).toISOString().slice(0,10)===x;
 const dayMs=86400000;
 const p95=values=>[...values].sort((a,b)=>a-b)[Math.ceil(values.length*.95)-1];
-export function assessFreeMigrationEvidence(evidence,{expectedCandidateSha,expectedVersion,now=Date.now()}={}){
+export function assessFreeMigrationEvidence(evidence,{expectedCandidateSha,expectedVersion,expectedCloudVersion,now=Date.now()}={}){
   const blockers=[],cautions=[];
   const fail=x=>{if(!blockers.includes(x))blockers.push(x)};
   const caution=x=>{if(!cautions.includes(x))cautions.push(x)};
-  if(!validSha(expectedCandidateSha)||evidence?.candidateSha!==expectedCandidateSha||typeof expectedVersion!=='string'||!expectedVersion||evidence?.candidateVersion!==expectedVersion)fail('CANDIDATE_IDENTITY_MISMATCH');
+  if(!validSha(expectedCandidateSha)||evidence?.candidateSha!==expectedCandidateSha||typeof expectedVersion!=='string'||!expectedVersion||evidence?.candidateVersion!==expectedVersion||typeof expectedCloudVersion!=='string'||!expectedCloudVersion||evidence?.cloudCandidateVersion!==expectedCloudVersion)fail('CANDIDATE_IDENTITY_MISMATCH');
   if(evidence?.source!=='ISOLATED_CLOUD_SYNTHETIC_PLUS_ACCOUNT_ANALYTICS')fail('CLOUD_EVIDENCE_SOURCE_REQUIRED');
   if(evidence?.isolatedSyntheticOnly!==true||evidence?.unexpectedOutbound!==0||evidence?.productionDataUntouched!==true)fail('ISOLATION_NOT_ATTESTED');
   const routes=Array.isArray(evidence?.scenarios)?evidence.scenarios:[];
@@ -28,7 +28,7 @@ export function assessFreeMigrationEvidence(evidence,{expectedCandidateSha,expec
     const id=s?.scenario;
     if(!REQUIRED_SCENARIOS.includes(id)||seen.has(id)){fail('UNKNOWN_OR_DUPLICATE_SCENARIO');continue;}seen.add(id);
     // The engineering margin is intentional. Per-invocation CF CPU, not wall duration.
-    if(s?.source!=='CLOUDFLARE_INVOCATION_CPU_MS'||s?.allExpectedOutcomes!==true||s?.completeCoverage!==true||
+    if(s?.source!=='CLOUDFLARE_INVOCATION_CPU_MS'||s?.candidateSha!==expectedCandidateSha||s?.cloudVersion!==expectedCloudVersion||s?.allExpectedOutcomes!==true||s?.completeCoverage!==true||
        !Array.isArray(s?.samples)||s.samples.length<10||s.samples.length>10000||s.samples.some(x=>!num(x)))fail('ROUTE_EVIDENCE_INCOMPLETE:'+id);
     else if(Math.max(...s.samples)>8||p95(s.samples)>5)fail('ROUTE_CPU_MARGIN_EXCEEDED:'+id);
     if(!integer(s?.maxSubrequests)||s.maxSubrequests>50)fail('ROUTE_SUBREQUEST_BUDGET_UNVERIFIED_OR_EXCEEDED:'+id);
