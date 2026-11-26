@@ -17,6 +17,16 @@ import {adminCommerceOrders,adminCommerceSummary,adminCommerceUser} from "./admi
 import {adminOperationsInsights,acknowledgeExpiredCreditAlert} from "./admin-operations-insights";
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
+import {myPartnerPolicy,adminPartnerPolicy} from "./partners";
+import {myAlipayRecipient} from "./partner-recipient";
+import {myAlipayRequests,adminAlipayRequests} from "./partner-requests";
+import {adminPartnerOrderPreview} from "./partner-order-preview";
+import {adminPartnerAccrualReview} from "./partner-accrual-review";
+import {adminPayoutReview} from "./partner-payout-review";
+import {adminPartnerDiscovery} from "./partner-discovery";
+import {scheduledPartnerDiscovery} from "./partner-scheduled";
+import {scheduledPartnerRefundSync} from "./partner-refund-scheduled";
+import {scheduledPartnerAccrual} from "./partner-accrual-scheduled";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminAuthCpuReadiness} from './admin-auth-cpu-readiness';
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
@@ -53,7 +63,7 @@ async function feedback(request: Request, env: Env): Promise<Response> {
 const adminEntitlementActivity=createAdminEntitlementActivity({requireAdminSession,response,ApiFailure});
 
 export default {
-  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); },
+  async scheduled(_controller: ScheduledController, env: Env): Promise<void> { await cleanup(env); await scheduledPartnerDiscovery(env,Date.now()); await scheduledPartnerRefundSync(env,Date.now()); await scheduledPartnerAccrual(env,Date.now()); },
   async fetch(request: Request, env: Env): Promise<Response> {
     const path = new URL(request.url).pathname;
     const isRegistration = request.method === "POST" && path === "/v1/auth/register";
@@ -178,6 +188,15 @@ export default {
       if (request.method === "GET" && path === "/v1/referrals/me") return await myReferrals(request,env);
       if (request.method === "POST" && path === "/v1/referrals/link") return await createReferralLink(request,env);
       if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);
+      if (request.method === "GET" && path === "/v1/partners/me") return await myPartnerPolicy(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/alipay-recipient") return await myAlipayRecipient(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/alipay-requests") return await myAlipayRequests(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/alipay-requests") return await adminAlipayRequests(request,env);
+      if (request.method === "GET" && path === "/v1/admin/partners/order-preview") return await adminPartnerOrderPreview(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/accrual-review") return await adminPartnerAccrualReview(request,env);
+      if (request.method === "POST" && path === "/v1/admin/partners/payout-review") return await adminPayoutReview(request,env);
+      if (request.method === "POST" && path === "/v1/admin/partners/discovery") return await adminPartnerDiscovery(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/policy") return await adminPartnerPolicy(request,env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await filteredUsers(request,env);
       if (request.method === "GET" && path === "/v1/admin/packages") return await adminPackages(request,env);

@@ -1,0 +1,162 @@
+-- Source-only proposal. Apply to synthetic fixtures after V1-A/B only.
+-- No migration number; no production D1 access or activation authorization.
+-- Explicit, immutable activation windows prevent old orders and disabled
+-- intervals from being retroactively commissioned. No seeded active window.
+CREATE TABLE partner_accrual_windows (
+ id TEXT PRIMARY KEY,
+ starts_at INTEGER NOT NULL CHECK(typeof(starts_at)='integer' AND starts_at>0),
+ ends_at INTEGER CHECK(ends_at IS NULL OR (typeof(ends_at)='integer' AND ends_at>starts_at)),
+ basis TEXT NOT NULL CHECK(basis='product_principal'),
+ hold_ms INTEGER NOT NULL CHECK(typeof(hold_ms)='integer' AND hold_ms BETWEEN 1 AND 31536000000),
+ authorized_by TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500)
+);
+CREATE UNIQUE INDEX partner_one_active_accrual_window ON partner_accrual_windows((1)) WHERE ends_at IS NULL;
+CREATE TRIGGER partner_accrual_window_no_overlap BEFORE INSERT ON partner_accrual_windows
+BEGIN SELECT CASE WHEN NEW.ends_at IS NOT NULL OR EXISTS(
+ SELECT 1 FROM partner_accrual_windows w WHERE w.ends_at IS NULL OR w.ends_at>NEW.starts_at
+ ) THEN RAISE(ABORT,'accrual window overlap') END; END;
+CREATE TRIGGER partner_accrual_window_close_only BEFORE UPDATE ON partner_accrual_windows
+BEGIN SELECT CASE WHEN OLD.ends_at IS NOT NULL OR NEW.ends_at IS NULL OR NEW.ends_at<=OLD.starts_at
+ OR NEW.id<>OLD.id OR NEW.starts_at<>OLD.starts_at OR NEW.basis<>OLD.basis OR NEW.hold_ms<>OLD.hold_ms
+ OR NEW.authorized_by<>OLD.authorized_by OR NEW.reason<>OLD.reason
+ THEN RAISE(ABORT,'accrual window immutable') END; END;
+CREATE TRIGGER partner_accrual_window_no_delete BEFORE DELETE ON partner_accrual_windows
+BEGIN SELECT RAISE(ABORT,'accrual window immutable'); END;
+-- Durable recovery work, one row per source order. No user-provided monetary
+-- facts; a future trusted adapter rereads evidence before every attempt.
+CREATE TABLE partner_accrual_jobs (
+ order_domain TEXT NOT NULL CHECK(order_domain IN ('recharge','subscription')),
+ order_id TEXT NOT NULL,
+ window_id TEXT NOT NULL REFERENCES partner_accrual_windows(id),
+ paid_at INTEGER NOT NULL CHECK(typeof(paid_at)='integer' AND paid_at>0),
+ created_at INTEGER NOT NULL CHECK(typeof(created_at)='integer' AND created_at>=paid_at),
+ state TEXT NOT NULL CHECK(state IN ('pending','review','done')),
+ attempts INTEGER NOT NULL DEFAULT 0 CHECK(typeof(attempts)='integer' AND attempts BETWEEN 0 AND 20),
+ next_attempt_at INTEGER NOT NULL CHECK(typeof(next_attempt_at)='integer' AND next_attempt_at>=created_at),
+ last_code TEXT NOT NULL CHECK(length(last_code) BETWEEN 1 AND 80),
+ updated_at INTEGER NOT NULL CHECK(updated_at>=created_at),
+ PRIMARY KEY(order_domain,order_id)
+);
+CREATE INDEX partner_accrual_due ON partner_accrual_jobs(state,next_attempt_at,order_domain,order_id);
+CREATE TRIGGER partner_accrual_job_no_delete BEFORE DELETE ON partner_accrual_jobs
+BEGIN SELECT RAISE(ABORT,'accrual recovery history retained'); END;
+CREATE TRIGGER partner_accrual_job_guard BEFORE UPDATE ON partner_accrual_jobs
+BEGIN SELECT CASE WHEN OLD.state='done' OR NEW.order_domain<>OLD.order_domain OR NEW.order_id<>OLD.order_id
+ OR NEW.window_id<>OLD.window_id OR NEW.paid_at<>OLD.paid_at OR NEW.created_at<>OLD.created_at
+ OR NEW.updated_at<OLD.updated_at OR NEW.attempts<>OLD.attempts+1
+ THEN RAISE(ABORT,'invalid accrual recovery transition') END;
+ SELECT CASE WHEN NEW.state='done' AND NOT EXISTS(SELECT 1 FROM partner_commissions c
+ WHERE c.order_domain=NEW.order_domain AND c.order_id=NEW.order_id AND c.paid_at=NEW.paid_at)
+ THEN RAISE(ABORT,'commission not recorded') END; END;
+
+-- Transaction-local invariant assertions. Any false assertion aborts the
+-- entire D1.batch; rows are removed in the same successful batch.
+CREATE TABLE partner_recovery_assertions (
+ id TEXT PRIMARY KEY,
+ ok INTEGER NOT NULL CHECK(ok=1)
+);
+
+-- Default-off non-production single-order review. Manual risk review is not a provider attestation.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_accrual_review_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_accrual_review_audits (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ reviewed_at INTEGER NOT NULL CHECK(typeof(reviewed_at)='integer' AND reviewed_at>0),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_commissions(order_domain,order_id)
+);
+CREATE TRIGGER partner_review_audit_no_update BEFORE UPDATE ON partner_accrual_review_audits
+BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
+CREATE TRIGGER partner_review_audit_no_delete BEFORE DELETE ON partner_accrual_review_audits
+BEGIN SELECT RAISE(ABORT,'review audit immutable'); END;
+
+-- Explicit non-production pilot start point; no cursor is seeded.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_discovery_enabled','0',0),('partner_refund_sync_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_discovery_cursors (
+ order_domain TEXT PRIMARY KEY CHECK(order_domain IN ('recharge','subscription')),
+ applied_at INTEGER NOT NULL CHECK(typeof(applied_at)='integer' AND applied_at>=0),
+ order_id TEXT NOT NULL CHECK(length(order_id)<=80),
+ updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at>=applied_at)
+);
+CREATE TRIGGER partner_discovery_cursor_monotonic BEFORE UPDATE ON partner_discovery_cursors
+BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.applied_at<OLD.applied_at
+ OR (NEW.applied_at=OLD.applied_at AND NEW.order_id<=OLD.order_id) OR NEW.updated_at<OLD.updated_at
+ THEN RAISE(ABORT,'discovery cursor must advance') END; END;
+
+-- Optional isolated scheduled discovery, disabled until explicitly configured.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_discovery_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+
+-- Refund reconciliation is independent of accrual. Source-only pilot.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_refund_sync_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_refund_sweep_cursors (
+ order_domain TEXT PRIMARY KEY CHECK(order_domain IN ('recharge','subscription')),
+ order_id TEXT NOT NULL DEFAULT '' CHECK(length(order_id)<=80),
+ generation INTEGER NOT NULL DEFAULT 0 CHECK(typeof(generation)='integer' AND generation>=0),
+ updated_at INTEGER NOT NULL CHECK(typeof(updated_at)='integer' AND updated_at>=0)
+);
+INSERT INTO partner_refund_sweep_cursors(order_domain,updated_at) VALUES('recharge',0),('subscription',0);
+CREATE TRIGGER partner_refund_sweep_cursor_guard BEFORE UPDATE ON partner_refund_sweep_cursors
+BEGIN SELECT CASE WHEN NEW.order_domain<>OLD.order_domain OR NEW.updated_at<OLD.updated_at OR NOT (
+ (NEW.generation=OLD.generation AND NEW.order_id>OLD.order_id) OR
+ (NEW.generation=OLD.generation+1 AND NEW.order_id='' AND OLD.order_id<>'')
+ ) THEN RAISE(ABORT,'invalid refund sweep cursor') END; END;
+
+-- Explicit per-order human approval, one per attempt. No auto-fraud claim.
+INSERT INTO system_settings(key,value,updated_at) VALUES('partner_scheduled_accrual_enabled','0',0) ON CONFLICT(key) DO NOTHING;
+CREATE TABLE partner_accrual_approvals (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ attempt INTEGER NOT NULL CHECK(typeof(attempt)='integer' AND attempt BETWEEN 0 AND 19),
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ snapshot_sha256 TEXT NOT NULL CHECK(length(snapshot_sha256)=64 AND snapshot_sha256 NOT GLOB '*[^0-9a-f]*'),
+ approved_at INTEGER NOT NULL CHECK(typeof(approved_at)='integer' AND approved_at>0),
+ expires_at INTEGER NOT NULL CHECK(expires_at=approved_at+3600000),
+ UNIQUE(order_domain,order_id,attempt),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_accrual_jobs(order_domain,order_id)
+);
+CREATE INDEX partner_accrual_approval_order ON partner_accrual_approvals(approved_at,operation_id);
+CREATE TRIGGER partner_accrual_approval_no_update BEFORE UPDATE ON partner_accrual_approvals
+BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
+CREATE TRIGGER partner_accrual_approval_no_delete BEFORE DELETE ON partner_accrual_approvals
+BEGIN SELECT RAISE(ABORT,'approval immutable'); END;
+
+-- Source-only administrator reopen history.
+CREATE INDEX partner_accrual_queue_state ON partner_accrual_jobs(state,updated_at DESC,order_domain,order_id);
+CREATE TABLE partner_accrual_reopen_audits (
+ operation_id TEXT PRIMARY KEY,
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ previous_attempt INTEGER NOT NULL CHECK(previous_attempt BETWEEN 0 AND 18),
+ actor_id TEXT NOT NULL REFERENCES users(id),
+ reason TEXT NOT NULL CHECK(length(trim(reason)) BETWEEN 8 AND 500),
+ created_at INTEGER NOT NULL CHECK(created_at>0),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_accrual_jobs(order_domain,order_id)
+);
+CREATE TRIGGER partner_reopen_audit_no_update BEFORE UPDATE ON partner_accrual_reopen_audits
+BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
+CREATE TRIGGER partner_reopen_audit_no_delete BEFORE DELETE ON partner_accrual_reopen_audits
+BEGIN SELECT RAISE(ABORT,'reopen audit immutable'); END;
+
+-- Permanent provider identity claim, independent of mutable transaction data.
+-- Source-only proposal; do not apply without explicit schema authorization.
+CREATE TABLE partner_payment_identity_claims (
+ merchant_provider TEXT NOT NULL CHECK(merchant_provider IN ('mk99','xiaodou')),
+ provider_trade_id TEXT NOT NULL CHECK(length(trim(provider_trade_id)) BETWEEN 1 AND 200),
+ provider_payment_id TEXT NOT NULL CHECK(length(trim(provider_payment_id)) BETWEEN 1 AND 200),
+ order_domain TEXT NOT NULL,
+ order_id TEXT NOT NULL,
+ created_at INTEGER NOT NULL CHECK(created_at>0),
+ PRIMARY KEY(merchant_provider,provider_payment_id),
+ UNIQUE(merchant_provider,provider_trade_id),
+ UNIQUE(order_domain,order_id),
+ FOREIGN KEY(order_domain,order_id) REFERENCES partner_commissions(order_domain,order_id)
+);
+CREATE TRIGGER partner_identity_claim_no_update BEFORE UPDATE ON partner_payment_identity_claims
+BEGIN SELECT RAISE(ABORT,'payment identity claim immutable'); END;
+CREATE TRIGGER partner_identity_claim_no_delete BEFORE DELETE ON partner_payment_identity_claims
+BEGIN SELECT RAISE(ABORT,'payment identity claim immutable'); END;
