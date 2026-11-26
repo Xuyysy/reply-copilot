@@ -11,3 +11,13 @@ test('duplicate case association, duplicate invocation and wrong event type cann
  const input=[event('a',{xrhAcceptanceCase:'case-1'}),event('a',{}, {cpuTimeMs:1,outcome:'ok'}),event('b',{xrhAcceptanceCase:'case-1'}),event('b',{}, {cpuTimeMs:10,outcome:'ok'}),event('c',{xrhAcceptanceCase:'case-2'}),event('c',{}, {cpuTimeMs:2,outcome:'ok'}),event('c',{}, {cpuTimeMs:3,outcome:'ok'})];
  assert.deepEqual(join(input,opts),{samples:[],cron:[],warnings:['AMBIGUOUS_INVOCATION_ASSOCIATIONS']});
 });
+
+test('actual Workers Observability source envelope is correlated by immutable version and request ID',()=>{
+ const marker=event('synthetic-id',{source:{xrhAcceptanceCase:'case-1'}}),inv=event('synthetic-id',{source:{level:'info',message:'not exported'}},{cpuTimeMs:32,outcome:'ok'});
+ assert.deepEqual(join([marker,inv],opts),{samples:[{id:'case-1',cpuMs:32,outcome:'ok'}],cron:[],warnings:[]});
+ assert.deepEqual(join([event('cron',{source:{xrhAcceptanceCron:123}},{eventType:'scheduled'}),event('cron',{}, {cpuTimeMs:10.9,outcome:'ok',eventType:'cron'})],opts).cron,[{scheduledTime:123,cpuMs:10.9,outcome:'ok'}]);
+});
+test('conflicting markers across event envelopes fail closed',()=>{
+ const marker=event('a',{source:{xrhAcceptanceCase:'case-1'},body:{xrhAcceptanceCase:'case-2'}});
+ assert.equal(join([marker,event('a',{}, {cpuTimeMs:2,outcome:'ok'})],opts).samples.length,0);
+});
