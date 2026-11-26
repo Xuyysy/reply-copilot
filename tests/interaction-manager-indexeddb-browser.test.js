@@ -1,0 +1,15 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {withMomentumBrowser} from './helpers/momentum-browser.js';
+const {buildSync}=createRequire(new URL('../api/package.json',import.meta.url))('esbuild');
+const js=buildSync({stdin:{contents:"import * as R from './interaction-manager/storage/repository.js'; window.R=R; window.momentumReady=true;",resolveDir:process.cwd()},bundle:true,format:'iife',write:false}).outputFiles[0].text;
+test('interaction native IndexedDB: replay, pages, coverage, reopen, account fencing and cancellation',{timeout:60000},async()=>{
+  await withMomentumBrowser('<script>'+js+'</script>',async({evaluate,call})=>{
+    const r=await evaluate("(async()=>{const db=await R.openInteractionDB(),a=await R.beginSession(db,'111'); const row=i=>({ownerUserId:'111',actorUserId:'222',targetUserId:'111',type:'reply',eventPostId:String(1000+i),source:'post',observedAt:1800000000000,occurredAt:1799999999999,evidenceQuality:'confirmed'}); const batch=Array.from({length:1200},(_,i)=>row(i)); const one=await R.commitBatch(db,a,batch.slice(0,1000),{source:'post',cursor:'next'}); const two=await R.commitBatch(db,a,batch.slice(1000),{source:'post',reason:'source_exhausted'}); const replay=await R.commitBatch(db,a,batch.slice(0,1000),{source:'post'}); const p1=await R.readEventPage(db,a,{limit:500}),p2=await R.readEventPage(db,a,{limit:500,after:p1.next}),p3=await R.readEventPage(db,a,{limit:500,after:p2.next}); const coverage=await R.readCoverage(db,a); const b=await R.beginSession(db,'333'); let stale=false;try{await R.commitBatch(db,a,[row(1201)],{source:'post'});}catch(e){stale=e.message==='stale_session';} const empty=await R.readEventPage(db,b); await R.endSession(db,a);const still=await R.readEventPage(db,b);await R.endSession(db,b);let ended=false;try{await R.readEventPage(db,b);}catch(e){ended=e.message==='stale_session';}db.close();return {one,two,replay,lens:[p1.rows.length,p2.rows.length,p3.rows.length],unique:new Set([...p1.rows,...p2.rows,...p3.rows].map(e=>e.eventId)).size,coverage,empty:empty.rows.length,still:still.rows.length,stale,ended};})()");
+    assert.equal(r.one.inserted,1000);assert.equal(r.two.inserted,200);assert.equal(r.replay.inserted,0);assert.deepEqual(r.lens,[500,500,200]);assert.equal(r.unique,1200);assert.equal(r.coverage.length,1);assert.equal(r.coverage[0].uniqueEvents,1200);assert.equal(r.coverage[0].historyComplete,false);assert.equal(r.empty,0);assert.equal(r.still,0);assert.equal(r.stale,true);assert.equal(r.ended,true);
+    await call('Page.reload');for(let i=0;i<100;i++){if(await evaluate('Boolean(window.momentumReady&&window.R)'))break;await new Promise(r=>setTimeout(r,10));}
+    const after=await evaluate("(async()=>{const db=await R.openInteractionDB(),s=await R.beginSession(db,'111');const page=await R.readEventPage(db,s,{limit:1000});db.close();return page.rows.length;})()");
+    assert.equal(after,1000,'records survive page reload and a fresh identity session');
+  });
+});

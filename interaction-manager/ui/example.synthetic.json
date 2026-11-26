@@ -1,0 +1,25 @@
+{
+  "format": "xrh-interaction-evidence-v1",
+  "ownerUserId": "111",
+  "kind": "post",
+  "posts": [
+    {
+      "postId": "123",
+      "authorUserId": "222",
+      "replyToUserId": "111",
+      "replyToPostId": "456"
+    },
+    {
+      "postId": "124",
+      "authorUserId": "333",
+      "quotedUserId": "111",
+      "quotedPostId": "456"
+    },
+    {
+      "postId": "125",
+      "authorUserId": "111",
+      "replyToUserId": "222",
+      "replyToPostId": "123"
+    }
+  ]
+}

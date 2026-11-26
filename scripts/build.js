@@ -43,6 +43,19 @@ if (packagedChannel) {
   if (channel === "staging") {
     manifest.background.service_worker = "staging/service-worker.js";
     manifest.content_scripts[0].js.unshift("staging/momentum-content.js");
+    cpSync(path.join(root,"interaction-manager"),path.join(output,"interaction-manager"),{recursive:true});
+    cpSync(path.join(root,"follow-manager"),path.join(output,"follow-manager"),{recursive:true});
+    // Explicit, inspected-tab DevTools QA panel only; no background capture.
+    manifest.devtools_page = "follow-manager/v2/devtools.html";
+    // Isolated interaction pilot: no Production/development changes or new permissions.
+    manifest.content_scripts[0].js.push("staging/interaction-capture.js","staging/interaction-interface.js");
+    const panelPath=path.join(output,"sidepanel","sidepanel.html");
+    const panel=readFileSync(panelPath,"utf8");
+    const marker='<details class="dashboard-card quick-settings"';
+    if(!panel.includes(marker))throw new Error("Staging interaction panel anchor changed");
+    const entries='<section class="dashboard-card" id="account-tools-entries"><div class="dashboard-actions"><button type="button" class="button" id="open-interaction-workbench">互动助手 ↗</button><button type="button" class="button secondary" id="open-follow-workbench">互关助手 ↗</button></div><p class="muted-note" id="account-tools-status" role="status"></p></section>';
+    writeFileSync(panelPath,panel.replace(marker,entries+marker).replace("</body>",'<script type="module" src="../staging/account-tools-entry.js"></script></body>'));
+
   }
   const bindingOrigin = channel === "production" ? "https://app.x-reply-helper.top" : "https://staging.x-reply-helper.top";
   if (websiteUrl === bindingOrigin) manifest.externally_connectable = {matches:[`${bindingOrigin}/*`]};
