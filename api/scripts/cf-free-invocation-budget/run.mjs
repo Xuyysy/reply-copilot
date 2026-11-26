@@ -41,11 +41,12 @@ const report={...expected,decision:'NO_GO',freeCertified:false,scope:'NOT_EXECUT
 let stage='init';
 async function fixture(sql,tag,rounds=100000,source='free',admin=false){
  const id='synthetic-'+tag,token=randomBytes(32).toString('hex'),ext=randomBytes(32).toString('hex'),now=Date.now();
+ if(admin){await sql('DELETE FROM site_administrator WHERE id=1');await sql("UPDATE users SET role='user' WHERE role='admin'");}
  await sql('INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,role,status) VALUES(?,?,?,?,?,?,?,?)',[id,id+'@example.test',1,1,id.replaceAll('-','_'),stored(rounds),admin?'admin':'user','active']);
  for(const [kind,t] of [['web',token],['extension',ext]])await sql('INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES(?,?,?,?,?,?)',[id+'-'+kind,sha(t),id,kind,1,now+86400000]);
  await sql('INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES(?,?,?,?,?)',[id,source==='paid'?0:200,source==='paid'?200:0,1,1]);
  await sql('INSERT INTO credit_batches(id,user_id,bucket,source_kind,grant_credits,remaining_credits,granted_at,history_confidence,status) VALUES(?,?,?,?,?,?,?,?,?)',[id+'-batch',id,source==='paid'?'paid':'free',source==='paid'?'legacy_paid':'signup',200,200,1,'tracked','active']);
- if(admin){await sql('DELETE FROM site_administrator WHERE id=1');await sql('INSERT INTO site_administrator VALUES(1,?,1)',[id]);}
+ if(admin)await sql('INSERT INTO site_administrator VALUES(1,?,1)',[id]);
  if(source==='subscription'){
   const start=now-2*86400000-10000;
   await sql("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,status,quoted_at,quote_expires_at,created_at,updated_at,paid_at,applied_at) VALUES(?,?,'basic-v1','purchase',6990,'paid',1,9999999999999,1,1,?,?)",[id+'-order',id,now,now]);
@@ -154,7 +155,7 @@ async function offline(){
  {config:{name:NAME,compatibilityDate:'2026-10-14',env,manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:code}}}},dev:{outboundService:{type:'fetcher',handler:deny}}},
  {config:{name:OWNER,compatibilityDate:'2026-10-14',env:{PASSWORD_PEPPER:{type:'text',value:PEPPER}},exports:{PasswordVerifierDO:{type:'durable-object',storage:'sqlite'}},manifest:{mainModule:'index.js',modules:{'index.js':{type:'esm',contents:verifier},'legacy-210k.wasm':{type:'wasm',contents:new Uint8Array(wasm)}}}},dev:{outboundService:{type:'fetcher',handler:deny}}}
  ]});
- try{const db=await mf.getD1Database('DB',NAME);await exercise({origin,repeats:3,send:(...args)=>mf.dispatchFetch(...args),sql:async(s,p=[])=> (await db.prepare(s).bind(...p).all()).results});assert.equal(escaped,0);}finally{await mf.dispose();}
+ try{const db=await mf.getD1Database('DB',NAME);await exercise({origin,repeats:10,send:(...args)=>mf.dispatchFetch(...args),sql:async(s,p=[])=> (await db.prepare(s).bind(...p).all()).results});assert.equal(escaped,0);}finally{await mf.dispose();}
 }
 
 try{await offline();report.behaviorPassed=true;}catch(e){report.behaviorPassed=false;console.error(e);process.exitCode=2;}
