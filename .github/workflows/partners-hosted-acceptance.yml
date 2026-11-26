@@ -1,90 +1,10 @@
-name: Partners hosted acceptance (short-lived identity)
+name: Partners offline authentication safety
 on:
   pull_request:
     branches: ['chatgpt/partners-v1a-foundation-20261125']
 permissions:
   contents: read
 jobs:
-  hosted:
-    if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-      id-token: write
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    env:
-      QA_ORIGIN: https://reply-copilot-api-partners-qa.yyx0149.workers.dev
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Inspect non-secret identity claims for exact-run trust
-        shell: bash
-        run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict';
-          const url=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
-          url.searchParams.set('audience',process.env.QA_ORIGIN+'/internal-qa');
-          const res=await fetch(url,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}});
-          assert.ok(res.ok,'OIDC token request failed');
-          const {value}=await res.json();
-          const claims=JSON.parse(Buffer.from(value.split('.')[1],'base64url'));
-          const fields=['iss','aud','repository','repository_id','event_name','ref','head_ref','base_ref','sha','workflow_ref','workflow_sha','run_id','run_attempt','runner_environment'];
-          console.log('QA_OIDC_CLAIMS '+JSON.stringify(Object.fromEntries(fields.map(k=>[k,claims[k]]))));
-          JS
-      # Not authorized for execution until a reviewed credential channel is installed.
-      # Retain the proposed scenario without retrying the blocked provisioning.
-      - name: Run hosted acceptance through exact-run short-lived grant
-        if: ${{ false }}
-        shell: bash
-        run: |
-          node --input-type=module <<'JS'
-          import assert from 'node:assert/strict';
-          const origin=process.env.QA_ORIGIN;
-          const url=new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL);
-          url.searchParams.set('audience',origin+'/internal-qa');
-          const identity=await fetch(url,{headers:{Authorization:'Bearer '+process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}});
-          assert.ok(identity.ok,'OIDC request failed');
-          const {value}=await identity.json();
-          const grant=await fetch(origin+'/internal-qa/exchange',{method:'POST',headers:{Authorization:'Bearer '+value},redirect:'error'});
-          assert.equal(grant.status,200,'QA exact-run grant unavailable; trust must be explicitly installed');
-          const g=await grant.json();
-          assert.ok(typeof g.access==='string'&&g.access.length>=40&&Array.isArray(g.accounts)&&g.accounts.length===7,'invalid grant');
-          const outer='Basic '+Buffer.from('qa:'+g.access).toString('base64');
-          const request=async(path,{method='GET',body,cookie,csrf}={})=>{
-            const r=await fetch(origin+path,{method,redirect:'manual',headers:{Authorization:outer,Origin:origin,...(cookie?{Cookie:cookie}:{}),...(csrf?{'X-CSRF-Token':csrf,'X-Reply-Copilot-Action':'1'}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});
-            return {r,body:await r.text()};
-          };
-          try{
-            for(const path of ['/','/account/','/admin/','/login/']){
-              const x=await request(path);assert.equal(x.r.status,200,'HTML '+path);
-              assert.match(x.body,/astro-island|<!DOCTYPE html>/i,'HTML document expected');
-            }
-            for(const account of g.accounts){
-              const x=await request('/v1/auth/login',{method:'POST',body:{identity:account.email,password:account.password}});
-              assert.equal(x.r.status,200,'login '+account.id);
-              const cookie=x.r.headers.get('set-cookie')?.split(';')[0];
-              assert.ok(cookie?.startsWith('rc_session='),'session cookie');
-              const me=await request('/v1/me',{cookie});assert.equal(me.r.status,200,'authenticated account '+account.id);
-              const csrf=await request('/v1/auth/csrf',{cookie});assert.equal(csrf.r.status,200,'csrf '+account.id);
-              const token=JSON.parse(csrf.body).csrfToken;assert.ok(token,'csrf token');
-              const partner=await request('/v1/partners/me',{cookie});assert.equal(partner.r.status,200,'partner read '+account.id);
-              const admin=await request('/v1/admin/partners/policy?q=qa-partner-a',{cookie});
-              assert.equal(admin.r.status,account.id==='qa-admin'?200:403,'admin authorization '+account.id);
-              const logout=await request('/v1/auth/logout',{method:'POST',cookie,csrf:token,body:{}});
-              assert.equal(logout.r.status,200,'logout '+account.id);
-              console.log('QA_HOSTED_LOGIN_PASS '+account.id);
-            }
-            for(const path of ['/v1/orders','/v1/auth/register','/v1/auth/request-password-reset','/v1/boltutil/orders','/v1/admin/payment-platform-check']){
-              const x=await request(path,{method:'POST',body:{}});assert.equal(x.r.status,403,'blocked route '+path);
-            }
-            console.log('QA_HOSTED_LOGIN_MATRIX_PASS: seven real password logins, session/CSRF, role separation and route allowlist');
-          }finally{
-            const close=await fetch(origin+'/internal-qa/close',{method:'POST',headers:{Authorization:'Bearer '+value},redirect:'error'});
-            assert.equal(close.status,200,'QA grant cleanup');
-          }
-          JS
-
   offline-safety:
     if: github.head_ref == 'chatgpt/partners-staging-qa-20261125' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
@@ -103,4 +23,4 @@ jobs:
         run: node --test --test-concurrency=1 api/tests/partner-password-acceptance.test.mjs api/tests/partner-hosted-denial.test.mjs
       - name: Explicitly mark hosted acceptance as blocked
         if: always()
-        run: echo 'Hosted grant and login acceptance NOT executed. Requires separately reviewed protected credential provisioning.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Offline authentication tests only. Hosted acceptance requires separately configured partners-qa environment secrets.' >> "$GITHUB_STEP_SUMMARY"
