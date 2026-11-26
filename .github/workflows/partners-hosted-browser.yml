@@ -1,0 +1,95 @@
+name: Partners hosted browser (protected QA secrets)
+on:
+  push:
+    branches: ['chatgpt/partners-staging-qa-20261125']
+permissions:
+  contents: read
+concurrency:
+  group: partners-hosted-qa-secrets
+  cancel-in-progress: false
+jobs:
+  browser:
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && startsWith(github.event.head_commit.message, 'ci-lite: qa-browser approved')
+    environment: partners-qa
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify preinstalled Chrome
+        run: google-chrome --version
+      # No checkout, third-party install scripts, artifacts, screenshots or
+      # secret output. Browser receives auth only for the exact QA origin.
+      - name: Actual browser sign-in, account, admin role and sign-out
+        env:
+          PARTNERS_QA_CREDENTIALS: ${{ secrets.PARTNERS_QA_CREDENTIALS }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import {spawn} from 'node:child_process';
+          import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+          import {tmpdir} from 'node:os';
+          import {join} from 'node:path';
+          const origin='https://reply-copilot-api-partners-qa.yyx0149.workers.dev';
+          const check=(ok,label)=>{if(!ok)throw Error(label);};
+          const delay=ms=>new Promise(r=>setTimeout(r,ms));
+          async function until(fn,label,ms=25000){const end=Date.now()+ms;while(Date.now()<end){if(await fn())return;await delay(150);}throw Error(label);}
+          let g;
+          try{g=JSON.parse(process.env.PARTNERS_QA_CREDENTIALS||'null');}catch{g=null;}
+          delete process.env.PARTNERS_QA_CREDENTIALS;
+          check(g&&/^[a-f0-9]{64}$/.test(g.access)&&Array.isArray(g.accounts)&&g.accounts.length===7,'invalid QA secret');
+          const cases=['qa-admin','qa-partner-a','qa-outsider-d'];
+          const accounts=new Map();
+          for(const a of g.accounts){check(/^qa-(admin|partner-a|buyer-b|buyer-c|outsider-d|excluded-e|partner-f)$/.test(a.id)&&a.email===a.id+'@example.test'&&/^[a-f0-9]{64}$/.test(a.password)&&!accounts.has(a.id),'invalid QA account');accounts.set(a.id,a);}
+          const outer='Basic '+Buffer.from('qa:'+g.access).toString('base64');
+          const profile=mkdtempSync(join(tmpdir(),'partners-hosted-browser-'));
+          const child=spawn('google-chrome',['--headless=new','--no-first-run','--no-default-browser-check','--disable-background-networking','--disable-extensions','--disable-sync','--remote-debugging-port=0','--user-data-dir='+profile,'about:blank'],{stdio:'ignore'});
+          let socket,seq=0,activeId=null,knownCookie=null,failed=false;
+          const pending=new Map();
+          function cdp(method,params={}){return new Promise((resolve,reject)=>{const id=++seq,timer=setTimeout(()=>{pending.delete(id);reject(Error('CDP timeout'));},12000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));});}
+          async function ev(expression){const r=await cdp('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});check(!r.exceptionDetails,'browser evaluation failed');return r.result.value;}
+          async function req(path,cookie,csrf){const r=await fetch(origin+path,{method:csrf?'POST':'GET',redirect:'error',signal:AbortSignal.timeout(10000),headers:{Authorization:outer,Origin:origin,Cookie:cookie,...(csrf?{'Content-Type':'application/json','X-CSRF-Token':csrf,'X-Reply-Copilot-Action':'1'}:{})},...(csrf?{body:'{}'}:{})});return r;}
+          async function captureCookie(){const r=await cdp('Network.getCookies',{urls:[origin]});const c=r.cookies.find(x=>x.name==='rc_session'&&x.domain===new URL(origin).hostname);return c?'rc_session='+c.value:null;}
+          async function cleanup(){if(!activeId)return;const cookie=knownCookie||await captureCookie();if(!cookie)return;const current=await req('/v1/me',cookie);if(current.status===401)return;check(current.status===200,'session cleanup lookup failed');const cr=await req('/v1/auth/csrf',cookie);check(cr.status===200,'session cleanup CSRF failed');const csrf=(await cr.json()).csrfToken;check(typeof csrf==='string','session cleanup CSRF missing');check((await req('/v1/auth/logout',cookie,csrf)).status===200,'session cleanup logout failed');check((await req('/v1/me',cookie)).status===401,'session cleanup revocation failed');}
+          async function navigate(path){await cdp('Page.navigate',{url:origin+path});await until(()=>ev('location.origin==='+JSON.stringify(origin)+'&&location.pathname.replace(/\\/$/,"")==='+JSON.stringify(path.replace(/\/$/,""))+'&&document.readyState==="complete"&&[...document.querySelectorAll("astro-island")].every(e=>!e.hasAttribute("ssr"))'),'page hydration failed');}
+          async function fill(selector,value){check(await ev('(()=>{const e=document.querySelector('+JSON.stringify(selector)+');if(!e)return false;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(e,'+JSON.stringify(value)+');e.dispatchEvent(new Event("input",{bubbles:true}));return true})()'),'login input missing');}
+          async function click(labels){check(await ev('(()=>{const e=[...document.querySelectorAll("button,[role=tab]")].find(e=>'+JSON.stringify(labels)+'.includes(e.textContent.trim())&&!e.disabled&&e.getClientRects().length);if(!e)return false;e.click();return true})()'),'expected control missing');}
+          async function visibleText(labels){await until(()=>ev(JSON.stringify(labels)+'.some(x=>document.body.innerText.includes(x))'),'expected UI missing');}
+          try{
+            let port;
+            await until(()=>{try{port=Number(readFileSync(join(profile,'DevToolsActivePort'),'utf8').split('\n')[0]);return port>0;}catch{return false;}},'Chrome startup failed');
+            const tabs=await (await fetch('http://127.0.0.1:'+port+'/json/list')).json();
+            socket=new WebSocket(tabs.find(t=>t.type==='page').webSocketDebuggerUrl);
+            await new Promise((resolve,reject)=>{socket.addEventListener('open',resolve,{once:true});socket.addEventListener('error',()=>reject(Error('CDP connect failed')),{once:true});});
+            socket.addEventListener('message',e=>{const m=JSON.parse(e.data);if(m.id&&pending.has(m.id)){const p=pending.get(m.id);pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(Error('CDP command failed')):p.resolve(m.result);return;}
+              if(m.method==='Fetch.requestPaused'){let allowed=false;try{allowed=new URL(m.params.request.url).origin===origin;}catch{}void cdp(allowed?'Fetch.continueRequest':'Fetch.failRequest',{requestId:m.params.requestId,...(allowed?{}:{errorReason:'BlockedByClient'})}).catch(()=>{failed=true;});}
+              if(m.method==='Fetch.authRequired'){const a=m.params.authChallenge;const allowed=a.origin===origin&&a.source==='Server'&&a.scheme.toLowerCase()==='basic'&&a.realm==='Private Partners QA';void cdp('Fetch.continueWithAuth',{requestId:m.params.requestId,authChallengeResponse:allowed?{response:'ProvideCredentials',username:'qa',password:g.access}:{response:'CancelAuth'}}).catch(()=>{failed=true;});}
+            });
+            for(const method of ['Page.enable','Runtime.enable','Network.enable'])await cdp(method);
+            await cdp('Fetch.enable',{handleAuthRequests:true,patterns:[{urlPattern:'*',requestStage:'Request'}]});
+            for(const id of cases){
+              activeId=id;knownCookie=null;
+              await cdp('Network.clearBrowserCookies');
+              const a=accounts.get(id);
+              await cdp('Emulation.setDeviceMetricsOverride',{width:id==='qa-outsider-d'?390:1440,height:id==='qa-outsider-d'?844:1000,deviceScaleFactor:1,mobile:id==='qa-outsider-d'});
+              await navigate('/login/');
+              await fill('input[autocomplete="username"]',a.email);await fill('input[autocomplete="current-password"]',a.password);
+              check(await ev('(()=>{const f=document.querySelector("input[autocomplete=current-password]")?.closest("form");if(!f)return false;f.requestSubmit();return true})()'),'login form missing');
+              await until(()=>ev('location.pathname.replace(/\\/$/,"")==="/account"&&document.body.innerText.includes('+JSON.stringify(a.email)+')'),'account login or identity failed');
+              knownCookie=await captureCookie();check(knownCookie,'browser session missing');
+              if(id==='qa-admin'){await navigate('/admin/');await visibleText(['推广管理','Partners']);await click(['推广管理','Partners']);await visibleText(['推广伙伴','Partner']);}
+              else{await navigate('/admin/');await visibleText(['无法访问管理后台','Admin access denied']);}
+              await navigate('/account/');
+              await visibleText([a.email]);await click(['退出登录','Sign out']);
+              await until(()=>ev('location.pathname.replace(/\\/$/,"")==="/login"'),'browser logout failed');
+              check((await req('/v1/me',knownCookie)).status===401,'browser logout revocation failed');
+              check(!failed,'browser request interception failed');
+              knownCookie=null;activeId=null;
+              console.log('QA_HOSTED_BROWSER_PASS '+id);
+            }
+            console.log('QA_HOSTED_BROWSER_AUTH_PASS: real Chrome, desktop/mobile, sign-in, identity, admin/ordinary access and sign-out. Financial UI acceptance still required.');
+          }catch{console.error('QA_HOSTED_BROWSER_FAIL '+(activeId||'setup'));process.exitCode=1;}
+          finally{if(activeId)try{await cleanup();}catch{console.error('QA_HOSTED_BROWSER_CLEANUP_REVIEW '+activeId);process.exitCode=1;}try{socket?.close();}catch{}for(const p of pending.values())clearTimeout(p.timer);child.kill('SIGTERM');await delay(500);rmSync(profile,{recursive:true,force:true});}
+          JS
