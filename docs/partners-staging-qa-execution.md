@@ -85,3 +85,10 @@ The existing QA `partner_order_preview_enabled` gate is currently off. The wrapp
 The workflow explicitly requires `enabled === true` before checking original payment evidence or making financial mutations. A disabled gate stops, preserves the pending request and commission, and revokes sessions; it must not be treated as missing evidence or bypassed. Restore the gate to its recorded original value after the approved acceptance scope, including failure; record restoration in the operator audit. Resuming after any partial financial write requires fresh state review, never a reset or blind rerun.
 
 D now clicks the actual initially collapsed eligibility control before inspecting owner earnings. The outsider must also open it and see the not-authorized UI, with no earnings amounts, settlement/recipient controls or reviewed request ID. These are read-only interactions. Local browser regression mounts the real React components; it does not stand in for protected hosted acceptance.
+
+
+### Hosted B outcome mismatch and repair
+
+Run 45817533791: approval and start passed; first paid outcome returned 409 despite one immutable paid outcome and payout being committed (1000 fen). D1 readback verified one matching start, outcome and paid payout; no duplicates, 2000 commission, no refund, no reserve, no sessions. Read-preview gate restored to 0. Do not replay this completed payment.
+
+A separate nonfinancial D1 probe used an INSERT with an AFTER INSERT UPDATE trigger: actual D1 meta.changes=2 for one inserted event and one updated parent; duplicate returned 0. Temporary objects removed and FK check clean. Local SQLite reports only the direct insert. Business repair uses an atomic precondition assertion, existing outcome INSERT, exact persisted outcome/payout assertion and assertion cleanup in one batch; no change-count dependency or policy relaxation. Applies to paid and no_transfer. Require fresh QA acceptance of the corrected API using an independently reviewed separate synthetic case or approved safe acceptance approach; existing paid record stays immutable. C and D remain gated; no production or shared Staging changes.

@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {payoutReviewRowsPlan,allocateReviewedItems,payoutEvidenceMatches,payoutReviewAssertions} from '../src/partner-payout-review.mjs';
 import {paymentEvidencePlan} from '../src/partner-payment-proof.mjs';
-import {alipayAdmissionPlan,alipayRequestPlan,alipayApprovePlan,alipayRejectPlan,alipayStartPlan,alipayOutcomePlan} from '../src/partner-transfer.mjs';
+import {alipayAdmissionPlan,alipayRequestPlan,alipayApprovePlan,alipayRejectPlan,alipayStartPlan,alipayOutcomePlan,alipayOutcomeBatchPlan} from '../src/partner-transfer.mjs';
 import {refundInsertPlan} from '../src/partner-ledger.mjs';
 import {partnerSummaryPlan,payoutResolvePlan} from '../src/partner-payout.mjs';
 function fixture(t){
@@ -72,6 +72,32 @@ test('actual successful transfer is recorded despite later refund or disabled ga
  const plan=partnerSummaryPlan('p',60),s=db.prepare(plan.sql).get(...plan.params);
  assert.equal(s.paid_fen,200);assert.equal(s.outstanding_fen,-200);
  assert.throws(()=>db.exec("DELETE FROM partner_alipay_transfer_outcomes"),/immutable/);
+});
+test('atomic outcome proves exact trigger transition without depending on D1 change counts',t=>{
+ const db=fixture(t);ready(db);run(db,alipayStartPlan(start));
+ const plan=alipayOutcomeBatchPlan(outcome);
+ for(const bad of [{actorId:'q'},{amountFen:199},{now:39}]){
+  assert.throws(()=>atomic(db,alipayOutcomeBatchPlan({...outcome,...bad})));
+  assert.equal(state(db),'reserved');
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_alipay_transfer_outcomes').get().n,0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_recovery_assertions').get().n,0);
+ }
+ db.exec("UPDATE system_settings SET value='0'");
+ atomic(db,plan);
+ assert.equal(state(db),'paid');
+ assert.throws(()=>atomic(db,plan));
+ assert.throws(()=>atomic(db,alipayOutcomeBatchPlan({...outcome,outcome:'no_transfer',amountFen:0,reference:null})));
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_alipay_transfer_outcomes').get().n,1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_recovery_assertions').get().n,0);
+});
+test('atomic no-transfer outcome cancels once and rejects incompatible replay',t=>{
+ const db=fixture(t);ready(db);run(db,alipayStartPlan(start));
+ const plan=alipayOutcomeBatchPlan({...outcome,outcome:'no_transfer',amountFen:0,reference:null});
+ atomic(db,plan);assert.equal(state(db),'cancelled');
+ assert.throws(()=>atomic(db,plan));
+ assert.throws(()=>atomic(db,alipayOutcomeBatchPlan(outcome)));
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_alipay_transfer_outcomes').get().n,1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_recovery_assertions').get().n,0);
 });
 test('owner can reject only a pending application',t=>{
  const db=fixture(t);enable(db);assert.equal(run(db,alipayRequestPlan(request)),1);

@@ -116,7 +116,23 @@ test(`actual Worker ${mode} discovery, accrual, payout and refund use real migra
  assert.equal((await call('a',root+'payout-review',{...action,operationId:randomUUID(),action:'start'})).status,409);
  f.env.PARTNER_PAYOUT_REVIEW_ENABLED='0';
  db.exec("UPDATE system_settings SET value='0' WHERE key LIKE 'partner_%_enabled'");
+ // Reproduce actual D1 metadata: the outcome INSERT and its trigger UPDATE
+ // are both counted. Local SQLite changes otherwise reports only the INSERT.
+ const prepare=f.env.DB.prepare.bind(f.env.DB),batch=f.env.DB.batch.bind(f.env.DB);
+ let outcomeWrites=0;
+ f.env.DB.prepare=(sql)=>{
+  const stmt=prepare(sql),run=stmt.run.bind(stmt);
+  if(sql.startsWith('INSERT INTO partner_alipay_transfer_outcomes'))stmt.run=async()=>{const r=await run();if(r.meta.changes===1){outcomeWrites++;r.meta.changes=2;}return r;};
+  return stmt;
+ };
+ f.env.DB.batch=async statements=>{
+  const result=await batch(statements);
+  statements.forEach((s,i)=>{if(s.query.startsWith('INSERT INTO partner_alipay_transfer_outcomes')&&result[i].meta.changes===1){outcomeWrites++;result[i].meta.changes=2;}});
+  return result;
+ };
  await ok('a',root+'payout-review',{...action,operationId:randomUUID(),action:'paid',amountFen:1000,reference:'synthetic-transfer'});
+ assert.equal(outcomeWrites,1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_recovery_assertions').get().n,0);
  assert.equal(db.prepare("SELECT status FROM partner_payouts").get().status,'paid');
  assert.equal((await call('a',root+'payout-review',{...action,operationId:randomUUID(),action:'paid',amountFen:1000,reference:'synthetic-transfer'})).status,409);
  // Simulate an already-confirmed full refund in the source payment ledger.
