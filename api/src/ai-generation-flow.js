@@ -23,5 +23,5 @@ export async function executeAiGeneration({ reserve, provider, validate, finish 
   // If successful settlement fails, let it propagate: whether the DB write
   // committed is uncertain, so the caller must not trigger a paid retry.
   if (await finish(result.raw, result.usage) === false) return {kind:"abandoned"};
-  return { kind: "generated", raw: result.raw };
+  return { kind: "generated", raw: result.raw, ...(reservation.funding?{funding:reservation.funding}:{}) };
 }

@@ -1,3 +1,4 @@
+import { creditInvariant } from './credit-assertion.js';
 import type { Env } from './types';
 import { uuid } from './security';
 
@@ -39,7 +40,7 @@ export async function releaseStaleProductionGenerations(env: Env, now: number, u
       SELECT user_id,request_id,'unknown-timeout-estimated',0,0,budget_reserved_micro_usd,?,provider_config_id,provider_config_version,'estimated' FROM ai_requests WHERE budget_finalization_ref=? ON CONFLICT(user_id,request_id) DO NOTHING`).bind(now,claim),
     env.DB.prepare(`INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at)
       SELECT lower(hex(randomblob(16))),user_id,'generation_release',0,0,user_id||':'||request_id,?,? FROM ai_requests WHERE budget_finalization_ref=? ON CONFLICT(kind,reference_id) DO NOTHING`).bind(reason,now,claim),
-    env.DB.prepare(`INSERT INTO credit_operation_assertions(operation_id,ok) SELECT ?,CASE WHEN NOT EXISTS(
+    ...creditInvariant(env,claim,`NOT EXISTS(
       SELECT 1 FROM credit_accounts a WHERE a.user_id IN (SELECT user_id FROM ai_requests WHERE budget_finalization_ref=?) AND (
       a.free_balance<>(SELECT COALESCE(SUM(remaining_credits),0) FROM credit_batches WHERE user_id=a.user_id AND bucket='free') OR
       a.paid_balance<>(SELECT COALESCE(SUM(remaining_credits),0) FROM credit_batches WHERE user_id=a.user_id AND bucket='paid') OR
@@ -49,8 +50,7 @@ export async function releaseStaleProductionGenerations(env: Env, now: number, u
       AND NOT EXISTS(SELECT 1 FROM credit_batches b WHERE b.user_id IN (SELECT user_id FROM ai_requests WHERE budget_finalization_ref=?) AND b.remaining_credits<>b.grant_credits-b.consumed_credits-b.permanently_revoked_credits)
       AND NOT EXISTS(SELECT 1 FROM ai_requests r WHERE r.budget_finalization_ref=? AND (
         NOT EXISTS(SELECT 1 FROM credit_ledger l WHERE l.user_id=r.user_id AND l.kind='generation_release' AND l.reference_id=r.user_id||':'||r.request_id) OR
-        NOT EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=r.budget_day AND d.reserved_micro_usd>=0))) THEN 1 ELSE 0 END`).bind(claim,claim,claim,claim),
-    env.DB.prepare('DELETE FROM credit_operation_assertions WHERE operation_id=?').bind(claim),
+        NOT EXISTS(SELECT 1 FROM ai_budget_days d WHERE d.budget_day=r.budget_day AND d.reserved_micro_usd>=0)))`,[claim,claim,claim]),
   ]);
   }
 }

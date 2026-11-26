@@ -80,3 +80,5 @@ test("Frozen accounts do not gain credits or an active entitlement via bootstrap
   assert.equal(f.sql.prepare("SELECT free_balance FROM credit_accounts WHERE user_id='test-user'").get().free_balance,200);
  }finally{f.sql.close();}
 });
+
+test("bootstrap has a single fresh user projection and rejects a freeze between balance and projection",async()=>{const {f,headers}=setup();try{let statusReads=0,userReads=0;const original=f.env.DB.prepare.bind(f.env.DB);f.env.DB.prepare=sql=>{if(sql==="SELECT status FROM users WHERE id=?")statusReads++;if(sql.startsWith("SELECT username,email,role,status,email_verified_at"))userReads++;return original(sql);};const r=await f.call("/v1/extension/bootstrap",{method:"GET",headers});assert.equal(r.status,200);assert.equal(userReads,1);assert.equal(statusReads,0);f.env.DB.prepare=sql=>{if(sql.startsWith("SELECT username,email,role,status,email_verified_at"))f.sql.exec("UPDATE users SET status='frozen' WHERE id='test-user'");return original(sql);};const frozen=await f.call("/v1/extension/bootstrap",{method:"GET",headers});assert.equal(frozen.status,401);assert.equal(frozen.body.quota,undefined);}finally{f.sql.close();}});

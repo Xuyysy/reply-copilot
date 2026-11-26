@@ -251,7 +251,7 @@ export async function packages(request:Request,env:Env):Promise<Response>{
   return response({packages:priced,paymentAvailable,paymentProvider:localMock?"local_mock":control.defaultMethod?.provider??null,paymentMethods:localMock?[{provider:"local_mock",channel:"ALIPAY_H5"}]:control.methods},200,env,request);
 }
 export async function createOrder(request:Request,env:Env,options?:{pilot?:{actorUserId:string;operationId:string;expectedAmountFen:number}}):Promise<Response>{
-  const session=await webSession(request,env,true),body=await jsonBody(request,1024),packageId=cleanId(body.packageId,/^[a-z0-9_-]{1,64}$/i),mock=isLocalMock(env,request),control=await paymentControl(env),pilot=options?.pilot??null;
+  const session=await webSession(request,env,true),body=await jsonBody(request,1024),packageId=cleanId(body.packageId,/^[a-z0-9_-]{1,64}$/i),mock=isLocalMock(env,request),pilot=options?.pilot??null,control=await paymentControl(env,{checkoutOnly:!pilot});
   if(pilot&&(
     env.ENVIRONMENT!=='production'||env.XIAODOU_PRODUCTION_PILOT_ENABLED!=='1'||
     env.XIAODOU_PRODUCTION_PILOT_TRADE_APPROVED!=='1'||
@@ -305,7 +305,7 @@ export async function createOrder(request:Request,env:Env,options?:{pilot?:{acto
   ]);
   if(created[0].meta.changes!==1){
     if(pilot)throw new ApiFailure(409,"PILOT_LIMIT_REACHED","已有验收订单或管理员操作记录，请核对原订单，勿重复付款。");
-    if(!mock&&!(await paymentControl(env)).methods.some(method=>method.provider===selected.provider&&method.channel===channel))throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","支付方式状态已变化，请重新选择。");
+    if(!mock&&!(await paymentControl(env,{checkoutOnly:true})).methods.some(method=>method.provider===selected.provider&&method.channel===channel))throw new ApiFailure(503,"PAYMENT_CHANNEL_UNAVAILABLE","支付方式状态已变化，请重新选择。");
     throw new ApiFailure(409,"UNRESOLVED_ORDER_EXISTS",mk99?"该套餐已有待付款或待确认订单，请先确认原订单状态。其他套餐仍可购买。":"该套餐在当前通道已有待支付或待确认订单。请查看原订单，或主动选择重新发起支付；旧订单仍保留。");
   }
   if(mk99)return await createMk99Checkout(request,env,(await transactionForOrder(env,id))!,{attemptId,requestId,packageName:packageName,credits:pkg.credits,displayPriceCents:amountCents,...feeSnapshot});
