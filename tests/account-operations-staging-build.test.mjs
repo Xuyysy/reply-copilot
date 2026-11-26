@@ -25,6 +25,8 @@ test("joint account tools appear only in actual staging build, preserving base p
    assert.equal(m.version,base.version);
    if(channel==="staging"){
     assert.equal(m.background.service_worker,"staging/service-worker.js");
+    assert.equal(m.devtools_page,"follow-manager/v2/devtools.html");
+    assert.ok(existsSync(path.join(out,m.devtools_page)));
     assert.deepEqual(m.host_permissions,["https://api-staging.x-reply-helper.top/*"]);
     assert.deepEqual(m.content_scripts[0].js,["staging/momentum-content.js",...base.content_scripts[0].js,"staging/interaction-capture.js"]);
     assert.equal(Object.hasOwn(m,"key"),false);
@@ -38,6 +40,7 @@ test("joint account tools appear only in actual staging build, preserving base p
    }else{
     for(const name of ["follow-manager","interaction-manager","staging"])assert.equal(existsSync(path.join(out,name)),false,name);
     assert.equal(panel,sourcePanel);
+    assert.equal(Object.hasOwn(m,"devtools_page"),false);
     assert.deepEqual(m.content_scripts,base.content_scripts);
     assert.equal(m.background.service_worker,base.background.service_worker);
     if(channel==="production"){assert.equal(m.key,identity.publicKey);assert.deepEqual(m.host_permissions,["https://api.x-reply-helper.top/*"]);}
