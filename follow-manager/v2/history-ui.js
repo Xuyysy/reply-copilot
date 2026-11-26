@@ -39,7 +39,7 @@ export async function mountHistory(){
   page=0;renderRows();
  }
  async function compare(){
-  if(busy||meta.length<2)return;busy=true;controls();clearComparison("比较中…");
+  if(busy||meta.length<2)return;busy=true;controls();status("比较中…");clearComparison("比较中…");
   try{const pair=await repo.readHistoryPair(owner,$("newer").value,$("older").value);renderReport(pair);status("比较完成");}
   catch(e){clearComparison("无法比较所选快照，请刷新并选择较早和较新记录。");status(e.message);}
   finally{busy=false;controls();}
@@ -56,7 +56,7 @@ export async function mountHistory(){
  }
  $("change-kind").append(...Object.entries(CHANGE_LABELS).map(([k,label])=>{const o=el("option",label);o.value=k;return o}));
  $("refresh").onclick=refresh;$("compare").onclick=compare;
- for(const id of ["older","newer"])$(id).onchange=()=>clearComparison("已更改选择，请点击比较。");
+ for(const id of ["older","newer"])$(id).onchange=()=>{status("已更改选择");clearComparison("已更改选择，请点击比较。");};
  $("change-kind").onchange=()=>{page=0;renderRows()};$("change-query").oninput=()=>{page=0;renderRows()};
  $("history-prev").onclick=()=>{page--;renderRows()};$("history-next").onclick=()=>{page++;renderRows()};
  $("csv").onclick=()=>{if(!filtered.length||busy)return;const url=URL.createObjectURL(new Blob(["\uFEFF",historyCsv(filtered)],{type:"text/csv;charset=utf-8"}));const a=el("a");a.href=url;a.download="fixture-follow-history.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};

@@ -1,5 +1,7 @@
 import {openRepository} from "./store.js";
-import {fixturePage,FIXTURE_OWNER as owner} from "./fixture.js";
+import {FIXTURE_OWNER as owner} from "./fixture.js";
+import {createFixtureSource} from "./fixture-source.js";
+import {runFixtureSync} from "./sync-engine.js";
 import {summarize,compareSnapshots,profileChanges,selectUsers} from "./model.js";
 const $=id=>document.getElementById(id);
 let repo,job=null,busy=false,pauseRequested=false,view=null,prior=null,page=0,filtered=[],protectedUsers=new Map();
@@ -20,15 +22,9 @@ async function run(resuming){
  if(busy)return;busy=true;pauseRequested=false;controls();
  try{
   if(resuming){job=await repo.resume(owner,job.jobId,job.lease);}else{job=await repo.start(owner,"fixture",Number($("size").value));}
-  // Job parameters persist before the first page.
-  const size=job.fixtureSize;
-  for(const kind of ["following","followers"]){while(!job.stages[kind].terminal){
-   if(pauseRequested){job=await repo.pause(owner,job.jobId,job.lease);status("已暂停，进度已保存");return;}
-   job=await repo.append(owner,job.jobId,job.lease,kind,fixturePage(kind,job.stages[kind].cursor,size));
-   status("模拟同步 · 关注 "+job.stages.following.count+" · 粉丝 "+job.stages.followers.count);await wait();
-  }}
-  job=await repo.finalize(owner,job.jobId,job.lease);status(job.completeness==="complete"?"完整模拟快照已保存":"模拟快照不完整，旧结果保留");
- }catch(e){status("任务停止："+(e?.message||"未知错误"));if(job)try{job=await repo.pause(owner,job.jobId,job.lease,"failed")}catch{}}
+  job=await runFixtureSync({repo,job,source:createFixtureSource(job.fixtureSize),shouldPause:()=>pauseRequested,onProgress:current=>{job=current;status("模拟同步 · 关注 "+job.stages.following.count+" · 粉丝 "+job.stages.followers.count);},yieldControl:wait});
+  status(job.status==="paused"?"已暂停，进度已保存":job.completeness==="complete"?"完整模拟快照已保存":"模拟快照不完整，旧结果保留");
+ }catch(e){status("任务停止："+(e?.message||"未知错误"));}
  finally{busy=false;try{await refresh()}catch(e){status("读取失败："+e.message)}controls();}
 }
 $("start").onclick=()=>run(false);$("resume").onclick=()=>run(true);$("pause").onclick=()=>{pauseRequested=true;};
