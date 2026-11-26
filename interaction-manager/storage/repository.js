@@ -3,14 +3,17 @@ const DB='reply-copilot-interactions-v1';
 function req(r){return new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function finished(tx){return new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error??Error('transaction_aborted'));tx.onerror=()=>reject(tx.error??Error('transaction_failed'));});}
 export async function openInteractionDB(factory=globalThis.indexedDB,name=DB){
-  const r=factory.open(name,1);
-  r.onupgradeneeded=()=>{
+  const r=factory.open(name,2);
+  r.onupgradeneeded=event=>{
     const db=r.result;
+    if(event.oldVersion<1){
     const events=db.createObjectStore('events',{keyPath:'eventId'});
     events.createIndex('owner','ownerUserId');
     events.createIndex('ownerTime',['ownerUserId','occurredAt']);
     db.createObjectStore('session',{keyPath:'key'});
     db.createObjectStore('coverage',{keyPath:['ownerUserId','source']});
+    }
+    if(event.oldVersion<2){const users=db.createObjectStore('users',{keyPath:['ownerUserId','userId']});users.createIndex('owner','ownerUserId');}
   };
   const db=await req(r);
   db.onversionchange=()=>db.close();
@@ -40,15 +43,19 @@ async function assertSession(tx,session){
   const current=await req(tx.objectStore('session').get('active'));
   if(!current||!validId(session?.ownerUserId)||current.token!==session.token||current.ownerUserId!==session.ownerUserId)throw Error('stale_session');
 }
-export async function commitBatch(db,session,inputs,{source,cursor=null,reason='partial',observedAt=Date.now()}={}){
+export async function commitBatch(db,session,inputs,{source,cursor=null,reason='partial',observedAt=Date.now(),users=[]}={}){
   if(!Array.isArray(inputs)||inputs.length>1000||!['notification','post','archive','authorized-api'].includes(source)||!['partial','source_exhausted','cancelled','limited','schema_changed'].includes(reason)||!(cursor===null||typeof cursor==='string'&&cursor.length<=2048)||!Number.isSafeInteger(observedAt)||observedAt<=0)throw Error('invalid_batch');
+  if(!Array.isArray(users)||users.length>2000)throw Error('invalid_users');
   const records=new Map();let rejected=0;
   for(const input of inputs){const event=normalizeEvent(input,session?.ownerUserId);if(!event||event.source!==source){rejected++;continue;}records.set(event.eventId,mergeEvent(records.get(event.eventId),event));}
-  return transaction(db,['session','events','coverage'],'readwrite',async tx=>{
+  return transaction(db,['session','events','coverage','users'],'readwrite',async tx=>{
     await assertSession(tx,session);
     const events=tx.objectStore('events');
     let inserted=0,sourceNew=0;
     for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old)inserted++;if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
+    const participants=new Set([...records.values()].flatMap(e=>[e.actorUserId,e.targetUserId]));
+    const userStore=tx.objectStore('users');
+    for(const u of users){if(!u||!participants.has(u.userId)||typeof u.handle!=='string'||! /^[A-Za-z0-9_]{1,15}$/.test(u.handle)||!Number.isSafeInteger(u.observedAt)||u.observedAt<=0||u.observedAt>observedAt)continue;const key=[session.ownerUserId,u.userId],old=await req(userStore.get(key));if(!old||old.observedAt<=u.observedAt)await req(userStore.put({ownerUserId:session.ownerUserId,userId:u.userId,handle:u.handle,observedAt:u.observedAt}));}
     // Never label a source exhaustion as complete account history.
     const coverage=tx.objectStore('coverage'),key=[session.ownerUserId,source];
     const old=await req(coverage.get(key));
@@ -62,13 +69,13 @@ export async function readEventPage(db,session,{after=null,limit=500}={}){
   if(!Number.isInteger(limit)||limit<1||limit>1000||!(after===null||typeof after==='string'&&after.startsWith(session?.ownerUserId+':')))throw Error('invalid_page');
   return transaction(db,['session','events'],'readonly',async tx=>{
     await assertSession(tx,session);
-    const index=tx.objectStore('events').index('owner');
+    const store=tx.objectStore('events');
     const rows=[];
     return new Promise((resolve,reject)=>{
-      const r=index.openCursor(IDBKeyRange.only(session.ownerUserId));
+      const prefix=session.ownerUserId+':';
+      const r=store.openCursor(IDBKeyRange.bound(after??prefix,prefix+'\uffff',after!==null,false));
       r.onerror=()=>reject(r.error);
       r.onsuccess=()=>{const c=r.result;if(!c){resolve({rows,next:null});return;}
-        if(after!==null&&c.primaryKey<=after){c.continue();return;}
         if(rows.length===limit){resolve({rows,next:rows[rows.length-1].eventId});return;}
         rows.push(c.value);c.continue();
       };
@@ -82,14 +89,17 @@ export async function readCoverage(db,session){
   });
 }
 
+export async function readUsers(db,session){
+  return transaction(db,['session','users'],'readonly',async tx=>{await assertSession(tx,session);return req(tx.objectStore('users').index('owner').getAll(IDBKeyRange.only(session.ownerUserId)));});
+}
 export async function clearOwner(db,session){
-  return transaction(db,['session','events','coverage'],'readwrite',async tx=>{
+  return transaction(db,['session','events','coverage','users'],'readwrite',async tx=>{
     await assertSession(tx,session);
-    const store=tx.objectStore('events');
-    const keys=await req(store.index('owner').getAllKeys(IDBKeyRange.only(session.ownerUserId)));
-    for(const key of keys)await req(store.delete(key));
-    const coverage=tx.objectStore('coverage');
-    const ckeys=await req(coverage.getAllKeys(IDBKeyRange.bound([session.ownerUserId],[session.ownerUserId,[]])));
-    for(const key of ckeys)await req(coverage.delete(key));
+    const owner=session.ownerUserId;
+    for(const name of ['events','users']){
+      const store=tx.objectStore(name),keys=await req(store.index('owner').getAllKeys(IDBKeyRange.only(owner)));
+      for(const k of keys)await req(store.delete(k));
+    }
+    await req(tx.objectStore('coverage').delete(IDBKeyRange.bound([owner],[owner,[]])));
   });
 }

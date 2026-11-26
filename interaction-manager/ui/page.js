@@ -1,11 +1,12 @@
 import {Workspace} from './workspace.js';
 import {MAX_FILE_BYTES} from './import.js';
+import {rankingCsv} from './csv.js';
 const $=id=>document.getElementById(id);
 let ws,working=false,page=0,people=[],detailRows=[],detailOffset=0;
 const PAGE=50,types={reply:'回复',like:'点赞',repost:'转发',quote:'引用',mention:'提及'};
 const status=text=>$('status').textContent=text;
-function options(){return {direction:$('direction').value,days:$('days').value?Number($('days').value):null,sort:$('sort').value};}
-function setControls(){const ready=!!ws?.session;for(const id of ['file','import','clear','direction','days','sort','search'])$(id).disabled=working||!ready;$('owner').disabled=working;$('owner-form').querySelector('button').disabled=working;}
+function options(){return {direction:$('direction').value,days:$('days').value?Number($('days').value):null,sort:$('sort').value,type:$('type').value};}
+function setControls(){const ready=!!ws?.session;$('export').disabled=working||!ready||!matching().length;for(const id of ['file','import','clear','direction','days','type','sort','search'])$(id).disabled=working||!ready;$('owner').disabled=working;$('owner-form').querySelector('button').disabled=working||!ws;}
 async function task(fn){if(working)return;working=true;setControls();try{await fn();}catch(e){status('操作未完成：'+String(e?.message??'未知错误').slice(0,120)+'。已提交的批次可能保留；可重新导入去重。');if(e?.message==='stale_session'){ws.session=null;people=[];render();clearDetails();$('summary').textContent='资料会话已失效，请重新选择。';$('active-owner').textContent='尚未选择';$('coverage').replaceChildren();}}finally{working=false;setControls();}}
 function clearDetails(){detailRows=[];detailOffset=0;$('details').replaceChildren();$('detail-title').textContent='点击排行榜用户 ID 查看记录。';$('more-details').hidden=true;}
 function appendDetails(){
@@ -18,15 +19,16 @@ function appendDetails(){
   }
   detailOffset+=50;$('more-details').hidden=detailOffset>=detailRows.length;
 }
+function matching(){const q=$('search').value.trim().toLowerCase().replace(/^@/,'');return people.filter(p=>!q||p.userId.includes(q)||p.handle?.toLowerCase().includes(q));}
 function render(){
-  const q=$('search').value.trim(),filtered=people.filter(p=>!q||p.userId.includes(q));
+  const filtered=matching();$('export').disabled=working||!ws?.session||!filtered.length;
   page=Math.min(page,Math.max(0,Math.ceil(filtered.length/PAGE)-1));
   $('ranking').replaceChildren();
-  for(const p of filtered.slice(page*PAGE,(page+1)*PAGE)){
+  for(const [index,p] of filtered.slice(page*PAGE,(page+1)*PAGE).entries()){
     const tr=document.createElement('tr'),td=document.createElement('td'),btn=document.createElement('button');
-    btn.textContent=p.userId;btn.type='button';btn.onclick=()=>task(async()=>{clearDetails();detailRows=await ws.details(p.userId,options());$('detail-title').textContent=p.userId+' · '+detailRows.length+' 条';appendDetails();});
-    td.append(btn);tr.append(td);
-    for(const v of [p.count,p.inbound,p.outbound,p.byType.reply,p.byType.like,p.byType.repost,p.byType.quote,p.byType.mention]){const cell=document.createElement('td');cell.textContent=String(v);tr.append(cell);}
+    btn.textContent=p.handle?'@'+p.handle:p.userId;btn.title='X 用户 ID '+p.userId;btn.type='button';btn.onclick=()=>task(async()=>{clearDetails();detailRows=await ws.details(p.userId,options());$('detail-title').textContent=(p.handle?'@'+p.handle:p.userId)+' · '+detailRows.length+' 条';appendDetails();});
+    const rank=document.createElement('td');rank.textContent=String(page*PAGE+index+1);tr.append(rank);td.append(btn);tr.append(td);
+    for(const v of [p.count,p.inbound,p.outbound,p.byType.reply,p.byType.like,p.byType.repost,p.byType.quote,p.byType.mention,p.unknownTime]){const cell=document.createElement('td');cell.textContent=String(v);tr.append(cell);}
     $('ranking').append(tr);
   }
   $('page').textContent=filtered.length?'第 '+(page+1)+' / '+Math.ceil(filtered.length/PAGE)+' 页':'无结果';
@@ -39,8 +41,9 @@ async function refresh(){
 }
 $('owner-form').addEventListener('submit',e=>{e.preventDefault();task(async()=>{people=[];render();clearDetails();$('coverage').replaceChildren();$('summary').textContent='正在打开资料';await ws.select($('owner').value.trim());$('active-owner').textContent='离线资料账号：'+ws.session.ownerUserId;status('资料已打开。');await refresh();});});
 $('import').onclick=()=>task(async()=>{const file=$('file').files[0];if(!file)throw Error('请选择 JSON 文件');if(file.size>MAX_FILE_BYTES)throw Error('文件超过 8 MiB');const r=await ws.importText(await file.text());status('导入新增 '+r.inserted+' 条，识别 '+r.accepted+' 条。未识别或外部目标不计入。');await refresh();});
-for(const id of ['direction','days','sort'])$(id).onchange=()=>task(refresh);
+for(const id of ['direction','days','type','sort'])$(id).onchange=()=>task(refresh);
 $('search').oninput=()=>{page=0;render();};
 $('previous').onclick=()=>{page--;render();};$('next').onclick=()=>{page++;render();};$('more-details').onclick=appendDetails;
 $('clear').onclick=()=>{if(confirm('仅删除当前离线资料账号的互动记录？'))task(async()=>{await ws.clear();status('当前资料已清除。');await refresh();});};
+$('export').onclick=()=>{if(working||!ws?.session||!matching().length)return;const url=URL.createObjectURL(new Blob(['\uFEFF'+rankingCsv(matching())],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download='interaction-ranking-'+ws.session.ownerUserId+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 setControls();Workspace.open().then(w=>{ws=w;setControls();}).catch(()=>status('无法打开本地数据库。'));

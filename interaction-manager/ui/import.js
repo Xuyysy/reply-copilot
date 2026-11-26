@@ -15,6 +15,10 @@ export function parseImport(text,now=Date.now()){
   const result=data.kind==='notification'?parseNotificationPayload(data.payload,context):parsePostEvidence(data.posts,context);
   if(result.stats?.truncated)throw Error('source_limit');
   if(result.events.length>20000)throw Error('source_limit');
+  const participants=new Set(result.events.flatMap(e=>[e.actorUserId,e.targetUserId]));
+  const users=new Map((result.users??[]).map(u=>[u.userId,u]));
+  if(data.users!==undefined&&(!Array.isArray(data.users)||data.users.length>20000))throw Error('invalid_users');
+  for(const u of data.users??[])if(u&&participants.has(u.userId)&&validId(u.userId)&&typeof u.handle==='string'&&/^[A-Za-z0-9_]{1,15}$/.test(u.handle))users.set(u.userId,{userId:u.userId,handle:u.handle,observedAt});
   // Only normalized event fields survive. Raw content and unrelated payloads never persist.
-  return {ownerUserId:data.ownerUserId,source:data.kind,observedAt,events:result.events,stats:result.stats??{rejected:result.rejected}};
+  return {ownerUserId:data.ownerUserId,source:data.kind,observedAt,events:result.events,users:[...users.values()],stats:result.stats??{rejected:result.rejected}};
 }
