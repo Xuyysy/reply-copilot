@@ -72,10 +72,38 @@ export async function openRepository(factory=globalThis.indexedDB){
    const data=await req(rows.index("byJob").getAll(id));return {ownerUserId,capturedAt:j.capturedAt,completeness:j.completeness,relationshipByUserId:relationshipById(data,j.completeness),users:data,source:j.source};
   });
  }
+ // Snapshot identifiers remain stable when a new sync shifts retention offsets.
+ async function listSnapshots(ownerUserId){
+  if(!stableId(ownerUserId))throw Error("invalid_owner");
+  return tx(["owners","jobs"],"readonly",async ({owners,jobs})=>{
+   const o=await req(owners.get(ownerUserId));if(!o)return [];
+   const found=await Promise.all(o.snapshotIds.map(id=>req(jobs.get(id))));
+   return found.filter(j=>j&&j.ownerUserId===ownerUserId&&j.status==="completed"&&j.source==="fixture"&&j.completeness==="complete").map(j=>({
+    snapshotId:j.jobId,ownerUserId,capturedAt:j.capturedAt,source:j.source,completeness:j.completeness,
+    followers:j.stages.followers.count,following:j.stages.following.count,
+    startedAt:j.stages.following.startedAt??j.createdAt,finishedAt:j.stages.followers.finishedAt??j.capturedAt
+   }));
+  });
+ }
+ // Resolve both selected snapshots inside one read transaction. Refuse evicted,
+ // cross-owner, unordered or partial records; do not silently compare another pair.
+ async function readHistoryPair(ownerUserId,newerId,olderId){
+  if(!stableId(ownerUserId)||typeof newerId!=="string"||typeof olderId!=="string"||newerId===olderId)throw Error("invalid_pair");
+  return tx(stores,"readonly",async ({owners,jobs,rows})=>{
+   const o=await req(owners.get(ownerUserId)),ids=o?.snapshotIds||[];
+   const a=ids.indexOf(newerId),b=ids.indexOf(olderId);if(a<0||b<0||a>=b)throw Error("invalid_pair");
+   async function read(id){
+    const j=await req(jobs.get(id));if(!j||j.ownerUserId!==ownerUserId||j.status!=="completed"||j.source!=="fixture"||j.completeness!=="complete")throw Error("invalid_snapshot");
+    const data=await req(rows.index("byJob").getAll(id));
+    return {snapshotId:id,ownerUserId,capturedAt:j.capturedAt,completeness:j.completeness,relationshipByUserId:relationshipById(data,j.completeness),users:data,source:j.source};
+   }
+   const [current,prior]=await Promise.all([read(newerId),read(olderId)]);return {current,prior};
+  });
+ }
  // Public integration seam is fail-closed. The fixture database is never a real relationship source.
  async function readFollowSnapshot(ownerUserId){if(!stableId(ownerUserId))throw Error("invalid_owner");return {ownerUserId,capturedAt:null,completeness:"unknown",relationshipByUserId:{}}}
  async function listProtected(ownerUserId){if(!stableId(ownerUserId))throw Error("invalid_owner");return tx(["protected"],"readonly",async s=>req(s.protected.index("byOwner").getAll(ownerUserId)));}
  async function setProtected(ownerUserId,userId,enabled,note=""){if(!stableId(ownerUserId)||!stableId(userId)||typeof enabled!=="boolean"||typeof note!=="string"||note.length>500)throw Error("invalid_protection");return tx(["protected"],"readwrite",async s=>{if(enabled)await req(s.protected.put({ownerUserId,userId,note,updatedAt:clock()}));else await req(s.protected.delete([ownerUserId,userId]));});}
  async function purge(ownerUserId){if(!stableId(ownerUserId))throw Error("invalid_owner");return tx([...stores,"protected"],"readwrite",async ({owners,jobs,rows,protected:p})=>{const o=await req(owners.get(ownerUserId));if(o){for(const id of new Set([o.activeJobId,...o.snapshotIds].filter(Boolean))){await removeRows(rows,id);await req(jobs.delete(id));}await req(owners.delete(ownerUserId));}const keys=await req(p.index("byOwner").getAllKeys(ownerUserId));await Promise.all(keys.map(k=>req(p.delete(k))));});}
- return {start,active,resume,append,pause,discard,finalize,readSnapshot,readFollowSnapshot,listProtected,setProtected,purge,close:()=>db.close()};
+ return {start,active,resume,append,pause,discard,finalize,readSnapshot,listSnapshots,readHistoryPair,readFollowSnapshot,listProtected,setProtected,purge,close:()=>db.close()};
 }
