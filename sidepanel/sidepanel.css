@@ -84,3 +84,50 @@ footer { background:var(--bg);border-color:var(--line); }
 .subscription-overage p{margin:0 0 8px;font-size:12px;line-height:1.5}.subscription-overage .button{margin-top:4px}
 
 .diagnostic-results{margin:8px 0;font-size:12px}.diagnostic-results>div{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}.diagnostic-results dt{flex:0 0 37%;color:var(--muted)}.diagnostic-results dd{margin:0;text-align:right;overflow-wrap:anywhere;min-width:0;color:var(--text)}.diagnostics-card .dashboard-actions{margin-top:8px}
+
+/* Follow Manager: compact local-first tool, directly after Account & Credits. */
+.follow-manager-entry{
+  position:relative;overflow:hidden;padding:15px;
+  border-color:var(--xrh-pro-line);
+  background:linear-gradient(140deg,var(--xrh-pro-surface),var(--card) 73%);
+}
+.follow-manager-entry::before{
+  content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:var(--xrh-brand);
+}
+.follow-manager-head{display:flex;align-items:center;gap:10px;min-width:0}
+.follow-manager-symbol{
+  width:38px;height:38px;display:grid;place-items:center;flex:0 0 38px;
+  border-radius:12px;background:var(--xrh-brand);color:var(--xrh-canvas);
+  box-shadow:0 4px 12px rgba(49,91,232,.15)
+}
+.follow-manager-heading{min-width:0;flex:1}
+.follow-manager-heading h2{
+  margin:0 0 3px;font-size:14px;line-height:1.3;letter-spacing:-.01em
+}
+.follow-manager-kicker{font-size:10px;color:var(--muted);line-height:1.4}
+.follow-manager-pill{
+  flex:0 0 auto;padding:5px 8px;border-radius:999px;
+  border:1px solid var(--xrh-pro-line);background:var(--card);
+  color:var(--xrh-brand-text);font-size:10px;font-weight:700;white-space:nowrap
+}
+.follow-manager-description{
+  margin:12px 0 11px;color:var(--muted);font-size:11px;line-height:1.65
+}
+.follow-manager-entry .follow-manager-action{
+  width:100%;min-height:39px;justify-content:space-between;padding:9px 12px;
+  background:var(--xrh-surface);border-color:var(--xrh-pro-line);
+  color:var(--xrh-brand-text);font-size:12px;font-weight:700
+}
+.follow-manager-entry .follow-manager-action:hover:not(:disabled){
+  background:var(--xrh-pro-surface);border-color:var(--xrh-brand)
+}
+.follow-manager-action svg{flex:none;transition:transform 150ms ease}
+.follow-manager-action:hover:not(:disabled) svg{transform:translateX(3px)}
+@media(max-width:320px){
+  .follow-manager-entry{padding:12px}
+  .follow-manager-head{gap:8px}
+  .follow-manager-symbol{width:34px;height:34px;flex-basis:34px}
+  .follow-manager-pill{padding:4px 6px}
+}
+@media(prefers-reduced-motion:reduce){.follow-manager-action svg{transition:none}}

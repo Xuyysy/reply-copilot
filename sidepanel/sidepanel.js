@@ -176,6 +176,12 @@ document.addEventListener('click',async event=>{
     return;
   }
   if(button.id==='account-refresh'){void refreshDashboard();return;}
+  if(button.id==='nav-follow-manager'){
+    if(RUNTIME_CONFIG.channel!=='staging')return;
+    try{await chrome.tabs.create({url:chrome.runtime.getURL('follow-manager/manager.html')});}
+    catch{$('account-summary').textContent='互关助手页面暂无法打开，请重试。';}
+    return;
+  }
   if(button.id==='check-binding'){
     if(manualBindingCheck)return;
     manualBindingCheck=true;button.disabled=true;
