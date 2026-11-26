@@ -1,0 +1,15 @@
+name: Paid Production safe smoke checks
+on:
+  push:
+    branches: ['chatgpt/paid-production-smoke-20261126']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 scripts/paid-production-safe-smoke-20261126.py
