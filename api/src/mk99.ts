@@ -13,6 +13,17 @@ export class Mk99Error extends Error{constructor(public code:string,public statu
 const bytes=(s:string)=>new TextEncoder().encode(s);
 const signTypes=['MD5','RSA'];
 function pem(pem:string|undefined,label:string){if(!pem?.includes(`-----BEGIN ${label}-----`))throw new Mk99Error('MK99_CONFIG_ERROR');return Uint8Array.from(atob(pem.replace(`-----BEGIN ${label}-----`,'').replace(`-----END ${label}-----`,'').replace(/\s/g,'')),x=>x.charCodeAt(0));}
+// Cache only one resolved, non-extractable public verification key per isolate.
+ // Exact configured PEM is the cache identity; a changed or invalid key is
+ // always imported/validated and never falls back to the previous key.
+ // Do not cache private signing keys or request-bound promises.
+let platformVerifyKey: {pem:string;key:CryptoKey}|undefined;
+async function importPlatformVerifyKey(value:string|undefined):Promise<CryptoKey>{
+ if(value!==undefined&&platformVerifyKey?.pem===value)return platformVerifyKey.key;
+ const key=await crypto.subtle.importKey('spki',pem(value,'PUBLIC KEY'),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);
+ if(value!==undefined)platformVerifyKey={pem:value,key};
+ return key;
+}
 export function canonicalMk99(params:Params):string{
  const entries=Object.entries(params).filter(([k,v])=>k!=='sign'&&k!=='sign_type'&&v!==''&&v!==null&&v!==undefined);
  if(entries.some(([k,v])=>!/^[A-Za-z0-9_]{1,64}$/.test(k)||!['string','number'].includes(typeof v)||(typeof v==='number'&&!Number.isSafeInteger(v))))throw new Mk99Error('MK99_INVALID_PARAMETERS');
@@ -32,7 +43,7 @@ export async function verifyMk99(params:Record<string,string>,config:Mk99Config)
    if(!/^[A-Fa-f0-9]{32}$/.test(params.sign))return false;
    const expected=await signMk99(params,{...config,signType:'MD5'}),actual=params.sign.toUpperCase();let d=0;for(let i=0;i<32;i++)d|=expected.charCodeAt(i)^actual.charCodeAt(i);return d===0;
   }
-  const key=await crypto.subtle.importKey('spki',pem(config.platformPublicKey,'PUBLIC KEY'),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);
+  const key=await importPlatformVerifyKey(config.platformPublicKey);
   const sig=Uint8Array.from(atob(params.sign),c=>c.charCodeAt(0));return await crypto.subtle.verify('RSASSA-PKCS1-v1_5',key,sig,bytes(canonicalMk99(params)));
  }catch{return false;}
 }
@@ -48,7 +59,7 @@ export function mk99Config(env:Env,requireConfirmed=true):Mk99Config{
 }
 export async function mk99Readiness(env:Env){
  let credentialsConfigured=false;
- try{const config=mk99Config(env,false);if(config.signType==='RSA')await crypto.subtle.importKey('pkcs8',pem(config.privateKey,'PRIVATE KEY'),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);if(config.notifySignType==='RSA')await crypto.subtle.importKey('spki',pem(config.platformPublicKey,'PUBLIC KEY'),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['verify']);credentialsConfigured=true;}catch{}
+ try{const config=mk99Config(env,false);if(config.signType==='RSA')await crypto.subtle.importKey('pkcs8',pem(config.privateKey,'PRIVATE KEY'),{name:'RSASSA-PKCS1-v1_5',hash:'SHA-256'},false,['sign']);if(config.notifySignType==='RSA')await importPlatformVerifyKey(config.platformPublicKey);credentialsConfigured=true;}catch{}
  return {credentialsConfigured,protocolConfirmed:env.MK99_PROTOCOL_CONFIRMED==='1',amountContractConfirmed:env.MK99_AMOUNT_CONTRACT==='CNY_EXACT_BUYER_TOTAL'};
 }
 /** MK99 documents total_amount as a decimal yuan string. Keep this parser local

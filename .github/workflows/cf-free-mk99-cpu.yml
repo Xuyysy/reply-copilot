@@ -1,0 +1,19 @@
+name: CF Free MK99 payment CPU candidate
+on:
+  push:
+    branches: ['chatgpt/cf-free-mk99-key-import-20261126']
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - run: node --test api/tests/mk99.test.mjs api/tests/mk99-payments.test.mjs api/tests/mk99-workers-runtime.test.mjs api/tests/mk99-migration.test.mjs
