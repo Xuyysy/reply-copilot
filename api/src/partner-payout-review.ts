@@ -58,6 +58,6 @@ export async function adminPayoutReview(request:Request,env:Env):Promise<Respons
    {sql:"DELETE FROM partner_recovery_assertions WHERE id IN (?,?)",params:[claim,claim+':done']}
   ];
  }
- try{await env.DB.batch([guard.check,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
+ try{await env.DB.batch([...guard.checks,...work,guard.cleanup].map(p=>env.DB.prepare(p.sql).bind(...p.params)));}catch{conflict();}
  return response({ok:true,state:action==='approve'?'reserved':'reconciling',pilot:true,...(recipient?{recipient,amountFen:q.amount_fen}: {})},200,env,request);
 }

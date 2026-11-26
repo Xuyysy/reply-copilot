@@ -152,6 +152,7 @@ test('payout review allocates mature funds and checks current evidence in same t
  const work=[...g.checks,...alipayApprovePlan({...approve,items}),g.cleanup];
  db.exec("UPDATE payment_transactions SET risk_state='manual_review'");
  assert.throws(()=>atomic(db,work));
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_recovery_assertions").get().n,0);
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,0);
  db.exec("UPDATE payment_transactions SET risk_state='clear'");
  atomic(db,work);
@@ -210,7 +211,9 @@ test('set-based payout checks 45 historical commissions and reserves more than 3
  const req={...request,amountFen:8100};
  assert.equal(run(db,alipayRequestPlan(req)),1);
  const g=allHistoryPayoutGuard({partnerId:'p',operationId:'large'});
- const work=[g.check,...setPayoutApprovePlan({...req,payoutId:'x',actorId:'a',now:30,reason:'verified fixture'}),g.cleanup];
+ assert.equal(g.checks.length,3);
+ assert.equal(new Set(g.checks.map(p=>p.params[0])).size,3);
+ const work=[...g.checks,...setPayoutApprovePlan({...req,payoutId:'x',actorId:'a',now:30,reason:'verified fixture'}),g.cleanup];
  // A late, unallocated order must still block approval.
  db.exec("UPDATE payment_transactions SET risk_state='manual_review' WHERE order_id='o044'");
  assert.throws(()=>atomic(db,work));
@@ -222,10 +225,10 @@ test('set-based payout checks 45 historical commissions and reserves more than 3
  assert.equal(state(db),'reserved');
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_recovery_assertions").get().n,0);
  db.exec("UPDATE payment_transactions SET provider_payment_id='changed' WHERE order_id='o044'");
- assert.throws(()=>atomic(db,[g.check,alipayStartPlan(start),g.cleanup]));
+ assert.throws(()=>atomic(db,[...g.checks,alipayStartPlan(start),g.cleanup]));
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_alipay_transfer_starts").get().n,0);
  db.exec("UPDATE payment_transactions SET provider_payment_id='pay44' WHERE order_id='o044'");
- atomic(db,[g.check,alipayStartPlan(start),g.cleanup]);
+ atomic(db,[...g.checks,alipayStartPlan(start),g.cleanup]);
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_alipay_transfer_starts").get().n,1);
 });
 test('set-based payout respects prior refund debt outside selected allocation',async t=>{
@@ -236,7 +239,7 @@ test('set-based payout respects prior refund debt outside selected allocation',a
  const req={...request,requestId:'r2',amountFen:8700,now:60};
  assert.equal(run(db,alipayRequestPlan(req)),1);
  const g=allHistoryPayoutGuard({partnerId:'p',operationId:'debt'});
- assert.throws(()=>atomic(db,[g.check,...setPayoutApprovePlan({...req,payoutId:'x2',actorId:'a',now:61,reason:'verified fixture'}),g.cleanup]),/insufficient partner net balance/);
+ assert.throws(()=>atomic(db,[...g.checks,...setPayoutApprovePlan({...req,payoutId:'x2',actorId:'a',now:61,reason:'verified fixture'}),g.cleanup]),/insufficient partner net balance/);
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payouts").get().n,1);
 });
 
@@ -253,15 +256,15 @@ test('set review accepts exact fully reversed subscription proof and rejects cha
  INSERT INTO partner_payment_identity_claims VALUES('mk99','out-s','pay-s','subscription','s',11);
  UPDATE system_settings SET value='1' WHERE key='partner_refund_sync_enabled';`);
  const g=allHistoryPayoutGuard({partnerId:'p',operationId:'sub'});
- assert.throws(()=>atomic(db,[g.check,g.cleanup]));
+ assert.throws(()=>atomic(db,[...g.checks,g.cleanup]));
  const digest=createHash('sha256').update(JSON.stringify(['out-s','pay-s','TRADE_REFUND',1000])).digest('hex');
  db.prepare("INSERT INTO subscription_payment_events VALUES('st','mk99','TRADE_REFUND',1000,?,?)").run(digest,'sub-risk:'+digest);
  const q=subscriptionRefundCandidatePlan('s'),rows=db.prepare(q.sql).all(...q.params);
  const plan=await subscriptionRefundSyncPlan({orderId:'s',rows,now:25});
  assert.equal(run(db,plan.write),1);
- atomic(db,[g.check,g.cleanup]);
+ atomic(db,[...g.checks,g.cleanup]);
  db.exec("UPDATE subscription_payment_events SET body_sha256='changed' WHERE event_type='TRADE_REFUND'");
- assert.throws(()=>atomic(db,[g.check,g.cleanup]));
+ assert.throws(()=>atomic(db,[...g.checks,g.cleanup]));
 });
 
 test('request state cannot be forged or reviewed with null evidence fields',t=>{
