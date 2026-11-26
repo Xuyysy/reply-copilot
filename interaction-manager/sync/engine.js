@@ -3,6 +3,7 @@
 import {validId,normalizeEvent,mergeEvent} from '../core/events.js';
 import {parseNotificationPayload} from '../adapters/notification-payload.js';
 import {parsePostEvidence} from '../adapters/post-evidence.js';
+import {decodeWebPostRecords} from '../adapters/web-post-records.js';
 import {beginSession,endSession,openSyncJob,commitBatch,readEventPage,readCoverage,readUsers} from '../storage/repository.js';
 import {rankInteractions} from '../analytics/ranking.js';
 const STATUS=new Map([[401,'unauthenticated'],[403,'forbidden'],[429,'rate_limited']]);
@@ -30,18 +31,22 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   if(typeof page.done!=='boolean'||!validCursor(page.nextCursor)||page.done!==(page.nextCursor===null)||!page.done&&page.nextCursor===cursor)fail('invalid_pagination');
   // Provider is responsible for proving a known timeline shape and explicit terminal evidence.
   if(page.structureVerified!==true||page.done&&page.terminalEvidence!=='explicit')fail('schema_changed');
-  const parsed=source==='notification'?parseNotificationPayload(page.payload,{ownerUserId,observedAt}):parsePostEvidence(page.posts,{ownerUserId,observedAt});
-  if(source==='notification'&&Array.isArray(page.posts)){
-    const posts=parsePostEvidence(page.posts,{ownerUserId,observedAt});
+  // The provider may supply an explicit bounded array of structured posts.
+  // Never traverse arbitrary response trees or assume a referenced post is an event.
+  const decoded=page.webPosts===undefined?null:decodeWebPostRecords(page.webPosts,{observedAt});
+  const suppliedPosts=decoded?[...(page.posts??[]),...decoded.posts]:page.posts;
+  const parsed=source==='notification'?parseNotificationPayload(page.payload,{ownerUserId,observedAt}):parsePostEvidence(suppliedPosts,{ownerUserId,observedAt});
+  if(source==='notification'&&Array.isArray(suppliedPosts)){
+    const posts=parsePostEvidence(suppliedPosts,{ownerUserId,observedAt});
     const byId=new Map(parsed.events.map(e=>[e.eventId,e]));
     for(const raw of posts.events){const e=normalizeEvent({...raw,source:'notification'},ownerUserId);if(e)byId.set(e.eventId,mergeEvent(byId.get(e.eventId),e));}
     parsed.events=[...byId.values()];
-    parsed.users=[...(parsed.users??[]),...(Array.isArray(page.users)?page.users:[]).map(u=>({...u,observedAt}))];
   }
+  parsed.users=[...(parsed.users??[]),...(decoded?.users??[]),...(Array.isArray(page.users)?page.users:[]).map(u=>({...u,observedAt}))];
   if(parsed.stats?.truncated||parsed.events.length>1000)fail('page_limit');
   if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows)fail('schema_changed');
   const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=100000?v:0;
-  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:count(page.ignored)};
+  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored))};
   return {...parsed,quality,nextCursor:page.nextCursor,done:page.done,observedAt};
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){

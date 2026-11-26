@@ -6,9 +6,14 @@ export function parsePostEvidence(posts,{ownerUserId,observedAt=Date.now()}={}){
   for(const p of posts){
     if(!p||!validId(p.postId)||!validId(p.authorUserId)){rejected++;continue;}
     const candidates=[];
+    if(p.repostedUserId!=null||p.repostedPostId!=null){
+      if(!validId(p.repostedUserId)||!validId(p.repostedPostId)){rejected++;continue;}
+      candidates.push(['repost',p.repostedUserId,p.repostedPostId]);
+    }else{
     if(validId(p.replyToUserId)&&validId(p.replyToPostId))candidates.push(['reply',p.replyToUserId,p.replyToPostId]);
     if(validId(p.quotedUserId)&&validId(p.quotedPostId))candidates.push(['quote',p.quotedUserId,p.quotedPostId]);
     if(Array.isArray(p.mentionedUserIds)&&p.mentionedUserIds.length<=100)for(const u of new Set(p.mentionedUserIds))if(validId(u))candidates.push(['mention',u,null]);
+    }
     for(const [type,targetUserId,targetPostId] of candidates){
       if(targetUserId!==ownerUserId&&p.authorUserId!==ownerUserId)continue;
       const e=normalizeEvent({ownerUserId,actorUserId:p.authorUserId,targetUserId,type,eventPostId:p.postId,targetPostId,occurredAt:p.createdAt??null,observedAt,source:'post',evidenceQuality:'confirmed'},ownerUserId);
