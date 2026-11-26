@@ -70,3 +70,29 @@ export function alipayOutcomePlan({payoutId,actorId,now,outcome,amountFen,refere
  SELECT ?,?,?,?,?,?,? WHERE ${admin} AND NOT EXISTS(SELECT 1 FROM partner_alipay_transfer_outcomes WHERE payout_id=?) ON CONFLICT(payout_id) DO NOTHING`,
  params:[payoutId,outcome,amountFen,reference?.trim()??null,actorId,now,why.trim(),actorId,payoutId]};
 }
+
+// D1 meta.changes includes the AFTER INSERT trigger's payout UPDATE. Assert
+// the exact durable transition inside the atomic batch instead of counting
+// writes. The pre-assertion also rejects races and identical replays.
+export function alipayOutcomeBatchPlan(input){
+ const {payoutId,actorId,now,outcome,amountFen,reference=null,reason:why}=input;
+ const record=alipayOutcomePlan(input);
+ const claim='outcome:'+payoutId;
+ return [
+  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN EXISTS(
+   SELECT 1 FROM partner_payouts p JOIN partner_alipay_transfer_starts s ON s.payout_id=p.id
+   JOIN partner_alipay_requests q ON q.payout_id=p.id AND q.status='approved'
+   WHERE p.id=? AND p.status='reserved' AND s.started_at<=?)
+   AND NOT EXISTS(SELECT 1 FROM partner_alipay_transfer_outcomes WHERE payout_id=?)
+   THEN 1 ELSE 0 END`,params:[claim,payoutId,now,payoutId]},
+  record,
+  {sql:`INSERT INTO partner_recovery_assertions(id,ok) SELECT ?,CASE WHEN EXISTS(
+   SELECT 1 FROM partner_alipay_transfer_outcomes e JOIN partner_payouts p ON p.id=e.payout_id
+   WHERE e.payout_id=? AND e.outcome=? AND e.amount_fen=? AND e.reference IS ?
+   AND e.recorded_by=? AND e.recorded_at=? AND e.reason=?
+   AND p.status=? AND p.resolved_at=e.recorded_at AND p.resolved_by=e.recorded_by
+   AND p.transfer_reference IS e.reference AND (e.outcome='no_transfer' OR p.amount_fen=e.amount_fen))
+   THEN 1 ELSE 0 END`,params:[claim+':done',payoutId,outcome,amountFen,reference?.trim()??null,actorId,now,why.trim(),outcome==='paid'?'paid':'cancelled']},
+  {sql:'DELETE FROM partner_recovery_assertions WHERE id IN (?,?)',params:[claim,claim+':done']}
+ ];
+}
