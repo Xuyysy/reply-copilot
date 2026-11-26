@@ -40,7 +40,9 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   }
   if(parsed.stats?.truncated||parsed.events.length>1000)fail('page_limit');
   if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows)fail('schema_changed');
-  return {...parsed,nextCursor:page.nextCursor,done:page.done,observedAt};
+  const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=100000?v:0;
+  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:count(page.ignored)};
+  return {...parsed,quality,nextCursor:page.nextCursor,done:page.done,observedAt};
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
   if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||!Number.isInteger(maxPages)||maxPages<1||maxPages>100||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
@@ -58,7 +60,7 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
       if(parsed.nextCursor!==null&&job.seen.includes(parsed.nextCursor))fail('cursor_cycle');
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
       check(signal,deadline);
-      const result=await commitBatch(db,session,parsed.events,{source,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',observedAt:parsed.observedAt,users:parsed.users??[],signal,checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done}});
+      const result=await commitBatch(db,session,parsed.events,{source,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',observedAt:parsed.observedAt,users:parsed.users??[],signal,checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
       job=result.job;inserted+=result.inserted;committed++;
       try{onProgress({pages:committed,inserted,done:job.done,stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
     }

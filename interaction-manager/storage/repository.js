@@ -55,6 +55,7 @@ export async function commitBatch(db,session,inputs,{source,cursor=null,reason='
     let job=null;
     if(checkpoint){
       const {providerId,revision,nextCursor,done}=checkpoint;
+      if(checkpoint.quality!=null)for(const key of QUALITY_KEYS)if(!Number.isSafeInteger(checkpoint.quality[key])||checkpoint.quality[key]<0||checkpoint.quality[key]>100000)throw Error('invalid_checkpoint');
       if(!validProvider(providerId)||!Number.isSafeInteger(revision)||revision<0||!validCursor(nextCursor)||typeof done!=='boolean'||done!==(nextCursor===null)||nextCursor!==cursor||reason!==(done?'source_exhausted':'partial')||rejected)throw Error('invalid_checkpoint');
       const store=tx.objectStore('syncJobs');job=await req(store.get([session.ownerUserId,providerId,source]));
       if(!job||job.revision!==revision||job.done)throw Error('stale_checkpoint');
@@ -75,7 +76,7 @@ export async function commitBatch(db,session,inputs,{source,cursor=null,reason='
     const old=await req(coverage.get(key));
     await req(coverage.put({ownerUserId:session.ownerUserId,source,cursor,reason,lastObservedAt:observedAt,uniqueEvents:(old?.uniqueEvents??0)+sourceNew,rejected:(old?.rejected??0)+rejected,historyComplete:false}));
     if(signal?.aborted)throw Error('cancelled');
-    if(job){const next={...job,revision:job.revision+1,pages:job.pages+1,cursor:checkpoint.nextCursor,done:checkpoint.done,seen:checkpoint.nextCursor===null?job.seen:[...job.seen,checkpoint.nextCursor],updatedAt:observedAt};await req(tx.objectStore('syncJobs').put(next));if(signal?.aborted)throw Error('cancelled');return {inserted,accepted:records.size,rejected,job:next};}
+    if(job){const quality=Object.fromEntries(QUALITY_KEYS.map(k=>[k,(job.quality?.[k]??0)+(checkpoint.quality?.[k]??0)]));const next={...job,quality,qualityPages:(job.qualityPages??0)+(checkpoint.quality?1:0),revision:job.revision+1,pages:job.pages+1,cursor:checkpoint.nextCursor,done:checkpoint.done,seen:checkpoint.nextCursor===null?job.seen:[...job.seen,checkpoint.nextCursor],updatedAt:observedAt};await req(tx.objectStore('syncJobs').put(next));if(signal?.aborted)throw Error('cancelled');return {inserted,accepted:records.size,rejected,job:next};}
     return {inserted,accepted:records.size,rejected};
   });
 }
@@ -121,6 +122,7 @@ export async function clearOwner(db,session){
   });
 }
 
+const QUALITY_KEYS=['unsupported','unresolvedActors','foreignTargets','ignored'];
 function validProvider(v){return typeof v==='string'&&/^[a-z0-9-]{1,50}$/.test(v);}
 function validCursor(v){return v===null||typeof v==='string'&&v.length>0&&v.length<=2048;}
 export async function openSyncJob(db,session,{providerId,source,refresh=false}={}){
@@ -130,7 +132,7 @@ export async function openSyncJob(db,session,{providerId,source,refresh=false}={
     const store=tx.objectStore('syncJobs'),key=[session.ownerUserId,providerId,source],old=await req(store.get(key));
     if(old&&!refresh)return old;
     // Explicit refresh starts from the head, without deleting previously committed events.
-    const job={ownerUserId:session.ownerUserId,providerId,source,revision:(old?.revision??-1)+1,cursor:null,seen:[],pages:0,done:false,updatedAt:Date.now()};
+    const job={ownerUserId:session.ownerUserId,providerId,source,revision:(old?.revision??-1)+1,cursor:null,seen:[],pages:0,done:false,qualityPages:0,quality:{unsupported:0,unresolvedActors:0,foreignTargets:0,ignored:0},updatedAt:Date.now()};
     await req(store.put(job));return job;
   });
 }
@@ -147,7 +149,7 @@ export async function readOwnerDataset(db,session){
     const users=await req(tx.objectStore('users').index('owner').getAll(range));
     const ownerRange=IDBKeyRange.bound([owner],[owner,[]]);
     const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected})=>({source,reason,lastObservedAt,uniqueEvents,rejected,historyComplete:false}));
-    const jobs=(await req(tx.objectStore('syncJobs').getAll(ownerRange))).map(({providerId,source,pages,done,updatedAt})=>({providerId,source,pages,done,updatedAt}));
+    const jobs=(await req(tx.objectStore('syncJobs').getAll(ownerRange))).map(({providerId,source,pages,done,updatedAt,quality,qualityPages})=>({providerId,source,pages,done,updatedAt,quality,qualityPages}));
     return {ownerUserId:owner,rows,users,coverage,jobs};
   });
 }

@@ -28,12 +28,16 @@ test('interface workbench actual DOM: sync two pages, persistence, filters, deta
  assert.deepEqual(await evaluate("fixture.calls.filter(x=>x.action==='page').map(x=>x.cursor)"),[null,'next']);
  assert.match(await evaluate("document.getElementById('interface-summary').textContent"),/57 条/);
  await evaluate("document.getElementById('interface-next').click()");
+ await wait(evaluate,"document.getElementById('interface-results').children.length===5");
  assert.equal(await evaluate("document.getElementById('interface-results').children.length"),5);
  await evaluate("document.getElementById('interface-days').value='7';document.getElementById('interface-days').dispatchEvent(new Event('change'));");
+ await wait(evaluate,"document.getElementById('interface-results').children.length===1");
  assert.equal(await evaluate("document.getElementById('interface-results').children.length"),1);
  await evaluate("document.querySelector('#interface-results button').click()");
+ await wait(evaluate,"document.getElementById('interface-detail').textContent.includes('回复')");
  assert.match(await evaluate("document.getElementById('interface-detail').textContent"),/回复/);
  await evaluate("document.getElementById('interface-days').value='';document.getElementById('interface-days').dispatchEvent(new Event('change'));document.getElementById('interface-search').value='user0';document.getElementById('interface-search').dispatchEvent(new Event('input'));");
+ await wait(evaluate,"document.getElementById('interface-results').children.length===1");
  assert.equal(await evaluate("document.getElementById('interface-results').children.length"),1);
  await evaluate("fixture.switchTab(2)");
  assert.equal(await evaluate("document.getElementById('interface-results').children.length"),0);
@@ -41,7 +45,10 @@ test('interface workbench actual DOM: sync two pages, persistence, filters, deta
  await evaluate("document.getElementById('interface-authorized').click();document.getElementById('interface-cached').click()");
  await wait(evaluate,ready+"&&document.getElementById('interface-results').children.length===50");
  assert.equal(await evaluate("fixture.calls.filter(x=>x.action==='page').length"),0);
- await evaluate("fixture.changeOwner('333');document.getElementById('interface-cached').click()");
+ await evaluate("fixture.changeOwner('333')");
+ await wait(evaluate,"document.getElementById('interface-results').children.length===0&&document.getElementById('interface-status').textContent.includes('账号或页面已变化')");
+ assert.equal(await evaluate("fixture.calls.filter(x=>x.action==='page').length"),0);
+ await evaluate("document.getElementById('interface-cached').click()");
  await wait(evaluate,ready+"&&document.getElementById('interface-summary').textContent.includes('已存 0 条')");
  assert.equal(await evaluate("document.getElementById('interface-results').children.length"),0);
  });
