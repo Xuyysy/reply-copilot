@@ -4,9 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {withMomentumBrowser} from './helpers/momentum-browser.js';
 const {buildSync}=createRequire(new URL('../api/package.json',import.meta.url))('esbuild');
-const build=readFileSync(new URL('../scripts/build.js',import.meta.url),'utf8');
-const match=build.match(/const apiInteraction='([^\n]+)';/);
-assert.ok(match,'actual Staging panel markup must exist');
+import {interfaceMarkup} from './fixtures/interaction-pilot-markup.js';
 const js=buildSync({entryPoints:['staging/interaction-interface-panel.js'],bundle:true,format:'iife',write:false}).outputFiles[0].text;
 // Browser DOM and IndexedDB are real. Only the extension message boundary is
 // simulated; there is no X traffic or access to a real account in this test.
@@ -17,7 +15,7 @@ const fixture=()=>{let owner='111',activeTab=1,serial=0,session=null;const calls
  window.fixture={calls,events,changeOwner:v=>{owner=v;},switchTab:v=>{activeTab=v;events.activated.forEach(f=>f({tabId:v}));}};
  Object.defineProperty(window,'chrome',{configurable:true,value:{tabs:{query:async()=>[{id:activeTab}],onActivated:listener('activated'),onUpdated:listener('updated'),onRemoved:listener('removed'),sendMessage:async(tab,m)=>{calls.push({action:m.action,readOnly:m.readOnly,cursor:m.cursor});if(m.action==='start'){session='fixture-'+(++serial);return {ok:true,value:{ownerUserId:owner,handle:'me',sessionId:session,kind:m.readOnly?null:'graphql'}};}if(m.action==='cancel')return {ok:true,value:{}};if(m.sessionId!==session)return {ok:false,error:'identity_changed'};if(m.action==='identity')return {ok:true,value:{ownerUserId:owner,handle:'me',sessionId:session}};if(m.action==='page')return {ok:true,value:page(m.cursor)};return {ok:false,error:'source_error'};}}}});
 };
-const setup=match[1]+'<script>('+fixture.toString()+')();'+js+';window.momentumReady=true;</script>';
+const setup=interfaceMarkup+'<script>('+fixture.toString()+')();'+js+';window.momentumReady=true;</script>';
 const wait=async(evaluate,expr)=>{for(let i=0;i<300;i++){if(await evaluate(expr))return;await new Promise(r=>setTimeout(r,10));}throw Error('UI timeout: '+expr);};
 test('interface workbench actual DOM: sync two pages, persistence, filters, details, account isolation and cache only',{timeout:60000},async()=>{
  await withMomentumBrowser(setup,async({evaluate,call})=>{

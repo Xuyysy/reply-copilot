@@ -119,8 +119,32 @@ export async function openRepository(factory=globalThis.indexedDB,{live=false}={
   if(!j||j.ownerUserId!==ownerUserId||j.source!==sourceKind)return null;
   const data=await req(rows.index("byJob").getAll(j.jobId));return {ownerUserId,capturedAt:null,completeness:"partial",relationshipByUserId:relationshipById(data,"partial"),users:data,source:j.source};
  });}
+ // Consistent cache view: current checkpoint, retained snapshots and protection
+ // are resolved from a single readonly transaction. No network or public bridge.
+ async function readDashboard(ownerUserId){
+  if(!stableId(ownerUserId))throw Error("invalid_owner");
+  return tx([...stores,"protected"],"readonly",async({owners,jobs,rows,protected:p})=>{
+   const o=await req(owners.get(ownerUserId));
+   if(!o)return {ownerUserId,snapshot:null,progress:null,history:[],protectedUsers:[]};
+   const valid=j=>j&&j.ownerUserId===ownerUserId&&j.source===sourceKind;
+   const history=(await Promise.all(o.snapshotIds.map(id=>req(jobs.get(id))))).filter(j=>valid(j)&&j.status==="completed"&&j.completeness==="complete").map(j=>({snapshotId:j.jobId,capturedAt:j.capturedAt,followers:j.stages.followers.count,following:j.stages.following.count}));
+   const activeJob=o.activeJobId?await req(jobs.get(o.activeJobId)):null;
+   const materialize=async(id,quality,capturedAt)=>{
+    const data=await req(rows.index("byJob").getAll(id));
+    return {ownerUserId,snapshotId:id,source:sourceKind,completeness:quality,capturedAt,relationshipByUserId:relationshipById(data,quality),users:data};
+   };
+   const snapshot=history.length?await materialize(history[0].snapshotId,"complete",history[0].capturedAt):null;
+   let progress=null;
+   if(valid(activeJob)){
+    const j=activeJob;
+    progress={status:j.status,following:{count:j.stages.following.count,expected:j.expectedCounts?.following??j.stages.following.expected},followers:{count:j.stages.followers.count,expected:j.expectedCounts?.followers??j.stages.followers.expected},view:await materialize(j.jobId,"partial",null)};
+   }
+   const protectedUsers=await req(p.index("byOwner").getAll(ownerUserId));
+   return {ownerUserId,snapshot,progress,history,protectedUsers};
+  });
+ }
  async function listProtected(ownerUserId){if(!stableId(ownerUserId))throw Error("invalid_owner");return tx(["protected"],"readonly",async s=>req(s.protected.index("byOwner").getAll(ownerUserId)));}
  async function setProtected(ownerUserId,userId,enabled,note=""){if(!stableId(ownerUserId)||!stableId(userId)||typeof enabled!=="boolean"||typeof note!=="string"||note.length>500)throw Error("invalid_protection");return tx(["protected"],"readwrite",async s=>{if(enabled)await req(s.protected.put({ownerUserId,userId,note,updatedAt:clock()}));else await req(s.protected.delete([ownerUserId,userId]));});}
  async function purge(ownerUserId){if(!stableId(ownerUserId))throw Error("invalid_owner");return tx([...stores,"protected"],"readwrite",async ({owners,jobs,rows,protected:p})=>{const o=await req(owners.get(ownerUserId));if(o){for(const id of new Set([o.activeJobId,...o.snapshotIds].filter(Boolean))){await removeRows(rows,id);await req(jobs.delete(id));}await req(owners.delete(ownerUserId));}const keys=await req(p.index("byOwner").getAllKeys(ownerUserId));await Promise.all(keys.map(k=>req(p.delete(k))));});}
- return {start,active,resume,append,pause,discard,finalize,readSnapshot,readProgress,listSnapshots,readHistoryPair,readFollowSnapshot,listProtected,setProtected,purge,close:()=>db.close()};
+ return {start,active,resume,append,pause,discard,finalize,readSnapshot,readProgress,listSnapshots,readHistoryPair,readFollowSnapshot,readDashboard,listProtected,setProtected,purge,close:()=>db.close()};
 }

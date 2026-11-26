@@ -167,8 +167,8 @@
  globalThis.ReplyCopilotInteractionInterface=Object.freeze({identityFrom,endpointFrom,pageURL,project});
  if(typeof chrome==='undefined'||!chrome.runtime?.onMessage)return;
  let active=null;
- function liveIdentity(){
-   if(!ORIGINS.has(location.origin)||!/^\/notifications\/?$/.test(location.pathname)||document.visibilityState!=='visible')fail('open_notifications');
+ function liveIdentity(cacheOnly=false){
+   if(!ORIGINS.has(location.origin)||!cacheOnly&&(!/^\/notifications\/?$/.test(location.pathname)||document.visibilityState!=='visible'))fail('open_notifications');
    const handles=[...document.querySelectorAll('a[data-testid="AppTabBar_Profile_Link"][href]')].filter(a=>a.getClientRects().length&&!a.closest('[hidden],[aria-hidden="true"]')).map(a=>{try{const u=new URL(a.href);const m=/^\/([A-Za-z0-9_]{1,15})\/?$/.exec(u.pathname);return u.origin===location.origin?m?.[1]:null;}catch{return null;}}).filter(Boolean);
    return identityFrom(document.cookie,handles);
  }
@@ -207,6 +207,11 @@
  }
  const errors=new Set(['open_notifications','owner_unverified','endpoint_not_observed','identity_changed','owner_mismatch','session_limit','unauthenticated','schema_changed','page_limit','invalid_cursor','invalid_pagination','ambiguous_cursor','terminal_unverified','cancelled']);
  chrome.runtime.onMessage.addListener((m,sender,respond)=>{
+   // Separate read-only local identity probe. Does not start a session or request X.
+   if(m?.type==='XRH_STAGING_WORKBENCH_IDENTITY'&&sender.id===chrome.runtime.id&&!sender.tab&&(!sender.url||sender.url===chrome.runtime.getURL('staging/service-worker.js'))){
+     try{respond({ok:true,value:liveIdentity(true)});}catch{respond({ok:false,error:'owner_unverified'});}
+     return;
+   }
    if(sender.id!==chrome.runtime.id||sender.url!==chrome.runtime.getURL('sidepanel/sidepanel.html')||m?.type!=='XRH_STAGING_INTERACTION_INTERFACE')return;
    (async()=>{
      if(m.action==='start'){

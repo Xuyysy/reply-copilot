@@ -23,3 +23,7 @@ Source acceptance preparation: historical own-project parser fixtures used direc
 ## Authorized provider candidate (internal, not a delivery)
 
 The separate authorized-store namespace and `runAuthorizedSync` are transport-neutral. Test providers are not actual X account authentication. Counts must remain stable, both lists must end, and the final count check must agree before a candidate snapshot is saved. Partial rows are not negative relationship evidence. The public read seam deliberately still returns unknown; no product transport, identity bridge or UI is enabled by this batch. An approved request interface and actual integration evidence are required before enabling it. Do not ship as real sync or ask the user to install this intermediate revision.
+
+## Cache workspace integration seam
+
+`readDashboard` reads latest complete snapshot, separate active progress, history metadata and protection state in one local transaction. `mountAuthorizedCache` is a transport-neutral UI mount for trusted extension callers with an already verified identity callback; it has no standalone route and does not authenticate X or initiate sync. It checks the owner/session before and after reads and on local view operations, clears data on identity mismatch, distinguishes partial from complete, and exposes filtering, protection, history and CSV. The public shared read seam remains unknown. Tests use synthetic inputs; no real provider is installed or enabled. This is not a deliverable until the approved identity and request provider are wired.

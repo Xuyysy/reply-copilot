@@ -32,13 +32,11 @@ test("joint account tools appear only in actual staging build, preserving base p
     assert.equal(Object.hasOwn(m,"key"),false);
     for(const target of ["follow-manager/v2/workbench.html","follow-manager/v2/history.html","interaction-manager/ui/index.html","staging/interaction-panel.js","staging/interaction-interface.js","staging/interaction-interface-panel.js","interaction-manager/sync/engine.js","interaction-manager/analytics/live-view.js"])assert.ok(existsSync(path.join(out,target)),target);
     assert.ok(!existsSync(path.join(out,"follow-manager","manager.html")));
-    assert.equal((panel.match(/id="joint-follow-preview"/g)||[]).length,1);
-    assert.equal((panel.match(/id="staging-interactions"/g)||[]).length,1);
-    assert.match(panel,/互关助手 V2（模拟数据预览）/);
-    assert.match(panel,/interaction-manager\/ui\/index\.html/);
-    assert.match(panel,/staging\/interaction-panel\.js/);
-    assert.equal((panel.match(/id="interaction-interface"/g)||[]).length,1);
-    assert.match(panel,/staging\/interaction-interface-panel\.js/);
+    assert.equal((panel.match(/id="open-interaction-workbench"/g)||[]).length,1);
+    assert.equal((panel.match(/id="open-follow-workbench"/g)||[]).length,1);
+    assert.match(panel,/staging\/account-tools-entry\.js/);
+    assert.doesNotMatch(panel,/id="(?:staging-interactions|interaction-interface|interface-sync|interaction-read)"/);
+    for(const target of ["staging/interaction-workbench.html","staging/follow-workbench.html","staging/account-workbench-background.js","staging/account-workbench.css","follow-manager/v2/cache-workbench.js"])assert.ok(existsSync(path.join(out,target)),target);
    }else{
     for(const name of ["follow-manager","interaction-manager","staging"])assert.equal(existsSync(path.join(out,name)),false,name);
     assert.equal(panel,sourcePanel);
