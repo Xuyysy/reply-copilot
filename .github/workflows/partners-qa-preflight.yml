@@ -21,7 +21,8 @@ jobs:
       - run: node --test api/tests/partner-qa-preflight.test.mjs
   protected-preflight:
     needs: offline
-    if: github.repository == 'Xuyysy/reply-copilot' && github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && startsWith(github.event.head_commit.message, 'ci-lite: qa-preflight approved')
+    if: >-
+      github.repository == 'Xuyysy/reply-copilot' && github.event_name == 'push' && github.ref == 'refs/heads/chatgpt/partners-staging-qa-20261125' && startsWith(github.event.head_commit.message, 'ci-lite: qa-preflight approved')
     environment: partners-qa
     runs-on: ubuntu-24.04
     timeout-minutes: 5
