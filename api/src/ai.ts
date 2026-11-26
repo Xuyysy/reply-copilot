@@ -125,7 +125,7 @@ export async function generate(request: Request, env: Env): Promise<Response> {
   trace.addDurations({worker_prepare:performance.now()-started});
   const execution = await executeAiGeneration({
     reserve: () => trace.measure("worker_reserve",()=>reserveGeneration(env, session, input.requestId, hash, budgetReserve, configuredModel?{id:configuredModel.config.configId,version:configuredModel.config.version}:null,{prechecked:true,omitNewQuota:true,omitSubscriptionReplayQuota:true})),
-    provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
+    provider: () => configuredModel ? requestConfiguredModel({config:configuredModel.config,apiKey:configuredModel.apiKey,system:prompts.system,user:prompts.user,inputRateMicroUsdPerMillion:configuredModel.config.inputRateMicroUsdPerMillion,outputRateMicroUsdPerMillion:configuredModel.config.outputRateMicroUsdPerMillion,reservedCostMicroUsd:budgetReserve,validateOutput:true,performanceTrace:trace.enabled?trace:null}) : trace.measure("model",()=>provider(env, prompts.system, prompts.user, mode)),
     validate: (result: Awaited<ReturnType<typeof provider>>) => {
       if(mode==="real"&&!configuredModel) {
         let decoded;
