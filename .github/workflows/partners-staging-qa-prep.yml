@@ -70,6 +70,8 @@ jobs:
           ASTRO_TELEMETRY_DISABLED: '1'
         run: npm --prefix web run build
       - name: Prepare bounded private artifact transport (no credentials)
+        env:
+          PUBLIC_API_BASE_URL: https://reply-copilot-api-partners-qa.yyx0149.workers.dev
         shell: bash
         run: |
           node --input-type=module <<'JS'
