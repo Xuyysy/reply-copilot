@@ -3,6 +3,7 @@ import {syncInteractions} from '../interaction-manager/sync/engine.js';
 import {openProviderSession} from '../interaction-manager/sync/provider-session.js';
 import {createXInteractionProviderFactory} from './interaction-provider.js';
 import {validId} from '../interaction-manager/core/events.js';
+import {createSchedulePreferences} from '../interaction-manager/sync/schedule-preferences.js';
 const TYPE='XRH_STAGING_ACCOUNT_WORKBENCH';
 const PATHS=Object.freeze({interaction:'staging/interaction-workbench.html',follow:'staging/follow-workbench.html'});
 const idOk=v=>Number.isInteger(v)&&v>=0;
@@ -20,6 +21,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  // Only noncredential task summaries persist across a browser restart.
  // Tab bindings stay session-only; opening a new workbench rechecks identity.
  const taskStore=c.storage.local??store;
+ const schedulePreferences=createSchedulePreferences(taskStore);
  const get=async f=>(await store.get(key(f)))[key(f)]??null;
  const put=(f,v)=>store.set({[key(f)]:v});
  const readTask=async owner=>{
@@ -152,6 +154,15 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      if(sender.url!==c.runtime.getURL('sidepanel/sidepanel.html'))fail('invalid_context');
      if(locks.has(f))return locks.get(f);
      const p=open(f);locks.set(f,p);try{return await p;}finally{locks.delete(f);}
+   }
+   // Preference-only controls; no enable/start action or background request.
+   if(m.action==='schedule-preferences'||m.action==='schedule-interval'){
+     if(f!=='interaction')fail('invalid_context');
+     const b=await verified(f,sender);
+     if(m.action==='schedule-interval'&&![30,60,120].includes(m.intervalMinutes))fail('invalid_context');
+     const v=m.action==='schedule-interval'?await schedulePreferences.write(b.ownerUserId,m.intervalMinutes):await schedulePreferences.read(b.ownerUserId);
+     const after=await verified(f,sender);if(after.bindingId!==b.bindingId||after.sourceTabId!==b.sourceTabId||!same(b,after))fail('identity_changed');
+     return v;
    }
    if(m.action==='view')return read(f,sender);
    if(m.action==='identity'){const b=await verified(f,sender);return {ownerUserId:b.ownerUserId,handle:b.handle,bindingId:b.bindingId};}

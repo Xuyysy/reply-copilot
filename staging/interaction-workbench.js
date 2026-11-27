@@ -10,7 +10,25 @@ let data=null,owner=null,people=[],page=0,selected=null,offset=0,busy=false,acti
 const msg=async(action,extra={})=>{const r=await chrome.runtime.sendMessage({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra});if(!r?.ok)throw Error(r?.error??'source_error');return r.value;};
 const settings=()=>({direction:'inbound',type:$('type').value,days:$('days').value?Number($('days').value):null,sort:$('sort').value,query:$('search').value});
 const node=(tag,text)=>{const e=document.createElement(tag);e.textContent=text;return e;};
-function hide(message){generation++;data=owner=null;people=[];selected=null;sourceReady=waiting=false;$('refresh').textContent='刷新';$('content').hidden=true;$('ranking').replaceChildren();$('detail').replaceChildren();$('export').disabled=$('clear').disabled=true;$('owner').textContent='未确认账号';$('status').textContent=message;}
+let preferenceBusy=false,preferenceOwner=null;
+function resetPreference(){preferenceOwner=null;$('auto-sync-enabled').checked=false;$('auto-sync-enabled').disabled=true;$('auto-sync-interval').disabled=true;$('auto-sync-interval').value='60';$('auto-sync-status').textContent='真实数据源尚未验收，自动同步不可启用。';}
+async function loadPreference(){
+ const g=generation,o=owner;if(!o||disposed||preferenceBusy||preferenceOwner===o.ownerUserId)return;
+ preferenceBusy=true;try{const p=await msg('schedule-preferences');if(g!==generation||disposed||owner?.ownerUserId!==o.ownerUserId)return;
+ if(p?.enabled!==false||![30,60,120].includes(p.intervalMinutes))return;
+ $('auto-sync-interval').value=String(p.intervalMinutes);preferenceOwner=o.ownerUserId;$('auto-sync-interval').disabled=false;
+ }catch{}finally{preferenceBusy=false;}
+}
+$('auto-sync-interval').onchange=async()=>{
+ if(preferenceBusy||disposed||!owner||preferenceOwner!==owner.ownerUserId)return;
+ const g=generation,o=owner,minutes=Number($('auto-sync-interval').value);preferenceBusy=true;$('auto-sync-interval').disabled=true;
+ try{const p=await msg('schedule-interval',{intervalMinutes:minutes});if(g!==generation||disposed||owner?.ownerUserId!==o.ownerUserId)return;
+ if(p?.enabled!==false||p.intervalMinutes!==minutes)throw Error('invalid_preference');
+ $('auto-sync-status').textContent='间隔已保存；真实数据源尚未验收，不会自动请求。';
+ }catch{if(g===generation&&!disposed){preferenceOwner=null;$('auto-sync-status').textContent='间隔保存失败，请重新打开页面。';}}
+ finally{preferenceBusy=false;if(g===generation&&!disposed&&preferenceOwner===o.ownerUserId)$('auto-sync-interval').disabled=false;}
+};
+function hide(message){generation++;resetPreference();data=owner=null;people=[];selected=null;sourceReady=waiting=false;$('refresh').textContent='刷新';$('content').hidden=true;$('ranking').replaceChildren();$('detail').replaceChildren();$('export').disabled=$('clear').disabled=true;$('owner').textContent='未确认账号';$('status').textContent=message;}
 async function guard(){const g=generation,o=owner;if(!o||disposed)return false;try{const i=await msg('identity');if(g!==generation)return false;if(i.ownerUserId!==o.ownerUserId||i.handle!==o.handle)throw Error('identity_changed');return true;}catch{if(g===generation)hide('账号或原 X 页面已变化，请从侧边栏重新打开。');return false;}}
 function details(reset=true){if(reset){offset=0;$('detail').replaceChildren();}if(!data||!selected)return;const rows=interactionDetails(data,selected,settings());for(const e of rows.slice(offset,offset+PAGE)){const li=node('li',labels[e.type]+' · '+(e.occurredAt===null?'时间未知':new Date(e.occurredAt).toLocaleString()));const id=e.eventPostId??e.targetPostId;if(id){const a=node('a',' 查看原帖');a.href='https://x.com/i/web/status/'+id;a.target='_blank';a.rel='noopener noreferrer';li.append(a);}$('detail').append(li);}offset+=PAGE;$('more').hidden=offset>=rows.length;}
 function render(){if(!data)return;const v=analyzeLiveDataset(data,settings());people=v.people;page=Math.min(page,Math.max(0,Math.ceil(people.length/PAGE)-1));const sum=people.reduce((a,p)=>({count:a.count+p.count,reply:a.reply+p.byType.reply,like:a.like+p.byType.like}),{count:0,reply:0,like:0});
@@ -26,7 +44,8 @@ function render(){if(!data)return;const v=analyzeLiveDataset(data,settings());pe
  $('quality').textContent='已存 '+v.stored+' 条，未知时间 '+v.unknownTime+' 条（日期筛选排除 '+v.excludedUnknownTime+' 条）。未知时间不等于没有互动。'+(coverage?' 来源记录：'+coverage+'。':' 暂无来源覆盖记录。')+(jobs?' 来源任务：'+jobs+'。':' 暂无同步检查点。')+' 非完整历史。';
 }
 async function load(action='view',extra={}){if(busy||disposed)return;busy=true;$('refresh').disabled=true;const g=++generation;try{const v=await msg(action,extra);if(g!==generation)return;if(v.busy||v.running){if(owner&&(v.identity?.ownerUserId!==owner.ownerUserId||v.identity?.handle!==owner.handle)){hide('账号已变化，请重新打开。');return;}waiting=true;$('status').textContent=v.running?'后台同步进行中 · 本次已提交 '+(v.task?.pages??0)+' 页，新增 '+(v.task?.inserted??0)+' 条。'+taskSuffix(v.task):'后台正在处理其他任务。';$('refresh').textContent=v.running?'停止':'刷新';$('clear').disabled=true;return;}waiting=false;sourceReady=v.sourceReady===true;$('refresh').textContent='刷新';if(!v.dataset||v.dataset.ownerUserId!==v.identity?.ownerUserId)throw Error('identity_changed');
- owner=v.identity;data=v.dataset;page=0;selected=null;$('detail').replaceChildren();$('detail-title').textContent='互动明细';$('detail-empty').hidden=false;$('more').hidden=true;
+ if(owner?.ownerUserId!==v.identity.ownerUserId)resetPreference();
+ owner=v.identity;void loadPreference();data=v.dataset;page=0;selected=null;$('detail').replaceChildren();$('detail-title').textContent='互动明细';$('detail-empty').hidden=false;$('more').hidden=true;
  $('owner').textContent='@'+owner.handle;$('source-note').textContent=v.sourceReady?'本地存储；后台同步需授权。':'当前仅支持读取已有本地缓存，实时后台数据源尚未接入。';$('status').textContent=v.sourceReady?(syncStatus[v.task?.state==='interrupted'?'interrupted':v.task?.reason]??(v.task?.reason?'同步未完成，已有记录保留':'本地缓存'))+taskSuffix(v.task):'本地缓存 · 实时同步尚未接入';$('content').hidden=false;$('clear').disabled=false;render();
  }catch{if(g===generation)hide('无法确认当前 X 账号。请从已登录的 X 页面侧边栏打开。');}finally{busy=false;$('refresh').disabled=actionBusy||disposed;}}
  async function runAction(fn){

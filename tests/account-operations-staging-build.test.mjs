@@ -7,7 +7,7 @@ import {fileURLToPath} from "node:url";
 import {execFileSync} from "node:child_process";
 const root=fileURLToPath(new URL("../",import.meta.url));
 const json=file=>JSON.parse(readFileSync(file,"utf8"));
-test("joint account tools appear only in actual staging build, preserving base permissions and production entrypoints",{timeout:60000},()=>{
+test("joint account tools appear only in actual staging build, isolating local alarm permission and preserving production entrypoints",{timeout:60000},()=>{
  const dir=mkdtempSync(path.join(tmpdir(),"xrh-joint-build-"));
  try{
   for(const name of ["background","config","content","domain","icons","onboarding","options","prompts","services","sidepanel","utils","manifest.json","privacy.html","staging","interaction-manager","follow-manager","package.json"])cpSync(path.join(root,name),path.join(dir,name),{recursive:true});
@@ -21,7 +21,7 @@ test("joint account tools appear only in actual staging build, preserving base p
    env.REPLY_COPILOT_API_URL=channel==="staging"?"https://api-staging.x-reply-helper.top":"https://api.x-reply-helper.top";
    execFileSync(process.execPath,[path.join(dir,"scripts","build.js"),channel],{env,stdio:"pipe"});
    const out=path.join(dir,"dist",channel),m=json(path.join(out,"manifest.json")),panel=readFileSync(path.join(out,"sidepanel","sidepanel.html"),"utf8");
-   assert.deepEqual(m.permissions,base.permissions);
+   assert.deepEqual(m.permissions,channel==="staging"?[...new Set([...base.permissions,"alarms"])]:base.permissions);
    assert.equal(m.version,base.version);
    if(channel==="staging"){
     assert.equal(m.background.service_worker,"staging/service-worker.js");
@@ -30,7 +30,7 @@ test("joint account tools appear only in actual staging build, preserving base p
     assert.deepEqual(m.host_permissions,["https://api-staging.x-reply-helper.top/*"]);
     assert.deepEqual(m.content_scripts[0].js,["staging/momentum-content.js",...base.content_scripts[0].js,"staging/interaction-capture.js","staging/interaction-interface.js"]);
     assert.equal(Object.hasOwn(m,"key"),false);
-    for(const target of ["follow-manager/v2/workbench.html","follow-manager/v2/history.html","interaction-manager/ui/index.html","staging/interaction-panel.js","staging/interaction-interface.js","staging/interaction-interface-panel.js","interaction-manager/sync/engine.js","interaction-manager/analytics/live-view.js"])assert.ok(existsSync(path.join(out,target)),target);
+    for(const target of ["follow-manager/v2/workbench.html","follow-manager/v2/history.html","interaction-manager/ui/index.html","staging/interaction-panel.js","staging/interaction-interface.js","staging/interaction-interface-panel.js","interaction-manager/sync/engine.js","interaction-manager/analytics/live-view.js","interaction-manager/sync/schedule-clock.js","interaction-manager/sync/schedule-preferences.js"])assert.ok(existsSync(path.join(out,target)),target);
     assert.ok(!existsSync(path.join(out,"follow-manager","manager.html")));
     assert.equal((panel.match(/id="open-interaction-workbench"/g)||[]).length,1);
     assert.equal((panel.match(/id="open-follow-workbench"/g)||[]).length,1);
