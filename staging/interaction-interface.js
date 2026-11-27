@@ -80,7 +80,7 @@
      if(u.pathname==='/i/api/2/notifications/all.json'){
        const params=[];
        for(const [k,v] of u.searchParams){
-         if(k==='cursor')continue;
+         if(k==='cursor'||/token|auth|secret|password|cookie|session/i.test(k))continue;
          if(/^(?:include_[a-z0-9_]+|skip_status|send_error_codes|simple_quoted_tweet|count|tweet_mode|cards_platform|ext)$/i.test(k)&&v.length<=2048)params.push([k,k==='count'&&/^\d+$/.test(v)?String(Math.min(Number(v),40)):v]);
        }
        return {kind:'rest',origin,path:u.pathname,params};
@@ -165,7 +165,7 @@
      viewer=body.data?.viewer_v2?.user_results?.result??body.data?.viewer?.user_results?.result;
      if(!obj(viewer))fail('schema_changed');
      const viewerId=stable(viewer.rest_id,viewer.legacy?.id_str);
-     if(viewerId&&viewerId!==owner)fail('owner_mismatch');
+     if((viewer.rest_id!=null||viewer.legacy?.id_str!=null)&&(!viewerId||viewerId!==owner))fail('owner_mismatch');
      // A local signed-in identity is corroborated by the viewer response when present.
      instructions=viewer.timeline?.instructions??viewer.timeline?.timeline?.instructions??viewer.timeline_v2?.timeline?.instructions;
    }else if(kind==='search'){
@@ -194,8 +194,15 @@
        const item=c.itemContent??c.item?.content;
        if(kind==='graphql'||kind==='search'){
          if(item?.__typename==='TimelineNotification'){
-           if(!['heart_icon','retweet_icon'].includes(item.notification_icon)){ignored++;continue;}
            const t=item.template;
+           if(item.notification_icon==='person_icon'){
+             if(!obj(t)||!(t.target_objects===undefined||Array.isArray(t.target_objects)&&t.target_objects.length===0)||!Array.isArray(t.from_users)||t.from_users.length<1||t.from_users.length>1000)fail('schema_changed');
+             const actors=t.from_users.map(x=>({user_results:{result:minimalUser(x?.user_results?.result)}}));
+             if(actors.some(x=>!x.user_results.result))fail('schema_changed');
+             notifications.push({__typename:'TimelineNotification',notification_icon:'person_icon',template:{from_users:actors,target_objects:[]}});
+             continue;
+           }
+           if(!['heart_icon','retweet_icon'].includes(item.notification_icon))fail('schema_changed');
            if(!obj(t)||!Array.isArray(t.from_users)||!Array.isArray(t.target_objects)||t.from_users.length>1000||t.target_objects.length!==1)fail('schema_changed');
            const target=minimalTweet(t.target_objects[0]?.tweet_results?.result);
            const actors=t.from_users.map(x=>({user_results:{result:minimalUser(x?.user_results?.result)}}));
@@ -223,8 +230,15 @@
    else{
      const n=Object.create(null),tweets=Object.create(null),people=Object.create(null);
      for(const [key,row] of Object.entries(global.notifications)){
-       if(!['heart_icon','retweet_icon'].includes(row?.icon?.id)){ignored++;continue;}
        const a=row?.template?.aggregateUserActionsV1;
+       if(row?.icon?.id==='person_icon'){
+         if(!obj(a)||!(a.targetObjects===undefined||Array.isArray(a.targetObjects)&&a.targetObjects.length===0)||!Array.isArray(a.fromUsers)||a.fromUsers.length<1||a.fromUsers.length>1000)fail('schema_changed');
+         const fromUsers=a.fromUsers.map(f=>({user:{id:stable(f?.user?.id,f?.user?.id_str)}}));
+         if(fromUsers.some(f=>!f.user.id))fail('schema_changed');
+         n[key]={icon:{id:'person_icon'},template:{aggregateUserActionsV1:{targetObjects:[],fromUsers}}};
+         continue;
+       }
+       if(!['heart_icon','retweet_icon'].includes(row?.icon?.id))fail('schema_changed');
        if(!Array.isArray(a?.targetObjects)||a.targetObjects.length!==1||!Array.isArray(a.fromUsers)||a.fromUsers.length>1000)fail('schema_changed');
        const id=stable(a.targetObjects[0]?.tweet?.id),t=id&&Object.hasOwn(global.tweets,id)?global.tweets[id]:null;
        if(!id||!t)continue;
@@ -271,6 +285,8 @@
      lastRequestAt=Date.now();s.pages++;
      const response=await fetch(url,{method:'GET',credentials:'same-origin',headers:{authorization:'Bearer '+WEB_BEARER,'x-csrf-token':csrf,'x-twitter-auth-type':'OAuth2Session','x-twitter-active-user':'yes',accept:'application/json'},cache:'no-store',redirect:'error',signal:c.signal});
      validate(m.sessionId);
+     // Explicit platform challenge: stop without reading or forwarding its body.
+     if(response.headers.get('cf-mitigated')==='challenge')fail('forbidden');
      const remaining=response.headers.get('x-rate-limit-remaining');
      const reset=Number(response.headers.get('x-rate-limit-reset'))*1000;
      if(response.status===429||remaining==='0'){
@@ -286,10 +302,10 @@
      const projected=project(body,endpoint.kind,i.ownerUserId);validate(m.sessionId);
      if(!projected.done&&projected.nextCursor===m.cursor)fail('invalid_pagination');
      return {status:200,ownerUserId:i.ownerUserId,source,requestCursor:m.cursor,...projected};
-   }catch(e){if(timedOut&&!s.controller.signal.aborted)throw Error('time_limit');throw e;}
+   }catch(e){s.blocked=true;if(timedOut&&!s.controller.signal.aborted)throw Error('time_limit');throw e;}
    finally{clearTimeout(timer);s.controller.signal.removeEventListener('abort',abort);s.busy=false;}
  }
- const errors=new Set(['open_notifications','owner_unverified','endpoint_not_observed','identity_changed','owner_mismatch','session_limit','rate_limited','unauthenticated','schema_changed','page_limit','invalid_cursor','invalid_pagination','ambiguous_cursor','terminal_unverified','time_limit','cancelled']);
+ const errors=new Set(['open_notifications','owner_unverified','endpoint_not_observed','identity_changed','owner_mismatch','session_limit','rate_limited','unauthenticated','forbidden','schema_changed','page_limit','invalid_cursor','invalid_pagination','ambiguous_cursor','terminal_unverified','time_limit','cancelled']);
  chrome.runtime.onMessage.addListener((m,sender,respond)=>{
    // Separate read-only local identity probe. Does not start a session or request X.
    if(m?.type==='XRH_STAGING_WORKBENCH_IDENTITY'&&sender.id===chrome.runtime.id&&!sender.tab&&(!sender.url||sender.url===chrome.runtime.getURL('staging/service-worker.js'))){

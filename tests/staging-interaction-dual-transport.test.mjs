@@ -8,10 +8,10 @@ const terminal={type:'TimelineTerminateTimeline',direction:'Bottom'};
 const user={rest_id:'222',core:{screen_name:'alice'}};
 const reply={rest_id:'777',core:{user_results:{result:user}},legacy:{in_reply_to_user_id_str:'111',in_reply_to_status_id_str:'555',full_text:'do not retain'}};
 const search=(cursor=null)=>({data:{search_by_raw_query:{search_timeline:{timeline:{instructions:[{entries:[{content:{itemContent:{__typename:'TimelineTweet',tweet_results:{result:reply}}}},...(cursor?[{content:{cursorType:'Bottom',value:cursor}}]:[])]},...(!cursor?[terminal]:[])]}}}}});
-function fixture({status=200,body=search(),changed=false,header={},pathname='/home',hang=false,timeoutFast=false,entries=[],digest=null}={}){
+function fixture({status=200,body=search(),changed=false,header={},pathname='/home',hang=false,timeoutFast=false,entries=[],digest=null,rawBody=null}={}){
  let listener;const calls=[],events={};
  const doc={visibilityState:'hidden',cookie:'twid=u%3D111; ct0=fixture-csrf',querySelectorAll:()=>[{href:'https://x.com/me',getClientRects:()=>[{}],closest:()=>null}]};
- const c={URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Uint8Array,Set,Map,Promise,JSON,Date,Error,Object,Array,Number,String,RegExp,decodeURIComponent,setTimeout:(fn,ms)=>setTimeout(fn,timeoutFast&&ms===12000?10:ms),clearTimeout,crypto:{randomUUID,subtle:digest?{digest}:webcrypto.subtle},location:{origin:'https://x.com',pathname},document:doc,performance:{getEntriesByType:()=>entries},addEventListener:(t,f)=>events[t]=f,chrome:{runtime:{id:'test',getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}}},fetch:async(url,options)=>{calls.push({url,options});if(hang)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>{const e=Error('fixture');e.name='AbortError';reject(e)},{once:true}));if(changed)doc.cookie='twid=u%3D333; ct0=other';return new Response(JSON.stringify(body),{status,headers:header});}};
+ const c={URL,URLSearchParams,AbortController,TextEncoder,TextDecoder,Uint8Array,Set,Map,Promise,JSON,Date,Error,Object,Array,Number,String,RegExp,decodeURIComponent,setTimeout:(fn,ms)=>setTimeout(fn,timeoutFast&&ms===12000?10:ms),clearTimeout,crypto:{randomUUID,subtle:digest?{digest}:webcrypto.subtle},location:{origin:'https://x.com',pathname},document:doc,performance:{getEntriesByType:()=>entries},addEventListener:(t,f)=>events[t]=f,chrome:{runtime:{id:'test',getURL:p=>'chrome-extension://test/'+p,onMessage:{addListener:fn=>listener=fn}}},fetch:async(url,options)=>{calls.push({url,options});if(hang)return new Promise((_,reject)=>options.signal.addEventListener('abort',()=>{const e=Error('fixture');e.name='AbortError';reject(e)},{once:true}));if(changed)doc.cookie='twid=u%3D333; ct0=other';return new Response(rawBody??JSON.stringify(body),{status,headers:header});}};
  vm.runInNewContext(code,c);
  const sender={id:'test',url:'chrome-extension://test/staging/service-worker.js'};
  const send=(action,extra={},from=sender)=>new Promise(resolve=>{if(listener({type:'XRH_STAGING_INTERACTION_INTERFACE',action,...extra},from,resolve)!==true)resolve(null)});
@@ -94,5 +94,18 @@ test('cancellation or replacement during fingerprint cannot resurrect a late pag
    assert.equal((await f.send('identity',{sessionId:next.value.sessionId})).ok,true);
   }else assert.equal((await f.send('identity',{sessionId:'cancelled-session'})).ok,false);
   assert.equal(f.calls.length,0);
+ }
+});
+
+test('HTTP 200 challenge and incompatible bodies stop the connection without a second request or sensitive response',async()=>{
+ for(const [options,error] of [
+  [{header:{'cf-mitigated':'challenge'},rawBody:'<html>fixture-sensitive-challenge</html>'},'forbidden'],
+  [{rawBody:'<html>fixture-sensitive-login</html>'},'schema_changed'],
+  [{body:{data:{unknown_timeline:{credential:'fixture-sensitive-payload'}}}},'schema_changed']
+ ]){
+  const f=fixture(options),s=(await start(f)).value;
+  const read=()=>f.send('page',{sessionId:s.sessionId,ownerUserId:'111',source:'post',cursor:null});
+  const result=await read();assert.equal(result.error,error);assert.ok(!JSON.stringify(result).includes('fixture-sensitive'));
+  assert.equal((await read()).error,'session_limit');assert.equal(f.calls.length,1);
  }
 });
