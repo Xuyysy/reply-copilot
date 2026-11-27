@@ -63,3 +63,22 @@ test("close view does not cancel; explicit stop aborts and still closes; session
  for(let n=0;n<200&&!x.starts;n++)await new Promise(resolve=>setTimeout(resolve,1));
  assert.equal(rx.status({...b,sessionId:"changed"}).status,"identity_changed");await rx.waitForIdle();
 });
+
+test("late transport after cancellation is closed; no database is opened",async()=>{
+ let resolveFactory,closed=0,opened=0;
+ const runner=createApprovedFollowRunner({openTransport:()=>new Promise(resolve=>resolveFactory=resolve),openRepo:async()=>{opened++;throw Error("unexpected")},sync:async()=>{throw Error("unexpected")}});
+ runner.start({binding:b,authorized:true});
+ for(let n=0;n<100&&!resolveFactory;n++)await new Promise(resolve=>setTimeout(resolve,1));
+ assert.equal(typeof resolveFactory,"function");
+ assert.equal(runner.stop(b).stopping,true);await runner.waitForIdle();
+ resolveFactory({close:async()=>{closed++}});
+ for(let n=0;n<100&&!closed;n++)await new Promise(resolve=>setTimeout(resolve,1));
+ assert.equal(closed,1);assert.equal(opened,0);
+ assert.equal(runner.status(b).status,"cancelled");
+});
+test("completion status does not leak to another session for the same owner",async()=>{
+ const h=setup(),runner=h.runner();
+ runner.start({binding:b,authorized:true});await runner.waitForIdle();
+ assert.equal(runner.status(b).status,"completed");
+ assert.equal(runner.status({...b,sessionId:"another"}).status,null);
+});

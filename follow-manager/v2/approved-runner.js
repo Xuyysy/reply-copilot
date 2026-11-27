@@ -33,10 +33,31 @@ export function createApprovedFollowRunner({
  !Number.isInteger(maxMs)||maxMs<1||maxMs>240000||
  typeof openRepo!=="function"||typeof sync!=="function")throw Error("invalid_context");
  let running=null,last=null;
+ async function establish(task){
+  // Abort or timeout a pending factory. Close a late response instead of
+  // retaining a transport after cancellation or a stopped session.
+  let timer,abort,finished=false;
+  const pending=Promise.resolve().then(()=>openTransport({binding:task.binding,signal:task.controller.signal}))
+   .then(value=>{
+    if(finished||task.controller.signal.aborted){
+     try{void Promise.resolve(value?.close?.()).catch(()=>{})}catch{}
+     throw Error("cancelled");
+    }
+    return value;
+   });
+  const limit=new Promise((_,reject)=>{
+   abort=()=>reject(Error("cancelled"));
+   timer=setTimeout(()=>reject(Error("time_limit")),12000);
+   task.controller.signal.addEventListener("abort",abort,{once:true});
+   if(task.controller.signal.aborted)abort();
+  });
+  try{return await Promise.race([pending,limit])}
+  finally{finished=true;clearTimeout(timer);task.controller.signal.removeEventListener("abort",abort);}
+ }
  async function execute(task){
   let transport=null,source=null,repo=null;
   try{
-   transport=await openTransport({binding:task.binding,signal:task.controller.signal});
+   transport=await establish(task);
    if(task.controller.signal.aborted)throw Error("cancelled");
    source=createApprovedFollowSource({binding:task.binding,transport});
    const verified=await source.readIdentity({signal:task.controller.signal});
@@ -61,10 +82,10 @@ export function createApprovedFollowRunner({
    };
    const result=await sync({repo,job,source:guarded,signal:task.controller.signal,maxPages,maxMs});
    if(result?.ownerUserId!==verified.ownerUserId||!["completed","paused","incomplete"].includes(result.status))throw Error("sync_failed");
-   last={ownerUserId:verified.ownerUserId,status:result.status,at:new Date().toISOString()};
+   last={...task.binding,status:result.status,at:new Date().toISOString()};
    return last;
   }catch(e){
-   last={ownerUserId:task.binding.ownerUserId,status:safeError(e),at:new Date().toISOString()};
+   last={...task.binding,status:safeError(e),at:new Date().toISOString()};
    return last;
   }finally{
    try{await source?.close()}catch{}
@@ -99,7 +120,7 @@ export function createApprovedFollowRunner({
    task.controller.abort();
    return {running:false,status:"identity_changed"};
   }
-  return {running:!!task,status:last?.ownerUserId===binding.ownerUserId?last.status:null,finishedAt:last?.ownerUserId===binding.ownerUserId?last.at:null};
+  return {running:!!task,status:same(last,binding)?last.status:null,finishedAt:same(last,binding)?last.at:null};
  }
  async function waitForIdle(){await running?.done;}
  return Object.freeze({start,stop,status,waitForIdle});
