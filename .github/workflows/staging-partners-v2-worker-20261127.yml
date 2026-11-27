@@ -1,0 +1,125 @@
+name: Guarded partner V2 Staging Worker (pinned acceptance candidate)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only check or explicitly approved Staging activation
+        type: choice
+        options: [check, deploy]
+        default: check
+        required: true
+      confirmation:
+        description: CHECK_ONLY or DEPLOY_PARTNERS_V2_STAGING_WORKER
+        type: string
+        required: true
+      schema_readiness:
+        description: Deploy only after separately authorized Staging schema review/application
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+concurrency:
+  group: xrh-staging-worker-release
+  cancel-in-progress: false
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Xuyysy/reply-copilot' && github.actor == 'Xuyysy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      MODE: ${{ inputs.mode }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      SCHEMA_READY: ${{ inputs.schema_readiness }}
+    steps:
+      - name: Verify exact successful full push CI, unchanged integration and owner intent
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$MODE:$CONFIRMATION:$SCHEMA_READY" in
+            check:CHECK_ONLY:false|deploy:DEPLOY_PARTNERS_V2_STAGING_WORKER:true) ;;
+            *) exit 1 ;;
+          esac
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46011865502 | jq -e '
+            .head_sha == "58ab69a5d907003d006401290b391f9fd3c52da2" and
+            .head_branch == "chatgpt/partner-acceptance-feedback-20261127" and
+            .head_repository.full_name == "Xuyysy/reply-copilot" and
+            .event == "push" and .path == ".github/workflows/ci.yml" and
+            .status == "completed" and .conclusion == "success"'
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46011865502/jobs | jq -e '
+            any(.jobs[]; .conclusion=="success" and
+            any(.steps[]; .name=="Run full suite and preserve the exit code" and .conclusion=="success") and
+            any(.steps[]; .name=="Upload immutable Staging Pages bundle" and .conclusion=="success"))'
+          test "$(gh api repos/Xuyysy/reply-copilot/git/ref/heads/chatgpt/partner-acceptance-feedback-20261127 --jq .object.sha)" = "58ab69a5d907003d006401290b391f9fd3c52da2"
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46012157835 | jq -e '.head_sha=="a36f3ed13762de295e534a2163020c44e92416d7" and .head_repository.full_name=="Xuyysy/reply-copilot" and .event=="push" and .status=="completed" and .conclusion=="success"'
+          test "$(gh api repos/Xuyysy/reply-copilot/git/commits/a36f3ed13762de295e534a2163020c44e92416d7 --jq '.parents[0].sha')" = "58ab69a5d907003d006401290b391f9fd3c52da2"
+      - uses: actions/checkout@v4
+        with:
+          ref: '58ab69a5d907003d006401290b391f9fd3c52da2'
+          persist-credentials: false
+      - name: Validate pinned Staging target
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "58ab69a5d907003d006401290b391f9fd3c52da2"
+          python3 - <<'PY'
+          import json
+          st=json.load(open('api/wrangler.jsonc'))['env']['staging']
+          assert st['name']=='reply-copilot-api-staging'
+          assert st['vars']['ENVIRONMENT']=='staging'
+          assert st['vars']['API_ORIGIN']=='https://api-staging.x-reply-helper.top'
+          assert st['vars']['WEB_ORIGIN']=='https://staging.x-reply-helper.top'
+          assert st['d1_databases'][0]['database_id']=='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - run: npm --prefix api run typecheck
+      - name: Compile exact Staging source without credentials or deployment
+        working-directory: api
+        run: |
+          ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/worker-artifact"
+          python3 - <<'PY'
+          import os, pathlib, hashlib, json
+          p=pathlib.Path(os.environ['RUNNER_TEMP'])/'worker-artifact'
+          assert (p/'index.js').is_file()
+          assert not any(x.suffix in ('.wasm','.mjs') or x.suffix=='.js' and x.name!='index.js' for x in p.rglob('*') if x.is_file())
+          (p/'manifest.json').write_text(json.dumps({'sourceSha':'58ab69a5d907003d006401290b391f9fd3c52da2','sha256':hashlib.sha256((p/'index.js').read_bytes()).hexdigest(),'target':'reply-copilot-api-staging'}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partner-staging-worker-58ab69a5d907003d006401290b391f9fd3c52da2
+          path: |
+            ${{ runner.temp }}/worker-artifact/index.js
+            ${{ runner.temp }}/worker-artifact/manifest.json
+          if-no-files-found: error
+  release:
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Xuyysy/reply-copilot' && github.actor == 'Xuyysy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: staging
+      url: https://api-staging.x-reply-helper.top
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: partner-staging-worker-58ab69a5d907003d006401290b391f9fd3c52da2
+          path: ${{ runner.temp }}/worker-artifact
+      - name: Check or deploy Staging only; no database operation
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PARTNER_PAYOUT_ENCRYPTION_KEY: ${{ secrets.PARTNER_PAYOUT_ENCRYPTION_KEY }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+          SCHEMA_READINESS: ${{ inputs.schema_readiness }}
+        run: python3 scripts/guarded-partner-v2-staging-worker-20261127.py
