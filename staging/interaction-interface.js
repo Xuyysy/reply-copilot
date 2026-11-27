@@ -194,7 +194,7 @@
      bottom.add(c.value);
    }
    function addPost(t){const p=postEvidence(t,owner,users);if(p)posts.push(p);}
-   let entryCount=0;
+   let entryCount=0,expandedCount=0;
    for(const ins of instructions){
      if(!obj(ins))fail('schema_changed');
      if(ins.type==='TimelineTerminateTimeline'&&ins.direction==='Bottom'||ins.terminateTimeline?.direction==='Bottom')terminal=true;
@@ -221,6 +221,8 @@
              else ignored++;
            }
          }
+         // Modules can fan out up to 100 items each; cap the entire expanded page.
+         if((expandedCount+=selected.length)>5000)fail('page_limit');
          for(const item of selected){
          if(item?.__typename==='TimelineNotification'){
            const t=item.template;
@@ -232,9 +234,11 @@
              continue;
            }
            if(!['heart_icon','retweet_icon'].includes(item.notification_icon))fail('schema_changed');
-           if(!obj(t)||!Array.isArray(t.from_users)||!Array.isArray(t.target_objects)||t.from_users.length>1000||t.target_objects.length!==1)fail('schema_changed');
+           if(!obj(t)||!Array.isArray(t.from_users)||!Array.isArray(t.target_objects)||t.from_users.length<1||t.from_users.length>1000||t.target_objects.length!==1)fail('schema_changed');
            const target=minimalTweet(t.target_objects[0]?.tweet_results?.result);
            const actors=t.from_users.map(x=>({user_results:{result:minimalUser(x?.user_results?.result)}}));
+           // Never count only the valid subset of a known aggregate.
+           if(!target||actors.some(x=>!x.user_results.result))fail('schema_changed');
            notifications.push({__typename:'TimelineNotification',notification_icon:item.notification_icon,template:{from_users:actors,target_objects:[{tweet_results:{result:target}}]}});
          }else if(item?.__typename==='TimelineTweet'){addPost(item.tweet_results?.result);}
          else if(item)ignored++;
@@ -265,12 +269,13 @@
          continue;
        }
        if(!['heart_icon','retweet_icon'].includes(row?.icon?.id))fail('schema_changed');
-       if(!Array.isArray(a?.targetObjects)||a.targetObjects.length!==1||!Array.isArray(a.fromUsers)||a.fromUsers.length>1000)fail('schema_changed');
+       if(!Array.isArray(a?.targetObjects)||a.targetObjects.length!==1||!Array.isArray(a.fromUsers)||a.fromUsers.length<1||a.fromUsers.length>1000)fail('schema_changed');
        const id=stable(a.targetObjects[0]?.tweet?.id),t=id&&Object.hasOwn(global.tweets,id)?global.tweets[id]:null;
        // Missing or contradictory target evidence must not masquerade as an empty page.
        if(!id||!obj(t)||!stable(id,t.id_str)||!stable(t.user_id_str))fail('schema_changed');
        tweets[id]={id_str:t.id_str??id,user_id_str:t.user_id_str};
        const fromUsers=a.fromUsers.map(f=>{const aid=stable(f?.user?.id,f?.user?.id_str),u=aid&&Object.hasOwn(global.users??{},aid)?global.users[aid]:null;if(aid&&u)people[aid]={id_str:u.id_str??aid,screen_name:u.screen_name};return {user:{id:aid}};});
+       if(fromUsers.some(f=>!f.user.id))fail('schema_changed');
        n[key]={icon:{id:row.icon.id},template:{aggregateUserActionsV1:{targetObjects:[{tweet:{id}}],fromUsers}}};
      }
      payload={globalObjects:{notifications:n,tweets,users:people}};

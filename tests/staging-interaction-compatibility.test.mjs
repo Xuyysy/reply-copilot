@@ -125,6 +125,50 @@ test('REST target omissions and contradictory tweet identities reject the full p
  assert.equal(parsed.events.length,0);assert.equal(parsed.quality.foreignTargets,1);
 });
 
+
+test('known like/repost aggregates reject missing or conflicting actors and target evidence',()=>{
+ for(const icon of ['heart_icon','retweet_icon']){
+  for(const mutate of [
+   n=>{n.template.from_users=[];},
+   n=>{n.template.from_users.push({user_results:{result:{rest_id:'333',legacy:{id_str:'444'}}}});},
+   n=>{n.template.from_users=[{user_results:{result:{core:{screen_name:'missing-id'}}}}];},
+   n=>{n.template.target_objects=[{tweet_results:{result:null}}];}
+  ]){
+   const valid=notice(icon),body=modern([valid]);
+   mutate(valid);
+   assert.throws(()=>api.project(body,'graphql',owner),/schema_changed/);
+  }
+  const good=notice(icon),bad=notice(icon);
+  bad.template.from_users.push({user_results:{result:{rest_id:'999',legacy:{id_str:'888'}}}});
+  assert.throws(()=>api.project(modern([good,bad]),'graphql',owner),/schema_changed/,'a good aggregate cannot conceal a corrupt one');
+  for(const mutate of [
+   row=>{row.template.aggregateUserActionsV1.fromUsers=[];},
+   row=>{row.template.aggregateUserActionsV1.fromUsers.push({user:{id:'222',id_str:'333'}});},
+   row=>{row.template.aggregateUserActionsV1.fromUsers.push({user:{id:null}});}
+  ]){
+   const body=legacy(icon);mutate(body.globalObjects.notifications.n);
+   assert.throws(()=>api.project(body,'rest',owner),/schema_changed/);
+  }
+ }
+ // A missing display handle is not a missing explicit actor ID.
+ const valid=legacy('heart_icon');delete valid.globalObjects.users['222'];
+ assert.deepEqual(normalized(valid,'rest','notification').events.map(e=>e.type),['like']);
+});
+
+test('nested module fanout has an aggregate limit even when every entry meets its local limit',()=>{
+ const body=modern([]),viewer=body.data.viewer_v2.user_results.result;
+ // Each item is a known non-countable kind, and each module stays below 100.
+ const module={content:{items:Array.from({length:100},()=>({item:{itemContent:{__typename:'TimelineSkip'}}}))}};
+ viewer.timeline.instructions=[{type:'TimelineAddEntries',entries:Array.from({length:50},()=>module)},terminal];
+ const within=api.project(body,'graphql',owner);
+ assert.equal(within.done,true);assert.equal(within.ignored,5000);
+ viewer.timeline.instructions[0].entries.push(module);
+ assert.throws(()=>api.project(body,'graphql',owner),/page_limit/);
+ // A small, real relationship still survives a module-wrapped page.
+ viewer.timeline.instructions=[{type:'TimelineAddEntries',entries:[{content:{items:[{item:{itemContent:notice('heart_icon')}}]}}]},terminal];
+ assert.deepEqual(normalized(body,'graphql','notification').events.map(e=>e.type),['like']);
+});
+
 test('REST operation metadata never copies credential-like query fields into an active request',()=>{
  const origin='https://x.com',endpoint=api.endpointFrom([{name:origin+'/i/api/2/notifications/all.json?count=20&include_user_entities=1&include_auth_token=fixture-sensitive&include_cookie=fixture-sensitive&include_session=fixture-sensitive'}],origin);
  const url=api.pageURL(endpoint,null,owner);
