@@ -84,7 +84,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(f!=='interaction'||!providerFactory)fail('source_unavailable');
    if(authorized!==true||!['both','notification','post'].includes(selectedSource))fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
-   if(jobs.size)fail('busy');
+   if(jobs.size||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
    const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0,sources:[]}};jobs.set(b.ownerUserId,task);
    // Preserve write order so a late progress update cannot overwrite final status.
    let taskWrites=Promise.resolve();
@@ -170,9 +170,9 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    };
    if(m.action==='sample-start'){
      if(m.authorized!==true||!['notification','post'].includes(m.source))fail('invalid_context');
-     if(jobs.size)fail('busy');
+     if(jobs.size||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
      await verify();
-     if(jobs.size)fail('busy');
+     if(jobs.size||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
      sampleTicket={id:crypto.randomUUID(),tabId:m.tabId,bindingId:b.bindingId,ownerUserId:b.ownerUserId,source:m.source,expires:Date.now()+60000};
      return {ticket:sampleTicket.id,ownerUserId:b.ownerUserId};
    }

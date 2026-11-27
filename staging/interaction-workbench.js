@@ -40,7 +40,7 @@ function render(){if(!data)return;const v=analyzeLiveDataset(data,settings());pe
  }
  $('empty').hidden=people.length>0;$('pagination').hidden=people.length<=PAGE;$('page').textContent=(page+1)+' / '+Math.max(1,Math.ceil(people.length/PAGE));$('prev').disabled=page===0;$('next').disabled=(page+1)*PAGE>=people.length;$('export').disabled=!people.length;
  const sourceNames={notification:'通知',post:'帖子',archive:'归档','authorized-api':'授权接口'};
- const coverage=v.coverage.map(c=>(sourceNames[c.source]??'其他来源')+'：'+c.uniqueEvents+' 条，'+new Date(c.lastObservedAt).toLocaleString()).join('；');
+ const coverage=v.coverage.map(c=>(sourceNames[c.source]??'其他来源')+'：'+c.uniqueEvents+' 条'+(c.observedSamples?'（网页响应样本 '+c.observedSamples+' 页）':'')+'，'+new Date(c.lastObservedAt).toLocaleString()).join('；');
  const jobs=v.jobs.map(j=>{const q=j.quality;return (sourceNames[j.source]??'其他来源')+' · '+(j.done?'已到本次来源末尾':'尚未完成')+' · '+j.pages+' 页'+(q&&j.qualityPages?'（不支持 '+q.unsupported+'，未确认参与者 '+q.unresolvedActors+'，其他账号目标 '+q.foreignTargets+'，排除 '+q.ignored+'）':'（质量统计缺失）');}).join('；');
  $('quality').textContent='已存 '+v.stored+' 条，未知时间 '+v.unknownTime+' 条（日期筛选排除 '+v.excludedUnknownTime+' 条）。未知时间不等于没有互动。'+(coverage?' 来源记录：'+coverage+'。':' 暂无来源覆盖记录。')+(jobs?' 来源任务：'+jobs+'。':' 暂无同步检查点。')+' 非完整历史。';
 }

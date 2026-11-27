@@ -19,7 +19,7 @@ export function createInteractionResponseProbe({network,project,commit,notify,cl
   if(active!==s)return;
   active=null;network.onRequestFinished.removeListener(s.listener);network.onNavigated.removeListener(s.navigate);unschedule(s.timer);notify(report);
  }
- function stop(reason='stopped'){if(active)finish(active,{phase:'stopped',reason});}
+ function stop(reason='stopped'){if(active)finish(active,{phase:'stopped',reason,saveMayHaveCompleted:active.committing===true});}
  function start({source,ownerUserId,authorized}){
   if(active||authorized!==true||!['notification','post'].includes(source)||!/^[1-9]\d{0,19}$/.test(ownerUserId))throw Error('invalid_context');
   const s={source,ownerUserId,claimed:false,deadline:clock()+60000};active=s;
@@ -42,6 +42,7 @@ export function createInteractionResponseProbe({network,project,commit,notify,cl
      const parsed=normalizeObservations(project(JSON.parse(body),kind,ownerUserId,{observedSample:true}),{ownerUserId,source,observedAt:clock()});
      if(parsed.stats?.unsupported||parsed.stats?.unresolvedActors||parsed.events.length>1000||parsed.users.length>2000){reject('schema_changed');return;}
      if(active!==s||clock()>=s.deadline){stop('timeout');return;}
+     s.committing=true;
      const result=await commit({events:parsed.events.filter(e=>e.direction==='inbound'),users:parsed.users});
      finish(s,{phase:'saved',source,routeKind:kind,httpStatus:200,accepted:result.accepted,inserted:result.inserted,historyComplete:false,quality:parsed.quality});
     }catch(e){reject(codes.has(e?.message)?e.message:'source_error');}

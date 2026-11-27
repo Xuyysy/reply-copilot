@@ -105,3 +105,37 @@ test('same owner rebinding to another tab invalidates pending task before commit
   assert.equal(r.reason,'identity_changed');assert.equal(r.rows,0);
  });
 });
+
+
+test('authorized observed response commits once to native workbench database without moving live checkpoint',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const result=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={};let owner='111',requests=0;
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async(id,m)=>{if(id!==1||m.type!=='XRH_STAGING_WORKBENCH_IDENTITY')throw Error('unexpected transport');return {ok:true,value:{ownerUserId:owner,handle:owner==='111'?'me':'other'}}},create:async()=>({id:10}),update:async()=>({})}};
+   const factory=async()=>({id:'sample-checkpoint-test',sources:['notification'],identify:async()=>({ownerUserId:'111',sessionId:'stable-session'}),readPage:async({cursor,source})=>{requests++;return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:true,nextCursor:null,terminalEvidence:'explicit',payload:{data:[]},posts:[{postId:'777',authorUserId:'222',replyToUserId:'111',replyToPostId:'555',createdAt:Date.now()-5000}],users:[]}}});
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'observed-response-commit'),providerFactory:factory});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}},probe={id:'fixture',url:root+'staging/interaction-response-panel.html'};
+   const msg=(action,sender,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const rejects=async p=>{try{await p;return false}catch{return true}};
+   await msg('open',side);await msg('sync',page,{authorized:true});
+   let before;for(let i=0;i<350;i++){const v=await msg('view',page);if(!v.running&&!v.busy&&v.dataset){before=v.dataset;break;}await new Promise(r=>setTimeout(r,10))}
+   if(!before)throw Error('sync did not settle');
+   const start=extra=>msg('sample-start',probe,{tabId:1,source:'notification',authorized:true,...extra});
+   const event={ownerUserId:'111',actorUserId:'333',targetUserId:'111',type:'like',targetPostId:'555',occurredAt:null,source:'notification',evidenceQuality:'confirmed'};
+   const commit=(ticket,events=[event])=>msg('sample-commit',probe,{tabId:1,ticket,events,users:[{userId:'333',handle:'alice'}]});
+   const denied=await rejects(start({authorized:false})),wrongSender=await rejects(msg('sample-start',page,{tabId:1,source:'notification',authorized:true}));
+   const t1=(await start()).ticket;const overlap=await rejects(msg('sync',page,{authorized:true}));
+   const first=await commit(t1);const replay=await rejects(commit(t1));
+   const t2=(await start()).ticket;const duplicate=await commit(t2);
+   const t3=(await start()).ticket;await msg('sample-cancel',probe,{tabId:1,ticket:t3});const cancelled=await rejects(commit(t3));
+   const t4=(await start()).ticket;owner='222';const switched=await rejects(commit(t4));owner='111';
+   const t5=(await start()).ticket;const foreign=await rejects(commit(t5,[{...event,ownerUserId:'222'}]));
+   const after=(await msg('view',page)).dataset;
+   return {denied,wrongSender,overlap,replay,cancelled,switched,foreign,first,duplicate,requests,rows:after.rows.map(x=>x.type).sort(),sameJobs:JSON.stringify(before.jobs)===JSON.stringify(after.jobs),coverage:after.coverage.map(x=>({source:x.source,uniqueEvents:x.uniqueEvents,observedSamples:x.observedSamples,historyComplete:x.historyComplete}))};
+  })()`);
+  assert.equal(result.denied,true);assert.equal(result.wrongSender,true);assert.equal(result.overlap,true);assert.equal(result.replay,true);assert.equal(result.cancelled,true);assert.equal(result.switched,true);assert.equal(result.foreign,true);
+  assert.equal(result.first.inserted,1);assert.equal(result.duplicate.inserted,0);assert.equal(result.requests,1);
+  assert.deepEqual(result.rows,['like','reply']);assert.equal(result.sameJobs,true);
+  assert.deepEqual(result.coverage,[{source:'notification',uniqueEvents:2,observedSamples:2,historyComplete:false}]);
+ });
+});

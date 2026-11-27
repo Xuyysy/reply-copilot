@@ -150,7 +150,7 @@ export async function readOwnerDataset(db,session){
     const rows=await req(store.getAll(range));
     const users=await req(tx.objectStore('users').index('owner').getAll(range));
     const ownerRange=IDBKeyRange.bound([owner],[owner,[]]);
-    const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected})=>({source,reason,lastObservedAt,uniqueEvents,rejected,historyComplete:false}));
+    const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected,observedSamples})=>({source,reason,lastObservedAt,uniqueEvents,rejected,...(Number.isSafeInteger(observedSamples)&&observedSamples>0?{observedSamples}:{}),historyComplete:false}));
     const jobs=(await req(tx.objectStore('syncJobs').getAll(ownerRange))).map(({providerId,source,pages,done,updatedAt,quality,qualityPages})=>({providerId,source,pages,done,updatedAt,quality,qualityPages}));
     return {ownerUserId:owner,rows,users,coverage,jobs};
   });
