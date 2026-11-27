@@ -18,3 +18,20 @@ test("no automatic retry on rate limit and page budget is resumable",async()=>{
  const h=harness();let attempts=0;h.source.page=async()=>{attempts++;throw Error("rate_limited")};await assert.rejects(runAuthorizedSync(h),/rate_limited/);assert.equal(attempts,1);assert.equal(h.writes,0);
  const h2=harness();const j=await runAuthorizedSync({...h2,maxPages:1});assert.equal(j.status,"paused");assert.equal(h2.writes,1);assert.equal(h2.finals,0);
 });
+
+test("engine propagates cancellation to every identity read including final recount",async()=>{
+ const h=harness(),controller=new AbortController(),original=h.source.readIdentity;
+ let reads=0;
+ h.source.readIdentity=async options=>{
+  assert.equal(options?.signal,controller.signal);reads++;
+  return original(options);
+ };
+ const result=await runAuthorizedSync({...h,signal:controller.signal});
+ assert.equal(result.status,"completed");assert.equal(reads,6);
+});
+test("a cancellation during page resolution does not commit the delayed page",async()=>{
+ const h=harness(),controller=new AbortController(),page=h.source.page;
+ h.source.page=async args=>{const value=await page(args);controller.abort();return value};
+ await assert.rejects(runAuthorizedSync({...h,signal:controller.signal}),/cancelled/);
+ assert.equal(h.writes,0);assert.equal(h.finals,0);
+});

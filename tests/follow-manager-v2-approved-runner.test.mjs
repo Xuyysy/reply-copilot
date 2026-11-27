@@ -82,3 +82,20 @@ test("completion status does not leak to another session for the same owner",asy
  assert.equal(runner.status(b).status,"completed");
  assert.equal(runner.status({...b,sessionId:"another"}).status,null);
 });
+
+test("rate-limited job is recovered only by a new explicitly authorized user start",async()=>{
+ const h=setup();h.setJob({ownerUserId:b.ownerUserId,jobId:"j",lease:"old",source:LIVE_SOURCE,expectedCounts:counts,status:"rate_limited"});
+ const runner=h.runner();assert.throws(()=>runner.start({binding:b}),/access_denied/);
+ assert.equal(h.resumes,0);runner.start({binding:b,authorized:true});await runner.waitForIdle();
+ assert.equal(h.resumes,1);assert.equal(h.starts,0);assert.equal(runner.status(b).status,"completed");
+});
+
+test("immediate stop before the factory microtask makes zero transport calls",async()=>{
+ let opened=0;
+ const runner=createApprovedFollowRunner({openTransport:async()=>{opened++;throw Error("unexpected_open")}});
+ runner.start({binding:b,authorized:true});
+ assert.equal(runner.stop(b).stopping,true);
+ await runner.waitForIdle();
+ assert.equal(opened,0);
+ assert.equal(runner.status(b).status,"cancelled");
+});

@@ -17,18 +17,18 @@ export async function runAuthorizedSync({repo,job,source,signal,maxPages=60,maxM
   return await Promise.race([Promise.resolve().then(fn),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error("time_limit")),Math.max(0,deadline-Date.now()));abort=()=>reject(Error("cancelled"));signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();})]);
  }finally{clearTimeout(timer);signal?.removeEventListener("abort",abort);}}
  try{
-  const id=verify(await bounded(()=>source.readIdentity()),owner,null,counts);
+  const id=verify(await bounded(()=>source.readIdentity({signal})),owner,null,counts);
   for(const kind of KINDS)while(!current.stages[kind].terminal){
    if(pages>=maxPages||budget())return await stop("paused");
-   verify(await bounded(()=>source.readIdentity()),owner,id,counts);
+   verify(await bounded(()=>source.readIdentity({signal})),owner,id,counts);
    const cursor=current.stages[kind].cursor;
    const p=await bounded(()=>source.page({ownerUserId:owner,kind,cursor,signal}));
-   verify(await bounded(()=>source.readIdentity()),owner,id,counts);
+   verify(await bounded(()=>source.readIdentity({signal})),owner,id,counts);
    if(budget())return await stop("paused");
    if(!p||p.ownerUserId!==owner||p.kind!==kind||p.cursor!==cursor||p.expected!==counts[kind]||p.coverage!=="authorized_observed"||p.terminal&&p.terminalEvidence!=="explicit_or_count_confirmed")throw Error("source_page_mismatch");
    current=await repo.append(owner,current.jobId,current.lease,kind,p);pages++;safeProgress(onProgress,current);
   }
-  const final=await bounded(()=>source.readIdentity({refresh:true}));verify(final,owner,id,counts);
+  const final=await bounded(()=>source.readIdentity({refresh:true,signal}));verify(final,owner,id,counts);
   if(budget())return await stop("paused");
   current=await repo.finalize(owner,current.jobId,current.lease,final.counts);safeProgress(onProgress,current);return current;
  }catch(e){
