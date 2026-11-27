@@ -1,7 +1,6 @@
 import {useEffect,useState} from "react";
 import {Gift,Copy,RefreshCw} from "lucide-react";
 import {api} from "../../lib/api";
-import {buildReferralShareText} from "../../lib/referral-share.mjs";
 import {phrase,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
@@ -10,6 +9,7 @@ type ReferralMine={
  enabled:boolean;canInvite?:boolean;link?:string|null;bonus?:number;
  registered?:number;rewarded?:number;pending?:number;earnedCredits?:number;
  invitedBy?:{status:string;registeredAt:number;rewardedAt:number|null}|null;
+ invites?:{registeredAt:number;status:string;label:string}[];
 };
 export default function ReferralInviteCard({language}:{language:Language}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
@@ -41,13 +41,6 @@ export default function ReferralInviteCard({language}:{language:Language}){
   try{await navigator.clipboard.writeText(data.link);setMessage(t("链接已复制","Link copied"));}
   catch{setError(t("无法自动复制，可选中链接手动复制。","Select and copy the link manually."));}
  };
- const shareText=data?.enabled&&data.canInvite&&data.link?buildReferralShareText(data.link,typeof window!=="undefined"?window.location.origin:"",language):"";
- const copyShare=async()=>{
-  if(!shareText)return;
-  setError("");setMessage("");
-  try{await navigator.clipboard.writeText(shareText);setMessage(t("推广文案已复制","Share text copied"));}
-  catch{setError(t("无法自动复制，请手动选中下方文案。","Unable to copy automatically. Select the share text below."));}
- };
  if(loading)return <div data-testid="referral-user-loading" role="status" className="text-sm text-muted-foreground">{t("正在读取邀请奖励…","Loading referral rewards…")}</div>;
  if(!data?.enabled)return null;
  return <Card data-testid="account-referral-rewards" className="border-primary/25">
@@ -60,23 +53,14 @@ export default function ReferralInviteCard({language}:{language:Language}){
       <input aria-label={t("我的邀请链接","My invite link")} readOnly value={data.link} onFocus={e=>e.target.select()} className="min-w-0 flex-1 rounded-md border bg-muted/30 p-2 text-xs"/>
       <Button type="button" size="sm" variant="outline" onClick={()=>void copy()}><Copy size={15}/>{t("复制链接","Copy link")}</Button>
      </div>:
-      <Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button>}
+      <div className="space-y-2 rounded-lg bg-muted/40 p-3"><h3 className="font-semibold">{t("想让流量变现？","Turn your audience into income?")}</h3><p className="text-sm">{t("成为推广合伙人，获得最低 15% 的约定佣金。你邀请的新用户产生符合条件的充值或订阅订单，即可按约定获得分成。想合作，请在 X 上私信站长。","Become a partner and earn an agreed commission of at least 15% on qualifying credit or subscription purchases by your referrals. Interested? DM the site owner on X.")}</p><p className="text-xs text-muted-foreground">{t("现金佣金仅对审核通过的合伙人开放，普通邀请奖励不变。","Cash commissions are available only to approved partners. Standard referral rewards are unchanged.")}</p><Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button></div>}
     <p className="text-xs text-muted-foreground">{t("30 天内最多奖励 20 位有效邀请。仅新注册用户可通过链接建立邀请关系。","Up to 20 rewarded referrals per rolling 30 days. Only newly created accounts can be attributed.")}</p>
    </div>}
    <div className="grid grid-cols-3 gap-2">
     {[[t("邀请注册","Registered"),data.registered],[t("奖励成功","Rewarded"),data.rewarded],[t("累计获赠","Credits earned"),data.earnedCredits]].map(([label,n])=>
      <div key={label} className="rounded-lg bg-muted/40 p-3 text-center"><strong className="block text-xl">{Number(n||0).toLocaleString()}</strong><span className="text-xs text-muted-foreground">{label}</span></div>)}
    </div>
-   <div className="space-y-2 rounded-lg border p-3" data-testid="referral-share-tools">
-    <div className="flex flex-wrap items-center justify-between gap-2">
-     <strong className="text-sm">{t("推广素材","Sharing toolkit")}</strong>
-     <a href="/promote/" className="text-sm underline">{t("查看推广指南","View sharing guide")}</a>
-    </div>
-    {shareText&&<div className="space-y-2">
-     <textarea readOnly value={shareText} rows={4} aria-label={t("可复制的推广文案","Copy-ready share text")} className="w-full rounded-md border bg-muted/30 p-2 text-sm" onFocus={e=>e.target.select()}/>
-     <Button type="button" size="sm" variant="outline" onClick={()=>void copyShare()}><Copy size={15}/>{t("复制推广文案","Copy share text")}</Button>
-    </div>}
-   </div>
+   <div className="space-y-2"><h3 className="font-semibold">{t("最近邀请注册","Recent registrations")}</h3>{data.invites?.length?<div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th>{t("受邀用户","Invitee")}</th><th>{t("注册时间","Registered")}</th><th>{t("奖励状态","Reward status")}</th></tr></thead><tbody>{data.invites.map((r,i)=><tr key={i} className="border-t"><td className="py-2">{r.label}</td><td>{new Date(r.registeredAt).toLocaleString()}</td><td>{r.status==="rewarded"?t("已激活","Activated"):t("待激活","Pending")}</td></tr>)}</tbody></table></div>:<p className="text-sm text-muted-foreground">{t("暂无邀请注册记录。","No registrations yet.")}</p>}<p className="text-xs text-muted-foreground">{t("展示最近 30 条记录，保护受邀用户隐私。","Latest 30 records; invitee privacy is protected.")}</p></div>
    {data.invitedBy&&<p className="text-sm text-muted-foreground">{data.invitedBy.status==="rewarded"?t("你通过好友邀请成功激活，额外获得 50 次免费额度。","Your friend referral earned you 50 extra free replies."):t("你有一笔好友邀请奖励待激活：完成插件绑定并成功接收第一条 AI 回复。","Your invite bonus is pending: connect the extension and receive your first AI reply.")}</p>}
    {message&&<p role="status" className="text-sm text-emerald-700">{message}</p>}
    {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}

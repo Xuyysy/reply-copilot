@@ -1,4 +1,4 @@
-import {useRef,useState} from "react";
+import {useEffect,useRef,useState} from "react";
 import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
@@ -9,6 +9,8 @@ import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
 type Policy={version:number;status:"active"|"paused";level:string;rate_bps:number;term_months:number|null;effective_at:number;reason:string};
 type Result={enabled:boolean;user?:{id:string;email:string;eligible:boolean};history?:Policy[]};
+type Directory={enabled:boolean;items?:{id:string;email:string;status:string;level:string;rate_bps:number;registered:number;activated:number;account_status:string}[];hasMore?:boolean;offset?:number};
+type InvitePage={enabled:boolean;items?:{invited_user_id:string;email:string;status:string;registered_at:number}[];hasMore?:boolean;offset?:number};
 type Props={language:Language;write:<T>(path:string,body:object)=>Promise<T>};
 const endpoint="/v1/admin/partners/policy";
 export default function PartnerAdminPanel({language,write}:Props){
@@ -25,30 +27,37 @@ export default function PartnerAdminPanel({language,write}:Props){
  const [error,setError]=useState("");
  const [notice,setNotice]=useState("");
  const current=data?.history?.[0];
+ const [directory,setDirectory]=useState<Directory|null>(null),[directoryError,setDirectoryError]=useState(""),[directoryBusy,setDirectoryBusy]=useState(false);
+ const [invites,setInvites]=useState<InvitePage|null>(null),[inviteError,setInviteError]=useState("");
+ const directorySeq=useRef(0),inviteSeq=useRef(0);
+ async function loadDirectory(offset=0){const seq=++directorySeq.current;setDirectoryBusy(true);setDirectoryError("");try{const next=await api<Directory>("/v1/admin/partners/list?offset="+offset);if(seq===directorySeq.current)setDirectory(next);}catch(e){if(seq===directorySeq.current){setDirectory(null);setDirectoryError(readableError(e,language));}}finally{if(seq===directorySeq.current)setDirectoryBusy(false);}}
+ useEffect(()=>{void loadDirectory();return()=>{directorySeq.current++;inviteSeq.current++;};},[]);
+ async function loadInvites(userId:string,offset=0){const seq=++inviteSeq.current;setInvites(null);setInviteError("");try{const next=await api<InvitePage>("/v1/admin/partners/invites?userId="+encodeURIComponent(userId)+"&offset="+offset);if(seq===inviteSeq.current)setInvites(next);}catch(e){if(seq===inviteSeq.current)setInviteError(readableError(e,language));}}
  async function load(value:string){
   const next=await api<Result>(endpoint+"?q="+encodeURIComponent(value));
   setData(next);
   const p=next.history?.[0];
   setLevel(p?.level||"standard");setStatus(p?.status||"active");
-  setRate(p?String(p.rate_bps/100):"");setTerm(p?(p.term_months===null?"unlimited":String(p.term_months)):"");setReason("");
+  setRate(p?String(p.rate_bps/100):"15");setTerm(p?(p.term_months===null?"unlimited":String(p.term_months)):"");setReason("");setInvites(null);inviteSeq.current++;if(next.user&&p)void loadInvites(next.user.id);
  }
- async function search(){
-  if(lock.current||!q.trim())return;
+ async function search(value=q){
+  if(lock.current||!value.trim())return;
+  setQ(value);
   lock.current=true;setBusy(true);setData(null);setError("");setNotice("");
-  try{await load(q.trim());}catch(e){setError(readableError(e,language));}
+  try{await load(value.trim());}catch(e){setError(readableError(e,language));}
   finally{lock.current=false;setBusy(false);}
  }
  async function save(){
   const target=data?.user;
   const bps=Math.round(Number(rate)*100);
   const months=term==="unlimited"?null:Number(term);
-  if(lock.current||!target||!/^\d{1,3}(\.\d{1,2})?$/.test(rate)||bps<1||bps>10000||
+  if(lock.current||!target||!/^\d{1,3}(\.\d{1,2})?$/.test(rate)||bps<(status==="active"?1500:1)||bps>10000||
    (months!==null&&(!/^\d{1,3}$/.test(term)||months<1||months>120))||reason.trim().length<8||
    (status==="active"&&!target.eligible)||(status==="paused"&&current?.status!=="active"))return;
   lock.current=true;setBusy(true);setError("");setNotice("");
   try{
    await write(endpoint,{userId:target.id,status,level,rateBps:bps,termMonths:months,reason:reason.trim(),expectedVersion:current?.version||0});
-   await load(target.id);setNotice(t("规则已保存，历史版本保留。","Policy saved; history retained."));
+   await load(target.id);void loadDirectory();setNotice(t("规则已保存，历史版本保留。","Policy saved; history retained."));
   }catch(e){
    setError(readableError(e,language)+" "+t("请重新查询确认实际状态。","Search again to confirm the actual state."));
    setData(null);
@@ -58,8 +67,9 @@ export default function PartnerAdminPanel({language,write}:Props){
  <CardContent className="space-y-4">
   <PartnerManualQueue language={language} write={write}/>
   <p className="text-sm text-muted-foreground">{t("管理指定伙伴及约定分成。满10元申请，由管理员人工转账并标记完成。","Manage assigned partners and commission terms. Requests start at CNY 10; transfer externally and mark settled.")}</p>
+  <section className="space-y-2 rounded-lg border p-3" data-testid="partner-directory"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{t("合伙人列表","Partner directory")}</h3><Button type="button" variant="outline" disabled={directoryBusy} onClick={()=>void loadDirectory()}>{t("刷新列表","Refresh list")}</Button></div>{directoryError&&<p role="alert">{directoryError}</p>}{directory?.enabled&&(!directory.items?.length?<p className="text-sm">{t("暂无合伙人","No partners yet")}</p>:directory.items.map(r=><div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"><div className="min-w-0 break-all text-sm"><strong>{r.email}</strong><p>{r.status==="active"?t("已授权","Authorized"):t("已暂停","Paused")} · {r.rate_bps/100}% · {t("注册","Registered")} {r.registered} · {t("激活","Activated")} {r.activated}</p></div><Button type="button" variant="outline" disabled={busy} onClick={()=>void search(r.id)}>{t("查看详情","Details")}</Button></div>))}{directory?.enabled&&<div className="flex gap-2"><Button type="button" variant="outline" disabled={directoryBusy||!(directory.offset??0)} onClick={()=>void loadDirectory(Math.max(0,(directory.offset??0)-30))}>{t("上一页","Previous")}</Button><Button type="button" variant="outline" disabled={directoryBusy||!directory.hasMore} onClick={()=>void loadDirectory((directory.offset??0)+30)}>{t("下一页","Next")}</Button></div>}</section>
   <form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void search();}}>
-   <Input aria-label={t("用户 ID 或邮箱","User ID or email")} value={q} onChange={e=>{setQ(e.target.value);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
+   <Input aria-label={t("用户 ID 或邮箱","User ID or email")} placeholder={t("输入用户 ID 或邮箱，授权新合伙人","Enter user ID or email to authorize a partner")} value={q} onChange={e=>{setQ(e.target.value);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
    <Button disabled={busy||!q.trim()}>{t("查询","Search")}</Button>
   </form>
   {data?.enabled===false&&<p role="status">{t("推广计划默认关闭，需单独审核后启用。","Program disabled pending separate rollout approval.")}</p>}
@@ -74,6 +84,7 @@ export default function PartnerAdminPanel({language,write}:Props){
    <Button disabled={busy||reason.trim().length<8||!rate||!term||(status==="active"&&!data.user.eligible)||(status==="paused"&&current?.status!=="active")}>{current?t("保存合作规则","Save policy"):t("授权推广伙伴","Authorize partner")}</Button>
   </form>}
   {data?.history?.length? <div className="space-y-2"><h3 className="font-medium">{t("最近 20 个规则版本","Last 20 policy versions")}</h3>{data.history.map(p=><div key={p.version} className="rounded border p-2 text-sm break-all">v{p.version} · {p.status} · {p.level} · {p.rate_bps/100}% · {p.term_months??"unlimited"} · {new Date(p.effective_at).toLocaleString()}<p>{p.reason}</p></div>)}</div>:null}
+  {data?.user&&current&&<section className="space-y-2"><h3 className="font-semibold">{t("受邀注册记录","Referral registrations")}</h3>{inviteError&&<p role="alert">{inviteError}</p>}{invites?.items?.length?invites.items.map(r=><div key={r.invited_user_id} className="rounded border p-2 text-sm break-all">{r.email} · {new Date(r.registered_at).toLocaleString()} · {r.status==="rewarded"?t("已激活","Activated"):t("待激活","Pending")}</div>):invites&&<p>{t("暂无注册记录","No registrations")}</p>}{invites&&<div className="flex gap-2"><Button type="button" variant="outline" disabled={!(invites.offset??0)} onClick={()=>void loadInvites(data.user!.id,Math.max(0,(invites.offset??0)-30))}>{t("上一页","Previous")}</Button><Button type="button" variant="outline" disabled={!invites.hasMore} onClick={()=>void loadInvites(data.user!.id,(invites.offset??0)+30)}>{t("下一页","Next")}</Button></div>}</section>}
   {data?.user&&current&&<PartnerManualReport key={data.user.id+":"+current.version} owner={data.user.id} language={language} write={write}/>}
   {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
   {notice&&<p role="status" className="text-sm text-emerald-700">{notice}</p>}

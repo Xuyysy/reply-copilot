@@ -1,0 +1,8 @@
+# Partner payout profile: separate protected follow-up
+Owner requests Alipay recipient details after assignment and in admin details/settlement.
+Do not collect recipient information before implementing and reviewing encrypted storage, migration and dedicated secret provisioning.
+- Only collect Alipay account identifier (email/phone/account) and recipient real name; no password, OTP, ID document, QR upload or payment credentials. Explain purpose, admin access and retention.
+- Dedicated encrypted versioned records, AES-GCM with random nonce and AAD binding user/version; separate environment-scoped secret; never log plaintext, put it in a URL, audit text, ordinary list payload or local storage. Mask by default; explicit reveal only for bound admin after password reauthentication and CSRF. Audit reveal/change with actor/time/version only.
+- Owner from authenticated session; only eligible assigned users. Pending application freezes recipient changes; bind immutable recipient version to each new application. Existing pending applications without version need explicit review, not automatic redirection. Existing terminal records immutable. New applications require recipient profile while capability enabled. No automatic transfer or payment provider.
+- Default-off capability, separate authorization before any migration, secret or rollout. Verify no plaintext storage, cross-user access, missing/invalid key, CSRF, reauthentication, concurrency and legacy records; mobile and bilingual acceptance.
+- New active policy >=15%; historical rates/terms unchanged. Commission only on qualifying verified purchases. Existing referral benefits unchanged. Contact handle has not been supplied; use generic X DM wording pending confirmation.

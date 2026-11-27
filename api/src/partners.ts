@@ -54,6 +54,7 @@ export async function adminPartnerPolicy(request:Request,env:Env):Promise<Respon
   let policy;
   try { policy=parsePartnerPolicy(raw); }
   catch { throw new ApiFailure(400,"PARTNER_POLICY_INVALID","推广规则无效。"); }
+  if(policy.status==="active"&&policy.rateBps<1500)throw new ApiFailure(400,"PARTNER_POLICY_INVALID","新启用的合作佣金比例不得低于15%。");
   if(policy.reason.length<8||target===actor.user_id)throw new ApiFailure(400,"PARTNER_POLICY_INVALID","操作原因至少 8 字且不能授权自己。");
   const plan=partnerPolicyAppendPlan({userId:target,actorId:actor.user_id,now:nowMs(),policy});
   const result=await env.DB.prepare(plan.sql).bind(...plan.params).run();
@@ -61,4 +62,29 @@ export async function adminPartnerPolicy(request:Request,env:Env):Promise<Respon
   // must reload history, never retry with a fresh version automatically.
   if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_POLICY_CONFLICT","资格不符合或版本已变化，请重新查询。");
   return response({ok:true,version:policy.expectedVersion+1},200,env,request);
+}
+
+export async function adminPartnerDirectory(request:Request,env:Env):Promise<Response>{
+ await requireAdminSession(request,env);
+ if(!await enabled(env))return response({enabled:false},200,env,request);
+ const raw=new URL(request.url).searchParams.get("offset")||"0";
+ if(!/^(0|[1-9][0-9]{0,3})$/.test(raw))throw new ApiFailure(400,"INVALID_OFFSET","分页参数无效。");
+ const offset=Number(raw);
+ const rows=await env.DB.prepare(`SELECT u.id,u.email,u.status account_status,p.version,p.status,p.level,p.rate_bps,p.term_months,p.effective_at,
+ (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id) registered,
+ (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id AND i.status='rewarded') activated
+ FROM partner_policy_versions p JOIN users u ON u.id=p.user_id
+ WHERE p.version=(SELECT MAX(v.version) FROM partner_policy_versions v WHERE v.user_id=p.user_id)
+ ORDER BY p.effective_at DESC,u.id LIMIT 31 OFFSET ?`).bind(offset).all();
+ return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset},200,env,request);
+}
+export async function adminPartnerInvites(request:Request,env:Env):Promise<Response>{
+ await requireAdminSession(request,env);
+ if(!await enabled(env))return response({enabled:false},200,env,request);
+ const url=new URL(request.url),target=id(url.searchParams.get("userId")),raw=url.searchParams.get("offset")||"0";
+ if(!/^(0|[1-9][0-9]{0,3})$/.test(raw))throw new ApiFailure(400,"INVALID_OFFSET","分页参数无效。");
+ if(!await current(env,target))throw new ApiFailure(404,"USER_NOT_FOUND","尚未指定该推广伙伴。");
+ const offset=Number(raw);
+ const rows=await env.DB.prepare("SELECT i.invited_user_id,u.email,i.status,i.registered_at,i.rewarded_at FROM referral_invites i JOIN users u ON u.id=i.invited_user_id WHERE i.inviter_user_id=? ORDER BY i.registered_at DESC,i.invited_user_id DESC LIMIT 31 OFFSET ?").bind(target,offset).all();
+ return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset},200,env,request);
 }

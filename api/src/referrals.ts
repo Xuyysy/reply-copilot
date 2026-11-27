@@ -85,14 +85,16 @@ export async function myReferrals(request:Request,env:Env):Promise<Response> {
   // Account view can safely retry a previous ACK whose grant failed due to a transient error.
   await bestEffortReferralAward(env,session.user_id);
   const canInvite=await eligibleOwner(env,session.user_id);
-  const [code,stats,invitedBy]=await Promise.all([
+  const [code,stats,invitedBy,invites]=await Promise.all([
     canInvite?env.DB.prepare("SELECT code FROM referral_codes WHERE user_id=?").bind(session.user_id).first<{code:string}>():Promise.resolve(null),
     env.DB.prepare("SELECT COUNT(*) registered,COALESCE(SUM(CASE WHEN status='rewarded' THEN 1 ELSE 0 END),0) rewarded FROM referral_invites WHERE inviter_user_id=?").bind(session.user_id).first<{registered:number;rewarded:number}>(),
-    env.DB.prepare("SELECT status,registered_at,rewarded_at FROM referral_invites WHERE invited_user_id=?").bind(session.user_id).first<{status:string;registered_at:number;rewarded_at:number|null}>()
+    env.DB.prepare("SELECT status,registered_at,rewarded_at FROM referral_invites WHERE invited_user_id=?").bind(session.user_id).first<{status:string;registered_at:number;rewarded_at:number|null}>(),
+    env.DB.prepare("SELECT i.registered_at,i.status,u.email FROM referral_invites i JOIN users u ON u.id=i.invited_user_id WHERE i.inviter_user_id=? ORDER BY i.registered_at DESC,i.invited_user_id DESC LIMIT 30").bind(session.user_id).all<{registered_at:number;status:string;email:string}>()
   ]);
   const rewarded=Number(stats?.rewarded||0),registered=Number(stats?.registered||0);
   return response({enabled:true,canInvite,link:linkFor(env,code?.code||null),bonus:REFERRAL_BONUS,
     registered,rewarded,pending:registered-rewarded,earnedCredits:rewarded*REFERRAL_BONUS,
+    invites:invites.results.map(r=>({registeredAt:r.registered_at,status:r.status,label:(Array.from(r.email||"")[0]||"")+"***"})),
     invitedBy:invitedBy?{status:invitedBy.status,registeredAt:invitedBy.registered_at,rewardedAt:invitedBy.rewarded_at}:null,
     eligibility:"verified_email_extension_first_delivered_reply"
   },200,env,request);
