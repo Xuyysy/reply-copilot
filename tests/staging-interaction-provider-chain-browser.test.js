@@ -29,7 +29,7 @@ test('real provider + page projector + background sync + native IndexedDB form a
    for(let i=0;i<700;i++){postOnly=await msg('view');if(!postOnly.running&&!postOnly.busy)break;await new Promise(r=>setTimeout(r,10))}
    return {beforeRows:before.dataset.rows.length,calls:firstCalls,reason:firstReason,rows:firstRows,jobs:firstJobs,
     postOnlyCalls:calls,postOnlyReason:postOnly.task.reason,postOnlySources:postOnly.task.sources.map(x=>x.source),postOnlyRows:postOnly.dataset.rows.map(e=>e.type),
-    privateLeak:JSON.stringify(result).includes('never retained')||JSON.stringify(result).includes('synthetic')||JSON.stringify(postOnly).includes('never retained'};
+    privateLeak:JSON.stringify(result).includes('never retained')||JSON.stringify(result).includes('synthetic')||JSON.stringify(postOnly).includes('never retained')};
   })()`);
   assert.equal(r.beforeRows,0);assert.equal(r.reason,'source_exhausted');assert.equal(r.calls.length,2);assert.ok(r.calls.every(x=>x.method==='GET'));
   assert.deepEqual(r.rows.map(x=>x.type).sort(),['like','reply']);assert.deepEqual(r.rows.find(x=>x.type==='reply').sources,['notification','post']);
