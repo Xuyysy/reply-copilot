@@ -6,6 +6,7 @@ import {parsePostEvidence} from '../adapters/post-evidence.js';
 import {decodeWebPostRecords} from '../adapters/web-post-records.js';
 import {beginSession,endSession,openSyncJob,commitBatch,readEventPage,readCoverage,readUsers} from '../storage/repository.js';
 import {rankInteractions} from '../analytics/ranking.js';
+import {safeSyncDiagnostic} from './diagnostic.js';
 const STATUS=new Map([[401,'unauthenticated'],[403,'forbidden'],[429,'rate_limited']]);
 const validCursor=v=>v===null||typeof v==='string'&&v.length>0&&v.length<=2048;
 const fail=code=>{throw Error(code);};
@@ -51,20 +52,26 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
   if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||!Number.isInteger(maxPages)||maxPages<1||maxPages>100||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
-  const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0;
+  const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0,stage='identity',httpStatus=null;
   try{
     const sessionId=identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId);
     check(signal,deadline);
+    stage='checkpoint';
     session=await beginSession(db,ownerUserId);
     job=await openSyncJob(db,session,{providerId:provider.id,source,refresh});
     while(!job.done&&committed<maxPages){
+      stage='identity';httpStatus=null;
       check(signal,deadline);
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
+      stage='read';
       const page=await bounded(()=>provider.readPage({ownerUserId,source,cursor:job.cursor,signal}),signal,deadline);
+      stage='validate';httpStatus=page?.status;
       const parsed=normalizePage(page,{ownerUserId,source,cursor:job.cursor});
       if(parsed.nextCursor!==null&&job.seen.includes(parsed.nextCursor))fail('cursor_cycle');
+      stage='identity';
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
       check(signal,deadline);
+      stage='commit';
       const result=await commitBatch(db,session,parsed.events,{source,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',observedAt:parsed.observedAt,users:parsed.users??[],signal,checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
       job=result.job;inserted+=result.inserted;committed++;
       try{onProgress({pages:committed,inserted,done:job.done,stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
@@ -73,7 +80,8 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
   }catch(e){
     // Return only known status codes, not provider error bodies, cursors or credentials.
     const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified','workspace_limit']);
-    return {reason:known.has(e?.message)?e.message:'sync_failed',committed,inserted,historyComplete:false};
+    const reason=known.has(e?.message)?e.message:'sync_failed';
+    return {reason,committed,inserted,historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,httpStatus)};
   }finally{if(session)await endSession(db,session).catch(()=>{});}
 }
 // Separate read session; callers must authenticate the currently selected owner first.

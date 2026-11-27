@@ -3,6 +3,7 @@ import {syncInteractions} from '../interaction-manager/sync/engine.js';
 import {openProviderSession} from '../interaction-manager/sync/provider-session.js';
 import {createXInteractionProviderFactory} from './interaction-provider.js';
 import {validId} from '../interaction-manager/core/events.js';
+import {safeSyncDiagnostic} from '../interaction-manager/sync/diagnostic.js';
 import {createSchedulePreferences} from '../interaction-manager/sync/schedule-preferences.js';
 const TYPE='XRH_STAGING_ACCOUNT_WORKBENCH';
 const PATHS=Object.freeze({interaction:'staging/interaction-workbench.html',follow:'staging/follow-workbench.html'});
@@ -94,7 +95,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      return pending;
    };
    try{await write('running');}catch(e){jobs.delete(b.ownerUserId);throw e;}
-   task.promise=inDB(async()=>{let reason='sync_failed',provider;try{
+   task.promise=inDB(async()=>{let reason='sync_failed',provider,stage='identity';try{
      const verifyBound=async()=>{
        if(task.controller.signal.aborted)fail('cancelled');
        const bound=await get(f);if(bound?.bindingId!==b.bindingId||bound.sourceTabId!==b.sourceTabId)fail('identity_changed');
@@ -102,6 +103,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        const after=await get(f);if(after?.bindingId!==b.bindingId||after.sourceTabId!==b.sourceTabId)fail('identity_changed');
      };
      await verifyBound();
+     stage='connect';
      provider=await openProviderSession(providerFactory,b,{signal:task.controller.signal});
      if(!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function')fail('source_unavailable');
      const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
@@ -109,6 +111,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      // independent durable checkpoint in the existing repository.
      const sources=provider.sources===undefined?['notification']:provider.sources;
      if(!Array.isArray(sources)||sources.length<1||sources.length>2||new Set(sources).size!==sources.length||sources.some(s=>!['notification','post'].includes(s)))fail('source_unavailable');
+     stage='checkpoint';
      db??=await openDB();
      const session=await beginSession(db,b.ownerUserId);
      let prior;
@@ -121,6 +124,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      task.progress={...task.progress,sources:ordered.map(source=>({source,state:'pending',reason:null,pages:0,inserted:0}))};
      const sourceProgress=(source,fields)=>{task.progress={...task.progress,sources:task.progress.sources.map(s=>s.source===source?{...s,...fields}:s)};};
      for(const source of ordered){
+       stage='identity';
        await verifyBound();
        const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
        sourceProgress(source,{state:'running'});
@@ -132,14 +136,14 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        completedPages+=result.committed;completedInserted+=result.inserted;
        task.progress={...task.progress,pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
-       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted});
+       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted,...(result.diagnostic&&reason!=='cancelled'?{diagnostic:safeSyncDiagnostic(result.diagnostic.stage,result.diagnostic.reason,result.diagnostic.httpStatus)}:{})});
        // A page budget boundary has no in-flight read. Allow the other source
        // its reserved pages, but never hide the partial result behind success.
        if(reason==='page_limit')partialReason='page_limit';
        if(!['source_exhausted','page_limit'].includes(reason))break;
      }
      if(reason==='source_exhausted'&&partialReason)reason=partialReason;
-   }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';}
+   }catch(e){reason=reasonSet.has(e?.message)?e.message:'sync_failed';if(reason!=='cancelled')task.progress={...task.progress,diagnostic:safeSyncDiagnostic(stage,reason)};}
    finally{
      task.progress={...task.progress,sources:task.progress.sources.map(s=>s.state==='running'?{...s,state:'stopped',reason}:s)};
      try{await provider?.close();await write('stopped',reason);}finally{jobs.delete(b.ownerUserId);}
