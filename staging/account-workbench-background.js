@@ -79,10 +79,10 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  }
  // Only the Staging registration injects the read-only X provider. Test callers
  // remain fail-closed without an explicit factory. Tasks outlive the workbench page.
- async function startSync(f,sender,authorized){
+ async function startSync(f,sender,authorized,selectedSource='both'){
    const b=await verified(f,sender);
    if(f!=='interaction'||!providerFactory)fail('source_unavailable');
-   if(authorized!==true)fail('invalid_context');
+   if(authorized!==true||!['both','notification','post'].includes(selectedSource))fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
    if(jobs.size)fail('busy');
    const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0,sources:[]}};jobs.set(b.ownerUserId,task);
@@ -109,8 +109,10 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
      // One owner-bound task can cover both timeline kinds. Each kind retains an
      // independent durable checkpoint in the existing repository.
-     const sources=provider.sources===undefined?['notification']:provider.sources;
-     if(!Array.isArray(sources)||sources.length<1||sources.length>2||new Set(sources).size!==sources.length||sources.some(s=>!['notification','post'].includes(s)))fail('source_unavailable');
+     const available=provider.sources===undefined?['notification']:provider.sources;
+     if(!Array.isArray(available)||available.length<1||available.length>2||new Set(available).size!==available.length||available.some(s=>!['notification','post'].includes(s)))fail('source_unavailable');
+     const sources=selectedSource==='both'?available:available.filter(source=>source===selectedSource);
+     if(sources.length===0)fail('source_unavailable');
      stage='checkpoint';
      db??=await openDB();
      const session=await beginSession(db,b.ownerUserId);
@@ -171,7 +173,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(m.action==='view')return read(f,sender);
    if(m.action==='identity'){const b=await verified(f,sender);return {ownerUserId:b.ownerUserId,handle:b.handle,bindingId:b.bindingId};}
    if(m.action==='clear'){if(m.confirmed!==true||f!=='interaction')fail('invalid_context');return read(f,sender,{clear:true});}
-   if(m.action==='sync')return startSync(f,sender,m.authorized);
+   if(m.action==='sync')return startSync(f,sender,m.authorized,m.selectedSource);
    if(m.action==='stop'){const b=await verified(f,sender);if(f!=='interaction')fail('invalid_context');jobs.get(b.ownerUserId)?.controller.abort();return {stopped:true};}
    fail('invalid_context');
  }

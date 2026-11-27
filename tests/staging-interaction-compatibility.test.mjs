@@ -169,6 +169,23 @@ test('nested module fanout has an aggregate limit even when every entry meets it
  assert.deepEqual(normalized(body,'graphql','notification').events.map(e=>e.type),['like']);
 });
 
+
+test('recognized non-like notification icons do not block confirmed likes or invent other events',()=>{
+ const known=['reply_icon','mention_icon','at_icon','quote_icon','bell_icon','bird_icon','community_icon','list_icon','space_icon','microphone_icon'];
+ for(const kind of ['graphql','rest'])for(const icon of known){
+  if(kind==='graphql'){
+   const out=normalized(modern([notice('heart_icon'),notice(icon)]),'graphql','notification');
+   assert.deepEqual(out.events.map(e=>e.type),['like']);assert.equal(out.quality.ignored,1);assert.equal(out.done,true);
+  }else{
+   const body=legacy('heart_icon');
+   body.globalObjects.notifications.other={icon:{id:icon},template:{aggregateUserActionsV1:{fromUsers:[{user:{id:'222'}}],targetObjects:[]}}};
+   const out=normalized(body,'rest','notification');
+   assert.deepEqual(out.events.map(e=>e.type),['like']);assert.equal(out.quality.ignored,1);
+  }
+ }
+ assert.throws(()=>api.project(modern([notice('heart_icon'),notice('unclassified_icon')]),'graphql',owner),/schema_changed/);
+});
+
 test('REST operation metadata never copies credential-like query fields into an active request',()=>{
  const origin='https://x.com',endpoint=api.endpointFrom([{name:origin+'/i/api/2/notifications/all.json?count=20&include_user_entities=1&include_auth_token=fixture-sensitive&include_cookie=fixture-sensitive&include_session=fixture-sensitive'}],origin);
  const url=api.pageURL(endpoint,null,owner);

@@ -233,6 +233,9 @@
              notifications.push({__typename:'TimelineNotification',notification_icon:'person_icon',template:{from_users:actors,target_objects:[]}});
              continue;
            }
+           // Known other icons cannot prove a like/repost; count an exclusion
+           // and let a separate explicitly selected post read establish relationships.
+           if(["reply_icon","mention_icon","at_icon","quote_icon","bell_icon","bird_icon","community_icon","list_icon","space_icon","microphone_icon"].includes(item.notification_icon)){ignored++;continue;}
            if(!['heart_icon','retweet_icon'].includes(item.notification_icon))fail('schema_changed');
            if(!obj(t)||!Array.isArray(t.from_users)||!Array.isArray(t.target_objects)||t.from_users.length<1||t.from_users.length>1000||t.target_objects.length!==1)fail('schema_changed');
            const target=minimalTweet(t.target_objects[0]?.tweet_results?.result);
@@ -268,6 +271,9 @@
          n[key]={icon:{id:'person_icon'},template:{aggregateUserActionsV1:{targetObjects:[],fromUsers}}};
          continue;
        }
+       // Recognized non-like categories are excluded, not misattributed.
+       // Unknown categories still stop the page for schema review.
+       if(["reply_icon","mention_icon","at_icon","quote_icon","bell_icon","bird_icon","community_icon","list_icon","space_icon","microphone_icon"].includes(row?.icon?.id)){ignored++;continue;}
        if(!['heart_icon','retweet_icon'].includes(row?.icon?.id))fail('schema_changed');
        if(!Array.isArray(a?.targetObjects)||a.targetObjects.length!==1||!Array.isArray(a.fromUsers)||a.fromUsers.length<1||a.fromUsers.length>1000)fail('schema_changed');
        const id=stable(a.targetObjects[0]?.tweet?.id),t=id&&Object.hasOwn(global.tweets,id)?global.tweets[id]:null;
