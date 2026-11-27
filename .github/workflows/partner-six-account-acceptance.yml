@@ -1,0 +1,38 @@
+name: Six account isolated partner acceptance (no deployment)
+on:
+  push:
+    branches: ['chatgpt/partners-six-account-acceptance-20261127']
+    paths:
+      - 'web/tests/partner-six-account-acceptance.test.mjs'
+      - '.github/workflows/partner-six-account-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  isolated:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: stable
+      - name: Local browser compatibility
+        env:
+          REAL_CHROME: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/ci-chrome"
+          printf '#!/usr/bin/env bash\nexec %q --no-sandbox --disable-dev-shm-usage "$@"\n' "$REAL_CHROME" > "$RUNNER_TEMP/ci-chrome/chrome"
+          chmod +x "$RUNNER_TEMP/ci-chrome/chrome"
+          sudo mkdir -p "/Applications/Google Chrome.app/Contents/MacOS" /private/tmp
+          sudo chmod 1777 /private/tmp
+          sudo ln -s "$RUNNER_TEMP/ci-chrome/chrome" "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      - run: npm --prefix web ci && npm --prefix api ci
+      - run: npm --prefix web run build:staging
+      - name: Actual Worker and six isolated browser identities
+        run: node --test web/tests/partner-six-account-acceptance.test.mjs
