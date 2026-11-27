@@ -1,0 +1,50 @@
+name: Partners exact-source Staging Worker build only
+on:
+  push:
+    branches: ['chatgpt/partners-staging-worker-build-only-20261127']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    if: github.repository == 'Xuyysy/reply-copilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Verify successful full CI for exact source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/Xuyysy/reply-copilot/actions/runs/45832981800 --jq '.head_sha + " " + .event + " " + .status + " " + .conclusion' | grep -Fx 'd44dc0410f5d9539d42a2d0c46be39cb1ae02d2a push completed success'
+      - uses: actions/checkout@v4
+        with:
+          ref: 'd44dc0410f5d9539d42a2d0c46be39cb1ae02d2a'
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: test "$(git rev-parse HEAD)" = 'd44dc0410f5d9539d42a2d0c46be39cb1ae02d2a'
+      - run: npm --prefix api ci
+      - run: npm --prefix api run typecheck
+      - run: npm --prefix api run check:staging
+      - name: Compile offline only
+        working-directory: api
+        run: |
+          ./node_modules/.bin/wrangler deploy --env staging --dry-run --outdir "$RUNNER_TEMP/worker-artifact"
+          python3 - <<'PY'
+          import os, pathlib, hashlib, json
+          p=pathlib.Path(os.environ['RUNNER_TEMP'])/'worker-artifact'
+          assert (p/'index.js').is_file()
+          assert not any(x.suffix in ('.wasm','.mjs') or x.suffix=='.js' and x.name!='index.js' for x in p.rglob('*') if x.is_file())
+          data=(p/'index.js').read_bytes()
+          manifest={'sourceSha':'d44dc0410f5d9539d42a2d0c46be39cb1ae02d2a','sha256':hashlib.sha256(data).hexdigest(),'bytes':len(data),'target':'reply-copilot-api-staging','ciRunId':45832981800,'buildOnly':True}
+          (p/'manifest.json').write_text(json.dumps(manifest,sort_keys=True))
+          print(json.dumps(manifest,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staging-worker-build-only-d44dc0410f5d9539d42a2d0c46be39cb1ae02d2a
+          path: |
+            ${{ runner.temp }}/worker-artifact/index.js
+            ${{ runner.temp }}/worker-artifact/manifest.json
+          if-no-files-found: error
