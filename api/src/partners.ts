@@ -4,6 +4,7 @@ import { requireAdminSession } from "./admin-auth";
 import { sessionFor } from "./auth";
 import { response } from "./http";
 import { jsonBody, nowMs } from "./security";
+import {payoutEnabled} from "./partner-payout";
 import { parsePartnerPolicy, partnerPolicyAppendPlan, partnerPolicyAtPlan } from "./partner-policy.mjs";
 
 async function enabled(env: Env): Promise<boolean> {
@@ -29,7 +30,7 @@ export async function myPartnerPolicy(request:Request,env:Env):Promise<Response>
   if(!policy)return response({enabled:true,policy:null},200,env,request);
   // Eligibility-only milestone. Never touch cash ledgers or infer financial balances.
   // The invitation card continues to display the existing referral statistics.
-  return response({enabled:true,policy},200,env,request);
+  return response({enabled:true,policy,...(await payoutEnabled(env)?{payoutProfileEnabled:true}:{})},200,env,request);
 }
 export async function adminPartnerPolicy(request:Request,env:Env):Promise<Response>{
   const write=request.method==="POST";
@@ -44,7 +45,7 @@ export async function adminPartnerPolicy(request:Request,env:Env):Promise<Respon
     const user=await env.DB.prepare("SELECT id,email,role,status,email_verified_at,is_test_account,archived_at FROM users WHERE id=? OR email=? ORDER BY CASE WHEN id=? THEN 0 ELSE 1 END LIMIT 1").bind(q,q.toLowerCase(),q).first<{id:string;email:string;role:string;status:string;email_verified_at:number|null;is_test_account:number;archived_at:number|null}>();
     if(!user)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
     const history=await env.DB.prepare("SELECT "+columns+",authorized_by,reason FROM partner_policy_versions WHERE user_id=? ORDER BY version DESC LIMIT 20").bind(user.id).all();
-    return response({enabled:true,user:{id:user.id,email:user.email,eligible:user.role==="user"&&user.status==="active"&&user.email_verified_at!==null&&user.is_test_account===0&&user.archived_at===null},history:history.results},200,env,request);
+    return response({enabled:true,user:{id:user.id,email:user.email,eligible:user.role==="user"&&user.status==="active"&&user.email_verified_at!==null&&user.is_test_account===0&&user.archived_at===null},history:history.results,...(history.results.length&&await payoutEnabled(env)?{payoutProfileEnabled:true}:{})},200,env,request);
   }
   const body=await jsonBody(request,4096);
   const {userId,operationId,...raw}=body;
@@ -69,14 +70,14 @@ export async function adminPartnerDirectory(request:Request,env:Env):Promise<Res
  if(!await enabled(env))return response({enabled:false},200,env,request);
  const raw=new URL(request.url).searchParams.get("offset")||"0";
  if(!/^(0|[1-9][0-9]{0,3})$/.test(raw))throw new ApiFailure(400,"INVALID_OFFSET","分页参数无效。");
- const offset=Number(raw);
+ const offset=Number(raw),payout=await payoutEnabled(env);
  const rows=await env.DB.prepare(`SELECT u.id,u.email,u.status account_status,p.version,p.status,p.level,p.rate_bps,p.term_months,p.effective_at,
  (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id) registered,
- (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id AND i.status='rewarded') activated
+ (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id AND i.status='rewarded') activated${payout?',EXISTS(SELECT 1 FROM partner_payout_profiles k WHERE k.user_id=u.id) payout_configured':''}
  FROM partner_policy_versions p JOIN users u ON u.id=p.user_id
  WHERE p.version=(SELECT MAX(v.version) FROM partner_policy_versions v WHERE v.user_id=p.user_id)
  ORDER BY p.effective_at DESC,u.id LIMIT 31 OFFSET ?`).bind(offset).all();
- return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset},200,env,request);
+ return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset,...(payout?{payoutProfileEnabled:true}:{})},200,env,request);
 }
 export async function adminPartnerInvites(request:Request,env:Env):Promise<Response>{
  await requireAdminSession(request,env);

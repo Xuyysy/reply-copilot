@@ -19,6 +19,7 @@ import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {myPartnerPolicy,adminPartnerPolicy,adminPartnerDirectory,adminPartnerInvites} from "./partners";
 import {myManualPartnerReport,adminManualPartnerReport} from "./partner-manual-report";
+import {myPartnerPayout,adminPartnerPayout} from "./partner-payout";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
 import {adminAuthCpuReadiness} from './admin-auth-cpu-readiness';
 import {adminXiaodouPilotStatus,adminXiaodouPilotCheckout} from './admin-xiaodou-pilot';
@@ -180,6 +181,8 @@ export default {
       if (request.method === "GET" && path === "/v1/referrals/me") return await myReferrals(request,env);
       if (request.method === "POST" && path === "/v1/referrals/link") return await createReferralLink(request,env);
       if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/payout") return await myPartnerPayout(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/payout") return await adminPartnerPayout(request,env);
       if (request.method === "GET" && path === "/v1/admin/partners/list") return await adminPartnerDirectory(request,env);
       if (request.method === "GET" && path === "/v1/admin/partners/invites") return await adminPartnerInvites(request,env);
       if (request.method === "GET" && path === "/v1/partners/me") return await myPartnerPolicy(request,env);

@@ -3,10 +3,11 @@ import {api} from "../../lib/api";
 import {phrase,type Language} from "../../lib/language";
 import {Badge} from "../ui/badge";
 import PartnerManualReport from "./PartnerManualReport";
+import PartnerPayoutProfile from "./PartnerPayoutProfile";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
 type Policy={status:"active"|"paused";level:"standard"|"advanced"|"strategic";rate_bps:number;term_months:number|null;effective_at:number};
-type Result={enabled:boolean;policy?:Policy|null};
+type Result={enabled:boolean;policy?:Policy|null;payoutProfileEnabled?:boolean};
 
 export default function PartnerMembershipCard({language,owner}:{language:Language;owner:string}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
@@ -34,6 +35,7 @@ export default function PartnerMembershipCard({language,owner}:{language:Languag
     <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{t("约定合作期限","Configured term")}</p><strong>{p.term_months===null?t("不限期","Unlimited"):t(p.term_months+" 个月",p.term_months+" months")}</strong></div>
    </div>
    <p className="text-xs text-muted-foreground">{t("使用原有邀请链接，分成由管理员人工核对和转账。","Use your existing invite link. Commission is reviewed and transferred manually by the administrator.")}</p>
+   {result.payoutProfileEnabled&&<PartnerPayoutProfile key={owner+":recipient"} language={language}/>}
    <PartnerManualReport key={owner} language={language} owner={owner}/>
   </CardContent>
  </Card>;

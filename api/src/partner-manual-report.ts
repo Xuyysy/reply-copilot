@@ -4,6 +4,7 @@ import {sessionFor,requireCsrf} from "./auth";
 import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
+import {payoutEnabled,recipientReady} from "./partner-payout";
 import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number};
@@ -39,8 +40,9 @@ async function report(env:Env,userId:string,admin:boolean){
   env.DB.prepare("SELECT id FROM partner_manual_requests WHERE partner_user_id=? AND status='pending'").bind(userId).first<{id:string}>()
  ]);
  const summary=summarizeManualOrders(orders,Number(total?.total??0),complete);
+ const payout=await payoutEnabled(env),ready=!payout||await recipientReady(env,userId);
  const latest=orders.sort((a,b)=>b.paidAt-a.paidAt||a.domain.localeCompare(b.domain)||a.orderId.localeCompare(b.orderId)).slice(0,30);
- return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:requestableFen(summary,!!pending),pendingId:pending?.id??null,orders:latest.map(o=>admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen}),records:records.results};
+ return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:ready?requestableFen(summary,!!pending):null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{}),pendingId:pending?.id??null,orders:latest.map(o=>admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen}),records:records.results};
 }
 export async function myManualPartnerReport(request:Request,env:Env){
  const {session,token}=await sessionFor(request,env);
@@ -71,7 +73,8 @@ export async function myManualPartnerReport(request:Request,env:Env){
  AND EXISTS(SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=?)
  AND (SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1')=2
  AND (SELECT COALESCE(SUM(amount_fen),0) FROM partner_manual_requests WHERE partner_user_id=? AND status='completed')=?
- ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen).run();
+ AND COALESCE((SELECT value FROM system_settings WHERE key='partner_payout_profile_enabled'),'0')=?
+ ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,current.payoutProfileRequired?'1':'0').run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_REQUEST_CONFLICT","申请状态已变化，请刷新。");
  return response({ok:true},200,env,request);
 }
@@ -85,8 +88,9 @@ export async function adminManualPartnerReport(request:Request,env:Env){
  if(!write){
   const userId=new URL(request.url).searchParams.get("userId")||"";
   if(!userId){
-   const queue=await env.DB.prepare("SELECT r.id,r.partner_user_id,r.amount_fen,r.created_at,u.email FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").all();
-   return response({enabled:true,queue:queue.results},200,env,request);
+   const payout=await payoutEnabled(env);
+   const queue=await env.DB.prepare("SELECT r.id,r.partner_user_id,r.amount_fen,r.created_at,u.email"+(payout?",EXISTS(SELECT 1 FROM partner_request_recipients s WHERE s.request_id=r.id) recipient_available":"")+" FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").all();
+   return response({enabled:true,queue:queue.results,...(payout?{payoutProfileEnabled:true}:{})},200,env,request);
   }
   if(!/^[A-Za-z0-9_-]{1,80}$/.test(userId))throw new ApiFailure(400,"INVALID_REQUEST","用户标识无效。");
   if(!await assigned(env,userId))throw new ApiFailure(404,"USER_NOT_FOUND","尚未指定该推广伙伴。");
@@ -99,6 +103,7 @@ export async function adminManualPartnerReport(request:Request,env:Env){
  typeof operationId!=="string"||! /^[a-f0-9-]{36}$/i.test(operationId)||
  (action!=="completed"&&action!=="rejected")||typeof reason!=="string"||reason.trim().length<8||reason.trim().length>500)
  throw new ApiFailure(400,"INVALID_REQUEST","申请处理参数无效。");
+ if(action==="completed"&&await payoutEnabled(env)&&!await env.DB.prepare("SELECT 1 FROM partner_request_recipients WHERE request_id=?").bind(requestId).first())throw new ApiFailure(409,"PAYOUT_NOT_CONFIGURED","该申请没有收款资料快照，请核对后驳回并重新申请。");
  // Completion is solely the administrator's declaration that the external
  // transfer was already made. No provider calls, bank details or transfer.
  const result=await env.DB.prepare(`UPDATE partner_manual_requests SET status=?,resolved_at=?,resolved_by=?,reason=?
