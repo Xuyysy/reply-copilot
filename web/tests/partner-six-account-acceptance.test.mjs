@@ -5,7 +5,7 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
  const dir=mkdtempSync(path.join(tmpdir(),'xrh-partner-ui-')),pending=new Map();let chrome,buffer='',serial=0,session;
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
- const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify(await evaluate('({notice:document.querySelector("[data-payment-notice]")?.textContent,reads:window.__reads,id:window.__id,status:window.__status})')));};
+ const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify({browser:await evaluate('({text:document.body.innerText,forms:[...document.forms].map(f=>({valid:f.checkValidity(),inputs:[...f.querySelectorAll("input")].map(e=>({value:e.value,valid:e.validity.valid,message:e.validationMessage}))}))})'),requests:requests.slice(-12)}));};
  const click=async expr=>{const point=await evaluate(`(()=>{const e=${expr};e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});};
 
  const f=fixture({released:false}),db=f.sql,tokens={},requests=[];let server,identity='owner',origin;
@@ -62,9 +62,9 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
    const body=Buffer.concat(chunks),headers={Origin:f.env.WEB_ORIGIN,'Content-Type':'application/json',Cookie:'rc_session='+token};
    for(const key of ['x-csrf-token','x-reply-copilot-action'])if(req.headers[key])headers[key]=req.headers[key];
    const r=await worker.fetch(new Request(f.env.API_ORIGIN+u.pathname+u.search,{method:req.method,headers,...(req.method==='POST'?{body}: {})}),f.env);
-   const response=await r.text();requests.push({who,path:u.pathname,method:req.method,status:r.status});
+   const response=await r.text();requests.push({who,path:u.pathname,method:req.method,status:r.status,...(r.status>=400?{error:JSON.parse(response).code||'unknown'}:{})});
    res.writeHead(r.status,{'content-type':'application/json','cache-control':'no-store'});res.end(response);
-  }catch(e){res.writeHead(500);res.end(JSON.stringify({message:String(e)}));}
+  }catch(e){requests.push({path:req.url,method:req.method,status:500,error:String(e)});res.writeHead(500);res.end(JSON.stringify({message:String(e)}));}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin='http://127.0.0.1:'+server.address().port;
  await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';
@@ -79,8 +79,8 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
  const button=t=>`[...document.querySelectorAll("button")].find(b=>b.textContent.trim().startsWith(${JSON.stringify(t)}))`;
  const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
  const ready=t=>`Boolean((${button(t)})&&! (${button(t)}).disabled)`;
- const press=async t=>{await until(ready(t));await click(button(t));};
- const type=async(expr,value)=>{await until(expr);await evaluate(expr+'.focus()');await call('Input.insertText',{text:value});};
+ const press=async t=>{await until(ready(t));await evaluate('('+button(t)+').click()');};
+ const type=async(expr,value)=>{await until(expr);await evaluate('(()=>{const e='+expr+';e.focus();e.select();})()');await call('Input.insertText',{text:value});await until('('+expr+').value==='+JSON.stringify(value));};
  const member=async(id,lang='zh')=>{identity=id;await evaluate('showMember('+JSON.stringify(id)+','+JSON.stringify(lang)+')');};
  const asAdmin=async()=>{identity='owner';await evaluate('showAdmin()');};
  const authorize=async(id)=>{
@@ -93,7 +93,7 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
    const e=`[...document.querySelectorAll("label")].find(x=>x.textContent.startsWith(${JSON.stringify(label)}))?.querySelector("input")`;
    await type(e,value);
   }
-  await press('授权推广伙伴');await until(has('规则已保存，历史版本保留。'));
+  assert.equal(await evaluate('('+button('授权推广伙伴')+').form.checkValidity()'),true);await press('授权推广伙伴');await until(has('规则已保存，历史版本保留。'));
  };
  await until(has('资格与规则'));await authorize('partner-a');await authorize('partner-b');
  assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_policy_versions').get().n,2);
