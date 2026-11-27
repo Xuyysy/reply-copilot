@@ -84,13 +84,19 @@ test('new routes preserve original admin guard and require scoped web session',(
  assert.match(router,/path === "\/v1\/admin\/partners\/policy"/);
 });
 
-test('eligibility-only candidate excludes financial routes, schedulers and non-partner public UI',()=>{
+test('partner candidate excludes automated transfers and schedulers, gates manual recipient details',()=>{
  const source=readFileSync(new URL('../src/partners.ts',import.meta.url),'utf8');
  const router=readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');
  const card=readFileSync(new URL('../../web/src/components/account/PartnerMembershipCard.tsx',import.meta.url),'utf8');
  const account=readFileSync(new URL('../../web/src/components/account/AccountDashboard.tsx',import.meta.url),'utf8');
  const admin=readFileSync(new URL('../../web/src/components/admin/AdminDashboard.tsx',import.meta.url),'utf8');
- assert.doesNotMatch(source,/partnerSummaryPlan|partner_commissions|partner_payout|partner_alipay/);
+ assert.doesNotMatch(source,/partnerSummaryPlan|partner_commissions|partner_alipay|executePayout|transferFunds/);
+ const payout=readFileSync(new URL('../src/partner-payout.ts',import.meta.url),'utf8');
+ assert.match(payout,/requireAdminSession\(request,env,write\)/);
+ assert.match(payout,/if\(write\)await requireCsrf\(request,env,token\)/);
+ assert.match(payout,/encryptRecipient\(key,id,version,value\)/);
+ assert.doesNotMatch(payout,/\bfetch\s*\(|executePayout|transferFunds|paymentProvider/);
+ assert.match(card,/result\.payoutProfileEnabled&&<PartnerPayoutProfile/);
  assert.doesNotMatch(router,/scheduledPartner|\/v1\/partners\/alipay|\/v1\/admin\/partners\/(?:discovery|accrual-review|payout-review|order-preview|alipay-requests)/);
  assert.match(card,/if\(!result\?\.enabled\|\|!result\.policy\)return null/);
  assert.match(card,/api<Result>\("\/v1\/partners\/me"\)/);
