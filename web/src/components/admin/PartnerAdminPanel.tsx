@@ -2,6 +2,7 @@ import {useRef,useState} from "react";
 import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
+import PartnerManualReport from "../account/PartnerManualReport";
 import {Input} from "../ui/input";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
@@ -54,7 +55,7 @@ export default function PartnerAdminPanel({language,write}:Props){
  }
  return <Card><CardHeader><CardTitle>{t("推广伙伴 · 资格与规则","Partners · Eligibility and policy")}</CardTitle></CardHeader>
  <CardContent className="space-y-4">
-  <p className="text-sm text-muted-foreground">{t("仅管理推广资格，当前不产生现金佣金。沿用原邀请链接与额度奖励。","Manage partner eligibility only. No cash commission accrual yet; existing invite links and credit rewards remain unchanged.")}</p>
+  <p className="text-sm text-muted-foreground">{t("管理指定伙伴及约定分成。转账在系统外完成，仅登记实际记录。","Manage assigned partners and commission terms. Transfers occur outside this system; record completed transfers only.")}</p>
   <form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void search();}}>
    <Input aria-label={t("用户 ID 或邮箱","User ID or email")} value={q} onChange={e=>{setQ(e.target.value);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
    <Button disabled={busy||!q.trim()}>{t("查询","Search")}</Button>
@@ -71,6 +72,7 @@ export default function PartnerAdminPanel({language,write}:Props){
    <Button disabled={busy||reason.trim().length<8||!rate||!term||(status==="active"&&!data.user.eligible)||(status==="paused"&&current?.status!=="active")}>{current?t("保存合作规则","Save policy"):t("授权推广伙伴","Authorize partner")}</Button>
   </form>}
   {data?.history?.length? <div className="space-y-2"><h3 className="font-medium">{t("最近 20 个规则版本","Last 20 policy versions")}</h3>{data.history.map(p=><div key={p.version} className="rounded border p-2 text-sm break-all">v{p.version} · {p.status} · {p.level} · {p.rate_bps/100}% · {p.term_months??"unlimited"} · {new Date(p.effective_at).toLocaleString()}<p>{p.reason}</p></div>)}</div>:null}
+  {data?.user&&current&&<PartnerManualReport key={data.user.id+":"+current.version} owner={data.user.id} language={language} write={write}/>}
   {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
   {notice&&<p role="status" className="text-sm text-emerald-700">{notice}</p>}
  </CardContent></Card>;

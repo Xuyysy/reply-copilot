@@ -2,6 +2,7 @@ import {useEffect,useState} from "react";
 import {api} from "../../lib/api";
 import {phrase,type Language} from "../../lib/language";
 import {Badge} from "../ui/badge";
+import PartnerManualReport from "./PartnerManualReport";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
 type Policy={status:"active"|"paused";level:"standard"|"advanced"|"strategic";rate_bps:number;term_months:number|null;effective_at:number};
@@ -32,7 +33,8 @@ export default function PartnerMembershipCard({language,owner}:{language:Languag
     <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{t("约定佣金比例","Configured commission rate")}</p><strong>{new Intl.NumberFormat(language==="zh"?"zh-CN":"en-US",{maximumFractionDigits:2}).format(p.rate_bps/100)}%</strong></div>
     <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{t("约定合作期限","Configured term")}</p><strong>{p.term_months===null?t("不限期","Unlimited"):t(p.term_months+" 个月",p.term_months+" months")}</strong></div>
    </div>
-   <p className="text-xs text-muted-foreground">{t("使用原有邀请链接。当前仅展示已授权合作规则，现金收益与提现功能尚未开放。","Use your existing invite link. This view displays authorized policy terms only; cash earnings and withdrawals are not available.")}</p>
+   <p className="text-xs text-muted-foreground">{t("使用原有邀请链接，分成由管理员人工核对和转账。","Use your existing invite link. Commission is reviewed and transferred manually by the administrator.")}</p>
+   <PartnerManualReport key={owner} language={language} owner={owner}/>
   </CardContent>
  </Card>;
 }
