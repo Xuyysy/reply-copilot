@@ -79,3 +79,9 @@
 - [Xplore 正规化测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/normalizer.test.ts) 与 [X API 测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/x-client.test.ts)：`timeline` / `timeline_v2` 变体、模块、底部游标、错误停止和测试隔离；未复制会话请求、签名或凭据处理逻辑。
 
 新增纯函数 `inspectNotificationTimelineEnvelope` 与离线通知 adapter 连接：明确读取经提供的 `viewer_v2/viewer → notification_timeline/timeline/timeline_v2 → instructions`，拒绝矛盾 owner、含糊游标、无终止证据、异常长度，接受已知条目/模块/替换节点，仍要求显式 actor、目标帖 owner，未知互动时间保持 null，未知图标不会推断为已确认互动。测试只使用合成 JSON。**此项是独立数据解析能力，不修改 `staging/interaction-interface.js` 的浏览器认证请求或其投影函数。** 现有页内投影仍可能在送达本 adapter 之前报 `schema_changed`；此次提交不能宣称实机源恢复，亦不解除自动同步门禁。所有代码自行实现，无复制第三方源文件。
+
+## 2026-11-27 Staging GraphQL 浏览器投影补齐
+
+继续审查固定版本 [X-Insights](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/notifications.ts)、[Xplore](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/normalizer.test.ts)、[fa0311 GraphQL 通知类型](https://github.com/fa0311/twitter-openapi-typescript/blob/de8bfafc68326b18454688311c32e34c524636ef/twitter-openapi-typescript-generated/src/models/NotificationsResult.ts) 与 [xsh REST 代码](https://github.com/benoitpetit/xsh/blob/5bdd43e61f1be5fb0979953da72625ccea767efd/core/api_notifications.go)。仅借鉴公开结构和测试思路，自行编写兼容逻辑，不复制源代码或修改授权会话请求。
+
+本次仅在 Staging 纯浏览器投影支持既有 GraphQL 通知的 `notification_timeline`、旧版 `timeline`/`timeline_v2`、模块条目及替换条目；所有通知仍通过明确 actor/target 校验。未知图标、身份冲突、无 terminal 证明、歧义游标、非法数组均继续拒绝；未改 HTTP 请求、认证、端点、节流或自动同步。离线测试不代表 X 实际接口可用、动作数据完整或实机 `schema_changed` 已解决。此 PR 保持 Draft，后续必须在平台授权环境经实测验收。

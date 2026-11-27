@@ -53,6 +53,45 @@ test('same-page duplicated or ambiguous cursors never establish terminal coverag
  assert.throws(()=>api.project(body,'graphql',owner),/ambiguous_cursor/);
 });
 
+
+test('Staging projector accepts notification_timeline without changing legacy GraphQL wrappers',()=>{
+ for(const path of ['notification_timeline','timeline','timeline_v2']){
+  const body=modern([notice('heart_icon'),notice('retweet_icon')]);
+  const viewer=body.data.viewer_v2.user_results.result;
+  if(path!=='timeline'){viewer[path]=viewer.timeline;delete viewer.timeline;}
+  const out=normalized(body,'graphql','notification');
+  assert.deepEqual(out.events.map(x=>x.type).sort(),['like','repost']);
+  assert.equal(out.done,true);
+  assert.ok(out.events.every(x=>x.occurredAt===null));
+ }
+});
+test('notification_timeline modules and replacement entries project through normalization',()=>{
+ const body=modern([]),viewer=body.data.viewer_v2.user_results.result;
+ viewer.notification_timeline=viewer.timeline;delete viewer.timeline;
+ const follow=notice('person_icon');follow.template.target_objects=[];
+ viewer.notification_timeline.instructions=[
+  {type:'TimelineAddEntries',entries:[{content:{items:[{item:{itemContent:notice('heart_icon')}},{item:{content:{itemContent:follow}}}]}}]},
+  {type:'TimelineReplaceEntry',replaceEntry:{entry:item(notice('retweet_icon'))}},
+  {type:'TimelineAddEntries',entries:[{content:{cursorType:'Bottom',value:'opaque-next'}}]}
+ ];
+ const projected=api.project(body,'graphql',owner);
+ assert.equal(projected.nextCursor,'opaque-next');assert.equal(projected.done,false);
+ const out=normalized(body,'graphql','notification');
+ assert.deepEqual(out.events.map(x=>x.type).sort(),['like','repost']);
+ assert.equal(out.stats.outOfScope,1);
+ assert.equal(out.historyComplete,false);
+});
+test('notification_timeline unknown nested icons and malformed wrappers still fail closed',()=>{
+ const body=modern([]),viewer=body.data.viewer_v2.user_results.result;
+ viewer.notification_timeline=viewer.timeline;delete viewer.timeline;
+ viewer.notification_timeline.instructions=[{type:'TimelineAddEntries',entries:[{content:{items:[{item:{itemContent:notice('future_icon')}}]}}]},terminal];
+ assert.throws(()=>api.project(body,'graphql',owner),/schema_changed/);
+ viewer.notification_timeline={};
+ assert.throws(()=>api.project(body,'graphql',owner),/schema_changed/);
+ viewer.notification_timeline={timeline:{instructions:[{type:'TimelineAddEntries',addEntries:{entries:{wrong:'type'}}}]}};
+ assert.throws(()=>api.project(body,'graphql',owner),/schema_changed/);
+});
+
 test('REST operation metadata never copies credential-like query fields into an active request',()=>{
  const origin='https://x.com',endpoint=api.endpointFrom([{name:origin+'/i/api/2/notifications/all.json?count=20&include_user_entities=1&include_auth_token=fixture-sensitive&include_cookie=fixture-sensitive&include_session=fixture-sensitive'}],origin);
  const url=api.pageURL(endpoint,null,owner);

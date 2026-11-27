@@ -167,7 +167,16 @@
      const viewerId=stable(viewer.rest_id,viewer.legacy?.id_str);
      if((viewer.rest_id!=null||viewer.legacy?.id_str!=null)&&(!viewerId||viewerId!==owner))fail('owner_mismatch');
      // A local signed-in identity is corroborated by the viewer response when present.
-     instructions=viewer.timeline?.instructions??viewer.timeline?.timeline?.instructions??viewer.timeline_v2?.timeline?.instructions;
+     // Known GraphQL wrappers only; conflicting instruction arrays fail closed.
+     const candidates=[
+       viewer.notification_timeline?.timeline?.instructions,
+       viewer.notification_timeline?.instructions,
+       viewer.timeline?.instructions,
+       viewer.timeline?.timeline?.instructions,
+       viewer.timeline_v2?.timeline?.instructions
+     ].filter(x=>x!==undefined&&x!==null);
+     if(!candidates.length||candidates.some(x=>!Array.isArray(x)||x!==candidates[0]))fail('schema_changed');
+     instructions=candidates[0];
    }else if(kind==='search'){
      instructions=body.data?.search_by_raw_query?.search_timeline?.timeline?.instructions;
    }else{
@@ -181,18 +190,34 @@
      bottom.add(c.value);
    }
    function addPost(t){const p=postEvidence(t,owner,users);if(p)posts.push(p);}
+   let entryCount=0;
    for(const ins of instructions){
      if(!obj(ins))fail('schema_changed');
      if(ins.type==='TimelineTerminateTimeline'&&ins.direction==='Bottom'||ins.terminateTimeline?.direction==='Bottom')terminal=true;
-     const entries=[...arr(ins.entries??ins.addEntries?.entries)];
-     if(ins.entry)entries.push(ins.entry);
-     if(ins.replaceEntry?.entry)entries.push(ins.replaceEntry.entry);
-     if(entries.length>2000)fail('page_limit');
+     const entries=[];
+     for(const source of [ins.entries,ins.addEntries?.entries]){
+       if(source===undefined||source===null)continue;
+       if(!Array.isArray(source))fail('schema_changed');
+       entries.push(...source);
+     }
+     for(const entry of [ins.entry,ins.replaceEntry?.entry])if(entry!==undefined&&entry!==null)entries.push(entry);
+     if((entryCount+=entries.length)>2000)fail('page_limit');
      for(const entry of entries){
        const c=entry?.content;if(!obj(c))continue;
        cursor(c);cursor(c.operation?.cursor);
-       const item=c.itemContent??c.item?.content;
+       const item=c.itemContent??c.item?.content?.itemContent??c.item?.content;
        if(kind==='graphql'||kind==='search'){
+         const selected=[];
+         if(item!==undefined&&item!==null)selected.push(item);
+         if(c.items!==undefined&&c.items!==null){
+           if(!Array.isArray(c.items)||c.items.length>100)fail('page_limit');
+           for(const row of c.items){
+             const nested=row?.item?.itemContent??row?.item?.content?.itemContent??row?.item?.content;
+             if(nested!==undefined&&nested!==null)selected.push(nested);
+             else ignored++;
+           }
+         }
+         for(const item of selected){
          if(item?.__typename==='TimelineNotification'){
            const t=item.template;
            if(item.notification_icon==='person_icon'){
@@ -208,11 +233,8 @@
            const actors=t.from_users.map(x=>({user_results:{result:minimalUser(x?.user_results?.result)}}));
            notifications.push({__typename:'TimelineNotification',notification_icon:item.notification_icon,template:{from_users:actors,target_objects:[{tweet_results:{result:target}}]}});
          }else if(item?.__typename==='TimelineTweet'){addPost(item.tweet_results?.result);}
-         else if(Array.isArray(c.items)){
-           if(c.items.length>100)fail('page_limit');
-           for(const row of c.items){const nested=row?.item?.itemContent;if(nested?.__typename==='TimelineTweet')addPost(nested.tweet_results?.result);else ignored++;}
-         }
          else if(item)ignored++;
+         }
        }else{
          const tweetId=item?.tweet?.id;
          if(typeof tweetId==='string'&&Object.hasOwn(global.tweets,tweetId)){
