@@ -94,3 +94,54 @@ test('synthetic page failure reaches persisted workbench diagnostic without leak
   }
  });
 });
+
+
+test('REST later-page corruption leaves the earlier interaction and cursor checkpoint intact',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const result=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={},calls=[];let listener;
+   const runtime={id:'fixture',getURL:p=>root+p,onMessage:{addListener:fn=>listener=fn}};
+   const send=m=>new Promise(resolve=>{const async=listener(m,{id:'fixture',url:root+'staging/service-worker.js'},resolve);if(async!==true&&m.type!=='XRH_STAGING_WORKBENCH_IDENTITY')resolve(null);});
+   const c={runtime,storage:{session:{get:async key=>({[key]:state[key]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async(id,m)=>{if(id!==1)throw Error('foreign tab');return send(m)},create:async()=>({id:10}),update:async()=>({})}};
+   const action=id=>({icon:{id:'heart_icon'},template:{aggregateUserActionsV1:{targetObjects:[{tweet:{id}}],fromUsers:[{user:{id:'222'}}]}}});
+   const users={222:{id_str:'222',screen_name:'actor'}};
+   const first={globalObjects:{notifications:{first:action('555')},tweets:{555:{id_str:'555',user_id_str:'111'}},users},timeline:{instructions:[{entries:[{content:{cursorType:'Bottom',value:'synthetic-next'}}]}]}};
+   const damaged={globalObjects:{notifications:{valid:action('666'),broken:action('999')},tweets:{666:{id_str:'666',user_id_str:'111'}},users},timeline:{instructions:[{terminateTimeline:{direction:'Bottom'}}]}};
+   new Function('chrome','location','document','performance','fetch','addEventListener',${JSON.stringify(code)})(
+    c,{origin:'https://x.com',pathname:'/home'},
+    {visibilityState:'hidden',cookie:'twid=u%3D111; ct0=fixture-private',querySelectorAll:()=>[{href:'https://x.com/me',getClientRects:()=>[{}],closest:()=>null}]},
+    {getEntriesByType:()=>[]},
+    async(url,options)=>{
+     const cursor=new URL(url).searchParams.get('cursor');
+     calls.push({cursor,method:options.method});
+     return new Response(JSON.stringify(cursor===null?first:damaged),{status:200});
+    },()=>{}
+   );
+   const name='rest-partial-target-integrity';
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,name),providerFactory:F(c)});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   await msg('open',side);await msg('sync',page,{authorized:true});
+   let view;
+   for(let i=0;i<350;i++){view=await msg('view');if(view?.dataset&&!view.busy&&!view.running)break;await new Promise(resolve=>setTimeout(resolve,10));}
+   if(!view?.dataset||view.busy||view.running)throw Error('job timeout');
+   const db=await openDB(indexedDB,name);
+   const jobs=await new Promise((resolve,reject)=>{const r=db.transaction('syncJobs','readonly').objectStore('syncJobs').getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+   return {calls,reason:view.task.reason,pages:view.task.pages,inserted:view.task.inserted,
+     rows:view.dataset.rows.map(e=>({type:e.type,targetPostId:e.targetPostId,actorUserId:e.actorUserId})),
+     coverage:view.dataset.coverage.map(x=>({source:x.source,uniqueEvents:x.uniqueEvents})),
+     jobs:jobs.map(j=>({source:j.source,cursor:j.cursor,pages:j.pages,done:j.done,revision:j.revision})),
+     sources:view.task.sources.map(s=>({source:s.source,state:s.state,pages:s.pages,reason:s.reason})),
+     diagnostic:diag(view.task),leak:JSON.stringify(view).includes('fixture-private')};
+  })()`);
+  assert.deepEqual(result.calls,[{cursor:null,method:'GET'},{cursor:'synthetic-next',method:'GET'}]);
+  assert.equal(result.reason,'schema_changed');
+  assert.equal(result.pages,1);assert.equal(result.inserted,1);
+  assert.deepEqual(result.rows,[{type:'like',targetPostId:'555',actorUserId:'222'}]);
+  assert.deepEqual(result.jobs,[{source:'notification',cursor:'synthetic-next',pages:1,done:false,revision:1}]);
+  assert.deepEqual(result.coverage,[{source:'notification',uniqueEvents:1}]);
+  assert.deepEqual(result.sources,[{source:'notification',state:'stopped',pages:1,reason:'schema_changed'},{source:'post',state:'pending',pages:0,reason:null}]);
+  assert.equal(result.diagnostic,'notification | read | schema_changed | HTTP 200 | rest | project');
+  assert.equal(result.leak,false);
+ });
+});

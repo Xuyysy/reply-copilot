@@ -105,6 +105,26 @@ test('notification_timeline unknown nested icons and malformed wrappers still fa
  assert.throws(()=>api.project(body,'graphql',owner),/schema_changed/);
 });
 
+
+test('REST target omissions and contradictory tweet identities reject the full page',()=>{
+ for(const mutate of [
+  b=>{delete b.globalObjects.tweets['555'];},
+  b=>{b.globalObjects.notifications.n.template.aggregateUserActionsV1.targetObjects=[{tweet:{id:'999'}}];},
+  b=>{b.globalObjects.tweets['555'].id_str='999';},
+  b=>{delete b.globalObjects.tweets['555'].user_id_str;},
+  b=>{b.globalObjects.tweets['555']=null;}
+ ]){
+  const body=legacy('heart_icon');mutate(body);
+  assert.throws(()=>api.project(body,'rest',owner),/schema_changed/);
+ }
+ const mixed=legacy('heart_icon');
+ mixed.globalObjects.notifications.broken={icon:{id:'retweet_icon'},template:{aggregateUserActionsV1:{targetObjects:[{tweet:{id:'999'}}],fromUsers:[{user:{id:'222'}}]}}};
+ assert.throws(()=>api.project(mixed,'rest',owner),/schema_changed/);
+ const foreign=legacy('heart_icon');foreign.globalObjects.tweets['555'].user_id_str='333';
+ const parsed=normalized(foreign,'rest','notification');
+ assert.equal(parsed.events.length,0);assert.equal(parsed.quality.foreignTargets,1);
+});
+
 test('REST operation metadata never copies credential-like query fields into an active request',()=>{
  const origin='https://x.com',endpoint=api.endpointFrom([{name:origin+'/i/api/2/notifications/all.json?count=20&include_user_entities=1&include_auth_token=fixture-sensitive&include_cookie=fixture-sensitive&include_session=fixture-sensitive'}],origin);
  const url=api.pageURL(endpoint,null,owner);

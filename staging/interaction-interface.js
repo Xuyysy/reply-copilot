@@ -267,7 +267,8 @@
        if(!['heart_icon','retweet_icon'].includes(row?.icon?.id))fail('schema_changed');
        if(!Array.isArray(a?.targetObjects)||a.targetObjects.length!==1||!Array.isArray(a.fromUsers)||a.fromUsers.length>1000)fail('schema_changed');
        const id=stable(a.targetObjects[0]?.tweet?.id),t=id&&Object.hasOwn(global.tweets,id)?global.tweets[id]:null;
-       if(!id||!t)continue;
+       // Missing or contradictory target evidence must not masquerade as an empty page.
+       if(!id||!obj(t)||!stable(id,t.id_str)||!stable(t.user_id_str))fail('schema_changed');
        tweets[id]={id_str:t.id_str??id,user_id_str:t.user_id_str};
        const fromUsers=a.fromUsers.map(f=>{const aid=stable(f?.user?.id,f?.user?.id_str),u=aid&&Object.hasOwn(global.users??{},aid)?global.users[aid]:null;if(aid&&u)people[aid]={id_str:u.id_str??aid,screen_name:u.screen_name};return {user:{id:aid}};});
        n[key]={icon:{id:row.icon.id},template:{aggregateUserActionsV1:{targetObjects:[{tweet:{id}}],fromUsers}}};
