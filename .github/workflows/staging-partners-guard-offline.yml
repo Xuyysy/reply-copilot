@@ -1,0 +1,22 @@
+name: Partner Staging release guard offline tests
+on:
+  push:
+    branches: ['chatgpt/partners-staging-release-gate-20261127']
+  pull_request:
+    paths:
+      - '.github/workflows/staging-partners-worker-20261127.yml'
+      - '.github/workflows/staging-partners-guard-offline.yml'
+      - 'scripts/guarded-partner-staging-worker-20261127.py'
+      - 'tests/test_partner_staging_release_guard.py'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile scripts/guarded-partner-staging-worker-20261127.py tests/test_partner_staging_release_guard.py
+      - run: python3 -m unittest discover -s tests -p 'test_partner_staging_release_guard.py' -v
