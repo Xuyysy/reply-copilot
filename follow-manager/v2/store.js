@@ -32,7 +32,7 @@ export async function openRepository(factory=globalThis.indexedDB,{live=false}={
  async function resume(ownerUserId,jobId,oldLease){
   return tx(["owners","jobs"],"readwrite",async ({owners,jobs})=>{
    const o=await req(owners.get(ownerUserId)),j=await req(jobs.get(jobId));
-   if(!o||!j||o.activeJobId!==jobId||j.ownerUserId!==ownerUserId||j.lease!==oldLease||!["paused","syncing","interrupted"].includes(j.status))throw Error("stale_job");
+   if(!o||!j||o.activeJobId!==jobId||j.ownerUserId!==ownerUserId||j.lease!==oldLease||!["paused","syncing","interrupted","rate_limited"].includes(j.status))throw Error("stale_job");
    if(j.source!==sourceKind)throw Error("invalid_source");
    if(!live&&!Number.isSafeInteger(j.fixtureSize)){const n=j.stages.following.expected??j.stages.followers.expected;if(!Number.isSafeInteger(n))throw Error("legacy_fixture_size_unknown");j.fixtureSize=n;}
    j.lease=crypto.randomUUID();j.status="syncing";await req(jobs.put(j));return j;

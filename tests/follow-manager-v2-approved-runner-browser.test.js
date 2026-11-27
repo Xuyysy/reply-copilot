@@ -10,3 +10,31 @@ test("approved source through Chromium IndexedDB: incomplete -> resume -> comple
   assert.deepEqual(result,{first:"partial",unknown:null,old:"unknown",final:"complete",negative:false,bridge:"unknown",history:1,opens:2,closes:2});
  });
 });
+
+test("Chromium: rate limit leaves last complete snapshot, explicit restart rotates lease and recovers",{timeout:60000},async()=>{
+ await withMomentumBrowser("<script>"+bundle+"</script>",async({evaluate})=>{
+  const result=await evaluate(`(async()=>{
+   const owner="123",binding={ownerUserId:owner,handle:"self",sessionId:"one"},counts={following:1,followers:1};
+   const u=id=>({entryId:"user-"+id,content:{entryType:"TimelineTimelineItem",itemContent:{itemType:"TimelineUser",user_results:{result:{__typename:"User",rest_id:id}}}}});
+   const payload=kind=>({data:{user:{result:{__typename:"User",rest_id:owner,timeline_v2:{timeline:{instructions:[
+    {type:"TimelineAddEntries",entries:[u(kind==="following"?"3":"4")]},
+    {type:"TimelineTerminateTimeline",direction:"Bottom"}]}}}}}});
+   let rateLimit=false,requests=0,closed=0;
+   const runner=R.createApprovedFollowRunner({openTransport:async()=>({
+    currentBinding:async()=>binding,readSelf:async()=>({viewerUserId:owner,profileUserId:owner,handle:"self",counts}),
+    readPage:async({kind})=>{requests++;return rateLimit?{status:429,payload:{}}:{status:200,payload:payload(kind)}},
+    close:async()=>{closed++}
+   })});
+   runner.start({binding,authorized:true});await runner.waitForIdle();
+   const repo=await R.openRepository(indexedDB,{live:true}),first=await repo.readSnapshot(owner);
+   rateLimit=true;runner.start({binding,authorized:true});await runner.waitForIdle();
+   const error=runner.status(binding).status,previous=await repo.readSnapshot(owner),active=await repo.active(owner);
+   rateLimit=false;runner.start({binding,authorized:true});await runner.waitForIdle();
+   const latest=await repo.readSnapshot(owner),history=await repo.listSnapshots(owner);
+   repo.close();
+   return {first:first.completeness,error,unchanged:first.capturedAt===previous.capturedAt,
+    interrupted:active.status,final:latest.completeness,history:history.length,requests,closed};
+  })()`);
+  assert.deepEqual(result,{first:"complete",error:"rate_limited",unchanged:true,interrupted:"rate_limited",final:"complete",history:2,requests:5,closed:3});
+ });
+});

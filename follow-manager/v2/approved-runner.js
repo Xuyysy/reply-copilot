@@ -37,7 +37,7 @@ export function createApprovedFollowRunner({
   // Abort or timeout a pending factory. Close a late response instead of
   // retaining a transport after cancellation or a stopped session.
   let timer,abort,finished=false;
-  const pending=Promise.resolve().then(()=>openTransport({binding:task.binding,signal:task.controller.signal}))
+  const pending=Promise.resolve().then(()=>{if(finished||task.controller.signal.aborted)throw Error("cancelled");return openTransport({binding:task.binding,signal:task.controller.signal})})
    .then(value=>{
     if(finished||task.controller.signal.aborted){
      try{void Promise.resolve(value?.close?.()).catch(()=>{})}catch{}
@@ -68,7 +68,7 @@ export function createApprovedFollowRunner({
    if(task.controller.signal.aborted)throw Error("cancelled");
    if(job){
     if(job.ownerUserId!==verified.ownerUserId||job.source!==LIVE_SOURCE)throw Error("source_page_mismatch");
-    if(!["paused","syncing","interrupted"].includes(job.status))throw Error("job_requires_discard");
+    if(!["paused","syncing","interrupted","rate_limited"].includes(job.status))throw Error("job_requires_discard");
     if(!expectedSame(job.expectedCounts,verified.counts))throw Error("count_changed");
     job=await repo.resume(job.ownerUserId,job.jobId,job.lease);
    }else job=await repo.start(verified.ownerUserId,LIVE_SOURCE,verified.counts);

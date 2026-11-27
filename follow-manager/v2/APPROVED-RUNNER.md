@@ -9,3 +9,7 @@ The runner gates one active session, confirms the current viewer and self profil
 The manager keeps only bounded status code and per-owner completion time in ephemeral controller state. It does not expose raw responses, request URLs, credentials, counters for other accounts, or input-dependent endpoint selection. The injected transport must enforce its own per-request budget and authorization scope; core `runAuthorizedSync` independently enforces the overall page/time budget.
 
 Release gate: real platform-authorized transport, independent viewer identity source, real X compatibility, integration with the existing independent Follow workspace and staged backend, and exact-SHA CI remain outstanding. Synthetic Chromium tests prove offline state transitions and data handling, **not** actual X compatibility.
+
+## Explicit recovery and cancellation hardening
+
+Every self-identity read now receives the active abort signal, including the final count check. The persisted `rate_limited` state is recoverable **only on a new explicit authorized `start`**; the runner still never schedules retries, switches endpoints or bypasses access denials. Other failed states remain blocked until manually discarded. Rate-limit recovery must respect the permitted source's cooldown; this code does not impose an automatic retry timer.
