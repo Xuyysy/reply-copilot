@@ -9,7 +9,7 @@ const user=id=>({rest_id:id,core:{screen_name:id===owner?'me':'other'}});
 const tweet=(id,author=owner)=>({__typename:'Tweet',rest_id:id,legacy:{user_id_str:author},core:{user_results:{result:user(author)}}});
 const notice=(icon='heart_icon',author=owner,who=actor)=>({__typename:'TimelineNotification',notification_icon:icon,template:{from_users:[{user_results:{result:user(who)}}],target_objects:[{tweet_results:{result:{__typename:'TweetWithVisibilityResults',tweet:tweet('555',author)}}}]}});
 const entry=item=>({content:{itemContent:item}});
-const result=(instructions,path='notification_timeline')=>({data:{viewer_v2:{user_results:{result:{...viewer,[path]:{timeline:{instructions}}}}}}});
+const result=(instructions,path='notification_timeline')=>({data:{viewer_v2:{user_results:{result:{...viewer,legacy:{...viewer.legacy},[path]:{timeline:{instructions}}}}}}});
 const terminal={type:'TimelineTerminateTimeline',direction:'Bottom'};
 const instructions=(items,more=false)=>[{type:'TimelineAddEntries',entries:[...items.map(entry),...(more?[{content:{cursorType:'Bottom',value:'opaque-next'}}]:[])]},...(more?[]:[terminal])];
 test('raw GraphQL notification_timeline route accepts owner-bound inbound like and repost only',()=>{
@@ -41,6 +41,8 @@ test('module entries, replacement entries and opaque bottom cursors do not infer
 test('viewer conflicts and malformed recognized GraphQL structures never downgrade to unknown-owner scanning',()=>{
  const conflict=result(instructions([notice()]));conflict.data.viewer_v2.user_results.result.legacy.id_str='999';
  assert.throws(()=>parseNotificationPayload(conflict,{ownerUserId:owner,observedAt:now}),/owner_mismatch/);
+ // Each synthetic envelope must own its nested identity; a conflict fixture cannot taint later tests.
+ assert.equal(result(instructions([notice()])).data.viewer_v2.user_results.result.legacy.id_str,owner);
  for(const variant of [
   {data:{viewer_v2:{user_results:{result:{rest_id:owner,notification_timeline:{}}}}}},
   result([]),
