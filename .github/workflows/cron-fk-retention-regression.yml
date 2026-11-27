@@ -1,0 +1,20 @@
+name: Cron FK retention regression
+on:
+  push:
+    branches: ['chatgpt/cron-foreign-key-retention-fix-20261127']
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix api ci
+      - run: npm --prefix api run typecheck
+      - run: node --test api/tests/cleanup-foreign-key-retention.test.mjs
