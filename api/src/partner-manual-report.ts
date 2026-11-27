@@ -97,7 +97,7 @@ export async function adminManualPartnerReport(request:Request,env:Env){
  if(Object.keys(body).sort().join(",")!=="action,operationId,reason,requestId"||
  typeof requestId!=="string"||! /^[a-f0-9-]{36}$/i.test(requestId)||
  typeof operationId!=="string"||! /^[a-f0-9-]{36}$/i.test(operationId)||
- !["completed","rejected"].includes(String(action))||typeof reason!=="string"||reason.trim().length<8||reason.trim().length>500)
+ (action!=="completed"&&action!=="rejected")||typeof reason!=="string"||reason.trim().length<8||reason.trim().length>500)
  throw new ApiFailure(400,"INVALID_REQUEST","申请处理参数无效。");
  // Completion is solely the administrator's declaration that the external
  // transfer was already made. No provider calls, bank details or transfer.

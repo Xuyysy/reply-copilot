@@ -60,6 +60,6 @@ export function summarizeManualOrders(orders,recordedFen,complete){
 }
 export const MIN_REQUEST_FEN=1000;
 export function requestableFen(summary,pending){
- if(pending||!summary?.complete||summary.reviewCount!==0||!int(summary.differenceFen,MIN_REQUEST_FEN))return null;
+ if(pending||!summary?.complete||summary.reviewCount!==0||!int(summary.differenceFen,MIN_REQUEST_FEN,1000000000000))return null;
  return summary.differenceFen;
 }

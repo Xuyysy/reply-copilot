@@ -11,7 +11,7 @@ CREATE TABLE partner_manual_requests (
  resolved_by TEXT REFERENCES users(id) ON DELETE RESTRICT,
  reason TEXT,
  CHECK((status='pending' AND resolved_at IS NULL AND resolved_by IS NULL AND reason IS NULL) OR
- (status IN ('completed','rejected') AND resolved_at>=created_at AND resolved_at IS NOT NULL AND resolved_by IS NOT NULL AND resolved_by<>partner_user_id AND reason IS NOT NULL AND length(trim(reason)) BETWEEN 8 AND 500))
+ (status IN ('completed','rejected') AND typeof(resolved_at)='integer' AND resolved_at>=created_at AND resolved_at IS NOT NULL AND resolved_by IS NOT NULL AND resolved_by<>partner_user_id AND reason IS NOT NULL AND length(trim(reason)) BETWEEN 8 AND 500))
 );
 CREATE UNIQUE INDEX partner_manual_one_pending_idx ON partner_manual_requests(partner_user_id) WHERE status='pending';
 CREATE INDEX partner_manual_requests_owner_idx ON partner_manual_requests(partner_user_id,created_at DESC,id);

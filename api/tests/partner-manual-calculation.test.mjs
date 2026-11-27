@@ -34,4 +34,5 @@ test('application minimum is exactly 1000 fen and one outstanding request',()=>{
  assert.equal(requestableFen({...s,differenceFen:1000,reviewCount:1},false),null);
  assert.equal(requestableFen({...s,differenceFen:1000,complete:false},false),null);
  assert.equal(requestableFen({...s,differenceFen:-1},false),null);
+ assert.equal(requestableFen({...s,differenceFen:1000000000001},false),null);
 });
