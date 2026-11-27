@@ -3,13 +3,19 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {randomUUID,createHash,createHmac} from 'node:crypto';
 import {fixture,worker} from './helpers/payment-v2.mjs';
+import {manualCandidatePlan,manualEvidenceBatchPlan} from '../src/partner-manual-calculation.mjs';
 
 // Offline-only SQLite and bundled Worker. No order/payment/refund fixtures,
 // provider requests, remote D1, release actions or real financial events.
 // Seed synthetic application rows solely to exercise administrative workflow.
 test('manual applications: owner isolation, minimum, admin handling and terminal state',async t=>{
  const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
- for(const name of ['partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
+ for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
+ // Verify both read queries against the full local schema even with no orders.
+ for(const domain of ['recharge','subscription']){
+  for(const p of [manualCandidatePlan(domain,'partner'),manualEvidenceBatchPlan(domain,['nonexistent-order'])])
+   assert.deepEqual(db.prepare(p.sql).all(...p.params),[]);
+ }
  const originalFetch=globalThis.fetch;
  globalThis.fetch=async()=>{throw Error('EXTERNAL_NETWORK_FORBIDDEN');};
  t.after(()=>{globalThis.fetch=originalFetch;});
