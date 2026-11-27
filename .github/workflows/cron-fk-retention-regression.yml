@@ -17,4 +17,4 @@ jobs:
           node-version: '24'
       - run: npm --prefix api ci
       - run: npm --prefix api run typecheck
-      - run: node --test api/tests/cleanup-foreign-key-retention.test.mjs
+      - run: node --test api/tests/cleanup-foreign-key-retention.test.mjs api/tests/cleanup-scheduled-workerd.test.mjs
