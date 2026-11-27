@@ -58,7 +58,8 @@ test('Staging projector accepts notification_timeline without changing legacy Gr
  for(const path of ['notification_timeline','timeline','timeline_v2']){
   const body=modern([notice('heart_icon'),notice('retweet_icon')]);
   const viewer=body.data.viewer_v2.user_results.result;
-  if(path!=='timeline'){viewer[path]=viewer.timeline;delete viewer.timeline;}
+  if(path==='timeline_v2'){viewer.timeline_v2={timeline:viewer.timeline};delete viewer.timeline;}
+  else if(path==='notification_timeline'){viewer.notification_timeline=viewer.timeline;delete viewer.timeline;}
   const out=normalized(body,'graphql','notification');
   assert.deepEqual(out.events.map(x=>x.type).sort(),['like','repost']);
   assert.equal(out.done,true);
