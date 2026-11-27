@@ -5,9 +5,9 @@ import {randomUUID,createHash,createHmac} from 'node:crypto';
 import {fixture,worker} from './helpers/payment-v2.mjs';
 import {manualCandidatePlan,manualEvidenceBatchPlan} from '../src/partner-manual-calculation.mjs';
 
-// Offline-only SQLite and bundled Worker. No order/payment/refund fixtures,
-// provider requests, remote D1, release actions or real financial events.
-// Seed synthetic application rows solely to exercise administrative workflow.
+// Offline-only SQLite and bundled Worker. The ordinary paid-order fixture
+// exists exclusively inside this in-memory DB; no provider requests, remote
+// data, real funds, refund operations, credentials or release actions.
 test('manual applications: owner isolation, minimum, admin handling and terminal state',async t=>{
  const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
  for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
@@ -47,10 +47,35 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
  assert.equal((await call('partner',me,{expectedAmountFen:999})).status,409);
  assert.equal((await call('partner',me,{expectedAmountFen:1000})).status,409);
  assert.equal((await call('partner',me,{expectedAmountFen:1000},{'X-CSRF-Token':'invalid'})).status,403);
- const requestId=randomUUID(),second=randomUUID();
+ const paid=db.prepare("SELECT effective_at FROM partner_policy_versions WHERE user_id='partner'").get().effective_at;
+ db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,registered_at) VALUES('ordinary','partner','0123456789abcdef',?)").run(paid);
+ db.prepare("INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES('ordinary',0,0,1,1)").run();
+ function paidOrder(orderId,principal){
+  // Same ordinary recharge fixture contract as the repository's existing
+  // offline payment regression tests. No live order or callback is created.
+  const tx='tx-'+orderId,out='out-'+orderId,trade='trade-'+orderId;
+  db.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at,paid_at,credited_at) VALUES(?,'ordinary','starter','fixture',500,100,'USD','paid','mk99',?,?,?,?)").run(orderId,out,paid,paid,paid);
+  db.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,provider_payment_id,paid_at) VALUES(?,?,'xiaodou','CNY',?,?,0,0,'fee-v1','not_applicable','paid',?,?,?,'rsa2','ALIPAY_H5','fixed_cny',1000000,'mk99','fixture','MD5','CNY_EXACT_BUYER_TOTAL',?,?,?)").run(tx,orderId,principal,principal,out,paid,paid,principal,trade,paid);
+  db.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider) VALUES(?,'xiaodou',?,?,'PAYMENT_SUCCEEDED',?,'CNY',?,?,'mk99')").run('event-'+orderId,'fixture-paid-'+orderId,tx,principal,'a'.repeat(64),paid);
+  db.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) VALUES(?,'ordinary','purchase_grant',0,500,?,'offline fixture',?)").run('ledger-'+orderId,orderId,paid);
+  db.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,source_order_id,grant_credits,remaining_credits,granted_at,paid_at,history_confidence,status) VALUES(?,'ordinary','paid','purchase',?,500,500,?,?,'tracked','active')").run('batch-'+orderId,orderId,paid,paid);
+  db.exec("UPDATE credit_accounts SET paid_balance=paid_balance+500 WHERE user_id='ordinary'");
+ }
+ paidOrder('under',4995);
+ const below=await ok('partner',me);
+ assert.equal(below.summary.estimatedFen,999);assert.equal(below.requestableFen,null);
+ assert.equal((await call('partner',me,{expectedAmountFen:999})).status,409);
+ paidOrder('boundary',5);
+ const exact=await ok('partner',me);
+ assert.equal(exact.summary.estimatedFen,1000);assert.equal(exact.requestableFen,1000);
+ assert.equal((await call('partner',me,{expectedAmountFen:1001})).status,409);
+ await ok('partner',me,{expectedAmountFen:1000});
+ const requestId=(await ok('partner',me)).pendingId,second=randomUUID();
+ assert.ok(requestId);
+ assert.equal((await call('partner',me,{expectedAmountFen:1000})).status,409);
  const seed=db.prepare("INSERT INTO partner_manual_requests(id,partner_user_id,amount_fen,created_at) VALUES(?,?,?,?)");
  assert.throws(()=>seed.run(randomUUID(),'partner',999,1));
- seed.run(requestId,'partner',1000,1);seed.run(second,'other',2000,2);
+ seed.run(second,'other',2000,2);
  assert.throws(()=>seed.run(randomUUID(),'partner',1000,3));
  assert.equal((await ok('partner',me)).pendingId,requestId);
  assert.equal((await ok('other',me+'?userId=partner')).pendingId,second);
@@ -66,15 +91,23 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
  assert.equal((await call('owner',admin,resolve)).status,409);
  const settled=await ok('partner',me);
  assert.equal(settled.pendingId,null);assert.equal(settled.records[0].status,'completed');assert.equal(settled.summary.recordedFen,1000);
- assert.equal(settled.requestableFen,null);assert.equal(settled.records[0].reason,undefined);
+ assert.equal(settled.requestableFen,null);assert.equal(settled.summary.differenceFen,0);assert.equal(settled.records[0].reason,undefined);
  assert.throws(()=>db.prepare("UPDATE partner_manual_requests SET amount_fen=2000 WHERE id=?").run(requestId));
  assert.throws(()=>db.prepare("DELETE FROM partner_manual_requests WHERE id=?").run(requestId));
  assert.throws(()=>db.prepare("UPDATE partner_manual_requests SET amount_fen=3000 WHERE id=?").run(second));
  await ok('owner',admin,{...resolve,requestId:second,operationId:randomUUID(),action:'rejected'});
  const rejected=await ok('other',me);assert.equal(rejected.pendingId,null);assert.equal(rejected.summary.recordedFen,0);assert.equal(rejected.records[0].status,'rejected');
  assert.equal((await ok('owner',admin)).queue.length,0);
+ paidOrder('next',5000);
+ assert.equal((await ok('partner',me)).requestableFen,1000);
+ await ok('partner',me,{expectedAmountFen:1000});
+ const next=(await ok('partner',me)).pendingId;
+ assert.ok(next);assert.notEqual(next,requestId);
+ await ok('owner',admin,{...resolve,requestId:next,operationId:randomUUID(),action:'rejected'});
+ assert.equal((await ok('partner',me)).requestableFen,1000);
+ assert.equal((await ok('owner',admin)).queue.length,0);
  db.exec("UPDATE system_settings SET value='0' WHERE key='partner_manual_reporting_enabled'");
  assert.deepEqual(await ok('partner',me),{enabled:false});
  assert.equal((await call('partner',me,{expectedAmountFen:1000})).status,409);
- assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_manual_requests').get().n,2);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_manual_requests').get().n,3);
 });
