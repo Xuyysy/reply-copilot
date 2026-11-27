@@ -10,6 +10,22 @@ test('payout ciphertext binds identity and version',async()=>{
  assert.deepEqual(await decryptRecipient(key,'partner',1,cipher),value);
  for(const [id,v,k] of [['other',1,key],['partner',2,key],['partner',1,randomBytes(32).toString('base64')]])await assert.rejects(decryptRecipient(k,id,v,cipher));
 });
+test('CF Free: concurrent payout crypto reuses one scoped import, isolates keys and evicts failures',async()=>{
+ const a=randomBytes(32).toString('base64'),b=randomBytes(32).toString('base64'),v={name:'Synthetic User',account:'synthetic@example.test'};
+ const sealed=await encryptRecipient(a,'partner',1,v);
+ const subtle=crypto.subtle,original=subtle.importKey,own=Object.getOwnPropertyDescriptor(subtle,'importKey');let imports=0,fail=false;
+ Object.defineProperty(subtle,'importKey',{configurable:true,writable:true,value:function(...args){imports++;if(fail){fail=false;return Promise.reject(Error('synthetic import failure'));}return original.apply(this,args);}});
+ try{
+  const scope={},other={};
+  assert.deepEqual(await Promise.all(Array.from({length:5},()=>decryptRecipient(a,'partner',1,sealed,scope))),Array(5).fill(v));assert.equal(imports,1);
+  await decryptRecipient(a,'partner',1,sealed,other);assert.equal(imports,2);
+  const changed=await encryptRecipient(b,'partner',2,v,scope);assert.equal(imports,3);
+  assert.deepEqual(await decryptRecipient(b,'partner',2,changed,scope),v);assert.equal(imports,3);
+  await assert.rejects(decryptRecipient(b,'partner',1,sealed,scope));assert.equal(imports,3);
+  fail=true;await assert.rejects(decryptRecipient(a,'partner',1,sealed,scope));assert.equal(imports,4);
+  await decryptRecipient(a,'partner',1,sealed,scope);assert.equal(imports,5);
+ }finally{if(own)Object.defineProperty(subtle,'importKey',own);else Reflect.deleteProperty(subtle,'importKey');}
+});
 test('recipient profile: owner-only, reauth, encrypted versions, request snapshot and pending lock',async t=>{
  const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
  for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql','partners_payout_profile_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
@@ -39,8 +55,22 @@ test('recipient profile: owner-only, reauth, encrypted versions, request snapsho
  assert.equal((await call('owner',admin,reveal)).status,403);assert.equal((await call('other',admin,reveal)).status,403);
  db.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('s-owner',?)").run(Date.now()+60000);
  assert.equal((await call('owner',admin+'?userId=partner')).body.configured,true);
+ // Actual Worker routes, not source regex: report reads and directory reads
+ // must not decrypt, and a profile view or audited reveal decrypts exactly once.
+ const subtle=crypto.subtle,originalDecrypt=subtle.decrypt,ownDecrypt=Object.getOwnPropertyDescriptor(subtle,'decrypt');let decrypts=0;
+ Object.defineProperty(subtle,'decrypt',{configurable:true,writable:true,value:function(...args){decrypts++;return originalDecrypt.apply(this,args);}});
+ try{
+  for(let i=0;i<3;i++){const r=await call('partner',report);assert.equal(r.status,200);assert.equal(r.body.recipientReady,true);}
+  assert.equal((await call('owner','/v1/admin/partners/list')).status,200);
+  assert.equal((await call('owner',admin+'?userId=partner')).status,200);
+  assert.equal((await call('owner',manual+'?userId=partner')).status,200);
+  assert.equal(decrypts,0);
+  assert.equal((await call('partner',me)).status,200);assert.equal(decrypts,1);
+  assert.equal((await call('owner',admin,reveal)).status,200);assert.equal(decrypts,2);
+ }finally{if(ownDecrypt)Object.defineProperty(subtle,'decrypt',ownDecrypt);else Reflect.deleteProperty(subtle,'decrypt');}
+
  assert.deepEqual((await call('owner',admin,reveal)).body.profile,{name:value.name,account:value.account});
- assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payout_reveal_audit").get().n,1);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payout_reveal_audit").get().n,2);
  const requestId=randomUUID(),seed=db.prepare("INSERT INTO partner_manual_requests(id,partner_user_id,amount_fen,created_at) VALUES(?,?,?,?)");
  assert.throws(()=>seed.run(randomUUID(),'other',1000,Date.now()));
  seed.run(requestId,'partner',1000,Date.now());
@@ -54,5 +84,34 @@ test('recipient profile: owner-only, reauth, encrypted versions, request snapsho
  const key=f.env.PARTNER_PAYOUT_ENCRYPTION_KEY;f.env.PARTNER_PAYOUT_ENCRYPTION_KEY='invalid';
  assert.equal((await call('partner',me)).status,503);assert.equal((await call('owner',admin,reveal)).status,503);
  const denied=await call('partner',report);assert.equal(denied.status,200);assert.equal(denied.body.recipientReady,false);assert.equal(denied.body.requestableFen,null);f.env.PARTNER_PAYOUT_ENCRYPTION_KEY=key;
+
+ // Real application endpoint against isolated paid evidence, never live orders.
+ const paid=db.prepare("SELECT effective_at FROM partner_policy_versions WHERE user_id='partner'").get().effective_at;
+ db.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,registered_at) VALUES('other','partner','0123456789abcdef',?)").run(paid);
+ db.prepare("INSERT INTO credit_accounts(user_id,free_balance,paid_balance,created_at,updated_at) VALUES('other',0,0,1,1)").run();
+  function paidOrder(orderId,principal){
+  // Same ordinary recharge fixture contract as the repository's existing
+  // offline payment regression tests. No live order or callback is created.
+  const tx='tx-'+orderId,out='out-'+orderId,trade='trade-'+orderId;
+  db.prepare("INSERT INTO recharge_orders(id,user_id,package_id,package_name,credits,amount_cents,currency,status,payment_method,provider_reference,created_at,paid_at,credited_at) VALUES(?,'other','starter','fixture',500,100,'USD','paid','mk99',?,?,?,?)").run(orderId,out,paid,paid,paid);
+  db.prepare("INSERT INTO payment_transactions(id,order_id,provider,currency,amount_fen,base_amount_fen,service_fee_fen,fee_rate_bps,fee_snapshot_version,provider_fee_projection_status,status,provider_trade_id,created_at,updated_at,payment_protocol,payment_channel,settlement_mode,exchange_rate_micros,merchant_provider,merchant_account,notification_sign_type,amount_contract,provider_requested_fen,provider_payment_id,paid_at) VALUES(?,?,'xiaodou','CNY',?,?,0,0,'fee-v1','not_applicable','paid',?,?,?,'rsa2','ALIPAY_H5','fixed_cny',1000000,'mk99','fixture','MD5','CNY_EXACT_BUYER_TOTAL',?,?,?)").run(tx,orderId,principal,principal,out,paid,paid,principal,trade,paid);
+  db.prepare("INSERT INTO provider_payment_events(id,provider,provider_event_id,transaction_id,event_type,amount_fen,currency,body_sha256,received_at,merchant_provider) VALUES(?,'xiaodou',?,?,'PAYMENT_SUCCEEDED',?,'CNY',?,?,'mk99')").run('event-'+orderId,'fixture-paid-'+orderId,tx,principal,'a'.repeat(64),paid);
+  db.prepare("INSERT INTO credit_ledger(id,user_id,kind,free_delta,paid_delta,reference_id,reason,created_at) VALUES(?,'other','purchase_grant',0,500,?,'offline fixture',?)").run('ledger-'+orderId,orderId,paid);
+  db.prepare("INSERT INTO credit_batches(id,user_id,bucket,source_kind,source_order_id,grant_credits,remaining_credits,granted_at,paid_at,history_confidence,status) VALUES(?,'other','paid','purchase',?,500,500,?,?,'tracked','active')").run('batch-'+orderId,orderId,paid,paid);
+  db.exec("UPDATE credit_accounts SET paid_balance=paid_balance+500 WHERE user_id='other'");
+ }
+ paidOrder('local-payout-order',10000);
+ const validReport=await call('partner',report);assert.equal(validReport.body.requestableFen,1500);
+ // A syntactically valid but incorrect key must be rejected at submission,
+ // even though the cheap report hint says a profile exists.
+ f.env.PARTNER_PAYOUT_ENCRYPTION_KEY=randomBytes(32).toString('base64');
+ assert.equal((await call('partner',report)).body.recipientReady,true);
+ const blocked=await call('partner',report,{expectedAmountFen:1500});assert.equal(blocked.status,409);assert.equal(blocked.body.code,'PAYOUT_NOT_CONFIGURED');
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_manual_requests WHERE status='pending'").get().n,0);
+ f.env.PARTNER_PAYOUT_ENCRYPTION_KEY=key;
+ const applied=await call('partner',report,{expectedAmountFen:1500});assert.equal(applied.status,200,JSON.stringify(applied.body));
+ const pendingId=(await call('partner',report)).body.pendingId;
+ assert.equal(db.prepare("SELECT profile_version FROM partner_request_recipients WHERE request_id=?").get(pendingId).profile_version,2);
+
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payout_profiles").get().n,2);
 });

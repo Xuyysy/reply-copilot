@@ -94,7 +94,7 @@ test('partner candidate excludes automated transfers and schedulers, gates manua
  const payout=readFileSync(new URL('../src/partner-payout.ts',import.meta.url),'utf8');
  assert.match(payout,/requireAdminSession\(request,env,write\)/);
  assert.match(payout,/if\(write\)await requireCsrf\(request,env,token\)/);
- assert.match(payout,/encryptRecipient\(key,id,version,value\)/);
+ assert.match(payout,/encryptRecipient\(key,id,version,value,env\)/);
  assert.doesNotMatch(payout,/\bfetch\s*\(|executePayout|transferFunds|paymentProvider/);
  assert.match(card,/result\.payoutProfileEnabled&&<PartnerPayoutProfile/);
  assert.doesNotMatch(router,/scheduledPartner|\/v1\/partners\/alipay|\/v1\/admin\/partners\/(?:discovery|accrual-review|payout-review|order-preview|alipay-requests)/);

@@ -21,7 +21,7 @@ const MAIN_USER = 'benchmark-main-user';
 const VERIFIER='cf-free-offline-business-verifier';
 const EXTENDED_ROUTES=Object.freeze([...ROUTES.slice(0,7),'login_60k','login_210k',...ROUTES.slice(7)]);
 
-export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full', passwordMode='native', extendedLogin=false, productionProvider=null, syntheticUpstream=null} = {}) {
+export async function setupSyntheticWorkerd({profile = false, source = 'free', assertionMode = 'legacy', measureBatches = false, expiryIndex = 'full', passwordMode='native', extendedLogin=false, productionProvider=null, syntheticUpstream=null, partnerPayout=false} = {}) {
   if(productionProvider!==null&&(!['legacy','managed'].includes(productionProvider)||typeof syntheticUpstream!=='function'))throw Error('Synthetic Production provider requires an explicit intercepted upstream');
   if(productionProvider===null&&syntheticUpstream!==null)throw Error('Unexpected upstream handler');
   if(passwordMode!=='native'||typeof extendedLogin!=='boolean')throw Error('Unknown local password experiment');
@@ -80,6 +80,7 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
     AI_MOCK_DELAY_MS:'0', SUBSCRIPTIONS_ENABLED:'1', PAYMENTS_ENABLED:'0',
     ADMIN_PORTAL_ENABLED:'0', CF_FREE_ZERO_WRITE_ASSERTIONS:assertionMode==='select'?'1':'0'
   };
+  if(partnerPayout)Object.assign(vars,{ADMIN_PORTAL_ENABLED:'1',PARTNER_PAYOUT_ENCRYPTION_KEY:Buffer.alloc(32,0x53).toString('base64')});
   const localProviderKey='synthetic-local-model-key';
   const localEncryptionKey=Buffer.alloc(32,9).toString('base64');
   if(productionProvider)Object.assign(vars,{ENVIRONMENT:'production',AI_MODE:'production',DEEPSEEK_API_KEY:localProviderKey,DEEPSEEK_INPUT_USD_PER_MILLION:'0.3',DEEPSEEK_OUTPUT_USD_PER_MILLION:'1.32',AI_CONFIG_ENCRYPTION_KEY:localEncryptionKey});
@@ -154,7 +155,7 @@ export async function setupSyntheticWorkerd({profile = false, source = 'free', a
   } catch (error) {await mf.dispose();throw error;}
 }
 
-class InspectorClient {
+export class InspectorClient {
   constructor(ws) {
     this.ws=ws;this.next=0;this.pending=new Map();
     ws.addEventListener('message',event=>{

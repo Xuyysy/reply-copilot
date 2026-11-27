@@ -4,7 +4,7 @@ import {sessionFor,requireCsrf} from "./auth";
 import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
-import {payoutEnabled,recipientReady} from "./partner-payout";
+import {payoutEnabled,recipientReady,verifiedRecipientVersion} from "./partner-payout";
 import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number};
@@ -64,6 +64,13 @@ export async function myManualPartnerReport(request:Request,env:Env){
  const amount=current.requestableFen;
  if(Object.keys(body).length!==1||!Number.isSafeInteger(body.expectedAmountFen)||amount===null||body.expectedAmountFen!==amount||amount>1000000000000)
   throw new ApiFailure(409,"PARTNER_REQUEST_UNAVAILABLE","未达到10元、已有申请或金额已变化，请刷新后重试。");
+ // Only a valid submission authenticates the encrypted recipient. Bind its
+ // verified version in the same guarded INSERT so a concurrent edit cannot
+ // switch the account between validation and the trigger's snapshot.
+ const recipientVersion=current.payoutProfileRequired?await verifiedRecipientVersion(env,session.user_id):null;
+ if(current.payoutProfileRequired&&recipientVersion===null)throw new ApiFailure(409,"PAYOUT_NOT_CONFIGURED","收款资料无法核实，请重新填写后再申请。");
+ const recipientGuard=current.payoutProfileRequired?" AND (SELECT MAX(version) FROM partner_payout_profiles WHERE user_id=?)=?":"";
+ const recipientParams=current.payoutProfileRequired?[session.user_id,recipientVersion]:[];
  const now=nowMs();
  // This is an application for HUMAN reconciliation only, not a payment
  // instruction. Recheck completed sum, current membership and gates at insert.
@@ -73,8 +80,8 @@ export async function myManualPartnerReport(request:Request,env:Env){
  AND EXISTS(SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=?)
  AND (SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1')=2
  AND (SELECT COALESCE(SUM(amount_fen),0) FROM partner_manual_requests WHERE partner_user_id=? AND status='completed')=?
- AND COALESCE((SELECT value FROM system_settings WHERE key='partner_payout_profile_enabled'),'0')=?
- ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,current.payoutProfileRequired?'1':'0').run();
+ AND COALESCE((SELECT value FROM system_settings WHERE key='partner_payout_profile_enabled'),'0')=?${recipientGuard}
+ ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,current.payoutProfileRequired?'1':'0',...recipientParams).run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_REQUEST_CONFLICT","申请状态已变化，请刷新。");
  return response({ok:true},200,env,request);
 }
