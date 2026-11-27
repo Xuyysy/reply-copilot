@@ -12,7 +12,13 @@ export function createXInteractionProviderFactory(chromeApi){
    if(closed||signal?.aborted)throw Error('cancelled');
    let r;try{r=await chromeApi.tabs.sendMessage(binding.sourceTabId,{type:TYPE,action,connectionId,sessionId,...extra});}catch{throw Error('source_unavailable');}
    if(closed||signal?.aborted)throw Error('cancelled');
-   if(!r?.ok)throw Error(errors.has(r?.error)?r.error:'source_unavailable');return r.value;
+   if(!r?.ok){
+     const failure=Error(errors.has(r?.error)?r.error:'source_unavailable'),d=r?.sourceDiagnostic;
+     if(d&&['rest','graphql','search'].includes(d.routeKind)&&['prepare','request','response','body','decode','project','validate'].includes(d.readPhase))
+       failure.sourceDiagnostic={routeKind:d.routeKind,readPhase:d.readPhase,httpStatus:Number.isInteger(d.httpStatus)&&d.httpStatus>=100&&d.httpStatus<=599?d.httpStatus:null};
+     throw failure;
+   }
+   return r.value;
   }
   function identity(i){if(i?.ownerUserId!==binding.ownerUserId||i.handle?.toLowerCase()!==binding.handle.toLowerCase()||typeof i.sessionId!=='string'||!i.sessionId||i.sessionId.length>128||sessionId&&sessionId!==i.sessionId)throw Error('identity_changed');return i;}
   if(signal?.aborted)throw Error('cancelled');signal?.addEventListener('abort',abort,{once:true});

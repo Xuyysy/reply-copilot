@@ -81,7 +81,7 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
     // Return only known status codes, not provider error bodies, cursors or credentials.
     const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified','workspace_limit']);
     const reason=known.has(e?.message)?e.message:'sync_failed';
-    return {reason,committed,inserted,historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,httpStatus)};
+    return {reason,committed,inserted,historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,e?.sourceDiagnostic?.httpStatus??httpStatus,e?.sourceDiagnostic)};
   }finally{if(session)await endSession(db,session).catch(()=>{});}
 }
 // Separate read session; callers must authenticate the currently selected owner first.

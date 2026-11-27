@@ -97,6 +97,27 @@ test('cancellation or replacement during fingerprint cannot resurrect a late pag
  }
 });
 
+
+test('source diagnostics reveal only bounded route, status and phase',async()=>{
+ const graphql='https://x.com/i/api/graphql/ABCDEFGH/NotificationsTimeline?variables='+encodeURIComponent(JSON.stringify({count:20,timelineType:'All'}));
+ const cases=[
+  [{rawBody:'<html>fixture-sensitive-token</html>'},'schema_changed',{routeKind:'rest',readPhase:'decode',httpStatus:200}],
+  [{body:{data:{unexpected:{cookie:'fixture-sensitive-cookie'}}}},'schema_changed',{routeKind:'rest',readPhase:'project',httpStatus:200}],
+  [{header:{'cf-mitigated':'challenge'},rawBody:'<html>fixture-sensitive-challenge</html>'},'forbidden',{routeKind:'rest',readPhase:'response',httpStatus:200}],
+  [{entries:[{name:graphql}],body:{data:{viewer_v2:{user_results:{result:{rest_id:'111',notification_timeline:{}}}}}}},'schema_changed',{routeKind:'graphql',readPhase:'project',httpStatus:200}]
+ ];
+ for(const [options,reason,detail] of cases){
+  const f=fixture(options),s=(await start(f)).value;
+  const read=()=>f.send('page',{sessionId:s.sessionId,ownerUserId:'111',source:'notification',cursor:null});
+  const result=await read();
+  assert.equal(result.ok,false);assert.equal(result.error,reason);
+  assert.deepEqual(JSON.parse(JSON.stringify(result.sourceDiagnostic)),detail);
+  assert.ok(!JSON.stringify(result).includes('fixture-sensitive'));
+  assert.equal((await read()).error,'session_limit');
+  assert.equal(f.calls.length,1);
+ }
+});
+
 test('HTTP 200 challenge and incompatible bodies stop the connection without a second request or sensitive response',async()=>{
  for(const [options,error] of [
   [{header:{'cf-mitigated':'challenge'},rawBody:'<html>fixture-sensitive-challenge</html>'},'forbidden'],

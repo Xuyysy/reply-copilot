@@ -136,7 +136,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        completedPages+=result.committed;completedInserted+=result.inserted;
        task.progress={...task.progress,pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
-       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted,...(result.diagnostic&&reason!=='cancelled'?{diagnostic:safeSyncDiagnostic(result.diagnostic.stage,result.diagnostic.reason,result.diagnostic.httpStatus)}:{})});
+       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted,...(result.diagnostic&&reason!=='cancelled'?{diagnostic:safeSyncDiagnostic(result.diagnostic.stage,result.diagnostic.reason,result.diagnostic.httpStatus,result.diagnostic)}:{})});
        // A page budget boundary has no in-flight read. Allow the other source
        // its reserved pages, but never hide the partial result behind success.
        if(reason==='page_limit')partialReason='page_limit';

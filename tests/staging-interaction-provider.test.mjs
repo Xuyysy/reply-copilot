@@ -21,6 +21,23 @@ test('trusted tab bridge exposes both sources and forwards only scoped read oper
  assert.ok(!JSON.stringify(f.calls).includes('cookie'));
  await assert.rejects(p.readPage({ownerUserId:'111',source:'post',cursor:null}),/cancelled/);
 });
+
+test('provider propagates bounded source diagnostics and drops arbitrary fields',async()=>{
+ const api={tabs:{sendMessage:async(_id,message)=>{
+  if(message.action==='start'||message.action==='identity')return {ok:true,value:{ownerUserId:'111',handle:'me',sessionId:'opaque',providerId:'x-web-'+'a'.repeat(32),sources:['notification','post']}};
+  if(message.action==='cancel')return {ok:true,value:{}};
+  return {ok:false,error:'schema_changed',sourceDiagnostic:{routeKind:'graphql',readPhase:'project',httpStatus:200,url:'fixture-sensitive-url',body:'fixture-sensitive-body'}};
+ }}};
+ const provider=await createXInteractionProviderFactory(api)(binding,{});
+ await assert.rejects(provider.readPage({ownerUserId:'111',source:'notification',cursor:null}),e=>{
+  assert.equal(e.message,'schema_changed');
+  assert.deepEqual(e.sourceDiagnostic,{routeKind:'graphql',readPhase:'project',httpStatus:200});
+  assert.ok(!JSON.stringify(e.sourceDiagnostic).includes('fixture-sensitive'));
+  return true;
+ });
+ await provider.close();
+});
+
 test('foreign account and transport failure are bounded safe errors; invalid source/owner never requests a page',async()=>{
  const foreign=fixture({owner:'222'});await assert.rejects(foreign.factory(binding,{}),/identity_changed/);
  assert.equal(foreign.calls.at(-1).action,'cancel');

@@ -293,7 +293,7 @@
    if(!endpoint||m.ownerUserId!==i.ownerUserId||s.blocked||s.busy||s.pages>=30||Date.now()-s.startedAt>=90000)fail('session_limit');
    if(Date.now()<limitedUntil)fail('rate_limited');
    s.busy=true;
-   let timedOut=false;
+   let timedOut=false,readPhase='prepare',httpStatus=null;
    const c=new AbortController(),abort=()=>c.abort(),timer=setTimeout(()=>{timedOut=true;c.abort();},12000);
    s.controller.signal.addEventListener('abort',abort,{once:true});
    try{
@@ -305,7 +305,9 @@
      if(lastRequestAt&&Date.now()-lastRequestAt<1800)await new Promise((resolve,reject)=>{const t=setTimeout(resolve,1800-(Date.now()-lastRequestAt));c.signal.addEventListener('abort',()=>{clearTimeout(t);reject(Error('cancelled'));},{once:true});});
      validate(m.sessionId);if(c.signal.aborted)fail('cancelled');
      lastRequestAt=Date.now();s.pages++;
+     readPhase='request';
      const response=await fetch(url,{method:'GET',credentials:'same-origin',headers:{authorization:'Bearer '+WEB_BEARER,'x-csrf-token':csrf,'x-twitter-auth-type':'OAuth2Session','x-twitter-active-user':'yes',accept:'application/json'},cache:'no-store',redirect:'error',signal:c.signal});
+     httpStatus=response.status;readPhase='response';
      validate(m.sessionId);
      // Explicit platform challenge: stop without reading or forwarding its body.
      if(response.headers.get('cf-mitigated')==='challenge')fail('forbidden');
@@ -316,15 +318,25 @@
        limitedUntil=Math.max(limitedUntil,Date.now()+Math.min(86400000,Math.max(60000,Number.isFinite(retry)?retry:0,Number.isFinite(reset)?reset-Date.now():0)));
      }
      if(response.status!==200){s.blocked=true;return {status:response.status};}
+     readPhase='body';
      const reader=response.body?.getReader();if(!reader)fail('schema_changed');
      let bytes=0;const chunks=[];
      try{for(;;){const {done,value}=await reader.read();if(done)break;bytes+=value.byteLength;if(bytes>2*1024*1024){await reader.cancel();fail('page_limit');}chunks.push(value);}}finally{reader.releaseLock();}
      const all=new Uint8Array(bytes);let offset=0;for(const chunk of chunks){all.set(chunk,offset);offset+=chunk.length;}
+     readPhase='decode';
      let body;try{body=JSON.parse(new TextDecoder().decode(all));}catch{fail('schema_changed');}
-     const projected=project(body,endpoint.kind,i.ownerUserId);validate(m.sessionId);
+     readPhase='project';
+     const projected=project(body,endpoint.kind,i.ownerUserId);
+     readPhase='validate';validate(m.sessionId);
      if(!projected.done&&projected.nextCursor===m.cursor)fail('invalid_pagination');
      return {status:200,ownerUserId:i.ownerUserId,source,requestCursor:m.cursor,...projected};
-   }catch(e){s.blocked=true;if(timedOut&&!s.controller.signal.aborted)throw Error('time_limit');throw e;}
+   }catch(e){
+     s.blocked=true;
+     const reason=timedOut&&!s.controller.signal.aborted?'time_limit':errors.has(e?.message)?e.message:e?.name==='AbortError'?'cancelled':'source_error';
+     const failure=Error(reason);
+     if(['rest','graphql','search'].includes(endpoint.kind))failure.sourceDiagnostic={routeKind:endpoint.kind,readPhase,httpStatus};
+     throw failure;
+   }
    finally{clearTimeout(timer);s.controller.signal.removeEventListener('abort',abort);s.busy=false;}
  }
  const errors=new Set(['open_notifications','owner_unverified','endpoint_not_observed','identity_changed','owner_mismatch','session_limit','rate_limited','unauthenticated','forbidden','schema_changed','page_limit','invalid_cursor','invalid_pagination','ambiguous_cursor','terminal_unverified','time_limit','cancelled']);
@@ -354,7 +366,13 @@
      if(m.action==='identity')return {...i,sessionId:active.sessionId};
      if(m.action==='page')return readPage(m);
      fail('schema_changed');
-   })().then(value=>respond({ok:true,value}),e=>respond({ok:false,error:errors.has(e?.message)?e.message:e?.name==='AbortError'?'cancelled':'source_error'}));
+   })().then(value=>respond({ok:true,value}),e=>{
+     const reason=errors.has(e?.message)?e.message:e?.name==='AbortError'?'cancelled':'source_error';
+     const d=e?.sourceDiagnostic;
+     const valid=d&&['rest','graphql','search'].includes(d.routeKind)&&['prepare','request','response','body','decode','project','validate'].includes(d.readPhase);
+     const safe=valid?{routeKind:d.routeKind,readPhase:d.readPhase,httpStatus:Number.isInteger(d.httpStatus)&&d.httpStatus>=100&&d.httpStatus<=599?d.httpStatus:null}:null;
+     respond({ok:false,error:reason,...(safe?{sourceDiagnostic:safe}:{})});
+   });
    return true;
  });
  addEventListener('pagehide',cancel,{once:true});
