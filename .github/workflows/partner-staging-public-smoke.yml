@@ -1,0 +1,39 @@
+name: Partner Staging public safety smoke (no writes)
+on:
+  push:
+    branches: ['chatgpt/partner-staging-public-smoke-20261127']
+    paths: ['.github/workflows/partner-staging-public-smoke.yml']
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Verify deployed health, anonymous boundaries and static pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          api=https://api-staging.x-reply-helper.top
+          web=https://staging.x-reply-helper.top
+          tmp=$(mktemp -d)
+          trap 'rm -rf "$tmp"' EXIT
+          check() {
+            local path="$1" expected="$2" code
+            code=$(curl --silent --show-error --connect-timeout 8 --max-time 15 -H "Origin: $web" -o "$tmp/body" -w '%{http_code}' "$api$path")
+            test "$code" = "$expected"
+            if [[ "$expected" == 200 ]]; then jq -e '.ok == true' "$tmp/body" >/dev/null; else jq -e '.code == "AUTH_REQUIRED"' "$tmp/body" >/dev/null; fi
+            echo "PASS $path HTTP $code"
+          }
+          check /health 200
+          check /v1/partners/me 401
+          check /v1/partners/manual-report 401
+          check /v1/admin/partners/policy 401
+          check /v1/admin/partners/manual-report 401
+          for page in /account/ /admin/ /promote/; do
+            code=$(curl --silent --show-error --connect-timeout 8 --max-time 15 -o "$tmp/page" -w '%{http_code}' "$web$page")
+            test "$code" = 200
+            grep -qi '<html' "$tmp/page"
+            echo "PASS $page HTTP $code"
+          done
+          echo 'PARTNER_STAGING_PUBLIC_SMOKE_OK: 8 GET requests; no authentication, no database writes, no payments'
