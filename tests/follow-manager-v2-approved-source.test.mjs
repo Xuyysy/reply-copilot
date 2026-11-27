@@ -12,11 +12,11 @@ function timeline(kind){
  ]}}}}}};
 }
 function setup(){
- let current={...binding},self={viewerUserId:owner,profileUserId:owner,handle:"Zane",counts},called=0,closed=0;
- const transport={currentBinding:async()=>current,readSelf:async()=>self,
+ let current={...binding},self={viewerUserId:owner,profileUserId:owner,handle:"Zane",counts},called=0,closed=0,selfReads=0;
+ const transport={currentBinding:async()=>current,readSelf:async()=>{selfReads++;return self},
   readPage:async({kind})=>{called++;return {status:200,payload:timeline(kind)};},close:async()=>{closed++}};
  const source=createApprovedFollowSource({binding,transport,clock:()=>"2026-11-27T00:00:00Z"});
- return {source,transport,changeBinding:b=>current=b,changeSelf:v=>self=v,get calls(){return called},get closed(){return closed}};
+ return {source,transport,changeBinding:b=>current=b,changeSelf:v=>self=v,get calls(){return called},get closed(){return closed},get selfReads(){return selfReads}};
 }
 test("only verified viewer + self profile unlock a bounded own-account relationship page",async()=>{
  const h=setup();assert.equal(h.source.kind,LIVE_SOURCE);
@@ -53,4 +53,18 @@ test("deny wrong target, status 429 and missing explicit terminal evidence witho
 test("constructor has no implicit transport or credential fallback",()=>{
  assert.throws(()=>createApprovedFollowSource({binding}),/source_unavailable/);
  assert.throws(()=>createApprovedFollowSource({binding:{...binding,sessionId:""}}),/source_unavailable/);
+});
+
+test("read profile only initially and at final refresh, keep session checks for every page",async()=>{
+ const h=setup();
+ const a=await h.source.readIdentity();assert.deepEqual(a.counts,counts);
+ await h.source.readIdentity();
+ await h.source.page({ownerUserId:owner,kind:"following",cursor:null});
+ await h.source.readIdentity();
+ await h.source.page({ownerUserId:owner,kind:"followers",cursor:null});
+ assert.equal(h.selfReads,1);
+ await h.source.readIdentity({refresh:true});assert.equal(h.selfReads,2);
+ h.changeBinding({...binding,sessionId:"changed"});
+ await assert.rejects(h.source.readIdentity(),/identity_changed/);
+ assert.equal(h.selfReads,2);
 });

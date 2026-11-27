@@ -29,6 +29,12 @@ export function createApprovedFollowSource({binding,transport,clock=()=>new Date
  }
  async function readIdentity({refresh=false,signal}={}){
   await check(signal);
+  // Local account/session checks remain per-page, while the authenticated
+  // self profile is fetched once and again at finalization. This avoids
+  // extra profile requests for every page without sacrificing the final
+  // server-side count consistency gate.
+  if(expected&&refresh!==true)return {source:LIVE_SOURCE,ownerUserId:local.ownerUserId,sessionId:local.sessionId,
+   identityEvidence:"self_profile_and_session",counts:expected};
   const v=await transport.readSelf({refresh:refresh===true,signal});
   await check(signal);
   // BOTH the viewer and the self-profile must match the signed-in binding.
