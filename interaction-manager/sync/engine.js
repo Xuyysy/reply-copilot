@@ -32,6 +32,11 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   if(typeof page.done!=='boolean'||!validCursor(page.nextCursor)||page.done!==(page.nextCursor===null)||!page.done&&page.nextCursor===cursor)fail('invalid_pagination');
   // Provider is responsible for proving a known timeline shape and explicit terminal evidence.
   if(page.structureVerified!==true||page.done&&page.terminalEvidence!=='explicit')fail('schema_changed');
+  return {...normalizeObservations(page,{ownerUserId,source,observedAt}),nextCursor:page.nextCursor,done:page.done};
+}
+// One explicitly observed browser response is evidence, not a sync checkpoint.
+export function normalizeObservations(page,{ownerUserId,source,observedAt=Date.now()}){
+  if(!validId(ownerUserId)||!['notification','post'].includes(source)||page?.structureVerified!==true)fail('schema_changed');
   // The provider may supply an explicit bounded array of structured posts.
   // Never traverse arbitrary response trees or assume a referenced post is an event.
   const decoded=page.webPosts===undefined?null:decodeWebPostRecords(page.webPosts,{observedAt});
@@ -48,7 +53,7 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   if(source==='notification'&&parsed.stats.unsupported>0&&parsed.stats.unsupported+parsed.stats.outOfScope===parsed.stats.rows)fail('schema_changed');
   const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=100000?v:0;
   const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored)+count(parsed.stats?.outOfScope))};
-  return {...parsed,quality,nextCursor:page.nextCursor,done:page.done,observedAt};
+  return {...parsed,quality,observedAt};
 }
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
   if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||!Number.isInteger(maxPages)||maxPages<1||maxPages>100||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');

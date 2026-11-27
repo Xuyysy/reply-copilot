@@ -36,7 +36,7 @@ test("joint account tools appear only in actual staging build, isolating local a
     assert.equal((panel.match(/id="open-follow-workbench"/g)||[]).length,1);
     assert.match(panel,/staging\/account-tools-entry\.js/);
     assert.doesNotMatch(panel,/id="(?:staging-interactions|interaction-interface|interface-sync|interaction-read)"/);
-    for(const target of ["staging/interaction-workbench.html","staging/follow-workbench.html","staging/account-workbench-background.js","staging/account-workbench.css","follow-manager/v2/cache-workbench.js"])assert.ok(existsSync(path.join(out,target)),target);
+    for(const target of ["staging/interaction-response-panel.html","staging/interaction-response-probe.js","staging/interaction-response-panel.js","staging/interaction-workbench.html","staging/follow-workbench.html","staging/account-workbench-background.js","staging/account-workbench.css","follow-manager/v2/cache-workbench.js"])assert.ok(existsSync(path.join(out,target)),target);
    }else{
     for(const name of ["follow-manager","interaction-manager","staging"])assert.equal(existsSync(path.join(out,name)),false,name);
     assert.equal(panel,sourcePanel);

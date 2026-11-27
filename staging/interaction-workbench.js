@@ -64,6 +64,7 @@ async function load(action='view',extra={}){if(busy||disposed)return;busy=true;$
    if(!confirm('读取当前 X 账号的'+sourceLabel+'数据？本次仅读取所选来源，记录保存在本机。'))return;
   try{await msg('sync',{authorized:true,selectedSource});if(!disposed){waiting=true;await load();}}catch{if(!disposed)$('status').textContent='同步暂不可用，已有缓存保留。';}
  });
+ $('cache-refresh').onclick=()=>runAction(async()=>{await load();});
  $('clear').onclick=()=>runAction(async()=>{if(!waiting&&await guard()&&!disposed&&confirm('清除当前 X 账号本地互动记录？'))await load('clear',{confirmed:true});});
  $('export').onclick=async()=>{if(!await guard())return;const url=URL.createObjectURL(new Blob(['\uFEFF'+rankingCsv(people)],{type:'text/csv;charset=utf-8'})),a=node('a','');a.href=url;a.download='interaction-ranking.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
  for(const id of ['search','type','days','sort'])$(id).addEventListener(id==='search'?'input':'change',async()=>{if(!await guard())return;page=0;selected=null;$('detail').replaceChildren();$('detail-title').textContent='互动明细';$('detail-empty').hidden=false;$('more').hidden=true;render();});

@@ -157,7 +157,7 @@
    const ms=Date.parse(legacy.created_at??'');
    return {postId:mt.rest_id,authorUserId:actor,replyToUserId,replyToPostId,quotedUserId:q?.legacy.user_id_str??null,quotedPostId:q?.rest_id??null,mentionedUserIds:mentionIds,createdAt:Number.isFinite(ms)&&ms>0?ms:null};
  }
- function project(body,kind,owner){
+ function project(body,kind,owner,{observedSample=false}={}){
    if(!obj(body)||arr(body.errors).length)fail('schema_changed');
    const notifications=[],posts=[],users=[],bottom=new Set(),restNotificationIds=new Set();let terminal=false,ignored=0;
    let instructions,viewer=null,global=null;
@@ -278,7 +278,7 @@
      }
    }
    if(bottom.size>1||terminal&&bottom.size)fail('ambiguous_cursor');
-   if(!terminal&&!bottom.size)fail('terminal_unverified');
+   if(!terminal&&!bottom.size&&!observedSample)fail('terminal_unverified');
    let payload;
    if(kind==='graphql'||kind==='search')payload={data:notifications};
    else{
@@ -313,10 +313,10 @@
      }
      payload={globalObjects:{notifications:n,tweets,users:people}};
    }
-   return {payload,posts,users,nextCursor:terminal?null:[...bottom][0],done:terminal,terminalEvidence:terminal?'explicit':null,structureVerified:true,ignored,viewerVerified:kind==='graphql'&&stable(viewer.rest_id,viewer.legacy?.id_str)===owner};
+   return {payload,posts,users,nextCursor:terminal?null:([...bottom][0]??null),done:terminal,terminalEvidence:terminal?'explicit':null,structureVerified:true,ignored,viewerVerified:kind==='graphql'&&stable(viewer.rest_id,viewer.legacy?.id_str)===owner};
  }
  globalThis.ReplyCopilotInteractionInterface=Object.freeze({identityFrom,endpointFrom,pageURL,project});
- if(typeof chrome==='undefined'||!chrome.runtime?.onMessage)return;
+ if(typeof chrome==='undefined'||!chrome.runtime?.onMessage||typeof location==='undefined'||!ORIGINS.has(location.origin))return;
  let active=null,pendingConnection=null,startGeneration=0,lastRequestAt=0,limitedUntil=0;
  function liveIdentity(cacheOnly=false){
    if(!ORIGINS.has(location.origin)||!cacheOnly&&(!/^\/notifications\/?$/.test(location.pathname)||document.visibilityState!=='visible'))fail('open_notifications');

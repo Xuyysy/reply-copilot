@@ -1,8 +1,8 @@
-import {openInteractionDB,beginSession,endSession,readOwnerDataset,clearOwner} from '../interaction-manager/storage/repository.js';
+import {openInteractionDB,beginSession,endSession,readOwnerDataset,clearOwner,commitBatch} from '../interaction-manager/storage/repository.js';
 import {syncInteractions} from '../interaction-manager/sync/engine.js';
 import {openProviderSession} from '../interaction-manager/sync/provider-session.js';
 import {createXInteractionProviderFactory} from './interaction-provider.js';
-import {validId} from '../interaction-manager/core/events.js';
+import {validId,normalizeEvent} from '../interaction-manager/core/events.js';
 import {safeSyncDiagnostic} from '../interaction-manager/sync/diagnostic.js';
 import {createSchedulePreferences} from '../interaction-manager/sync/schedule-preferences.js';
 const TYPE='XRH_STAGING_ACCOUNT_WORKBENCH';
@@ -13,7 +13,7 @@ const same=(a,b)=>ownerOk(a)&&ownerOk(b)&&a.ownerUserId===b.ownerUserId&&a.handl
 const fail=code=>{throw Error(code)};
 const errors=new Set(['owner_unverified','identity_changed','source_unavailable','busy','invalid_context','cancelled','workspace_limit']);
 export function createAccountWorkbenchController({chromeApi=chrome,openDB=openInteractionDB,providerFactory=null}={}){
- const c=chromeApi,locks=new Map(),jobs=new Map();let db,dbQueue=Promise.resolve();
+ const c=chromeApi,locks=new Map(),jobs=new Map();let db,dbQueue=Promise.resolve(),sampleTicket=null;
  const taskKey=owner=>'xrh-interaction-task-'+owner;
  const reasonSet=new Set(['source_exhausted','page_limit','time_limit','cancelled','identity_changed','owner_mismatch','unauthenticated','forbidden','rate_limited','source_unavailable','schema_changed','workspace_limit','sync_failed','source_error','session_limit','owner_unverified','endpoint_not_observed','open_notifications','invalid_cursor','ambiguous_cursor','terminal_unverified','response_mismatch','invalid_pagination','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint']);
  const inDB=fn=>{const p=dbQueue.then(fn,fn);dbQueue=p.catch(()=>{});return p;};
@@ -70,7 +70,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    const session=await beginSession(db,b.ownerUserId);
    try{
      await verified(f,sender);
-     if(clear){await clearOwner(db,session);await saveTask(b.ownerUserId,{state:'idle',updatedAt:Date.now()});}
+     if(clear){sampleTicket=null;await clearOwner(db,session);await saveTask(b.ownerUserId,{state:'idle',updatedAt:Date.now()});}
      const dataset=await readOwnerDataset(db,session);
      await verified(f,sender);
      return {identity:{ownerUserId:b.ownerUserId,handle:b.handle},dataset,sourceReady:!!providerFactory,running:false,task:await readTask(b.ownerUserId)};
@@ -153,9 +153,54 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    task.promise.catch(()=>{});
    return {running:true};
  }
+ // DevTools is a trusted extension page, not a web-page message bridge.
+ async function observedSample(m,sender){
+   if(sender.url!==c.runtime.getURL('staging/interaction-response-panel.html')||m.feature!=='interaction'||!idOk(m.tabId))fail('invalid_context');
+   if(m.action==='sample-cancel'){
+     if(sampleTicket?.id===m.ticket&&sampleTicket.tabId===m.tabId)sampleTicket=null;
+     return {stopped:true};
+   }
+   const b=await get('interaction');
+   if(!b||b.sourceTabId!==m.tabId)fail('invalid_context');
+   const verify=async()=>{
+     const before=await get('interaction');
+     if(before?.bindingId!==b.bindingId||before.sourceTabId!==m.tabId||!same(before,b)||!same(await identity(m.tabId),b))fail('identity_changed');
+     const after=await get('interaction');
+     if(after?.bindingId!==b.bindingId||after.sourceTabId!==m.tabId||!same(after,b))fail('identity_changed');
+   };
+   if(m.action==='sample-start'){
+     if(m.authorized!==true||!['notification','post'].includes(m.source))fail('invalid_context');
+     if(jobs.size)fail('busy');
+     await verify();
+     if(jobs.size)fail('busy');
+     sampleTicket={id:crypto.randomUUID(),tabId:m.tabId,bindingId:b.bindingId,ownerUserId:b.ownerUserId,source:m.source,expires:Date.now()+60000};
+     return {ticket:sampleTicket.id,ownerUserId:b.ownerUserId};
+   }
+   const t=sampleTicket;
+   if(!t||t.id!==m.ticket||t.tabId!==m.tabId||t.bindingId!==b.bindingId||t.ownerUserId!==b.ownerUserId||t.expires<=Date.now())fail('invalid_context');
+   sampleTicket=null; // Single use even when validation or commit fails.
+   if(jobs.size)fail('busy');
+   const observedAt=Date.now();
+   if(!Array.isArray(m.events)||m.events.length>1000||!Array.isArray(m.users)||m.users.length>2000)fail('invalid_context');
+   const events=m.events.map(e=>normalizeEvent({...e,observedAt},b.ownerUserId));
+   if(events.some(e=>!e||e.source!==t.source||e.direction!=='inbound'))fail('invalid_context');
+   const users=m.users.filter(u=>validId(u?.userId)&&typeof u.handle==='string'&&/^[A-Za-z0-9_]{1,15}$/.test(u.handle)).map(u=>({userId:u.userId,handle:u.handle,observedAt}));
+   return inDB(async()=>{
+     if(jobs.size||t.expires<=Date.now())fail('busy');
+     await verify();if(jobs.size||t.expires<=Date.now())fail('busy');
+     db??=await openDB();
+     const session=await beginSession(db,b.ownerUserId);
+     try{
+       await verify();if(jobs.size||t.expires<=Date.now())fail('busy');
+       const result=await commitBatch(db,session,events,{source:t.source,observedAt,users,observedSample:true});
+       return {inserted:result.inserted,accepted:result.accepted,source:t.source,historyComplete:false};
+     }finally{await endSession(db,session);}
+   });
+ }
  async function dispatch(m,sender){
    if(m?.type!==TYPE||sender.id!==c.runtime.id||!Object.hasOwn(PATHS,m.feature))fail('invalid_context');
    const f=m.feature;
+   if(['sample-start','sample-commit','sample-cancel'].includes(m.action))return observedSample(m,sender);
    if(m.action==='open'){
      if(sender.url!==c.runtime.getURL('sidepanel/sidepanel.html'))fail('invalid_context');
      if(locks.has(f))return locks.get(f);
