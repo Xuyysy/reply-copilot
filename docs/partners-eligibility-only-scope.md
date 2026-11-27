@@ -7,3 +7,5 @@ This branch is a genuinely narrower functional milestone from the deployed Paid 
 The existing PR #268 and its approval conditions remain unchanged. This is source development only, not an alternative protected release path; the same established version, CI, D1 authorization, backup/restore and authorized Worker release mechanisms must be satisfied before any deployment. No protected workflow modification or dispatch, credential changes, or remote D1 operations are authorized by this branch. Do not substitute this milestone for full financial acceptance.
 
 Tests: existing V1-A SQLite policy tests, route guard and scope regressions, normal full Push CI. Actual deployed version and authenticated browser acceptance remain outstanding.
+
+Additional regression coverage: actual bundled Worker fetch through in-memory SQLite for unauthenticated access, singleton admin, reauthentication, CSRF, eligible target, duplicate version rejection, owner-scoped reads, policy pause/history and disabled-program behavior. No cloud database, cash records or provider calls. Automated local execution is CI evidence only, not hosted acceptance.
