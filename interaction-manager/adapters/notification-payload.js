@@ -2,6 +2,7 @@
 // No network, cookies, endpoint discovery or capture hooks.
 // Shapes are based on public X-Insights fixtures; live X compatibility is not yet validated.
 import {validId,normalizeEvent,mergeEvent} from '../core/events.js';
+import {inspectNotificationTimelineEnvelope} from './graphql-notification-envelope.js';
 const obj=v=>v&&typeof v==='object'&&!Array.isArray(v)?v:null;
 const arr=v=>Array.isArray(v)?v:[];
 const stable=(...ids)=>{const known=ids.filter(x=>x!==undefined&&x!==null);return known.length&&known.every(validId)&&new Set(known).size===1?known[0]:null;};
@@ -64,8 +65,10 @@ export function parseNotificationPayload(payload,{ownerUserId,observedAt=Date.no
     const notifications=obj(old.notifications)??{},tweets=obj(old.tweets)??{},users=obj(old.users)??{};
     for(const row of Object.values(notifications)){if(stats.rows>=20000){stats.truncated=true;break;}add(legacy(row,tweets,users));}
   }
-  // Only known TimelineNotification objects; never infer a notification from tweet text.
-  const stack=[payload.data??payload], seen=new WeakSet();let visited=0;
+  // Prefer a validated owner-bound timeline when a raw GraphQL viewer envelope
+  // is supplied. Existing projected arrays and legacy REST payloads remain supported.
+  const envelope=inspectNotificationTimelineEnvelope(payload,{ownerUserId});
+  const stack=envelope?envelope.notifications:[payload.data??payload], seen=new WeakSet();let visited=0;
   while(stack.length){
     const node=stack.pop();if(!node||typeof node!=='object'||seen.has(node))continue;
     seen.add(node);if(++visited>100000||stats.rows>=20000){stats.truncated=true;break;}

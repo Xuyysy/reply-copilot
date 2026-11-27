@@ -69,3 +69,13 @@
 
 ## 2026-11-27 用户实机反馈与诊断补充
 用户截图显示通知源 `schema_changed`，已提交 0 页 / 新增 0 条，帖子源未执行。不能据此确认具体 HTTP 状态、返回字段或是否受到访问限制。未采集真实响应。新增通用同步阶段、有限错误码及已知 HTTP 状态的本地诊断投影；未知状态显示 unknown，且不会保存响应正文、请求头、地址、游标或账号凭据。现有传输、停止条件及授权门禁不变；不自动重试，不启用备用来源。该增量用于可审计故障报告，不声称修复真实接口。
+
+## 2026-11-27 开源源码逐项复核与独立解析增量
+
+检查了以下 **固定 Git commit** 的具体文件，而不是用仓库名称推断能力：
+
+- [X-Insights 通知解析](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/notifications.ts)：已知 GraphQL `TimelineNotification` 与旧版 REST `globalObjects`、显式 actor/target。其英文文本推断和采集时间回填不适合本文的保守互动计数。
+- [X-Insights 帖子解析](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/tweet.ts)：`TweetWithVisibilityResults` 包装、缺字段与引用；只复用高层兼容性测试模式。
+- [Xplore 正规化测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/normalizer.test.ts) 与 [X API 测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/x-client.test.ts)：`timeline` / `timeline_v2` 变体、模块、底部游标、错误停止和测试隔离；未复制会话请求、签名或凭据处理逻辑。
+
+新增纯函数 `inspectNotificationTimelineEnvelope` 与离线通知 adapter 连接：明确读取经提供的 `viewer_v2/viewer → notification_timeline/timeline/timeline_v2 → instructions`，拒绝矛盾 owner、含糊游标、无终止证据、异常长度，接受已知条目/模块/替换节点，仍要求显式 actor、目标帖 owner，未知互动时间保持 null，未知图标不会推断为已确认互动。测试只使用合成 JSON。**此项是独立数据解析能力，不修改 `staging/interaction-interface.js` 的浏览器认证请求或其投影函数。** 现有页内投影仍可能在送达本 adapter 之前报 `schema_changed`；此次提交不能宣称实机源恢复，亦不解除自动同步门禁。所有代码自行实现，无复制第三方源文件。
