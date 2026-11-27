@@ -159,7 +159,7 @@
  }
  function project(body,kind,owner){
    if(!obj(body)||arr(body.errors).length)fail('schema_changed');
-   const notifications=[],posts=[],users=[],bottom=new Set();let terminal=false,ignored=0;
+   const notifications=[],posts=[],users=[],bottom=new Set(),restNotificationIds=new Set();let terminal=false,ignored=0;
    let instructions,viewer=null,global=null;
    if(kind==='graphql'){
      // Never accept a good primary viewer while ignoring a conflicting alias.
@@ -207,7 +207,28 @@
      for(const entry of [ins.entry,ins.replaceEntry?.entry])if(entry!==undefined&&entry!==null)entries.push(entry);
      if((entryCount+=entries.length)>2000)fail('page_limit');
      for(const entry of entries){
-       const c=entry?.content;if(!obj(c))continue;
+       const entryId=kind==='rest'&&typeof entry?.entryId==='string'?entry.entryId:null;
+       // REST URT distinguishes notification references and bottom pagination
+       // through entryId, even when operation.cursor omits cursorType.
+       if(entryId?.startsWith('notification-')){
+         const id=entryId.slice('notification-'.length);
+         if(!id||id.length>256)fail('schema_changed');
+         restNotificationIds.add(id);
+       }
+       const restBottom=entryId==='cursor-bottom'||entryId?.startsWith('cursor-bottom-');
+       const restTop=entryId==='cursor-top'||entryId?.startsWith('cursor-top-');
+       const c=entry?.content;
+       if(!obj(c)){if(restBottom)fail('invalid_pagination');continue;}
+       if(restBottom||restTop){
+         const direction=restBottom?'Bottom':'Top';
+         if(c.cursorType!=null&&c.cursorType!==direction||c.cursor_type!=null&&c.cursor_type!==direction)fail('ambiguous_cursor');
+         if(restBottom){
+           const direct=c.value,nested=c.operation?.cursor?.value;
+           if(direct!=null&&nested!=null&&direct!==nested)fail('ambiguous_cursor');
+           cursor({cursorType:'Bottom',value:nested??direct});
+         }
+         continue;
+       }
        cursor(c);cursor(c.operation?.cursor);
        const item=c.itemContent??c.item?.content?.itemContent??c.item?.content;
        if(kind==='graphql'||kind==='search'){
@@ -262,7 +283,13 @@
    if(kind==='graphql'||kind==='search')payload={data:notifications};
    else{
      const n=Object.create(null),tweets=Object.create(null),people=Object.create(null);
-     for(const [key,row] of Object.entries(global.notifications)){
+     // URT may carry off-page globalObjects. Read only displayed references
+     // when explicit notification entry IDs are present.
+     const visible=restNotificationIds.size?[...restNotificationIds].map(id=>{
+       if(!Object.hasOwn(global.notifications,id))fail('schema_changed');
+       return [id,global.notifications[id]];
+     }):Object.entries(global.notifications);
+     for(const [key,row] of visible){
        const a=row?.template?.aggregateUserActionsV1;
        if(row?.icon?.id==='person_icon'){
          if(!obj(a)||!(a.targetObjects===undefined||Array.isArray(a.targetObjects)&&a.targetObjects.length===0)||!Array.isArray(a.fromUsers)||a.fromUsers.length<1||a.fromUsers.length>1000)fail('schema_changed');

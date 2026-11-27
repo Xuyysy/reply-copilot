@@ -114,7 +114,7 @@ test('REST later-page corruption leaves the earlier interaction and cursor check
    const c={runtime,storage:{session:{get:async key=>({[key]:state[key]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async(id,m)=>{if(id!==1)throw Error('foreign tab');return send(m)},create:async()=>({id:10}),update:async()=>({})}};
    const action=id=>({icon:{id:'heart_icon'},template:{aggregateUserActionsV1:{targetObjects:[{tweet:{id}}],fromUsers:[{user:{id:'222'}}]}}});
    const users={222:{id_str:'222',screen_name:'actor'}};
-   const first={globalObjects:{notifications:{first:action('555')},tweets:{555:{id_str:'555',user_id_str:'111'}},users},timeline:{instructions:[{entries:[{content:{cursorType:'Bottom',value:'synthetic-next'}}]}]}};
+   const first={globalObjects:{notifications:{first:action('555')},tweets:{555:{id_str:'555',user_id_str:'111'}},users},timeline:{instructions:[{addEntries:{entries:[{entryId:'notification-first',content:{}},{entryId:'cursor-bottom-1',content:{operation:{cursor:{value:'synthetic-next'}}}}]}}]}};
    const damaged={globalObjects:{notifications:{valid:action('666'),broken:action('999')},tweets:{666:{id_str:'666',user_id_str:'111'}},users},timeline:{instructions:[{terminateTimeline:{direction:'Bottom'}}]}};
    new Function('chrome','location','document','performance','fetch','addEventListener',${JSON.stringify(code)})(
     c,{origin:'https://x.com',pathname:'/home'},

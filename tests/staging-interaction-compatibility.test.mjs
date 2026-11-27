@@ -186,6 +186,43 @@ test('recognized non-like notification icons do not block confirmed likes or inv
  assert.throws(()=>api.project(modern([notice('heart_icon'),notice('unclassified_icon')]),'graphql',owner),/schema_changed/);
 });
 
+
+test('REST URT cursor-bottom operation and displayed notification references are accepted',()=>{
+ const body=legacy('heart_icon');
+ body.globalObjects.notifications.hidden={icon:{id:'future-icon'}};
+ body.timeline.instructions=[{type:'TimelineAddEntries',addEntries:{entries:[
+  {entryId:'cursor-top-42',content:{operation:{cursor:{value:'ignored-top'}}}},
+  {entryId:'notification-n',content:{}},
+  {entryId:'cursor-bottom-41',content:{operation:{cursor:{value:'opaque-rest-next'}}}}
+ ]}}];
+ const p=api.project(body,'rest',owner);
+ assert.equal(p.nextCursor,'opaque-rest-next');assert.equal(p.done,false);
+ const result=normalized(body,'rest','notification');
+ assert.deepEqual(result.events.map(e=>e.type),['like']);
+ assert.equal(result.nextCursor,'opaque-rest-next');assert.equal(result.done,false);
+ body.timeline.instructions[0].addEntries.entries[2]={entryId:'cursor-bottom',content:{value:'plain-bottom'}};
+ assert.equal(api.project(body,'rest',owner).nextCursor,'plain-bottom');
+});
+test('REST URT rejects missing/mismatched bottom values and missing referenced notifications',()=>{
+ const make=()=>{const b=legacy('heart_icon');b.timeline.instructions=[{addEntries:{entries:[
+  {entryId:'notification-n',content:{}},
+  {entryId:'cursor-bottom-10',content:{operation:{cursor:{value:'opaque'}}}}
+ ]}}];return b;};
+ for(const mutate of [
+  b=>{b.timeline.instructions[0].addEntries.entries[1].content={};},
+  b=>{b.timeline.instructions[0].addEntries.entries[1].content={cursorType:'Top',value:'opaque'};},
+  b=>{b.timeline.instructions[0].addEntries.entries[1].content={value:'different',operation:{cursor:{value:'opaque'}}};}
+ ]){const b=make();mutate(b);assert.throws(()=>api.project(b,'rest',owner),/(invalid_pagination|ambiguous_cursor)/);}
+ const missing=make();missing.timeline.instructions[0].addEntries.entries[0].entryId='notification-not-present';
+ assert.throws(()=>api.project(missing,'rest',owner),/schema_changed/);
+ const both=make();both.timeline.instructions[0].addEntries.entries.push({entryId:'cursor-bottom-11',content:{operation:{cursor:{value:'other'}}}});
+ assert.throws(()=>api.project(both,'rest',owner),/ambiguous_cursor/);
+ const noProof=make();noProof.timeline.instructions[0].addEntries.entries.pop();
+ assert.throws(()=>api.project(noProof,'rest',owner),/terminal_unverified/);
+ const terminal=make();terminal.timeline.instructions.push({type:'TimelineTerminateTimeline',direction:'Bottom'});
+ assert.throws(()=>api.project(terminal,'rest',owner),/ambiguous_cursor/);
+});
+
 test('REST operation metadata never copies credential-like query fields into an active request',()=>{
  const origin='https://x.com',endpoint=api.endpointFrom([{name:origin+'/i/api/2/notifications/all.json?count=20&include_user_entities=1&include_auth_token=fixture-sensitive&include_cookie=fixture-sensitive&include_session=fixture-sensitive'}],origin);
  const url=api.pageURL(endpoint,null,owner);
