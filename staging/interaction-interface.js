@@ -162,10 +162,14 @@
    const notifications=[],posts=[],users=[],bottom=new Set();let terminal=false,ignored=0;
    let instructions,viewer=null,global=null;
    if(kind==='graphql'){
-     viewer=body.data?.viewer_v2?.user_results?.result??body.data?.viewer?.user_results?.result;
-     if(!obj(viewer))fail('schema_changed');
-     const viewerId=stable(viewer.rest_id,viewer.legacy?.id_str);
-     if((viewer.rest_id!=null||viewer.legacy?.id_str!=null)&&(!viewerId||viewerId!==owner))fail('owner_mismatch');
+     // Never accept a good primary viewer while ignoring a conflicting alias.
+     const viewers=[body.data?.viewer_v2?.user_results?.result,body.data?.viewer?.user_results?.result].filter(x=>x!=null);
+     if(!viewers.length||viewers.some(v=>!obj(v)))fail('schema_changed');
+     for(const candidate of viewers){
+       const id=stable(candidate.rest_id,candidate.legacy?.id_str);
+       if((candidate.rest_id!=null||candidate.legacy?.id_str!=null)&&(!id||id!==owner))fail('owner_mismatch');
+     }
+     viewer=viewers[0];
      // A local signed-in identity is corroborated by the viewer response when present.
      // Known GraphQL wrappers only; conflicting instruction arrays fail closed.
      const candidates=[

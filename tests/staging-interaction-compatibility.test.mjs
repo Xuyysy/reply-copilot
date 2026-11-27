@@ -44,6 +44,18 @@ test('contradictory explicit viewer identities cannot be downgraded to unverifie
  assert.throws(()=>api.project(body,'graphql',owner),/owner_mismatch/);
 });
 
+
+test('duplicated GraphQL viewer aliases cannot conceal a contradictory owner identity',()=>{
+ const body=modern([notice('heart_icon')]);
+ body.data.viewer={user_results:{result:{rest_id:'333',legacy:{id_str:'333'}}}};
+ assert.throws(()=>api.project(body,'graphql',owner),/owner_mismatch/);
+ const alias=body.data.viewer.user_results.result;
+ alias.rest_id=owner;alias.legacy.id_str=owner;
+ assert.deepEqual(normalized(body,'graphql','notification').events.map(e=>e.type),['like']);
+ alias.legacy.id_str='333';
+ assert.throws(()=>api.project(body,'graphql',owner),/owner_mismatch/);
+});
+
 test('same-page duplicated or ambiguous cursors never establish terminal coverage',()=>{
  const body=modern([notice('heart_icon')]);
  body.data.viewer_v2.user_results.result.timeline.instructions[0].entries.push({content:{cursorType:'Bottom',value:'next'}});
