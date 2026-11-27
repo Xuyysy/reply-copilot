@@ -5,7 +5,7 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
  const dir=mkdtempSync(path.join(tmpdir(),'xrh-partner-ui-')),pending=new Map();let chrome,buffer='',serial=0,session;
  const call=(method,params={},sid=session)=>new Promise((resolve,reject)=>{const id=++serial,timer=setTimeout(()=>{pending.delete(id);reject(Error('Browser command timed out'));},8000);pending.set(id,{resolve,reject,timer});chrome.stdio[3].write(JSON.stringify({id,method,params,...(sid?{sessionId:sid}:{})})+'\0');});
  const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.result.exceptionDetails)throw Error(r.result.exceptionDetails.exception?.description);return r.result.result.value;};
- const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify({browser:await evaluate('({text:document.body.innerText,forms:[...document.forms].map(f=>({valid:f.checkValidity(),inputs:[...f.querySelectorAll("input")].map(e=>({value:e.value,valid:e.validity.valid,message:e.validationMessage}))}))})'),requests:requests.slice(-12)}));};
+ const until=async expr=>{for(let i=0;i<240;i++){if(await evaluate(`Boolean(${expr})`))return;await new Promise(r=>setTimeout(r,20));}throw Error('Browser condition failed: '+expr+' '+JSON.stringify({browser:await evaluate('({text:document.body?.innerText,forms:[...document.forms].map(f=>({valid:f.checkValidity(),inputs:[...f.querySelectorAll("input")].map(e=>({value:e.value,valid:e.validity.valid,message:e.validationMessage}))}))})'),requests:requests.slice(-12)}));};
  const click=async expr=>{const point=await evaluate(`(()=>{const e=${expr};e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};})()`);await call('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',clickCount:1});await call('Input.dispatchMouseEvent',{type:'mouseReleased',...point,button:'left',clickCount:1});};
 
  const f=fixture({released:false}),db=f.sql,tokens={},requests=[];let server,identity='owner',origin;
@@ -74,13 +74,13 @@ test('six isolated accounts: Chromium and actual bundled Worker partner lifecycl
  window.showAdmin=()=>root.render(<Admin key="admin" language="zh" write={(p,b)=>api(p,{method:'POST',body:JSON.stringify({...b,operationId:crypto.randomUUID()})})}/>);
  window.showAdmin();`,resolveDir:web,loader:'tsx'},bundle:true,platform:'browser',format:'iife',define:{'import.meta.env.PUBLIC_API_BASE_URL':JSON.stringify(origin),'import.meta.env.DEV':'false'},outfile:app});
  chrome=spawn('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',['--headless=new','--no-first-run','--disable-background-networking','--remote-debugging-pipe',`--user-data-dir=${path.join(dir,'profile')}`,'about:blank'],{stdio:['ignore','ignore','ignore','pipe','pipe']});chrome.stdio[4].on('data',c=>{buffer+=c;let i;while((i=buffer.indexOf('\0'))>=0){const r=JSON.parse(buffer.slice(0,i));buffer=buffer.slice(i+1);const p=pending.get(r.id);if(p){pending.delete(r.id);clearTimeout(p.timer);r.error?p.reject(Error(r.error.message)):p.resolve(r);}}});
- const target=(await call('Target.createTarget',{url:'about:blank'},null)).result.targetId;session=(await call('Target.attachToTarget',{targetId:target,flatten:true},null)).result.sessionId;await call('Page.enable');await call('Page.navigate',{url:origin+'/'});
+ const target=(await call('Target.createTarget',{url:'about:blank'},null)).result.targetId;session=(await call('Target.attachToTarget',{targetId:target,flatten:true},null)).result.sessionId;await call('Page.enable');await call('Page.navigate',{url:origin+'/'});await until('document.readyState!=="loading" && Boolean(document.body) && typeof window.showAdmin==="function"');
 
  const button=t=>`[...document.querySelectorAll("button")].find(b=>b.textContent.trim().startsWith(${JSON.stringify(t)}))`;
- const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
+ const has=t=>'document.body?.textContent.includes('+JSON.stringify(t)+')';
  const ready=t=>`Boolean((${button(t)})&&! (${button(t)}).disabled)`;
  const press=async t=>{await until(ready(t));await evaluate('('+button(t)+').click()');};
- const type=async(expr,value)=>{await until(expr);await evaluate('(()=>{const e='+expr+';e.focus();e.select();})()');await call('Input.insertText',{text:value});await until('('+expr+').value==='+JSON.stringify(value));};
+ const type=async(expr,value)=>{await until(expr);await evaluate('(()=>{const e='+expr+';e.focus();e.select();})()');await call('Input.insertText',{text:value});await until('('+expr+')?.value==='+JSON.stringify(value));};
  const member=async(id,lang='zh')=>{identity=id;await evaluate('showMember('+JSON.stringify(id)+','+JSON.stringify(lang)+')');};
  const asAdmin=async()=>{identity='owner';await evaluate('showAdmin()');};
  const authorize=async(id)=>{
