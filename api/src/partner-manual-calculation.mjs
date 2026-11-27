@@ -41,9 +41,11 @@ export function manualOrderEstimate(domain,c,rows){
  if(!candidateInTerm(c))return null;
  const review={domain,orderId:c.order_id,paidAt:c.paid_at,buyerId:c.buyer_id,rateBps:c.rate_bps,state:'review',reason:'evidence_requires_review',principalFen:null,commissionFen:null};
  if(c.buyer_eligible!==1||!Array.isArray(rows)||rows.some(r=>r.buyer_id!==c.buyer_id||r.order_id!==c.order_id||r.paid_at!==c.paid_at))return review;
- const e=classifyPaymentEvidence(domain,rows,{allowFullyReversed:true});
+ const e=classifyPaymentEvidence(domain,rows);
  if(!e.eligible||!('principalFen' in e)||!('refundedPrincipalFen' in e))return {...review,reason:e.reason};
- const principal=e.principalFen-e.refundedPrincipalFen;
+ // No automatic refund adjustments in this release. Flag affected orders for manual review.
+ if(e.refundedPrincipalFen!==0)return {...review,reason:'refund_requires_manual_review'};
+ const principal=e.principalFen;
  return {...review,state:'verified',reason:null,principalFen:principal,commissionFen:commissionFen(principal,c.rate_bps)};
 }
 export function summarizeManualOrders(orders,recordedFen,complete){
@@ -56,9 +58,8 @@ export function summarizeManualOrders(orders,recordedFen,complete){
  const reviewCount=orders.length-reviewed.length;
  return {verifiedOrders:reviewed.length,reviewCount,estimatedFen:complete?total:null,recordedFen,differenceFen:complete&&reviewCount===0?total-recordedFen:null,complete};
 }
-export function parseManualRecord(value,now){
- if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='amountFen,operationId,reason,reference,transferredAt,userId')throw new TypeError('PARTNER_RECORD_INVALID');
- const {userId,operationId,amountFen,transferredAt,reference,reason}=value;
- if(!id(userId)||typeof operationId!=='string'||! /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(operationId)||!int(amountFen,1,1000000000000)||!int(transferredAt,1,now)||typeof reference!=='string'||! /^[A-Za-z0-9_-]{4,80}$/.test(reference.trim())||typeof reason!=='string'||reason.trim().length<8||reason.trim().length>500)throw new TypeError('PARTNER_RECORD_INVALID');
- return {userId,operationId,amountFen,transferredAt,reference:reference.trim().toLowerCase(),reason:reason.trim()};
+export const MIN_REQUEST_FEN=1000;
+export function requestableFen(summary,pending){
+ if(pending||!summary?.complete||summary.reviewCount!==0||!int(summary.differenceFen,MIN_REQUEST_FEN))return null;
+ return summary.differenceFen;
 }

@@ -182,7 +182,7 @@ export default {
       if (request.method === "GET" && path === "/v1/admin/referrals") return await adminReferralOverview(request,env);
       if (request.method === "GET" && path === "/v1/partners/me") return await myPartnerPolicy(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/policy") return await adminPartnerPolicy(request,env);
-      if (request.method === "GET" && path === "/v1/partners/manual-report") return await myManualPartnerReport(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/manual-report") return await myManualPartnerReport(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/manual-report") return await adminManualPartnerReport(request,env);
       if (request.method === "GET" && path === "/v1/admin/dashboard") return await adminDashboard(request,env);
       if (request.method === "GET" && path === "/v1/admin/users") return await filteredUsers(request,env);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {commissionFen,termEnd,candidateInTerm,manualCandidatePlan,manualEvidenceBatchPlan,summarizeManualOrders,parseManualRecord,manualOrderEstimate} from '../src/partner-manual-calculation.mjs';
+import {commissionFen,termEnd,candidateInTerm,manualCandidatePlan,manualEvidenceBatchPlan,summarizeManualOrders,requestableFen,manualOrderEstimate} from '../src/partner-manual-calculation.mjs';
 
 test('manual report uses integer fen, historical rate and calendar term',()=>{
  assert.equal(commissionFen(10001,2000),2000);
@@ -25,8 +25,13 @@ test('missing or ambiguous evidence does not produce a balance',()=>{
  assert.equal(summarizeManualOrders([v],3000,true).differenceFen,-1000);
  assert.equal(summarizeManualOrders([v],1000,false).estimatedFen,null);
 });
-test('external record validation rejects unknown fields, invalid dates and floating fen',()=>{
- const r={userId:'p',operationId:'12345678-1234-1234-1234-123456789abc',amountFen:2000,transferredAt:100,reference:'Receipt_001',reason:'manual reconciliation'};
- assert.equal(parseManualRecord(r,100).reference,'receipt_001');
- for(const x of [{...r,amountFen:1.5},{...r,transferredAt:101},{...r,reason:'x'},{...r,reference:'a'},{...r,recipient:'not allowed'}])assert.throws(()=>parseManualRecord(x,100));
+test('application minimum is exactly 1000 fen and one outstanding request',()=>{
+ const s={complete:true,reviewCount:0,differenceFen:999};
+ assert.equal(requestableFen(s,false),null);
+ assert.equal(requestableFen({...s,differenceFen:1000},false),1000);
+ assert.equal(requestableFen({...s,differenceFen:5600},false),5600);
+ assert.equal(requestableFen({...s,differenceFen:1000},true),null);
+ assert.equal(requestableFen({...s,differenceFen:1000,reviewCount:1},false),null);
+ assert.equal(requestableFen({...s,differenceFen:1000,complete:false},false),null);
+ assert.equal(requestableFen({...s,differenceFen:-1},false),null);
 });

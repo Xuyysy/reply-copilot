@@ -3,6 +3,7 @@ import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
 import PartnerManualReport from "../account/PartnerManualReport";
+import PartnerManualQueue from "./PartnerManualQueue";
 import {Input} from "../ui/input";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
@@ -55,7 +56,8 @@ export default function PartnerAdminPanel({language,write}:Props){
  }
  return <Card><CardHeader><CardTitle>{t("推广伙伴 · 资格与规则","Partners · Eligibility and policy")}</CardTitle></CardHeader>
  <CardContent className="space-y-4">
-  <p className="text-sm text-muted-foreground">{t("管理指定伙伴及约定分成。转账在系统外完成，仅登记实际记录。","Manage assigned partners and commission terms. Transfers occur outside this system; record completed transfers only.")}</p>
+  <PartnerManualQueue language={language} write={write}/>
+  <p className="text-sm text-muted-foreground">{t("管理指定伙伴及约定分成。满10元申请，由管理员人工转账并标记完成。","Manage assigned partners and commission terms. Requests start at CNY 10; transfer externally and mark settled.")}</p>
   <form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void search();}}>
    <Input aria-label={t("用户 ID 或邮箱","User ID or email")} value={q} onChange={e=>{setQ(e.target.value);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
    <Button disabled={busy||!q.trim()}>{t("查询","Search")}</Button>
