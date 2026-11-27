@@ -1,6 +1,7 @@
 import {useEffect,useState} from "react";
 import {Gift,Copy,RefreshCw} from "lucide-react";
 import {api} from "../../lib/api";
+import {buildReferralShareText} from "../../lib/referral-share.mjs";
 import {phrase,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
@@ -40,6 +41,13 @@ export default function ReferralInviteCard({language}:{language:Language}){
   try{await navigator.clipboard.writeText(data.link);setMessage(t("链接已复制","Link copied"));}
   catch{setError(t("无法自动复制，可选中链接手动复制。","Select and copy the link manually."));}
  };
+ const shareText=data?.enabled&&data.canInvite&&data.link?buildReferralShareText(data.link,typeof window!=="undefined"?window.location.origin:"",language):"";
+ const copyShare=async()=>{
+  if(!shareText)return;
+  setError("");setMessage("");
+  try{await navigator.clipboard.writeText(shareText);setMessage(t("推广文案已复制","Share text copied"));}
+  catch{setError(t("无法自动复制，请手动选中下方文案。","Unable to copy automatically. Select the share text below."));}
+ };
  if(loading)return <div data-testid="referral-user-loading" role="status" className="text-sm text-muted-foreground">{t("正在读取邀请奖励…","Loading referral rewards…")}</div>;
  if(!data?.enabled)return null;
  return <Card data-testid="account-referral-rewards" className="border-primary/25">
@@ -58,6 +66,16 @@ export default function ReferralInviteCard({language}:{language:Language}){
    <div className="grid grid-cols-3 gap-2">
     {[[t("邀请注册","Registered"),data.registered],[t("奖励成功","Rewarded"),data.rewarded],[t("累计获赠","Credits earned"),data.earnedCredits]].map(([label,n])=>
      <div key={label} className="rounded-lg bg-muted/40 p-3 text-center"><strong className="block text-xl">{Number(n||0).toLocaleString()}</strong><span className="text-xs text-muted-foreground">{label}</span></div>)}
+   </div>
+   <div className="space-y-2 rounded-lg border p-3" data-testid="referral-share-tools">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+     <strong className="text-sm">{t("推广素材","Sharing toolkit")}</strong>
+     <a href="/promote/" className="text-sm underline">{t("查看推广指南","View sharing guide")}</a>
+    </div>
+    {shareText&&<div className="space-y-2">
+     <textarea readOnly value={shareText} rows={4} aria-label={t("可复制的推广文案","Copy-ready share text")} className="w-full rounded-md border bg-muted/30 p-2 text-sm" onFocus={e=>e.target.select()}/>
+     <Button type="button" size="sm" variant="outline" onClick={()=>void copyShare()}><Copy size={15}/>{t("复制推广文案","Copy share text")}</Button>
+    </div>}
    </div>
    {data.invitedBy&&<p className="text-sm text-muted-foreground">{data.invitedBy.status==="rewarded"?t("你通过好友邀请成功激活，额外获得 50 次免费额度。","Your friend referral earned you 50 extra free replies."):t("你有一笔好友邀请奖励待激活：完成插件绑定并成功接收第一条 AI 回复。","Your invite bonus is pending: connect the extension and receive your first AI reply.")}</p>}
    {message&&<p role="status" className="text-sm text-emerald-700">{message}</p>}
