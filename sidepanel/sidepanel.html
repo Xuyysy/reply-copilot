@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>x-Reply-Helper</title><link rel="stylesheet" href="../content/design-tokens.css"><link rel="stylesheet" href="sidepanel.css"><link rel="stylesheet" href="../content/momentum.css"></head>
 <body>
-  <header class="app-header"><img class="brand-icon" src="../icons/icon-48.png" alt=""><div><h1>x-Reply-Helper</h1><p>AI 创作者控制中心</p></div><button id="settings" class="icon-button" aria-label="设置" title="设置">⚙</button></header>
+  <header class="app-header"><img class="brand-icon" src="../icons/icon-48.png" alt=""><div class="app-brand"><h1>x-Reply-Helper</h1><p>AI 创作者控制中心</p></div><button id="nav-partners" type="button" class="button partner-nav-button" title="成为推广合伙人，赚取推广佣金（新标签页）">赚佣金</button><button id="settings" class="icon-button" aria-label="设置" title="设置">⚙</button></header>
   <main>
     <div id="momentum-control" class="dashboard-card pro-control"></div>
     <section id="dashboard">
@@ -30,7 +30,7 @@
       <details class="dashboard-card usage-card"><summary>本地使用统计 <span>仅统计本机操作</span></summary><div class="usage-card-content"><div class="quota-row"><div><strong id="stat-week">0</strong><span>近 7 天生成</span></div><div><strong id="stat-all">0</strong><span>累计生成</span></div><div><strong id="stat-copy">0</strong><span>已复制建议</span></div></div><p class="muted-note">仅统计本机事件，不代表服务端扣费或实际发送。</p></div></details>
       <details class="dashboard-card supported-flow"><summary>如何使用回复助手</summary><p>在 X 帖子下点击「回复」，使用回复悬浮窗生成与编辑建议。侧栏只负责账户、设置和互动势能，不会在后台生成回复。</p></details>
       <details class="dashboard-card diagnostics-card" id="diagnostic-panel" hidden><summary>故障诊断</summary><p class="muted-note">悬浮窗不出现？先点击「开始复现」，在 X 页面点击一次回复，约12秒后完成复现（生成较慢可等到30秒），建议保存完整 JSON 报告。仅在本机采集脱敏结构特征，不记录正文、URL、账号、输入内容或登录凭据。</p><dl id="diagnostic-results" class="diagnostic-results"></dl><p id="diagnostic-status" class="muted-note" role="status" aria-live="polite">尚未检查。</p><div class="dashboard-actions"><button id="diagnostic-arm" class="button primary" type="button">开始复现</button><button id="diagnostic-finish" class="button secondary" type="button" disabled>完成复现</button><button id="diagnostic-cancel" class="button secondary" type="button" disabled>取消录制</button><button id="diagnostic-run" class="button secondary" type="button">快速检查</button><button id="diagnostic-copy" class="button secondary" type="button" disabled>复制报告</button><button id="diagnostic-export" class="button secondary" type="button" disabled>保存 JSON</button></div></details>
-      <div class="dashboard-card quick-links"><h2>快捷入口</h2><div class="dashboard-actions"><button id="nav-partners" type="button" class="button partner-nav-button">推广合伙人 <span aria-hidden="true">↗</span></button><button id="nav-website" class="button secondary">打开官网</button><button id="nav-account" class="button secondary">我的账户</button><button id="nav-pricing" class="button secondary">充值套餐</button><button id="nav-guide" class="button secondary">使用指南</button></div></div>
+      <div class="dashboard-card quick-links"><h2>快捷入口</h2><div class="dashboard-actions"><button id="nav-website" class="button secondary">打开官网</button><button id="nav-account" class="button secondary">我的账户</button><button id="nav-pricing" class="button secondary">充值套餐</button><button id="nav-guide" class="button secondary">使用指南</button></div></div>
     </section>
   </main>
   <footer><button id="footer-settings" class="text-button">设置</button></footer>

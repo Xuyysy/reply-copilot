@@ -18,8 +18,9 @@ test('partner navigation uses the existing same-origin website opener for both c
  const js=readFileSync(new URL('../../sidepanel/sidepanel.js',import.meta.url),'utf8');
  const css=readFileSync(new URL('../../sidepanel/sidepanel.css',import.meta.url),'utf8');
  assert.equal((html.match(/id="nav-partners"/g)||[]).length,1);
- assert.match(html,/<div class="dashboard-card quick-links"><h2>快捷入口<\/h2><div class="dashboard-actions"><button id="nav-partners" type="button" class="button partner-nav-button">推广合伙人/);
- assert.match(css,/\.quick-links \.partner-nav-button\s*\{[^}]*grid-column:1\/-1/);
+ assert.match(html,/<header class="app-header">[^\n]*<button id="nav-partners"[^>]*>赚佣金<\/button><button id="settings"/);
+ assert.doesNotMatch(html,/<div class="dashboard-card quick-links">[^\n]*nav-partners/);
+ assert.match(css,/\.app-header \.partner-nav-button\s*\{[^}]*white-space:nowrap/);
  const raw=js.match(/'nav-partners':'([^']+)'/);
  assert.ok(raw);
  assert.equal(raw[1],'/partners');

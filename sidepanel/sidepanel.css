@@ -8,7 +8,11 @@ body.dashboard-mode footer{display:none}body.dashboard-mode main{padding-bottom:
 /* Design System V1: native SidePanel dashboard, retaining existing interactions. */
 :root { --bg:var(--xrh-canvas);--card:var(--xrh-surface);--text:var(--xrh-ink);--muted:var(--xrh-muted);--line:var(--xrh-line);--accent:var(--xrh-brand);--soft:var(--xrh-pro-surface); }
 body { min-width:270px; min-height:100vh; font-size:13px; background:var(--bg); }
-.app-header { padding:16px 17px; gap:12px; background:var(--bg); border-bottom-color:var(--line); }
+.app-header { padding:16px 17px; gap:8px; background:var(--bg); border-bottom-color:var(--line); }
+.app-header .app-brand { flex:1 1 auto;min-width:0;overflow-wrap:anywhere; }
+.app-header .partner-nav-button { flex:0 0 auto;min-height:32px;padding:6px 9px;font-size:12px;font-weight:700;white-space:nowrap;border-radius:9px; }
+.app-header #settings { flex:0 0 34px;margin-left:0; }
+@media (max-width:320px) { .app-header { padding:12px 10px;gap:6px; } .app-header .brand-icon { width:30px;height:30px; } .app-header .app-brand h1 { font-size:13px; } .app-header .app-brand p { font-size:10px; } .app-header .partner-nav-button { padding:6px 7px; } }
 .brand-icon { width:38px;height:38px;border-radius:12px;box-shadow:0 3px 12px #315be818; }
 h1 { font-size:15px;font-weight:780;letter-spacing:-.025em;color:var(--text); }
 header p { margin-top:4px; }
@@ -63,8 +67,6 @@ main { padding:17px 15px 78px; }
 .quick-settings input[type="checkbox"]:checked::before { transform:translateX(15px); }
 .quick-links .dashboard-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr)); }
 .quick-links .button { width:100%; }
-.quick-links .partner-nav-button { grid-column:1/-1;gap:7px;min-height:38px;font-size:13px;font-weight:700; }
-.quick-links .partner-nav-button span { font-size:14px;line-height:1; }
 .supported-flow { padding-top:12px;padding-bottom:12px; }
 .supported-flow>p { margin-bottom:0; }
 footer { background:var(--bg);border-color:var(--line); }
