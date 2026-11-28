@@ -520,7 +520,14 @@
     }
     const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body));
     const label=normalized(last.innerText||last.textContent);
-    if(!label||!text.endsWith(' '+label))return null;
+    if(!label||!text.endsWith(label))return null;
+    // Adjacent CJK punctuation and native link spans need not have a
+    // whitespace boundary. Only remove a DOM-proven trailing anchor.
+    if(!text.endsWith(' '+label)){
+      const tail=body.ownerDocument.createRange();
+      tail.selectNodeContents(body);tail.setStartAfter(last);
+      if(normalized(tail.toString())||tail.cloneContents().querySelector('img,video,a,[data-testid="tweetText"]'))return null;
+    }
     return {text:text.slice(0,-label.length).trim(),links:anchors.slice(0,-1).map(link=>link.href)};
   }
   function detailQuoteCheck(post,article,initialUrl){
@@ -695,21 +702,23 @@
     if(expandedId&&expandedId!==post.statusId)return false;
     const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId,true);
     let modalQuote=captureDetailQuote(article,initialUrl,post.statusId,true);
-    const outerCorroborated=sourceAuthor===owner&&modalAuthor===owner&&
-      sourceEvidence.eligible&&modalEvidence.eligible&&
+    const outerShape=sourceAuthor===owner&&modalAuthor===owner&&sourceEvidence.eligible&&modalEvidence.eligible;
+    const outerCorroborated=outerShape&&
       (routeId===post.statusId||modalEvidence.statusId===post.statusId||expandedId===post.statusId||
        (sourceTime!==null&&sourceTime===modalTime));
+    let recoveredInner=false;
     // A compact modal can omit the inner permalink and replace the
     // source's native media with a pic link. Recover the INNER identity
     // only from an exact attached quote destination plus the same author
-    // and exact quote content, after independently confirming the outer.
+    // and exact quote content. A compact parent lacking its ID/time can
+    // use the existing trusted-click stability fence, NOT a verified bind.
     // This is never a way to infer the parent from a quote URL.
-    if(outerCorroborated&&post.hasCapturedQuote&&sourceQuote?.id&&sourceQuote.owner&&
+    if(outerShape&&post.hasCapturedQuote&&sourceQuote?.id&&sourceQuote.owner&&
        modalQuote&&!modalQuote.conflict&&!modalQuote.id&&modalQuote.owner===sourceQuote.owner&&
        (sourceQuote.time===null||modalQuote.time===null||sourceQuote.time===modalQuote.time)&&
        quoteProjection(article,sourceQuote.id,initialUrl,sourceQuote.owner)){
       const candidate={...modalQuote,id:sourceQuote.id};
-      if(sameTimelineQuote(sourceQuote,candidate))modalQuote=candidate;
+      if(sameTimelineQuote(sourceQuote,candidate)){modalQuote=candidate;recoveredInner=true;}
     }
     if(report)Object.assign(report,{sourceQuoteId:Boolean(sourceQuote?.id),modalQuoteId:Boolean(modalQuote?.id),
       quoteOwnerMatch:Boolean(sourceQuote?.owner&&sourceQuote.owner===modalQuote?.owner),
@@ -723,8 +732,9 @@
     }else if(sourceQuote||modalQuote)return result(false,'unexpected_quote');
     // Missing evidence is not an explicit contradiction. Preserve the
     // existing hydration wait, but never let known conflicts reach it.
-    if(!outerCorroborated)return result(null,'outer_evidence_missing');
+    if(!outerCorroborated&&!recoveredInner)return result(null,'outer_evidence_missing');
     if(post.quoteOnly){
+      if(!outerCorroborated)return result(null,'outer_evidence_missing');
       return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
     }
@@ -750,8 +760,19 @@
       const sText=s?.text||normalized(post.sourceText),mText=m?.text||normalized(globalThis.ZaneReplyCopilotContent.postExtractor.postText(article));
       if((s||m)&&sText&&sText===mText&&JSON.stringify(s?.links||sourceLinks)===JSON.stringify(m?.links||modalLinks)&&
          !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
-           (normalized(old.sourceText)===sText||sameContext(old,mText))))return result(true,'quote_projection_matched');
+           (normalized(old.sourceText)===sText||sameContext(old,mText)))){
+        if(outerCorroborated)return result(true,'quote_projection_matched');
+        // Exact outer caption and quote projection agree, but no outer
+        // permalink/time is available. Do NOT claim identity verification.
+        // Preserve the existing unique-new-editor, trusted-click, 120ms
+        // stability check and pre-insertion revalidation. Any unrelated
+        // unowned status link outside the text remains ambiguous.
+        if(ownedDetailNodes(article,'a[href*="/status/"]').some(link=>!link.closest('[data-testid="tweetText"]')))
+          return result(false,'outer_identity_conflict');
+        return result(null,'quote_projection_causal_pending');
+      }
     }
+    if(!outerCorroborated)return result(false,'body_links_conflict');
     if(modalLinks.some((href,i)=>href!==sourceLinks[i])||
        (!short.expanded&&sourceLinks.length!==modalLinks.length))return result(false,'body_links_conflict');
     const matches=(long,value)=>{

@@ -121,7 +121,12 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
         {name:'zh_outer_native_media_conflict',source:zhSource+parentMedia,modal:noOuterTime+parentMedia.replace('/status/101/','/status/999/')},
         {name:'zh_outer_analytics_without_native_reply',source:zhSource,modal:noOuterTime+'<a href="'+url+'/analytics">Views</a>'},
         {name:'zh_outer_native_media_wrong_author',source:zhSource+parentMedia,modal:noOuterTime.replace('https://x.com/example','https://x.com/other')+parentMedia},
-        {name:'zh_outer_native_media_wrong_time',source:zhSource+parentMedia,modal:zhModal.replace(exactTime,wrongTime)+parentMedia}
+        {name:'zh_outer_native_media_wrong_time',source:zhSource+parentMedia,modal:zhModal.replace(exactTime,wrongTime)+parentMedia},
+        {name:'zh_compact_no_outer_time_wrong_caption',source:zhSource,modal:noOuterTime.replace('让我们恭喜他','完全不同的正文')},
+        {name:'zh_compact_no_outer_time_wrong_quote',source:zhSource,modal:noOuterTime.replace('多久能审核通过呀？','完全不同的正文')},
+        {name:'zh_compact_no_outer_time_wrong_link',source:zhSource,modal:noOuterTime.replace('title="https://x.com/quoted/status/202"','title="https://x.com/quoted/status/203"')},
+        {name:'zh_compact_no_outer_time_adjacent_link',source:zhSource,modal:noOuterTime.replace(' '+expandedQuoteLink,expandedQuoteLink)},
+        {name:'zh_compact_no_outer_time_stale',source:zhSource,modal:noOuterTime,quarantine:[{statusId:'999',sourceText:'又叒叒叒一位同学通过了！！！ 让我们恭喜他！！！ 希望各位也能早日上岸！！！'}]}
       ];
       const results=[];
       for(const item of specs){
@@ -185,13 +190,16 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       tco_expanded_quote:'bound',tco_unlinked_inner_timestamp:'bound',tco_wrong_expanded_id:'rejected',
       tco_missing_expanded_metadata:'rejected',tco_wrong_inner_time:'rejected',tco_wrong_inner_author:'rejected',tco_no_outer_time:'waiting',
       zh_owned_quote_media_id:'bound',zh_owned_quote_media_id_wrong_owner:'rejected',
-      zh_owned_quote_media_id_wrong_link:'rejected',zh_owned_quote_media_id_no_outer_proof:'rejected',
+      zh_owned_quote_media_id_wrong_link:'rejected',zh_owned_quote_media_id_no_outer_proof:'waiting',
       zh_owned_quote_media_id_wrong_inner_text:'rejected',zh_owned_quote_media_id_wrong_inner_author:'rejected',
       zh_owned_quote_media_id_wrong_outer_time:'rejected',zh_owned_quote_media_id_wrong_outer_route:'rejected',
       zh_owned_quote_media_id_quarantined:'rejected',zh_body_link_not_quote_media_evidence:'rejected',
       zh_outer_native_media_proof:'bound',zh_outer_native_analytics_proof:'bound',
       zh_outer_native_media_conflict:'rejected',zh_outer_analytics_without_native_reply:'rejected',
-      zh_outer_native_media_wrong_author:'rejected',zh_outer_native_media_wrong_time:'rejected'
+      zh_outer_native_media_wrong_author:'rejected',zh_outer_native_media_wrong_time:'rejected',
+      zh_compact_no_outer_time_wrong_caption:'rejected',zh_compact_no_outer_time_wrong_quote:'rejected',
+      zh_compact_no_outer_time_wrong_link:'rejected',zh_compact_no_outer_time_adjacent_link:'waiting',
+      zh_compact_no_outer_time_stale:'rejected'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

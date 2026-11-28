@@ -39,9 +39,12 @@ function fixture(){
   document.getElementById('open').addEventListener('click',()=>{
     history.pushState({},'','/compose/post');
     const d=document.createElement('div');d.id='modal';d.setAttribute('role','dialog');
-    const inner=f.mode==='wrong_quote'?projected.replace('多久能审核通过呀？','完全不同的正文'):projected;
-    const time=f.mode==='wrong_time'?timestamp.replace('03:51:00','03:51:01'):timestamp;
-    d.innerHTML='<div role="dialog" aria-modal="true"><article data-testid="tweet">'+header+time+text(caption+' '+link)+inner+'</article><div id="editor" role="textbox" aria-label="Reply draft" data-testid="tweetTextarea_0" contenteditable="true" style="min-height:40px;border:1px solid"></div><button id="send" data-testid="tweetButton">Reply</button></div>';
+    const compact=f.mode.startsWith('compact');
+    const inner=f.mode==='wrong_quote'||f.mode==='compact_wrong_quote'?projected.replace('多久能审核通过呀？','完全不同的正文'):projected;
+    const time=compact?'<time>1h</time>':f.mode==='wrong_time'?timestamp.replace('03:51:00','03:51:01'):timestamp;
+    const outer=f.mode==='compact_wrong_caption'?caption.replace('让我们恭喜他','完全不同的正文'):caption;
+    const tail=f.mode==='compact_wrong_link'?link.replace('/status/202','/status/203'):link;
+    d.innerHTML='<div role="dialog" aria-modal="true"><article data-testid="tweet">'+header+time+text(outer+(f.mode==='compact_adjacent'?'':' ')+tail)+inner+'</article><div id="editor" role="textbox" aria-label="Reply draft" data-testid="tweetTextarea_0" contenteditable="true" style="min-height:40px;border:1px solid"></div><button id="send" data-testid="tweetButton">Reply</button></div>';
     document.body.append(d);const editor=d.querySelector('#editor');
     editor.addEventListener('paste',e=>{e.preventDefault();f.pastes++;editor.textContent=e.clipboardData.getData('text/plain');editor.dispatchEvent(new InputEvent('input',{bubbles:true,inputType:'insertFromPaste'}));});
     d.querySelector('#send').addEventListener('click',()=>f.sends++);
@@ -77,15 +80,23 @@ test('Chromium trusted click through actual quote capture, three candidates and 
     let s=await state();assert.equal(s.generations.length,1);assert.equal(s.generations[0].sourceUrl,'https://x.com/example/status/101');assert.match(s.generations[0].sourceText,/早日上岸/);
     assert.deepEqual(s.styles,['natural','light_humor','thoughtful']);assert.equal(s.sends,0);
     await sleep(900);s=await state();assert.equal(s.generations.length,1);assert.equal(s.pastes,1);rows.push({name:'success',requests:s.generations.length,pastes:s.pastes,submissions:s.sends});
-    for(const mode of ['draft','closed']){
+    for(const mode of ['compact','compact_adjacent']){
       await reset(mode);await until('fixture.generations.length===1&&Boolean(fixture.pending)');
-      if(mode==='draft')await call('Input.insertText',{text:'我的草稿'});
-      else await evaluate('document.querySelector("#modal").remove()');
-      await evaluate('fixture.pending()');await sleep(950);s=await state();
-      assert.equal(s.generations.length,1,mode);assert.equal(s.pastes,0,mode);assert.equal(s.sends,0,mode);assert.equal(s.editor,mode==='draft'?'我的草稿':null);
+      await evaluate('fixture.pending()');await until('fixture.pastes===1&&document.querySelector("#editor").innerText===fixture.replies.natural');
+      await sleep(900);s=await state();assert.equal(s.generations.length,1,mode);assert.equal(s.pastes,1,mode);assert.equal(s.sends,0,mode);
+      assert.equal(s.generations[0].sourceUrl,'https://x.com/example/status/101',mode);
+      assert.deepEqual(s.styles,['natural','light_humor','thoughtful'],mode);
       rows.push({name:mode,requests:s.generations.length,pastes:s.pastes,submissions:s.sends});
     }
-    for(const mode of ['wrong_quote','wrong_time']){
+    for(const mode of ['draft','closed','compact_draft','compact_closed']){
+      await reset(mode);await until('fixture.generations.length===1&&Boolean(fixture.pending)');
+      if(mode.endsWith('draft'))await call('Input.insertText',{text:'我的草稿'});
+      else await evaluate('document.querySelector("#modal").remove()');
+      await evaluate('fixture.pending()');await sleep(950);s=await state();
+      assert.equal(s.generations.length,1,mode);assert.equal(s.pastes,0,mode);assert.equal(s.sends,0,mode);assert.equal(s.editor,mode.endsWith('draft')?'我的草稿':null);
+      rows.push({name:mode,requests:s.generations.length,pastes:s.pastes,submissions:s.sends});
+    }
+    for(const mode of ['wrong_quote','wrong_time','compact_wrong_caption','compact_wrong_quote','compact_wrong_link']){
       await reset(mode);await until('replyCopilotAssociationReport().some(e=>e.stage==="rejected")');
       await sleep(900);s=await state();assert.equal(s.generations.length,0,mode);assert.equal(s.pastes,0,mode);assert.equal(s.sends,0,mode);
       rows.push({name:mode,requests:s.generations.length,pastes:s.pastes,submissions:s.sends});
