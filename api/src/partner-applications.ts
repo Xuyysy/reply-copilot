@@ -56,7 +56,7 @@ export async function adminPartnerApplications(request:Request,env:Env){
  }
  const body=await jsonBody(request,4096);
  const {applicationId,operationId,action,...raw}=body??{};
- if(typeof applicationId!=="string"||!/^[a-f0-9-]{36}$/i.test(applicationId)||typeof operationId!=="string"||!/^[a-f0-9-]{36}$/i.test(operationId)||!["approved","rejected"].includes(action))throw new ApiFailure(400,"INVALID_REQUEST","审核参数无效。");
+ if(typeof applicationId!=="string"||!/^[a-f0-9-]{36}$/i.test(applicationId)||typeof operationId!=="string"||!/^[a-f0-9-]{36}$/i.test(operationId)||(action!=="approved"&&action!=="rejected"))throw new ApiFailure(400,"INVALID_REQUEST","审核参数无效。");
  if(action==="rejected"){
   if(Object.keys(raw).join(",")!=="reason"||typeof raw.reason!=="string"||raw.reason.trim().length<8||raw.reason.trim().length>500)throw new ApiFailure(400,"INVALID_REQUEST","操作原因至少 8 字。");
   const r=await env.DB.prepare(`UPDATE partner_applications SET status='rejected',reviewed_at=?,reviewed_by=?,review_reason=? WHERE id=? AND status='pending' AND ${flags}
