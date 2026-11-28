@@ -143,7 +143,16 @@ test('privacy policy is public, bilingual and reflects hosted models, retention 
 });
 
 
-test('public FAQ describes hosted AI without identifying its supplier',()=>{
- const html=page('faq');assert.match(html,/Do I need my own AI API key/);
- assert.doesNotMatch(html,/DeepSeek|Qwen|Gemini|MK99|Resend/i);
+test('public FAQ keeps four requested questions and public AI copy does not identify its supplier',()=>{
+ const html=page('faq'),home=page('index');
+ assert.match(home,/Do I need my own API key/);
+ assert.match(home,/Hosted AI is included/);
+ for(const question of ['When do I receive free credits?', 'How many credits do three styles use?', 'Will it post on X?', "Why isn't the floating reply panel showing?"]){
+   // Astro may serialize apostrophes as HTML entities.
+   assert.ok(html.replace(/&#39;|&#x27;|&apos;/gi,"'").includes(question),question);
+ }
+ assert.equal((html.match(/<details class="faq-item public-faq-item"/g)||[]).length,4);
+ assert.match(html,/Google Translate/);
+ assert.doesNotMatch(html,/Do I need my own AI API key|How do I top up|How can I send feedback/);
+ for(const publicHtml of [html,home])assert.doesNotMatch(publicHtml,/DeepSeek|Qwen|Gemini|MK99|Resend/i);
 });
