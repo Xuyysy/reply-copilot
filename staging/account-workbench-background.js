@@ -173,16 +173,17 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      if(after?.bindingId!==b.bindingId||after.sourceTabId!==m.tabId||!same(after,b))fail('identity_changed');
    };
    if(m.action==='sample-start'){
-     if(m.authorized!==true||!['notification','post'].includes(m.source))fail('invalid_context');
+     const maxPages=m.maxPages??1;
+     if(m.authorized!==true||![1,5].includes(maxPages)||!['notification','post'].includes(m.source))fail('invalid_context');
      if(jobs.size||sampleCommit||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
      await verify();
      if(jobs.size||sampleCommit||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
-     sampleTicket={id:crypto.randomUUID(),tabId:m.tabId,bindingId:b.bindingId,ownerUserId:b.ownerUserId,source:m.source,expires:Date.now()+60000};
+     sampleTicket={id:crypto.randomUUID(),tabId:m.tabId,bindingId:b.bindingId,ownerUserId:b.ownerUserId,source:m.source,expires:Date.now()+60000,maxPages,sequence:1};
      return {ticket:sampleTicket.id,ownerUserId:b.ownerUserId};
    }
    const t=sampleTicket;
-   if(!t||t.id!==m.ticket||t.tabId!==m.tabId||t.bindingId!==b.bindingId||t.ownerUserId!==b.ownerUserId||t.expires<=Date.now())fail('invalid_context');
-   sampleTicket=null; // Single use even when validation or commit fails.
+   if(!t||t.id!==m.ticket||t.tabId!==m.tabId||t.bindingId!==b.bindingId||t.ownerUserId!==b.ownerUserId||t.expires<=Date.now()||(m.sequence??1)!==t.sequence)fail('invalid_context');
+   sampleTicket=null; // Consume this sequence before any asynchronous commit.
    if(jobs.size||sampleCommit)fail('busy');
    const observedAt=Date.now();
    if(!Array.isArray(m.events)||m.events.length>1000||!Array.isArray(m.users)||m.users.length>2000)fail('invalid_context');
@@ -199,6 +200,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      try{
        await verify();check();
        const result=await commitBatch(db,session,events,{source:t.source,observedAt,users,observedSample:true,signal});
+       if(!signal.aborted&&t.sequence<t.maxPages&&t.expires>Date.now())sampleTicket={...t,sequence:t.sequence+1};
        return {inserted:result.inserted,accepted:result.accepted,source:t.source,historyComplete:false};
      }finally{await endSession(db,session);}
    });}finally{if(sampleCommit===pending)sampleCommit=null;}

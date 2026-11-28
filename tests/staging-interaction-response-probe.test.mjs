@@ -34,3 +34,22 @@ test('a background cancellation is reported without replacing it with a generic 
  network.onRequestFinished.emit({request:{url:'https://x.com/i/api/2/notifications/all.json',method:'GET'},response:{status:200},getContent:f=>f(JSON.stringify(body),'')});
  await Promise.resolve();await Promise.resolve();assert.equal(reports.at(-1).reason,'cancelled');assert.equal(probe.active,false);
 });
+
+test('bounded five-page authorization captures sequential native responses without queuing bodies',async()=>{
+ const network={onRequestFinished:channel(),onNavigated:channel()},reports=[],seq=[];let reads=0;
+ const probe=createInteractionResponseProbe({network,project,commit:async x=>{seq.push(x.sequence);return {inserted:seq.length===1?1:0,accepted:1}},notify:e=>reports.push(e),schedule:()=>1,unschedule:()=>{}});
+ assert.throws(()=>probe.start({source:'notification',ownerUserId:'111',authorized:true,maxPages:6}),/invalid_context/);
+ probe.start({source:'notification',ownerUserId:'111',authorized:true,maxPages:5});
+ const emit=(status=200)=>network.onRequestFinished.emit({request:{url:'https://x.com/i/api/2/notifications/all.json',method:'GET'},response:{status},getContent:f=>{reads++;f(JSON.stringify(body),'')}});
+ for(let i=0;i<5;i++){emit();if(i===0)emit();await Promise.resolve();await Promise.resolve();}
+ assert.deepEqual(seq,[1,2,3,4,5]);assert.equal(reads,5);assert.equal(reports.at(-1).phase,'saved');assert.equal(reports.at(-1).pages,5);assert.equal(reports.at(-1).inserted,1);assert.equal(reports.at(-1).skipped,1);assert.equal(probe.active,false);
+ emit();assert.equal(reads,5);
+});
+test('a denial during an in-flight save ends the observation session',async()=>{
+ const network={onRequestFinished:channel(),onNavigated:channel()},reports=[];let release,reads=0;
+ const probe=createInteractionResponseProbe({network,project,commit:()=>new Promise(r=>release=r),notify:e=>reports.push(e),schedule:()=>1,unschedule:()=>{}});
+ probe.start({source:'notification',ownerUserId:'111',authorized:true,maxPages:5});
+ const emit=status=>network.onRequestFinished.emit({request:{url:'https://x.com/i/api/2/notifications/all.json',method:'GET'},response:{status},getContent:f=>{reads++;f(JSON.stringify(body),'')}});
+ emit(200);emit(429);assert.equal(reads,1);assert.equal(reports.at(-1).reason,'rate_limited');assert.equal(probe.active,false);
+ release({accepted:1,inserted:1});await Promise.resolve();assert.equal(reports.at(-1).phase,'rejected');
+});

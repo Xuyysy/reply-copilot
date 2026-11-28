@@ -133,12 +133,14 @@ test('authorized observed response commits once to native workbench database wit
    const t6=(await start()).ticket;holdIdentity=true;const pending=rejects(commit(t6,[{...event,targetPostId:'999'}]));
    for(let i=0;i<200&&!releaseIdentity;i++)await new Promise(r=>setTimeout(r,5));if(!releaseIdentity)throw Error('commit did not reach identity check');
    const overlapCommit=await rejects(start());await msg('sample-cancel',probe,{tabId:1,ticket:t6});releaseIdentity();const cancelledCommit=await pending;
+   const multi=(await start({maxPages:5})).ticket;const nextSample=(sequence)=>msg('sample-commit',probe,{tabId:1,ticket:multi,sequence,events:[event],users:[]});
+   const outOfOrder=await rejects(nextSample(2));const multiFirst=await nextSample(1);const multiReplay=await rejects(nextSample(1));for(let seq=2;seq<=5;seq++)await nextSample(seq);const multiLimit=await rejects(nextSample(6));
    const after=(await msg('view',page)).dataset;
-   return {denied,wrongSender,overlap,replay,cancelled,switched,foreign,first,duplicate,requests,overlapCommit,cancelledCommit,rows:after.rows.map(x=>x.type).sort(),sameJobs:JSON.stringify(before.jobs)===JSON.stringify(after.jobs),coverage:after.coverage.map(x=>({source:x.source,uniqueEvents:x.uniqueEvents,observedSamples:x.observedSamples,historyComplete:x.historyComplete}))};
+   return {denied,wrongSender,overlap,replay,cancelled,switched,foreign,first,duplicate,requests,overlapCommit,cancelledCommit,outOfOrder,multiFirst,multiReplay,multiLimit,rows:after.rows.map(x=>x.type).sort(),sameJobs:JSON.stringify(before.jobs)===JSON.stringify(after.jobs),coverage:after.coverage.map(x=>({source:x.source,uniqueEvents:x.uniqueEvents,observedSamples:x.observedSamples,historyComplete:x.historyComplete}))};
   })()`);
-  assert.equal(result.denied,true);assert.equal(result.wrongSender,true);assert.equal(result.overlap,true);assert.equal(result.replay,true);assert.equal(result.cancelled,true);assert.equal(result.switched,true);assert.equal(result.foreign,true);assert.equal(result.overlapCommit,true);assert.equal(result.cancelledCommit,true);
+  assert.equal(result.denied,true);assert.equal(result.wrongSender,true);assert.equal(result.overlap,true);assert.equal(result.replay,true);assert.equal(result.cancelled,true);assert.equal(result.switched,true);assert.equal(result.foreign,true);assert.equal(result.overlapCommit,true);assert.equal(result.cancelledCommit,true);assert.equal(result.outOfOrder,true);assert.equal(result.multiReplay,true);assert.equal(result.multiLimit,true);assert.equal(result.multiFirst.inserted,0);
   assert.equal(result.first.inserted,1);assert.equal(result.duplicate.inserted,0);assert.equal(result.requests,1);
   assert.deepEqual(result.rows,['like','reply']);assert.equal(result.sameJobs,true);
-  assert.deepEqual(result.coverage,[{source:'notification',uniqueEvents:2,observedSamples:2,historyComplete:false}]);
+  assert.deepEqual(result.coverage,[{source:'notification',uniqueEvents:2,observedSamples:7,historyComplete:false}]);
  });
 });
