@@ -295,7 +295,7 @@
       return;
     }
     if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
-       !session.post.hasCapturedQuote||session.copyOnly||session.post.modernLayout)return;
+       !session.post.hasCapturedQuote||session.copyOnly||session.post.modernLayout||session.post.legacyDetailIdentity)return;
     session.offeringQuoteCopyOnly=true;
     try {
     const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
@@ -405,7 +405,7 @@
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
-    if(post.hasCapturedQuote&&!post.modernLayout){
+    if(post.hasCapturedQuote&&!post.modernLayout&&!post.legacyDetailIdentity){
       session.copyOnlyFastTimer=setTimeout(()=>{
         void offerQuoteCopyOnly(session,QUOTE_STABILITY_MS);
       },QUOTE_EARLY_CHECK_MS);
@@ -557,7 +557,7 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
-      if((current.post.modernLayout||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
+      if((current.post.modernLayout||current.post.legacyDetailIdentity||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
         if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
         return;
       }

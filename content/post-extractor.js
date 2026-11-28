@@ -182,9 +182,82 @@
     }
     return candidates.size === 1 ? candidates.values().next().value : null;
   }
+  // Legacy detail pages can expose a non-linked timestamp and native
+  // photo/video or analytics URLs instead of a canonical permalink.
+  // These are evidence only when owned by this exact outer tweet.
+  const DETAIL_MEDIA='[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]';
+  function detailStatusLink(raw,base) {
+    if(!raw||!base)return null;
+    try {
+      const origin=new URL(base),url=new URL(raw,origin);
+      if(origin.protocol!=='https:'||!STATUS_HOSTS.has(origin.hostname)||
+         url.origin!==origin.origin||url.username||url.password||url.hash)return null;
+      const alias=url.pathname.match(/^\/i(?:\/web)?\/status\/(\d+)\/?$/);
+      if(alias)return {id:alias[1],kind:'alias'};
+      const match=url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)(?:\/(photo\/[1-9]\d*|video\/[1-9]\d*|analytics|history))?\/?$/);
+      if(!match)return null;
+      return {id:match[2],kind:match[3]||'canonical',
+        sourceUrl:url.origin+'/'+match[1]+'/status/'+match[2]};
+    }catch{return null;}
+  }
+  function legacyDetailEvidence(article,referenceUrl) {
+    const none={statusId:null,conflict:false};
+    if(!article?.matches?.('article[data-testid="tweet"]')||
+       article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]'))return none;
+    const owned=node=>{
+      if(node?.closest?.('article')!==article||isQuoteContent(node,article))return false;
+      const card=node.closest('div[role="link"],[data-slot="embedded-tweet-frame"],form,[contenteditable="true"]');
+      return !card||!article.contains(card);
+    };
+    const bodies=[...article.querySelectorAll('[data-testid="tweetText"]')].filter(owned);
+    if(bodies.length!==1)return none;
+    const outsideBody=node=>owned(node)&&!node.closest('[data-testid="tweetText"]');
+    const ids=new Set(),otherCanonical=new Set();
+    let conflict=false;
+    const add=p=>{if(p)ids.add(p.id);};
+    for(const time of article.querySelectorAll('time')){
+      if(!outsideBody(time))continue;
+      const a=time.closest('a[href*="/status/"]');
+      if(!a||!outsideBody(a))continue;
+      const p=detailStatusLink(a.getAttribute('href'),referenceUrl);
+      if(!p||!['canonical','alias','history'].includes(p.kind))conflict=true;
+      else add(p);
+    }
+    // Native analytics links must share the owned group with exactly one
+    // native Reply control; media links must own an actual X media node.
+    const controls=[...article.querySelectorAll('button[data-testid="reply"],[role="button"][data-testid="reply"]')].filter(outsideBody);
+    const group=controls.length===1?controls[0].closest('[role="group"]'):null;
+    for(const a of article.querySelectorAll('a[href*="/status/"]')){
+      if(!outsideBody(a))continue;
+      const p=detailStatusLink(a.getAttribute('href'),referenceUrl);
+      if(!p)continue;
+      if(p.kind==='analytics'&&group&&owned(group)&&a.closest('[role="group"]')===group)add(p);
+      else if(/^(?:photo|video)\//.test(p.kind)){
+        const media=a.closest(DETAIL_MEDIA);
+        if((media&&owned(media))||[...a.querySelectorAll(DETAIL_MEDIA)].some(owned))add(p);
+      }else if(p.kind==='canonical'||p.kind==='alias'){
+        const header=a.closest('[data-testid="User-Name"]');
+        if(header&&owned(header))add(p);
+        else otherCanonical.add(p.id);
+      }
+    }
+    if(conflict||ids.size>1||otherCanonical.size>1||
+       (ids.size===1&&[...otherCanonical].some(id=>!ids.has(id))))return {statusId:null,conflict:true};
+    return {statusId:ids.size===1?ids.values().next().value:null,conflict:false};
+  }
+  function legacyDetailIdentity(article,detailUrl) {
+    // Never treat a background comment, quote or reply preview as the
+    // focal tweet merely because the browser happens to be on /status/.
+    const route=detailStatusLink(detailUrl,detailUrl);
+    if(route?.kind!=='canonical'||article?.closest?.('[role="dialog"]'))return null;
+    const evidence=legacyDetailEvidence(article,detailUrl);
+    return !evidence.conflict&&evidence.statusId===route.id?
+      {statusId:route.id,sourceUrl:route.sourceUrl}:null;
+  }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
-    return isModernPost(article)?modernIdentityEvidence(article).identity:legacyPostIdentity(article);
+    return isModernPost(article)?modernIdentityEvidence(article).identity:
+      legacyPostIdentity(article)||legacyDetailIdentity(article,globalThis.location?.href);
   }
   // In bilingual mode, use the original tweet, not an appended translation.
   // A translation-only rewrite cannot be reversed reliably; never fabricate.
@@ -226,12 +299,12 @@
     const quoted=card.querySelector?.('[data-testid="tweetText"]');
     return originalPostText(quoted);
   }
-  function extractPost(article) {
+  function extractPost(article,detailUrl=globalThis.location?.href) {
     if (!article?.matches?.("article")) return { ok: false, reason: "no-post" };
     const modernLayout=isModernPost(article);
     // Resolve the modern path once: the hot activation/snapshot path used
     // to classify the same article repeatedly and scan body nodes twice.
-    // Leave the established legacy extractor below untouched.
+    // Keep the established legacy fast path; the detail fallback runs only on failure.
     if(modernLayout){
       if(article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]'))return {ok:false,reason:"post-context-incomplete"};
       const bodies=modernBodyNodes(article);
@@ -245,7 +318,9 @@
       if(!sourceText)return {ok:false,reason:"post-context-incomplete"};
       return {ok:true,article,...identity,sourceText,modernLayout:true,quoteOnly:!ownText&&Boolean(quotedText),quotedText:quotedText||null};
     }
-    const identity = legacyPostIdentity(article);
+    const primaryIdentity = legacyPostIdentity(article);
+    const detailIdentity = primaryIdentity?null:legacyDetailIdentity(article,detailUrl);
+    const identity = primaryIdentity||detailIdentity;
     const ownText = legacyPostText(article);
     // A quote-only post has a canonical OUTER post ID but no own tweetText.
     // Use the visibly attached quote as context, never its ID as the target.
@@ -253,8 +328,9 @@
     const sourceText = ownText || quotedText;
     if (!identity || !sourceText) return { ok: false, reason: "post-context-incomplete" };
     return { ok: true, article, ...identity, sourceText,
+      ...(detailIdentity?{legacyDetailIdentity:true}:{}),
       quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts };
+  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts, legacyDetailEvidence };
 })();

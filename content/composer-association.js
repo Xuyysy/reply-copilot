@@ -110,9 +110,15 @@
       visibleReplyEditorCount:visibleEditors.filter(node=>node.closest('[role="dialog"]')).length,
       baselineEditors:editors};
   }
-  function contextId(article,modernLayout=false) {
+  function contextId(article,modernLayout=false,detailReference=null) {
     // Canonical ID from the author's timestamp, never a random quote link.
     const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
+    if(detailReference){
+      // A recovered source needs independent evidence inside the modal;
+      // never reuse the detail route or the ordinary text-only fallback.
+      const evidence=extractor.legacyDetailEvidence(article,detailReference);
+      return evidence.conflict?'conflicting_status_links':evidence.statusId;
+    }
     if(modernLayout||extractor.isModernPost?.(article)){
       const evidence=extractor.modernIdentityEvidence(article);
       return evidence.identity?.statusId||(evidence.conflict?'conflicting_status_links':null);
@@ -225,7 +231,7 @@
   }
   function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[]) {
     const api=globalThis.ZaneReplyCopilotContent;
-    const original=post.article?.isConnected?api.postExtractor.extractPost(post.article):null;
+    const original=post.article?.isConnected?api.postExtractor.extractPost(post.article,post.legacyDetailIdentity?initialUrl:undefined):null;
     const nodes=new Set();
     const selector=selectorFor(document,post);
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible);
@@ -246,7 +252,7 @@
       // Identify the ONE article whose canonical status ID matches the
       // clicked target; never equate the first article with the parent.
       let candidates=articles.map(article=>({
-        article, id:contextId(article,post.modernLayout===true), text:api.postExtractor.postText(article)
+        article, id:contextId(article,post.modernLayout===true,post.legacyDetailIdentity?initialUrl:null), text:api.postExtractor.postText(article)
       }));
       // On some rich-media reply modals X renders the original tweetText
       // directly in the dialog, without wrapping it in an article. The
@@ -363,7 +369,11 @@
         matching.length!==1?null:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
       if(linkless&&modernMatch===true)statusId=routeId;
-      const contextMatches=modernContext?modernMatch:post.quoteOnly
+      const detailMatch=post.legacyDetailIdentity?
+        candidates.some(c=>c.id&&c.id!==post.statusId)||matching.length>1?false:
+        candidates.length!==1||matching.length!==1||!normalized(text)?null:
+        sameContext(post,text):null;
+      const contextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
         ? !candidates.length?null
           :matching.length>1?false
           :matching.length===1?(!quotePreview.seen || quotedPreviewMatches)
@@ -402,7 +412,7 @@
         contextTextMatches:Boolean(primary&&sameContext(post,text)||quoteRoutePreview),
         contextMatches,contextDetail};
     });
-    return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true),
+    return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true||post.legacyDetailIdentity===true),
       sourceUnchanged:!post.article?.isConnected||Boolean(original?.ok&&original.statusId===post.statusId)};
   }
   globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};

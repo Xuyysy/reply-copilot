@@ -1,0 +1,74 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+
+test('legacy detail identity fallback requires owned native evidence and an independently verified reply modal',()=>{
+  const dir=mkdtempSync(path.join(tmpdir(),'xrh-legacy-detail-'));
+  try{
+    const code=['post-extractor','reply-detector','composer-adapter','composer-association'].map(n=>
+      readFileSync(new URL('../content/'+n+'.js',import.meta.url),'utf8')).join('\n');
+    const run=()=>{
+      const {postExtractor:p,composerAssociation:a}=ZaneReplyCopilotContent;
+      const url='https://x.com/example/status/101',compose='https://x.com/compose/post';
+      const checks={};
+      const $=id=>document.getElementById(id);
+      const make=(id,markup)=>{const article=document.createElement('article');article.dataset.testid='tweet';article.id=id;article.innerHTML=markup;document.querySelector('main').append(article);return article;};
+      const text='<div data-testid="tweetText">Synthetic caption</div>';
+      const actions=id=>'<div role="group"><button data-testid="reply">Reply</button><a href="https://x.com/example/status/'+id+'/analytics">Views</a></div>';
+      const photo=id=>'<a href="https://x.com/example/status/'+id+'/photo/1"><div data-testid="tweetPhoto">Media</div></a>';
+      const original=make('focal','<time>Now</time>'+text+photo('101')+actions('101')+'<a href="https://x.com/example/status/101/history">History</a>');
+      const post=p.extractPost(original,url);
+      checks.fallback=post.ok&&post.statusId==='101'&&post.sourceUrl===url&&post.legacyDetailIdentity===true;
+      checks.normalFastPath=p.extractPost(make('normal','<a href="https://x.com/example/status/999"><time>Now</time></a>'+text),url).statusId==='999';
+      checks.otherComment=!p.extractPost(make('comment','<time>Now</time>'+text+photo('202')+actions('202')),url).ok;
+      checks.conflict=!p.extractPost(make('conflict','<time>Now</time>'+text+photo('202')+actions('101')),url).ok;
+      checks.pageOnly=!p.extractPost(make('pageOnly','<time>Now</time>'+text+'<button data-testid="reply">Reply</button>'),url).ok;
+      checks.genericLink=!p.extractPost(make('arbitrary','<time>Now</time>'+text+'<a href="https://x.com/example/status/101/photo/1">Unowned</a>'),url).ok;
+      checks.bodyLink=!p.extractPost(make('bodyLink','<time>Now</time><div data-testid="tweetText"><a href="https://x.com/example/status/101/photo/1"><div data-testid="tweetPhoto">Link</div></a></div>'),url).ok;
+      checks.quotedMedia=!p.extractPost(make('quoted','<time>Now</time>'+text+'<div data-testid="quoteTweet">'+photo('101')+'</div>'),url).ok;
+      checks.unmarkedCard=!p.extractPost(make('unmarked','<time>Now</time>'+text+'<div role="link">'+photo('101')+'</div>'),url).ok;
+      checks.external=!p.extractPost(make('external','<time>Now</time>'+text+'<a href="https://other.example/example/status/101/photo/1"><div data-testid="tweetPhoto">Media</div></a>'),url).ok;
+      checks.alias=p.extractPost(make('alias','<a href="https://x.com/i/web/status/101"><time>Now</time></a>'+text),url).legacyDetailIdentity===true;
+      checks.notDetail=!p.extractPost(original,'https://x.com/home').ok;
+      checks.analyticsOnly=p.extractPost(make('analytics','<time>Now</time>'+text+actions('101')),url).legacyDetailIdentity===true;
+      const captured=a.capturePost(post),base=a.baseline(document,captured);
+      const dlg=document.createElement('div');dlg.setAttribute('role','dialog');document.body.append(dlg);
+      dlg.innerHTML='<article data-testid="tweet"><a href="https://x.com/example/status/101"><time>Now</time></a>'+text+'</article><div role="textbox" contenteditable="true" style="min-height:20px"></div>';
+      const editor=dlg.querySelector('[contenteditable]');editor.focus();
+      const makeSession=()=>a.create({trusted:true,statusId:'101',requestId:'test',now:0,...base});
+      const facts=(current=compose)=>a.snapshot(document,captured,url,current,20);
+      checks.verifiedModal=makeSession().evaluate(facts()).editor===editor;
+      checks.sourceRevalidated=facts().sourceUnchanged===true;
+      checks.wrongRoute=makeSession().evaluate(facts(compose+'?in_reply_to=202')).state==='rejected';
+      checks.quoteRoute=makeSession().evaluate(facts(compose+'?quote=101')).state==='rejected';
+      checks.duplicateRoute=makeSession().evaluate(facts(compose+'?in_reply_to=101&in_reply_to=101')).state==='rejected';
+      const anchor=dlg.querySelector('a');anchor.href='https://x.com/example/status/202';
+      checks.wrongModal=makeSession().evaluate(facts()).state==='rejected';
+      anchor.remove();
+      checks.textOnly=makeSession().evaluate(facts()).state==='waiting';
+      dlg.querySelector('article').prepend(anchor);anchor.href=url;
+      dlg.querySelector('[data-testid="tweetText"]').textContent='Changed caption';
+      checks.wrongText=makeSession().evaluate(facts()).state==='rejected';
+      dlg.querySelector('[data-testid="tweetText"]').textContent='Synthetic caption';
+      editor.textContent='existing draft';checks.draft=makeSession().evaluate(facts()).reason==='existing_draft';
+      editor.textContent='';
+      const other=document.createElement('div');other.contentEditable='true';other.setAttribute('role','textbox');other.style.minHeight='20px';dlg.append(other);
+      checks.multiEditor=makeSession().evaluate(facts()).reason==='multiple_editors';other.remove();
+      original.remove();checks.detachedSource=makeSession().evaluate(facts()).editor===editor;
+      $('result').textContent=JSON.stringify(checks);
+    };
+    const file=path.join(dir,'fixture.html');writeFileSync(file,'<!doctype html><html><body><main></main><output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>');
+    const browser=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const result=spawnSync(browser,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+path.join(dir,'profile'),'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:25000,maxBuffer:2*1024*1024});
+    assert.equal(result.status,0,result.stderr);
+    const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
+    assert.ok(match,result.stdout.slice(-1000));
+    const checks=JSON.parse(match[1]);
+    assert.equal(Object.keys(checks).length,24);
+    assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
