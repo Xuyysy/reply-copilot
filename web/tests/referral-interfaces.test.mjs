@@ -36,6 +36,8 @@ test("Partners owns V1 referrals and My Account retains only a navigation link",
  assert.match(pitch,/分享好用的工具、真实的使用心得、X 运营经验或原创文章/);
  assert.match(pitch,/sharing useful tools, honest reviews, tips for growing on X, or original articles/);
  assert.match(pitch,/同一份内容，多一份收益/);
+ assert.match(pitch,/data-testid="partner-promotion-highlight"[^>]+border-l-4[^>]+bg-primary\/5/);
+ assert.match(pitch,/data-testid="partner-promotion-slogan"[^>]+text-xl font-bold[^>]+sm:text-2xl/);
  assert.match(pitch,/approved\?rateBps\/100\+"%":"15%\+"/);
  assert.match(wrapper,/partnerRateBps=\{hasPartner&&result\.policy\?\.status==="active"\?result\.policy\.rate_bps:undefined\}/);
  assert.match(card,/partnerRateBps!==undefined&&!showRecruitment&&/);
