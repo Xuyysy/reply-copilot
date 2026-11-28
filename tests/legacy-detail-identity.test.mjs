@@ -42,11 +42,18 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       const inlineCell=document.createElement('div');inlineCell.dataset.testid='cellInnerDiv';
       inlineCell.innerHTML='<div data-testid="tweetTextarea_0" contenteditable="true"></div>';
       column.append(inlineCell);document.body.append(column);
-      checks.focalShape=p.extractPost(focalShape,url).legacyDetailIdentity===true;
+      const focalPost=p.extractPost(focalShape,url);
+      checks.focalShape=focalPost.legacyDetailIdentity===true&&focalPost.legacyDetailKind==='focal';
       focalShape.tabIndex=0;checks.nonFocalShape=!p.extractPost(focalShape,url).ok;focalShape.tabIndex=-1;
       const duplicate=focalShape.cloneNode(true);focalCell.append(duplicate);
       checks.duplicateFocal=!p.extractPost(focalShape,url).ok;duplicate.remove();
       inlineCell.remove();checks.noInlineShape=!p.extractPost(focalShape,url).ok;
+      checks.capturedFocalSurvivesInlineRemoval=p.revalidateLegacyDetailSource(focalPost,url);
+      focalShape.querySelector('[data-testid="tweetText"]').textContent='Changed';
+      checks.capturedFocalTextChanged=!p.revalidateLegacyDetailSource(focalPost,url);
+      focalShape.querySelector('[data-testid="tweetText"]').textContent='Synthetic caption';
+      focalShape.tabIndex=0;checks.capturedFocalMarkerLost=!p.revalidateLegacyDetailSource(focalPost,url);focalShape.tabIndex=-1;
+      focalCell.append(duplicate);checks.capturedFocalAmbiguous=!p.revalidateLegacyDetailSource(focalPost,url);duplicate.remove();
       column.remove();
       const captured=a.capturePost(post),base=a.baseline(document,captured);
       const dlg=document.createElement('div');dlg.setAttribute('role','dialog');document.body.append(dlg);
@@ -56,6 +63,8 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       const facts=(current=compose)=>a.snapshot(document,captured,url,current,20);
       checks.verifiedModal=makeSession().evaluate(facts()).editor===editor;
       checks.sourceRevalidated=facts().sourceUnchanged===true;
+      const modalArticle=dlg.querySelector('article');dlg.append(modalArticle);
+      checks.previewAfterEditor=makeSession().evaluate(facts()).state==='rejected';dlg.prepend(modalArticle);
       checks.wrongRoute=makeSession().evaluate(facts(compose+'?in_reply_to=202')).state==='rejected';
       checks.quoteRoute=makeSession().evaluate(facts(compose+'?quote=101')).state==='rejected';
       checks.duplicateRoute=makeSession().evaluate(facts(compose+'?in_reply_to=101&in_reply_to=101')).state==='rejected';
@@ -63,6 +72,8 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       checks.wrongModal=makeSession().evaluate(facts()).state==='rejected';
       anchor.remove();
       checks.textOnly=makeSession().evaluate(facts()).state==='waiting';
+      modalArticle.insertAdjacentHTML('afterbegin','<a href="https://x.com/example/status/202">Other post</a>');
+      checks.weakConflictingModal=makeSession().evaluate(facts()).state==='rejected';modalArticle.querySelector('a').remove();
       dlg.querySelector('article').prepend(anchor);anchor.href=url;
       dlg.querySelector('[data-testid="tweetText"]').textContent='Changed caption';
       checks.wrongText=makeSession().evaluate(facts()).state==='rejected';
@@ -81,7 +92,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
     const checks=JSON.parse(match[1]);
-    assert.equal(Object.keys(checks).length,28);
+    assert.equal(Object.keys(checks).length,34);
     assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

@@ -251,7 +251,7 @@
   // primary column, unique outer focal cell, owned native reply control
   // and a separate detail composer. The modal must later corroborate ID
   // and original text independently before any AI request is made.
-  function legacyFocalShape(article) {
+  function legacyFocalShape(article,requireInline=true) {
     if(!article?.matches?.('article[data-testid="tweet"][tabindex="-1"]')||
        article.closest('[role="dialog"]'))return false;
     const column=article.closest('[data-testid="primaryColumn"]');
@@ -264,6 +264,7 @@
       node.closest('article')===article&&!isQuoteContent(node,article)&&
       !node.closest('[data-testid="tweetText"]')&&node.closest('[role="group"]')?.closest('article')===article);
     if(replies.length!==1)return false;
+    if(!requireInline)return true;
     const inline=[...column.querySelectorAll('[data-testid="tweetTextarea_0"][contenteditable="true"]')].filter(node=>
       !node.closest('article,[role="dialog"]')&&
       node.closest('[data-testid="cellInnerDiv"]')!==cell&&
@@ -279,7 +280,26 @@
     if(evidence.conflict||!evidence.eligible)return null;
     const ownedMatch=evidence.statusId===route.id;
     const focalMatch=!evidence.statusId&&(!evidence.otherCanonicalId||evidence.otherCanonicalId===route.id)&&legacyFocalShape(article);
-    return ownedMatch||focalMatch?{statusId:route.id,sourceUrl:route.sourceUrl}:null;
+    return ownedMatch||focalMatch?{statusId:route.id,sourceUrl:route.sourceUrl,
+      legacyDetailKind:ownedMatch?'owned':'focal'}:null;
+  }
+  function revalidateLegacyDetailSource(post,initialUrl) {
+    const article=post?.article;
+    if(!article?.isConnected||!post.legacyDetailIdentity)return false;
+    const route=detailStatusLink(initialUrl,initialUrl);
+    if(route?.kind!=='canonical'||route.id!==post.statusId||route.sourceUrl!==post.sourceUrl||
+       article.closest('[role="dialog"]'))return false;
+    const evidence=legacyDetailEvidence(article,initialUrl);
+    if(!evidence.eligible||evidence.conflict||
+       (evidence.statusId&&evidence.statusId!==post.statusId)||
+       (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId))return false;
+    const norm=s=>(s||'').replace(/\s+/g,' ').trim();
+    if(!norm(post.sourceText)||norm(legacyPostText(article))!==norm(post.sourceText))return false;
+    if(evidence.statusId===post.statusId)return true;
+    // Opening the native modal can remove the background detail composer.
+    // Only the already captured article may retain its focal qualification.
+    // The modal must independently corroborate exact ID and original text.
+    return post.legacyDetailKind==='focal'&&legacyFocalShape(article,false);
   }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
@@ -359,5 +379,5 @@
       quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts, legacyDetailEvidence };
+  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts, legacyDetailEvidence, revalidateLegacyDetailSource };
 })();
