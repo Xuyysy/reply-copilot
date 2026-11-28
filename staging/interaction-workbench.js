@@ -6,7 +6,7 @@ const labels={like:'点赞',reply:'回复',repost:'转发',quote:'引用',mentio
 const syncStatus={source_exhausted:'本次同步完成（不代表完整历史）',interrupted:'上次同步已中断，本地检查点保留，确认后可继续',rate_limited:'接口限流，请等待后手动刷新；已提交记录保留',unauthenticated:'X 登录状态无效，请在原 X 标签页重新登录',forbidden:'X 拒绝访问，已停止；不会自动重试',identity_changed:'账号已变化，请从对应 X 页面重新打开',schema_changed:'X 接口结构已变化，已停止；已有记录保留',source_error:'X 接口暂不可用或已变更，已有记录保留',source_unavailable:'数据连接暂不可用，已有记录保留',session_limit:'本次同步达到安全上限，刷新可继续',time_limit:'本次同步已超时，刷新可从已提交进度继续',page_limit:'本次分页上限已到，刷新可继续',cancelled:'同步已停止，已提交记录保留'};
 const sourceLabels={notification:'通知',post:'帖子'};
 const taskSources=t=>Array.isArray(t?.sources)?t.sources.filter(s=>Object.hasOwn(sourceLabels,s.source)).map(s=>sourceLabels[s.source]+'：'+(s.state==='pending'?'未执行':s.state==='running'?(t.state==='interrupted'?'已中断':'同步中'):syncStatus[s.reason]??'已停止')+' · '+(Number.isSafeInteger(s.pages)?s.pages:0)+' 页 / 新增 '+(Number.isSafeInteger(s.inserted)?s.inserted:0)+' 条').join('；'):'';
-const taskSuffix=t=>{const s=taskSources(t);return s?'｜'+s:'';};
+const taskSuffix=t=>{const s=taskSources(t);return (t?.syncMode==='recent'?'｜最新扫描，不改变历史进度':'')+(s?'｜'+s:'');};
 let data=null,owner=null,people=[],page=0,selected=null,offset=0,busy=false,actionBusy=false,disposed=false,generation=0,sourceReady=false,waiting=false;
 const msg=async(action,extra={})=>{const r=await chrome.runtime.sendMessage({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra});if(!r?.ok)throw Error(r?.error??'source_error');return r.value;};
 const settings=()=>({direction:'inbound',type:$('type').value,days:$('days').value?Number($('days').value):null,sort:$('sort').value,query:$('search').value});
@@ -40,7 +40,7 @@ function render(){if(!data)return;const v=analyzeLiveDataset(data,settings());pe
  }
  $('empty').hidden=people.length>0;$('pagination').hidden=people.length<=PAGE;$('page').textContent=(page+1)+' / '+Math.max(1,Math.ceil(people.length/PAGE));$('prev').disabled=page===0;$('next').disabled=(page+1)*PAGE>=people.length;$('export').disabled=!people.length;
  const sourceNames={notification:'通知',post:'帖子',archive:'归档','authorized-api':'授权接口'};
- const coverage=v.coverage.map(c=>(sourceNames[c.source]??'其他来源')+'：'+c.uniqueEvents+' 条'+(c.observedSamples?'（网页响应样本 '+c.observedSamples+' 页）':'')+'，'+new Date(c.lastObservedAt).toLocaleString()).join('；');
+ const coverage=v.coverage.map(c=>(sourceNames[c.source]??'其他来源')+'：'+c.uniqueEvents+' 条'+(c.observedSamples?'（网页响应样本 '+c.observedSamples+' 页）':'')+(c.recentPages?'（最新扫描累计 '+c.recentPages+' 页）':'')+'，'+new Date(c.lastObservedAt).toLocaleString()).join('；');
  const jobs=v.jobs.map(j=>{const q=j.quality;return (sourceNames[j.source]??'其他来源')+' · '+(j.done?'已到本次来源末尾':'尚未完成')+' · '+j.pages+' 页'+(q&&j.qualityPages?'（不支持 '+q.unsupported+'，未确认参与者 '+q.unresolvedActors+'，其他账号目标 '+q.foreignTargets+'，排除 '+q.ignored+'）':'（质量统计缺失）');}).join('；');
  $('quality').textContent='已存 '+v.stored+' 条，未知时间 '+v.unknownTime+' 条（日期筛选排除 '+v.excludedUnknownTime+' 条）。未知时间不等于没有互动。'+(coverage?' 来源记录：'+coverage+'。':' 暂无来源覆盖记录。')+(jobs?' 来源任务：'+jobs+'。':' 暂无同步检查点。')+' 非完整历史。';
 }
@@ -58,11 +58,11 @@ async function load(action='view',extra={}){if(busy||disposed)return;busy=true;$
   if(waiting){if($('refresh').textContent==='停止'){try{await msg('stop');await load();}catch{if(!disposed)$('status').textContent='停止请求失败，请重新确认任务状态。';}}else await load();return;}
   if(!sourceReady||!owner)return load();
   if(!await guard()||disposed)return;
-  const selectedSource=$('sync-source').value;
-   if(!['both','notification','post'].includes(selectedSource))return;
+  const selectedSource=$('sync-source').value,syncMode=$('sync-mode').value;
+   if(!['both','notification','post'].includes(selectedSource)||!['recent','history'].includes(syncMode))return;
    const sourceLabel={both:'通知和帖子',notification:'通知',post:'帖子'}[selectedSource];
-   if(!confirm('读取当前 X 账号的'+sourceLabel+'数据？本次仅读取所选来源，记录保存在本机。'))return;
-  try{await msg('sync',{authorized:true,selectedSource});if(!disposed){waiting=true;await load();}}catch(e){if(!disposed)$('status').textContent=e?.message==='busy'?'其他同步或网页采集正在进行，请先停止或完成该任务。':'同步暂不可用，已有缓存保留。';}
+   if(!confirm('读取当前 X 账号的'+sourceLabel+'数据？'+(syncMode==='recent'?'从最新页开始，最多3页/来源，不改变历史同步进度。':'从历史检查点继续；已完成的来源从头刷新。')+'记录保存在本机。'))return;
+  try{await msg('sync',{authorized:true,selectedSource,syncMode});if(!disposed){waiting=true;await load();}}catch(e){if(!disposed)$('status').textContent=e?.message==='busy'?'其他同步或网页采集正在进行，请先停止或完成该任务。':'同步暂不可用，已有缓存保留。';}
  });
  $('cache-refresh').onclick=()=>runAction(async()=>{await load();});
  $('clear').onclick=()=>runAction(async()=>{if(!waiting&&await guard()&&!disposed&&confirm('清除当前 X 账号本地互动记录？'))await load('clear',{confirmed:true});});

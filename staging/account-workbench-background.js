@@ -82,13 +82,13 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
  }
  // Only the Staging registration injects the read-only X provider. Test callers
  // remain fail-closed without an explicit factory. Tasks outlive the workbench page.
- async function startSync(f,sender,authorized,selectedSource='both'){
+ async function startSync(f,sender,authorized,selectedSource='both',syncMode='history'){
    const b=await verified(f,sender);
    if(f!=='interaction'||!providerFactory)fail('source_unavailable');
-   if(authorized!==true||!['both','notification','post'].includes(selectedSource))fail('invalid_context');
+   if(authorized!==true||!['both','notification','post'].includes(selectedSource)||!['history','recent'].includes(syncMode))fail('invalid_context');
    if(jobs.has(b.ownerUserId))return {running:true};
    if(jobs.size||sampleCommit||sampleTicket&&sampleTicket.expires>Date.now())fail('busy');
-   const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0,sources:[]}};jobs.set(b.ownerUserId,task);
+   const task={controller:new AbortController(),runId:crypto.randomUUID(),progress:{pages:0,inserted:0,sources:[],...(syncMode==='recent'?{syncMode}:{})}};jobs.set(b.ownerUserId,task);
    // Preserve write order so a late progress update cannot overwrite final status.
    let taskWrites=Promise.resolve();
    const write=(state,reason=null)=>{
@@ -126,7 +126,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      const sourceId=source=>provider.sourceIds?.[source]??provider.id;
      const checkpoint=source=>prior.jobs.find(j=>j.providerId===sourceId(source)&&j.source===source)??prior.jobs.find(j=>j.providerId===provider.id&&j.source===source);
      const ordered=[...sources].sort((a,b)=>Number(checkpoint(a)?.done===true)-Number(checkpoint(b)?.done===true)||(checkpoint(a)?.updatedAt??0)-(checkpoint(b)?.updatedAt??0));
-     const pagesPerSource=Math.floor(30/sources.length),msPerSource=Math.floor(80000/sources.length);
+     const pagesPerSource=syncMode==='recent'?3:Math.floor(30/sources.length),msPerSource=Math.floor(80000/sources.length);
      task.progress={...task.progress,sources:ordered.map(source=>({source,state:'pending',reason:null,pages:0,inserted:0}))};
      const sourceProgress=(source,fields)=>{task.progress={...task.progress,sources:task.progress.sources.map(s=>s.source===source?{...s,...fields}:s)};};
      for(const source of ordered){
@@ -135,7 +135,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        const refresh=checkpoint(source)?.done===true;
        const id=sourceId(source),scoped={...guarded,id,...(id!==provider.id?{legacyProviderId:provider.id}:{})};
        sourceProgress(source,{state:'running'});
-       const result=await syncInteractions(db,scoped,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
+       const result=await syncInteractions(db,scoped,{ownerUserId:b.ownerUserId,source,refresh,recentOnly:syncMode==='recent',maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
          task.progress={...task.progress,pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
          sourceProgress(source,{pages:p.pages,inserted:p.inserted});
          void write('running').catch(()=>{});
@@ -228,7 +228,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
    if(m.action==='view')return read(f,sender);
    if(m.action==='identity'){const b=await verified(f,sender);return {ownerUserId:b.ownerUserId,handle:b.handle,bindingId:b.bindingId};}
    if(m.action==='clear'){if(m.confirmed!==true||f!=='interaction')fail('invalid_context');return read(f,sender,{clear:true});}
-   if(m.action==='sync')return startSync(f,sender,m.authorized,m.selectedSource);
+   if(m.action==='sync')return startSync(f,sender,m.authorized,m.selectedSource,m.syncMode);
    if(m.action==='stop'){const b=await verified(f,sender);if(f!=='interaction')fail('invalid_context');jobs.get(b.ownerUserId)?.controller.abort();return {stopped:true};}
    fail('invalid_context');
  }

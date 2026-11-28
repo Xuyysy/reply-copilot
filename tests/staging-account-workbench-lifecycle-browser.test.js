@@ -163,3 +163,20 @@ test('independent source versions migrate exact legacy cursor and resume unchang
   assert.equal(r.third.find(j=>j.source==='notification').pages,45);assert.ok(r.third.some(j=>j.providerId==='post-v2'&&j.done));
  });
 });
+
+test('recent scan reads head independently, preserves history cursor and deduplicates observations',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={},calls=[];let phase='history';
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const factory=async()=>({id:'head-test',sources:['notification'],identify:async()=>({ownerUserId:'111',sessionId:'session'}),readPage:async({source,cursor})=>{calls.push([phase,cursor]);const id=phase==='recent'?'888':'777';return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:false,nextCursor:String(Number(cursor??0)+1),payload:{data:[]},posts:[{postId:id,authorUserId:'222',replyToUserId:'111',replyToPostId:'555',createdAt:1000}]}}});
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'recent-scan-separate'),providerFactory:factory});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const run=async syncMode=>{await msg('sync',page,{authorized:true,syncMode});for(let i=0;i<500;i++){const v=await msg('view');if(!v.busy&&!v.running&&v.dataset)return v;await new Promise(r=>setTimeout(r,5));}throw Error('sync timeout')};
+   await msg('open',side);const first=await run('history');phase='recent';const recent=await run('recent');phase='resume';const resume=await run('history');
+   return {sameJobs:JSON.stringify(first.dataset.jobs)===JSON.stringify(recent.dataset.jobs),recentCalls:calls.filter(x=>x[0]==='recent').map(x=>x[1]),resumeCursor:calls.find(x=>x[0]==='resume')[1],recentRows:recent.dataset.rows.length,recentPages:recent.dataset.coverage[0].recentPages,finalPages:resume.dataset.jobs[0].pages,mode:recent.task.syncMode,inserted:recent.task.inserted};
+  })()`);
+  assert.equal(r.sameJobs,true);assert.deepEqual(r.recentCalls,[null,'1','2']);assert.equal(r.resumeCursor,'30');assert.equal(r.recentRows,2);assert.equal(r.recentPages,3);assert.equal(r.finalPages,60);assert.equal(r.mode,'recent');assert.equal(r.inserted,1);
+ });
+});

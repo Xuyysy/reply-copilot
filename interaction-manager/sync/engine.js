@@ -55,15 +55,15 @@ export function normalizeObservations(page,{ownerUserId,source,observedAt=Date.n
   const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored)+count(parsed.stats?.outOfScope))};
   return {...parsed,quality,observedAt};
 }
-export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
-  if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||!Number.isInteger(maxPages)||maxPages<1||maxPages>100||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
+export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,recentOnly=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
+  if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||typeof recentOnly!=='boolean'||!Number.isInteger(maxPages)||maxPages<1||maxPages>(recentOnly?3:100)||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
   const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0,stage='identity',httpStatus=null;
   try{
     const sessionId=identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId);
     check(signal,deadline);
     stage='checkpoint';
     session=await beginSession(db,ownerUserId);
-    job=await openSyncJob(db,session,{providerId:provider.id,legacyProviderId:provider.legacyProviderId,source,refresh});
+    job=recentOnly?{cursor:null,seen:[],done:false}:await openSyncJob(db,session,{providerId:provider.id,legacyProviderId:provider.legacyProviderId,source,refresh});
     while(!job.done&&committed<maxPages){
       stage='identity';httpStatus=null;
       check(signal,deadline);
@@ -77,8 +77,9 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
       check(signal,deadline);
       stage='commit';
-      const result=await commitBatch(db,session,parsed.events,{source,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',observedAt:parsed.observedAt,users:parsed.users??[],signal,checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
-      job=result.job;inserted+=result.inserted;committed++;
+      const common={source,observedAt:parsed.observedAt,users:parsed.users??[],signal};
+      const result=await commitBatch(db,session,parsed.events,recentOnly?{...common,recentScan:true}:{...common,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
+      job=recentOnly?{cursor:parsed.nextCursor,done:parsed.done,seen:parsed.nextCursor===null?job.seen:[...job.seen,parsed.nextCursor]}:result.job;inserted+=result.inserted;committed++;
       try{onProgress({pages:committed,inserted,done:job.done,stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
     }
     return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,historyComplete:false};
