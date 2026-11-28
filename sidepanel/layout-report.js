@@ -80,6 +80,9 @@ export function sanitizeReproduction(o,stage,reason){
   facts:arr(o.facts,20,f=>({atMs:int(f?.atMs,60000),value:{...fields(f?.value,['routeAllowed','sourceUnchanged'],bool),...fields(f?.value,['candidates','dialogs'],int),
    editors:arr(f?.value?.editors,5,e=>({editor:node(e?.editor),
     contextDetail:enumOf(e?.contextDetail,['verified_context','verified_route_preview','awaiting_route_preview','route_preview_conflict','duplicate_parent_identity','quote_preview_mismatch','awaiting_parent_article','different_parent_identity','awaiting_verified_parent','awaiting_captioned_quote_parent','unconfirmed_context']),
+    ...(e?.timelineEvidence?{timelineEvidence:{
+      reason:enumOf(e.timelineEvidence.reason,['shape_missing','source_changed','outer_author_conflict','outer_time_conflict','outer_identity_conflict','quote_conflict','quote_missing','unexpected_quote','outer_evidence_missing','body_links_conflict','body_matched','body_text_conflict','quote_projection_matched']),
+      ...fields(e.timelineEvidence,['sourceQuoteId','modalQuoteId','quoteOwnerMatch','quoteTimeMatch','outerTimeMatch'],bool)}}:{}),
     ...fields(e,['modal','focused','empty','contextIdentityPresent','contextTextPresent','contextTextMatches'],bool),contextArticleCount:int(e?.contextArticleCount),contextMatches:enumOf(e?.contextMatches,['pending','match','mismatch'])}))}})),
   sampleErrors:int(o.sampleErrors,100)};
 }

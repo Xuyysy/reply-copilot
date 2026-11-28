@@ -199,7 +199,7 @@
     const detailPreviewSource=legacyDetailRoute?captureDetailPreviewSource(post,initialUrl):null;
     const detailQuoteSource=legacyDetailRoute&&hasCapturedQuote?captureDetailQuote(post.article,initialUrl,post.statusId):null;
     const timelineQuoteSource=!legacyDetailRoute&&!post.modernLayout&&hasCapturedQuote&&post.article?.nodeType===1?
-      captureDetailQuote(post.article,initialUrl,post.statusId):null;
+      captureDetailQuote(post.article,initialUrl,post.statusId,true):null;
     const detailNativeVideo=Boolean(legacyDetailRoute&&ownedDetailNodes(post.article,'video').length);
     return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto||detailNativeVideo,
       ...(detailPreviewSource?{detailPreviewSource}:{}),
@@ -385,7 +385,7 @@
   }
   // Capture exactly one explicit quoted card, independently of the outer
   // author. Never borrow its ID as the target. Read-only DOM evidence.
-  function captureDetailQuote(article,initialUrl,outerId){
+  function captureDetailQuote(article,initialUrl,outerId,corroborate=false){
     const cards=[...article.querySelectorAll('[data-testid="quoteTweet"],div[role="link"]')].filter(card=>
       card.closest('article')===article&&
       (card.matches('[data-testid="quoteTweet"]')||
@@ -415,7 +415,34 @@
       (/^https:\/\/t\.co\/[A-Za-z0-9]+$/.test(link.href)||/^https:\/\/pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+$/i.test(link.href));
     const links=[...body.querySelectorAll('a[href]')].filter(link=>!mediaPresentation(link)).map(link=>link.href);
     const presentations=[...body.querySelectorAll('a[href]')].filter(mediaPresentation).map(link=>link.href);
-    return text?Object.freeze({id,text,media,links:Object.freeze(links),presentations:Object.freeze(presentations)}):{conflict:true};
+    let owner=null,time=null;
+    if(corroborate){
+      const headers=[...card.querySelectorAll('[data-testid="User-Name"]')];
+      if(headers.length!==1)return {conflict:true};
+      const handles=new Set();
+      for(const a of headers[0].querySelectorAll('a[href]')){
+        try{
+          const u=new URL(a.getAttribute('href'),initialUrl),base=new URL(initialUrl);
+          const m=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
+          if(u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&!u.search&&m)handles.add(m[1].toLowerCase());
+        }catch{}
+      }
+      if(handles.size>1)return {conflict:true};
+      if(!handles.size)for(const n of headers[0].querySelectorAll('span,div')){
+        if(n.children.length)continue;
+        const m=normalized(n.textContent).match(/^@([A-Za-z0-9_]{1,15})$/);
+        if(m)handles.add(m[1].toLowerCase());
+      }
+      if(handles.size>1)return {conflict:true};
+      owner=handles.values().next().value||null;
+      const timestamps=[...card.querySelectorAll('time[datetime]')].filter(n=>!body.contains(n));
+      if(timestamps.length>1)return {conflict:true};
+      const raw=timestamps[0]?.getAttribute('datetime');
+      if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw||'')){
+        const parsed=Date.parse(raw);if(Number.isFinite(parsed))time=parsed;
+      }
+    }
+    return text?Object.freeze({id,text,media,links:Object.freeze(links),presentations:Object.freeze(presentations),owner,time}):{conflict:true};
   }
   function sameCapturedQuote(source,modal){
     if(!source||!modal||source.conflict||modal.conflict||
@@ -432,7 +459,19 @@
   // Recognize only an exact native link to the independently verified
   // embedded post. A truncated display label, t.co alone, or any other
   // post link cannot be removed. Keep unrelated links in the comparison.
-  function quoteProjection(article,quoteId,initialUrl){
+  function sameTimelineQuote(source,modal){
+    if(!source||!modal||source.conflict||modal.conflict||
+       (source.id&&modal.id&&source.id!==modal.id)||
+       (source.owner&&modal.owner&&source.owner!==modal.owner)||
+       (source.time!==null&&modal.time!==null&&source.time!==modal.time))return false;
+    if(sameCapturedQuote(source,modal))return true;
+    // An unlinked inner timestamp can still independently corroborate
+    // a known quoted ID. Never use relative time, display name or prefix.
+    return Boolean(source.id&&(!modal.id||modal.id===source.id)&&source.owner&&
+      source.owner===modal.owner&&source.time!==null&&source.time===modal.time&&
+      sameCapturedQuote(source,{...modal,id:source.id}));
+  }
+  function quoteProjection(article,quoteId,initialUrl,quoteOwner=null){
     if(!quoteId)return null;
     const bodies=ownedDetailNodes(article,'[data-testid="tweetText"]');
     if(bodies.length!==1)return null;
@@ -444,7 +483,22 @@
       return u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&
         u.pathname.match(/^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/(\d+)\/?$/)?.[1]===quoteId;
     }catch{return false;}};
-    if(!target(last.href))return null;
+    if(!target(last.href)){
+      // X may render the attached quote as t.co with a full expanded
+      // destination in native metadata. Require an exact canonical
+      // status URL and matching known quote owner; no network resolving.
+      try{
+        const u=new URL(last.href),base=new URL(initialUrl);
+        if(u.protocol!=='https:'||u.hostname!=='t.co'||u.username||u.password||
+           u.search||u.hash||!/^\/[A-Za-z0-9]+$/.test(u.pathname)||!quoteOwner)return null;
+        const destinations=['data-expanded-url','title'].map(name=>last.getAttribute(name)).filter(Boolean);
+        if(!destinations.length||!destinations.every(raw=>{
+          if(!/^https:\/\//.test(raw)||!target(raw))return false;
+          const v=new URL(raw);
+          return v.origin===base.origin&&v.pathname.split('/')[1]?.toLowerCase()===quoteOwner;
+        }))return null;
+      }catch{return null;}
+    }
     const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body));
     const label=normalized(last.innerText||last.textContent);
     if(!label||!text.endsWith(' '+label))return null;
@@ -590,12 +644,13 @@
   // Fallback only for a canonically captured legacy feed post whose
   // existing exact-ID/text fast path failed. No feed scan, prefetch or
   // delay; require independent modal time or native route evidence.
-  function verifiedTimelinePreview(post,article,editor,dialog,initialUrl,currentUrl,original,quarantinedPosts){
+  function verifiedTimelinePreview(post,article,editor,dialog,initialUrl,currentUrl,original,quarantinedPosts,report){
+    const result=(value,reason)=>{if(report)report.reason=reason;return value;};
     if(!article||!post.article?.isConnected||!original?.ok||
        !detailPreviewBefore(article,editor,dialog)||editor.closest('[inert],[aria-hidden="true"]')||
-       !article.matches('article[data-testid="tweet"]')||article.querySelector('article,[data-slot="embedded-tweet-frame"]'))return null;
+       !article.matches('article[data-testid="tweet"]')||article.querySelector('article,[data-slot="embedded-tweet-frame"]'))return result(null,'shape_missing');
     if(original.statusId!==post.statusId||original.sourceUrl!==post.sourceUrl||
-       normalized(original.sourceText)!==normalized(post.sourceText))return false;
+       normalized(original.sourceText)!==normalized(post.sourceText))return result(false,'source_changed');
     let owner,routeId;
     try{
       const initial=new URL(initialUrl),current=new URL(currentUrl),source=new URL(post.sourceUrl);
@@ -611,31 +666,35 @@
     }catch{return null;}
     const source=scanDetailArticle(post,post.article,initialUrl),modal=scanDetailArticle(post,article,initialUrl);
     const sourceAuthor=source.author(),modalAuthor=modal.author();
-    if((sourceAuthor&&sourceAuthor!==owner)||(modalAuthor&&modalAuthor!==owner))return false;
+    if((sourceAuthor&&sourceAuthor!==owner)||(modalAuthor&&modalAuthor!==owner))return result(false,'outer_author_conflict');
     const sourceTime=source.time(),modalTime=modal.time();
-    if(sourceTime!==null&&modalTime!==null&&sourceTime!==modalTime)return false;
+    if(sourceTime!==null&&modalTime!==null&&sourceTime!==modalTime)return result(false,'outer_time_conflict');
     const sourceEvidence=source.evidence(),modalEvidence=modal.evidence();
     if([sourceEvidence,modalEvidence].some(e=>e.conflict||(e.statusId&&e.statusId!==post.statusId)||
-         (e.otherCanonicalId&&e.otherCanonicalId!==post.statusId)))return false;
+         (e.otherCanonicalId&&e.otherCanonicalId!==post.statusId)))return result(false,'outer_identity_conflict');
     const expandedId=modal.expansionId();
     if(expandedId&&expandedId!==post.statusId)return false;
-    const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId);
-    const modalQuote=captureDetailQuote(article,initialUrl,post.statusId);
+    const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId,true);
+    const modalQuote=captureDetailQuote(article,initialUrl,post.statusId,true);
     if(post.hasCapturedQuote){
       if(sourceQuote?.conflict||modalQuote?.conflict||
-         (sourceQuote&&modalQuote&&!sameCapturedQuote(sourceQuote,modalQuote))||
-         (post.timelineQuoteSource&&sourceQuote&&!sameCapturedQuote(post.timelineQuoteSource,sourceQuote)))return false;
-      if(!sourceQuote||!modalQuote)return null;
-    }else if(sourceQuote||modalQuote)return false;
+         (sourceQuote&&modalQuote&&!sameTimelineQuote(sourceQuote,modalQuote))||
+         (post.timelineQuoteSource&&sourceQuote&&!sameTimelineQuote(post.timelineQuoteSource,sourceQuote)))return result(false,'quote_conflict');
+      if(!sourceQuote||!modalQuote)return result(null,'quote_missing');
+    }else if(sourceQuote||modalQuote)return result(false,'unexpected_quote');
     // Missing evidence is not an explicit contradiction. Preserve the
     // existing hydration wait, but never let known conflicts reach it.
     if(sourceAuthor!==owner||modalAuthor!==owner||
        !sourceEvidence.eligible||!modalEvidence.eligible||
-       (routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime)))return null;
+       (routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime)))return result(null,'outer_evidence_missing');
     if(post.quoteOnly){
       return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
     }
+    if(report)Object.assign(report,{sourceQuoteId:Boolean(sourceQuote?.id),modalQuoteId:Boolean(modalQuote?.id),
+      quoteOwnerMatch:Boolean(sourceQuote?.owner&&sourceQuote.owner===modalQuote?.owner),
+      quoteTimeMatch:Boolean(sourceQuote?.time!=null&&sourceQuote.time===modalQuote?.time),
+      outerTimeMatch:Boolean(sourceTime!==null&&sourceTime===modalTime)});
     const full=source.bodies(),short=modal.bodies();
     if(!full.texts.length||!short.texts.length)return null;
     // Rendered labels can be truncated or identical for different links.
@@ -650,15 +709,18 @@
     // a trailing exact quote permalink may be present in only one body.
     // Require the same independently identified quote in both before
     // comparing without that one verified presentation link.
-    if(sourceQuote?.id&&sourceQuote.id===modalQuote?.id){
-      const s=quoteProjection(post.article,sourceQuote.id,initialUrl),m=quoteProjection(article,sourceQuote.id,initialUrl);
+    const quotedIdentityMatch=Boolean(sourceQuote?.id&&modalQuote&&
+      (sourceQuote.id===modalQuote.id||(!modalQuote.id&&sourceQuote.owner&&sourceQuote.owner===modalQuote.owner&&
+       sourceQuote.time!==null&&sourceQuote.time===modalQuote.time)));
+    if(quotedIdentityMatch){
+      const s=quoteProjection(post.article,sourceQuote.id,initialUrl,sourceQuote.owner),m=quoteProjection(article,sourceQuote.id,initialUrl,sourceQuote.owner);
       const sText=s?.text||normalized(post.sourceText),mText=m?.text||normalized(globalThis.ZaneReplyCopilotContent.postExtractor.postText(article));
       if((s||m)&&sText&&sText===mText&&JSON.stringify(s?.links||sourceLinks)===JSON.stringify(m?.links||modalLinks)&&
          !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
-           (normalized(old.sourceText)===sText||sameContext(old,mText))))return true;
+           (normalized(old.sourceText)===sText||sameContext(old,mText))))return result(true,'quote_projection_matched');
     }
     if(modalLinks.some((href,i)=>href!==sourceLinks[i])||
-       (!short.expanded&&sourceLinks.length!==modalLinks.length))return false;
+       (!short.expanded&&sourceLinks.length!==modalLinks.length))return result(false,'body_links_conflict');
     const matches=(long,value)=>{
       if(long===value)return true;
       const prefix=value.replace(/(?:\u2026|\.{3})$/,'').trim();
@@ -667,7 +729,8 @@
     };
     if(quarantinedPosts.some(old=>old?.statusId!==post.statusId&&short.texts.some(value=>
       matches(presentationNormalize(old.sourceText,old.hasCapturedMedia||old.hasCapturedPhoto),value))))return false;
-    return full.texts.some(long=>short.texts.some(value=>matches(long,value)));
+    const matched=full.texts.some(long=>short.texts.some(value=>matches(long,value)));
+    return result(matched,matched?'body_matched':'body_text_conflict');
   }
   function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[],includeCompactEvidence=false) {
     const api=globalThis.ZaneReplyCopilotContent;
@@ -875,9 +938,10 @@
           :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
+      const timelineEvidence=includeCompactEvidence&&post.hasCapturedQuote?{}:null;
       const timelineFallback=existingContextMatches!==true&&!modernContext&&!post.legacyDetailIdentity&&
         !post.detailPreviewSource&&sourceUnchanged&&candidates.length===1&&primary?.article&&!primary.id?
-        verifiedTimelinePreview(post,primary.article,node,dialog,initialUrl,currentUrl,original,quarantinedPosts):null;
+        verifiedTimelinePreview(post,primary.article,node,dialog,initialUrl,currentUrl,original,quarantinedPosts,timelineEvidence):null;
       const contextMatches=timelineFallback===null?existingContextMatches:timelineFallback;
       const compactEvidence=includeCompactEvidence&&detailScan?{
         expansion:detailScan.expands().length===1,
@@ -905,7 +969,7 @@
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)||routeQuoteText),
         contextTextMatches:Boolean(primary&&exactText.includes(primary)||quoteRoutePreview),
-        contextMatches,contextDetail,compactEvidence};
+        contextMatches,contextDetail,compactEvidence,timelineEvidence};
     });
     return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true||post.legacyDetailIdentity===true),
       sourceUnchanged};

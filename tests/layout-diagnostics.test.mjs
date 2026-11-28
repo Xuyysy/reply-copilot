@@ -126,3 +126,10 @@ test('V3 findings distinguish mounted-only, generation and verified fill',()=>{
   assert.equal(classifyFailure({...base,reproduction:{...base.reproduction,marks:[...base.reproduction.marks,{stage:'fill',reason}]}}),finding);
  }
 });
+
+test('timeline preview diagnostics expose only bounded codes and booleans',()=>{
+ const secret='https://x.com/private/status/123';
+ const r=sanitizeReproduction({state:'complete',facts:[{value:{editors:[{timelineEvidence:{reason:'quote_conflict',sourceQuoteId:true,modalQuoteId:false,raw:secret,quoteOwnerMatch:secret}}]}}]},[],[]);
+ const e=r.facts[0].value.editors[0].timelineEvidence;
+ assert.equal(e.reason,'quote_conflict');assert.equal(e.sourceQuoteId,true);assert.equal(e.modalQuoteId,false);assert.equal(e.quoteOwnerMatch,null);assert.ok(!JSON.stringify(r).includes(secret));
+});

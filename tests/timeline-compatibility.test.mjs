@@ -39,6 +39,9 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       const projectedQuote=quote.replace('Independent quoted caption','Independent quoted caption pic.x.com/Quote123');
       const projectedVideo=quote.replace('Independent quoted caption','Independent quoted caption pic.twitter.com/Quote123');
       const videoQuote=quote.replace('</div></div>','</div><video></video></div>');
+      const timedMediaQuote=mediaQuote.replace('<time>Nov 25</time>','<time datetime="2026-11-25T01:51:00.000Z">Nov 25</time>');
+      const linklessProjectedQuote=projectedQuote.replace('<a href="https://x.com/quoted/status/202"><time>Nov 25</time></a>','<time datetime="2026-11-25T01:51:00.000Z">Nov 25</time>');
+      const expandedQuoteLink='<a href="https://t.co/QuoteToken" title="https://x.com/quoted/status/202">x.com/quoted/status/20…</a>';
       const specs=[
         {name:'plain',source:header+permalink+text(caption),modal:header+permalink+text(caption)},
         {name:'long_verified_modal_id',source:header+permalink+text(full)+photo,modal:header+permalink+text(caption)+more},
@@ -86,7 +89,14 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
         {name:'quote_only_media_linkless_outer',source:header+permalink+mediaQuote,modal:header+exactTime+projectedQuote},
         {name:'quote_projection_unverified_time',source:header+permalink+text(caption)+mediaQuote,modal:header+text(caption+' '+quoteLink)+projectedQuote},
         {name:'quote_projection_wrong_body_destination',source:header+permalink+text(caption+' <a href="https://example.com/one">same</a>')+mediaQuote,modal:header+exactTime+text(caption+' <a href="https://example.com/two">same</a> '+quoteLink)+projectedQuote},
-        {name:'quote_projection_second_card',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote+wrongQuote}
+        {name:'quote_projection_second_card',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote+wrongQuote},
+        {name:'tco_expanded_quote',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+projectedQuote},
+        {name:'tco_unlinked_inner_timestamp',source:header+permalink+text(caption)+timedMediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote},
+        {name:'tco_wrong_expanded_id',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink.replace('status/202','status/203'))+projectedQuote},
+        {name:'tco_missing_expanded_metadata',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink.replace(' title="https://x.com/quoted/status/202"',''))+projectedQuote},
+        {name:'tco_wrong_inner_time',source:header+permalink+text(caption)+timedMediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote.replace('01:51:00','01:51:01')},
+        {name:'tco_wrong_inner_author',source:header+permalink+text(caption)+timedMediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote.replace('https://x.com/quoted','https://x.com/other')},
+        {name:'tco_no_outer_time',source:header+permalink+text(caption)+timedMediaQuote,modal:header+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote}
       ];
       const results=[];
       for(const item of specs){
@@ -138,7 +148,9 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       quote_video_projection:'bound',quote_projection_wrong_link:'rejected',quote_projection_wrong_inner_id:'rejected',
       quote_projection_without_media:'rejected',quote_projection_changed_inner_text:'rejected',quote_projection_wrong_parent:'rejected',
       quote_only_media_verified_outer:'bound',quote_only_media_linkless_outer:'bound',quote_projection_unverified_time:'waiting',
-      quote_projection_wrong_body_destination:'rejected',quote_projection_second_card:'rejected'
+      quote_projection_wrong_body_destination:'rejected',quote_projection_second_card:'rejected',
+      tco_expanded_quote:'bound',tco_unlinked_inner_timestamp:'bound',tco_wrong_expanded_id:'rejected',
+      tco_missing_expanded_metadata:'rejected',tco_wrong_inner_time:'rejected',tco_wrong_inner_author:'rejected',tco_no_outer_time:'waiting'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
