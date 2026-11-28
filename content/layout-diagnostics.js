@@ -303,7 +303,7 @@
         marksTruncated:run.marksTruncated,factsTruncated:run.factsTruncated,recordedMs:age()};
       reset();return report;
     }
-    return {start,gesture,mark,facts,finish,cancel(id){if(run?.id===id)reset();},reset};
+    return {start,gesture,mark,facts,finish,wantsFacts(){return Boolean(run&&run.startedAt!==null&&!run.finished&&run.facts.length<20);},cancel(id){if(run?.id===id)reset();},reset};
   }
   api.layoutDiagnostics={layout,render,gestureShape,createRecorder};
 })();
