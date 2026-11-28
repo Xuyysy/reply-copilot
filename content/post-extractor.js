@@ -157,12 +157,18 @@
       a.parentElement?.closest('article')===article);
     return cards.map(modernBody).filter(Boolean);
   }
+  // Body links are content, not the containing post's identity. The
+  // native expansion control is the sole explicit exception.
+  function legacyIdentityContent(node){
+    return Boolean(node?.closest?.('[data-testid="tweetText"],[data-testid="card.wrapper"],[data-testid="birdwatch-pivot"],blockquote')&&
+      !node.closest('[data-testid="tweet-text-show-more-link"]'));
+  }
   function legacyPostIdentity(article) {
     // The author's timestamp is more reliable than a random /status/ link:
     // quote cards, media and link previews can contain OTHER tweet IDs.
     const timed=new Map();
     for (const time of article.querySelectorAll("time")) {
-      if (time.closest("article") !== article || isQuoteContent(time, article)) continue;
+      if (time.closest("article") !== article || isQuoteContent(time, article)||legacyIdentityContent(time)) continue;
       const link = time.closest('a[href*="/status/"]');
       if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
       let identity = statusLink(link);
@@ -188,7 +194,7 @@
     // exactly one possible post ID; never guess between a post and its quote.
     const candidates = new Map();
     for (const anchor of article.querySelectorAll('a[href*="/status/"]')) {
-      if (anchor.closest("article") !== article || isQuoteContent(anchor, article)) continue;
+      if (anchor.closest("article") !== article || isQuoteContent(anchor, article)||legacyIdentityContent(anchor)) continue;
       const identity = statusLink(anchor);
       if (identity) candidates.set(identity.statusId, identity);
     }
@@ -395,5 +401,5 @@
       quoteOnly: !ownText && Boolean(quotedText), quotedText: quotedText || null };
   }
   globalThis.ZaneReplyCopilotContent ||= {};
-  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts, legacyDetailEvidence, revalidateLegacyDetailSource };
+  globalThis.ZaneReplyCopilotContent.postExtractor = { extractPost, postIdentity, postText, isQuoteContent, readOriginalText: originalPostText, isModernPost, modernPage, modernIdentityEvidence, modernQuoteTexts, legacyDetailEvidence, revalidateLegacyDetailSource, legacyIdentityContent };
 })();

@@ -6,9 +6,8 @@ import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-// Characterization only: record current accepted 0.3.22 decisions.
-// A known gap is not marked as a successful reply. Synthetic DOM, no X
-// or provider request; quote waiting is not proof of eventual failure.
+// Synthetic DOM, no live X or provider calls. Preserve previous coverage
+// and add independent quote ownership / media presentation regressions.
 test('timeline compatibility: verified legacy media, history and strictly corroborated preview',{timeout:60000},()=>{
   const dir=mkdtempSync(path.join(tmpdir(),'xrh-timeline-compat-'));
   try{
@@ -33,6 +32,13 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       const wrongTime='<time datetime="2026-11-25T03:51:01.000Z">Nov 25</time>';
       const wrongAuthor='<div data-testid="User-Name"><a href="https://x.com/other">@other</a></div>';
       const wrongQuote=quote.replace('/status/202','/status/203');
+      const quoteUrl='https://x.com/quoted/status/202';
+      const quoteLink='<a href="'+quoteUrl+'">x.com/quoted/status/20…</a>';
+      const otherLink='<a href="https://x.com/other/status/203">x.com/quoted/status/20…</a>';
+      const mediaQuote=quote.replace('</div></div>','</div><a href="'+quoteUrl+'/photo/1"><div data-testid="tweetPhoto">Quoted image</div></a></div>');
+      const projectedQuote=quote.replace('Independent quoted caption','Independent quoted caption pic.x.com/Quote123');
+      const projectedVideo=quote.replace('Independent quoted caption','Independent quoted caption pic.twitter.com/Quote123');
+      const videoQuote=quote.replace('</div></div>','</div><video></video></div>');
       const specs=[
         {name:'plain',source:header+permalink+text(caption),modal:header+permalink+text(caption)},
         {name:'long_verified_modal_id',source:header+permalink+text(full)+photo,modal:header+permalink+text(caption)+more},
@@ -66,7 +72,21 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
         {name:'quote_only_timestamp',source:header+permalink+quote,modal:header+exactTime+quote},
         {name:'quote_only_wrong_quoted_id',source:header+permalink+quote,modal:header+exactTime+wrongQuote},
         {name:'history_conflicting_timestamps',source:header+'<a href="'+url+'/history"><time>Edited</time></a>'+wrong+text(caption),modal:header+permalink+text(caption)},
-        {name:'arbitrary_history_link',source:header+text(caption)+'<a href="'+url+'/history">History</a>',modal:header+permalink+text(caption)}
+        {name:'arbitrary_history_link',source:header+text(caption)+'<a href="'+url+'/history">History</a>',modal:header+permalink+text(caption)},
+        {name:'body_link_never_identity',source:header+text(caption+' '+quoteLink)+quote,modal:header+permalink+text(caption)+quote},
+        {name:'quote_media_projection',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote},
+        {name:'quote_media_projection_rolelink',source:header+permalink+text(caption)+mediaQuote.replace('data-testid="quoteTweet"','role="link"'),modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote.replace('data-testid="quoteTweet"','role="link"')},
+        {name:'quote_video_projection',source:header+permalink+text(caption)+videoQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedVideo},
+        {name:'quote_projection_wrong_link',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+otherLink)+projectedQuote},
+        {name:'quote_projection_wrong_inner_id',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote.replace('/status/202','/status/203')},
+        {name:'quote_projection_without_media',source:header+permalink+text(caption)+quote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote},
+        {name:'quote_projection_changed_inner_text',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote.replace('Independent quoted caption','Different quoted caption')},
+        {name:'quote_projection_wrong_parent',source:header+permalink+text(caption)+mediaQuote,modal:header+wrong+text(caption+' '+quoteLink)+projectedQuote},
+        {name:'quote_only_media_verified_outer',source:header+permalink+mediaQuote,modal:header+permalink+projectedQuote},
+        {name:'quote_only_media_linkless_outer',source:header+permalink+mediaQuote,modal:header+exactTime+projectedQuote},
+        {name:'quote_projection_unverified_time',source:header+permalink+text(caption)+mediaQuote,modal:header+text(caption+' '+quoteLink)+projectedQuote},
+        {name:'quote_projection_wrong_body_destination',source:header+permalink+text(caption+' <a href="https://example.com/one">same</a>')+mediaQuote,modal:header+exactTime+text(caption+' <a href="https://example.com/two">same</a> '+quoteLink)+projectedQuote},
+        {name:'quote_projection_second_card',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+quoteLink)+projectedQuote+wrongQuote}
       ];
       const results=[];
       for(const item of specs){
@@ -113,7 +133,12 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       long_quarantined_prefix:'rejected',long_source_changed:'rejected',same_tco_timestamp:'bound',
       different_tco_timestamp:'rejected',captioned_quote_timestamp:'bound',captioned_quote_conflict:'rejected',
       quote_only_timestamp:'bound',quote_only_wrong_quoted_id:'rejected',
-      history_conflicting_timestamps:'failed',arbitrary_history_link:'failed'
+      history_conflicting_timestamps:'failed',arbitrary_history_link:'failed',
+      body_link_never_identity:'failed',quote_media_projection:'bound',quote_media_projection_rolelink:'bound',
+      quote_video_projection:'bound',quote_projection_wrong_link:'rejected',quote_projection_wrong_inner_id:'rejected',
+      quote_projection_without_media:'rejected',quote_projection_changed_inner_text:'rejected',quote_projection_wrong_parent:'rejected',
+      quote_only_media_verified_outer:'bound',quote_only_media_linkless_outer:'bound',quote_projection_unverified_time:'waiting',
+      quote_projection_wrong_body_destination:'rejected',quote_projection_second_card:'rejected'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

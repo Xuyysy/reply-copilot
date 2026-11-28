@@ -136,7 +136,7 @@
     // An unknown parent can use verified text; conflicting IDs cannot.
     const ids=new Set();
     for(const anchor of article?.querySelectorAll?.('a[href*="/status/"]')||[]) {
-      if(anchor.closest?.('article')!==article || globalThis.ZaneReplyCopilotContent.postExtractor.isQuoteContent?.(anchor,article))continue;
+      if(anchor.closest?.('article')!==article || extractor.isQuoteContent?.(anchor,article)||extractor.legacyIdentityContent?.(anchor))continue;
       try{
         const url=new URL(anchor.href);
         const match=url.pathname.match(/^\/[^/]+\/status\/(\d+)\/?$/);
@@ -198,10 +198,13 @@
     const legacyDetailRoute=!post.modernLayout&&initialUrl&&/\/status\/\d+(?:[/?#]|$)/.test(initialUrl);
     const detailPreviewSource=legacyDetailRoute?captureDetailPreviewSource(post,initialUrl):null;
     const detailQuoteSource=legacyDetailRoute&&hasCapturedQuote?captureDetailQuote(post.article,initialUrl,post.statusId):null;
+    const timelineQuoteSource=!legacyDetailRoute&&!post.modernLayout&&hasCapturedQuote&&post.article?.nodeType===1?
+      captureDetailQuote(post.article,initialUrl,post.statusId):null;
     const detailNativeVideo=Boolean(legacyDetailRoute&&ownedDetailNodes(post.article,'video').length);
     return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto||detailNativeVideo,
       ...(detailPreviewSource?{detailPreviewSource}:{}),
       ...(detailQuoteSource?{detailQuoteSource}:{}),
+      ...(timelineQuoteSource?{timelineQuoteSource}:{}),
       ...(detailPreviewSource&&timelinePreview?.statusId===post.statusId&&
         timelinePreview.sourceUrl===post.sourceUrl&&typeof timelinePreview.sourceText==='string'&&
         normalized(timelinePreview.sourceText)?{timelinePreview:Object.freeze({
@@ -404,16 +407,54 @@
       }catch{return {conflict:true};}
     }
     if(ids.size>1||ids.has(outerId))return {conflict:true};
-    const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(bodies[0]));
-    return text?Object.freeze({id:ids.values().next().value||null,text}):{conflict:true};
+    const body=bodies[0],id=ids.values().next().value||null;
+    const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body));
+    // Only media within this one captured quote card, not outer media.
+    const media=Boolean(card.querySelector('[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"],video'));
+    const mediaPresentation=link=>/^(?:https:\/\/ ?)?pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+$/i.test(normalized(link.textContent))&&
+      (/^https:\/\/t\.co\/[A-Za-z0-9]+$/.test(link.href)||/^https:\/\/pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+$/i.test(link.href));
+    const links=[...body.querySelectorAll('a[href]')].filter(link=>!mediaPresentation(link)).map(link=>link.href);
+    const presentations=[...body.querySelectorAll('a[href]')].filter(mediaPresentation).map(link=>link.href);
+    return text?Object.freeze({id,text,media,links:Object.freeze(links),presentations:Object.freeze(presentations)}):{conflict:true};
+  }
+  function sameCapturedQuote(source,modal){
+    if(!source||!modal||source.conflict||modal.conflict||
+       (source.id&&modal.id&&source.id!==modal.id))return false;
+    if(JSON.stringify(source.links)!==JSON.stringify(modal.links))return false;
+    if(source.text===modal.text&&JSON.stringify(source.presentations)===JSON.stringify(modal.presentations))return true;
+    // A known native quote's image/video can become a trailing pic link
+    // in the reply modal. Never strip arbitrary URLs or another quote's
+    // text; require matching independent quote ID and owned source media.
+    return Boolean(source.media&&source.id&&source.id===modal.id&&
+      presentationNormalize(source.text,true)===presentationNormalize(modal.text,true)&&
+      presentationNormalize(source.text,true));
+  }
+  // Recognize only an exact native link to the independently verified
+  // embedded post. A truncated display label, t.co alone, or any other
+  // post link cannot be removed. Keep unrelated links in the comparison.
+  function quoteProjection(article,quoteId,initialUrl){
+    if(!quoteId)return null;
+    const bodies=ownedDetailNodes(article,'[data-testid="tweetText"]');
+    if(bodies.length!==1)return null;
+    const body=bodies[0],anchors=[...body.querySelectorAll('a[href]')];
+    const last=anchors.at(-1);
+    if(!last)return null;
+    const target=raw=>{try{
+      const base=new URL(initialUrl),u=new URL(raw,base);
+      return u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&
+        u.pathname.match(/^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/(\d+)\/?$/)?.[1]===quoteId;
+    }catch{return false;}};
+    if(!target(last.href))return null;
+    const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body));
+    const label=normalized(last.innerText||last.textContent);
+    if(!label||!text.endsWith(' '+label))return null;
+    return {text:text.slice(0,-label.length).trim(),links:anchors.slice(0,-1).map(link=>link.href)};
   }
   function detailQuoteCheck(post,article,initialUrl){
     if(!post.hasCapturedQuote)return {conflict:Boolean(captureDetailQuote(article,initialUrl,post.statusId)),matched:false};
     const captured=post.detailQuoteSource,modal=captureDetailQuote(article,initialUrl,post.statusId);
     if(!modal)return {conflict:false,matched:false};
-    if(!captured||captured.conflict||modal.conflict||
-       (captured.id&&modal.id&&captured.id!==modal.id)||
-       captured.text!==modal.text)return {conflict:true,matched:false};
+    if(!sameCapturedQuote(captured,modal))return {conflict:true,matched:false};
     return {conflict:false,matched:Boolean(captured.id&&modal.id===captured.id)};
   }
   function detailPreviewBefore(article,editor,dialog){
@@ -582,8 +623,8 @@
     const modalQuote=captureDetailQuote(article,initialUrl,post.statusId);
     if(post.hasCapturedQuote){
       if(sourceQuote?.conflict||modalQuote?.conflict||
-         (sourceQuote&&modalQuote&&(sourceQuote.text!==modalQuote.text||
-           (sourceQuote.id&&modalQuote.id&&sourceQuote.id!==modalQuote.id))))return false;
+         (sourceQuote&&modalQuote&&!sameCapturedQuote(sourceQuote,modalQuote))||
+         (post.timelineQuoteSource&&sourceQuote&&!sameCapturedQuote(post.timelineQuoteSource,sourceQuote)))return false;
       if(!sourceQuote||!modalQuote)return null;
     }else if(sourceQuote||modalQuote)return false;
     // Missing evidence is not an explicit contradiction. Preserve the
@@ -605,6 +646,17 @@
       .filter(link=>!link.closest('[data-testid="tweet-text-show-more-link"]'))
       .map(link=>link.href);
     const sourceLinks=hrefs(post.article),modalLinks=hrefs(article);
+    // Feed and modal can represent the same attached quote differently:
+    // a trailing exact quote permalink may be present in only one body.
+    // Require the same independently identified quote in both before
+    // comparing without that one verified presentation link.
+    if(sourceQuote?.id&&sourceQuote.id===modalQuote?.id){
+      const s=quoteProjection(post.article,sourceQuote.id,initialUrl),m=quoteProjection(article,sourceQuote.id,initialUrl);
+      const sText=s?.text||normalized(post.sourceText),mText=m?.text||normalized(globalThis.ZaneReplyCopilotContent.postExtractor.postText(article));
+      if((s||m)&&sText&&sText===mText&&JSON.stringify(s?.links||sourceLinks)===JSON.stringify(m?.links||modalLinks)&&
+         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
+           (normalized(old.sourceText)===sText||sameContext(old,mText))))return true;
+    }
     if(modalLinks.some((href,i)=>href!==sourceLinks[i])||
        (!short.expanded&&sourceLinks.length!==modalLinks.length))return false;
     const matches=(long,value)=>{
@@ -722,7 +774,11 @@
         return {seen:nodes.length>0,matches:nodes.some(node=>
           normalized(api.postExtractor.readOriginalText?.(node)||node.innerText||node.textContent)===normalized(post.quotedText))};
       })() : {seen:false,matches:false};
-      const quotedPreviewMatches=quotePreview.matches;
+      const capturedQuote=post.detailQuoteSource||post.timelineQuoteSource;
+      const projectedQuoteMatch=Boolean(post.quoteOnly&&quotePreview.seen&&!quotePreview.matches&&
+        capturedQuote&&matching.length===1&&matching[0].article&&
+        sameCapturedQuote(capturedQuote,captureDetailQuote(matching[0].article,initialUrl,post.statusId)));
+      const quotedPreviewMatches=quotePreview.matches||projectedQuoteMatch;
       const exactText=candidates.filter(item=>sameContext(post,item.text));
       // X sometimes omits the parent permalink in a quote/video reply modal,
       // while leaving a separate quoted article. A UNIQUE source-text match
