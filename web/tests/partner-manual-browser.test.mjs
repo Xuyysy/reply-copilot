@@ -14,13 +14,14 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  import {api} from './src/lib/api';
  const root=createRoot(document.getElementById('root'));
  const policy={version:1,status:'active',level:'standard',rate_bps:2000,term_months:null,effective_at:1700000000000,reason:'synthetic policy'};
- window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false};
+ window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false};
  const f=window.fixture,member='/v1/partners/manual-report',admin='/v1/admin/partners/manual-report',policyPath='/v1/admin/partners/policy';
  const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
-  const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');
+  const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');if(!init.method||init.method==='GET')f.reads.push(u.pathname);
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
-  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null});
+  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout});
+  if(u.pathname==='/v1/partners/payout')return Response.json({enabled:true,version:0,locked:false,profile:null});
   if(u.pathname==='/v1/referrals/me')return Response.json({enabled:true,canInvite:true,link:f.link??null,registered:3,rewarded:1,pending:2,earnedCredits:50,bonus:50,invites:[{registeredAt:1700000000000,status:'rewarded',label:'y***'},{registeredAt:1700000000001,status:'pending',label:'z***'}]});
   if(init.method==='POST'){
    if(init.headers['X-CSRF-Token']!=='fixture-csrf')throw Error('Missing CSRF');
@@ -73,7 +74,12 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await evaluate('showMember("ordinary")');await until('!document.querySelector("[data-testid=partner-membership]")');assert.equal(await evaluate('fixture.posts.length'),4);
  await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until(has('想让流量变现'));assert.equal(await evaluate('Boolean(document.querySelector("[aria-label=我的邀请链接]"))'),true);assert.equal(await evaluate(has('审核开通后，继续使用已有邀请链接')),true);assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);assert.equal(await evaluate('Boolean('+button('生成我的邀请链接')+')'),false);
  await evaluate('showReferral("ordinary",null)');await until(has('想让流量变现'));assert.equal(await evaluate('Boolean('+button('生成我的邀请链接')+')'),true);
- await evaluate('showReferral("partner","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until(has('推广伙伴'));assert.equal(await evaluate(has('想让流量变现')),false);
+ await evaluate('fixture.reads=[];fixture.payout=true;showReferral("partner","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until(has('推广伙伴'));await until(has('最近邀请注册'));assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate('document.querySelectorAll("[data-testid=account-referral-rewards]").length'),1);assert.equal(await evaluate('document.querySelectorAll("[aria-label=我的邀请链接]").length'),1);assert.deepEqual((await evaluate('fixture.reads')).sort(),['/v1/partners/me','/v1/referrals/me']);assert.equal(await evaluate(has('受邀用户 y***')),false);
+ await press('购买记录');await until(has('受邀用户 y***'));assert.equal(await evaluate(has('最近邀请注册')),false);assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/manual-report").length'),1);
+ await press('邀请注册');await until(has('最近邀请注册'));assert.equal(await evaluate(has('受邀用户 y***')),false);
+ await press('购买记录');await until(has('受邀用户 y***'));assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/manual-report").length'),1);
+ await press('结算记录');await until(has('支付宝收款资料'));await until(has('申请记录'));assert.equal(await evaluate(has('受邀用户 y***')),false);assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/payout").length'),1);assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+ await evaluate('fixture.payout=false');
  await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef",false)');await until('Boolean(document.querySelector("[aria-label=我的邀请链接]"))');assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate('fixture.posts.length'),4);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });

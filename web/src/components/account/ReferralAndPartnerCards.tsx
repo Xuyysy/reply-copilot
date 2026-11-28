@@ -1,14 +1,12 @@
-import {useState} from "react";
 import type {Language} from "../../lib/language";
 import ReferralInviteCard from "./ReferralInviteCard";
-import PartnerMembershipCard from "./PartnerMembershipCard";
+import {usePartnerMembership,PartnerMembershipContent} from "./PartnerMembershipCard";
 
-// Share the existing authenticated membership request; no additional API
-// calls, no duplicated membership state, and no recruiting approved partners.
+// One authenticated membership read, one referral read; both start in parallel.
+// Cash reporting and the recipient profile remain independently gated and lazy.
 export default function ReferralAndPartnerCards({language,owner}:{language:Language;owner:string}){
- const [showRecruitment,setShowRecruitment]=useState(false);
- return <>
-  <ReferralInviteCard language={language} showRecruitment={showRecruitment}/>
-  <PartnerMembershipCard owner={owner} language={language} onRecruitment={setShowRecruitment}/>
- </>;
+ const result=usePartnerMembership(owner);
+ const showRecruitment=result?.enabled===true&&result.policy===null;
+ const hasPartner=result?.enabled===true&&!!result.policy;
+ return <ReferralInviteCard language={language} showRecruitment={showRecruitment} renderPartner={hasPartner?(invites)=><PartnerMembershipContent owner={owner} language={language} result={result} inviteRecords={invites}/>:undefined}/>;
 }

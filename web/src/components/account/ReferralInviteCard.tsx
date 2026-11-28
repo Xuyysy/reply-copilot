@@ -1,4 +1,4 @@
-import {useEffect,useState} from "react";
+import {useEffect,useState,type ReactNode} from "react";
 import {Gift,Copy,RefreshCw} from "lucide-react";
 import {api} from "../../lib/api";
 import {phrase,type Language} from "../../lib/language";
@@ -11,7 +11,7 @@ type ReferralMine={
  invitedBy?:{status:string;registeredAt:number;rewardedAt:number|null}|null;
  invites?:{registeredAt:number;status:string;label:string}[];
 };
-export default function ReferralInviteCard({language,showRecruitment}:{language:Language;showRecruitment:boolean}){
+export default function ReferralInviteCard({language,showRecruitment,renderPartner}:{language:Language;showRecruitment:boolean;renderPartner?:(invites:ReactNode)=>ReactNode}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [data,setData]=useState<ReferralMine|null>(null);
  const [loading,setLoading]=useState(true);
@@ -42,10 +42,13 @@ export default function ReferralInviteCard({language,showRecruitment}:{language:
   catch{setError(t("无法自动复制，可选中链接手动复制。","Select and copy the link manually."));}
  };
  if(loading)return <div data-testid="referral-user-loading" role="status" className="text-sm text-muted-foreground">{t("正在读取邀请奖励…","Loading referral rewards…")}</div>;
- if(!data?.enabled)return null;
+ if(!data?.enabled&&!renderPartner)return error?<p role="alert" className="text-sm text-red-700">{error}</p>:null;
+ const inviteRecords=data?.enabled?<div className="space-y-2"><h3 className="font-semibold">{t("最近邀请注册","Recent registrations")}</h3>{data.invites?.length?<div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th>{t("受邀用户","Invitee")}</th><th>{t("注册时间","Registered")}</th><th>{t("奖励状态","Reward status")}</th></tr></thead><tbody>{data.invites.map((r,i)=><tr key={i} className="border-t"><td className="py-2">{r.label}</td><td>{new Date(r.registeredAt).toLocaleString()}</td><td>{r.status==="rewarded"?t("已激活","Activated"):t("待激活","Pending")}</td></tr>)}</tbody></table></div>:<p className="text-sm text-muted-foreground">{t("暂无邀请注册记录。","No registrations yet.")}</p>}<p className="text-xs text-muted-foreground">{t("展示最近 30 条记录，保护受邀用户隐私。","Latest 30 records; invitee privacy is protected.")}</p></div>:<p className="text-sm text-muted-foreground">{t("邀请记录暂不可用。","Referral records are unavailable.")}</p>;
  return <Card data-testid="account-referral-rewards" className="border-primary/25">
-  <CardHeader><CardTitle className="flex items-center gap-2"><Gift size={20}/>{t("邀请好友 · 双方各得 50 次，新人另领 200 次","Invite friends · 50 bonus credits each + 200 welcome credits for newcomers")}</CardTitle></CardHeader>
+  <CardHeader><CardTitle className="flex items-center gap-2"><Gift size={20}/>{t("我的推广中心","My referral center")}</CardTitle></CardHeader>
   <CardContent className="space-y-4">
+   {data?.enabled&&<>
+   <p className="text-sm font-medium">{t("邀请好友 · 双方各得 50 次，新人另领 200 次","Invite friends · 50 bonus credits each + 200 welcome credits for newcomers")}</p>
    <p className="text-sm text-muted-foreground">{t("好友通过你的邀请链接注册并验证邮箱后，首次绑定插件可领取原有的 200 次新人免费额度；成功接收第一条 AI 回复后，你和好友各额外获得 50 次。好友合计 250 次，邀请奖励不主动过期。","A friend who signs up through your link and verifies their email receives the usual 200 welcome credits after first connecting the extension. Once they successfully receive their first AI reply, both you and your friend earn 50 extra credits each. Your friend receives 250 credits in total, and the referral bonuses do not expire automatically.")}</p>
    {data.canInvite===false&&<p role="status" data-testid="referral-ineligible-explanation" className="text-sm text-muted-foreground">{t("当前账号尚不符合邀请资格。请确认账号已验证邮箱、未被冻结且不是测试账号。","Your account is not eligible to invite yet. Verify your email and make sure your account is active and not marked for testing.")}</p>}
    {data.canInvite&&<div className="space-y-2">
@@ -68,12 +71,13 @@ export default function ReferralInviteCard({language,showRecruitment}:{language:
     <p className="text-xs text-muted-foreground">{t("30 天内最多奖励 20 位有效邀请。仅新注册用户可通过链接建立邀请关系。","Up to 20 rewarded referrals per rolling 30 days. Only newly created accounts can be attributed.")}</p>
    </div>}
    <div className="grid grid-cols-3 gap-2">
-    {[[t("邀请注册","Registered"),data.registered],[t("奖励成功","Rewarded"),data.rewarded],[t("累计获赠","Credits earned"),data.earnedCredits]].map(([label,n])=>
+    {[[t("邀请注册","Registered"),data.registered],[t("奖励成功","Rewarded"),data.rewarded],[t("累计免费奖励","Free credits earned"),data.earnedCredits]].map(([label,n])=>
      <div key={label} className="rounded-lg bg-muted/40 p-3 text-center"><strong className="block text-xl">{Number(n||0).toLocaleString()}</strong><span className="text-xs text-muted-foreground">{label}</span></div>)}
    </div>
-   <div className="space-y-2"><h3 className="font-semibold">{t("最近邀请注册","Recent registrations")}</h3>{data.invites?.length?<div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-muted-foreground"><th>{t("受邀用户","Invitee")}</th><th>{t("注册时间","Registered")}</th><th>{t("奖励状态","Reward status")}</th></tr></thead><tbody>{data.invites.map((r,i)=><tr key={i} className="border-t"><td className="py-2">{r.label}</td><td>{new Date(r.registeredAt).toLocaleString()}</td><td>{r.status==="rewarded"?t("已激活","Activated"):t("待激活","Pending")}</td></tr>)}</tbody></table></div>:<p className="text-sm text-muted-foreground">{t("暂无邀请注册记录。","No registrations yet.")}</p>}<p className="text-xs text-muted-foreground">{t("展示最近 30 条记录，保护受邀用户隐私。","Latest 30 records; invitee privacy is protected.")}</p></div>
    {data.invitedBy&&<p className="text-sm text-muted-foreground">{data.invitedBy.status==="rewarded"?t("你通过好友邀请成功激活，额外获得 50 次免费额度。","Your friend referral earned you 50 extra free replies."):t("你有一笔好友邀请奖励待激活：完成插件绑定并成功接收第一条 AI 回复。","Your invite bonus is pending: connect the extension and receive your first AI reply.")}</p>}
    {message&&<p role="status" className="text-sm text-emerald-700">{message}</p>}
+   </>}
+   {renderPartner?renderPartner(inviteRecords):inviteRecords}
    {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}
   </CardContent>
  </Card>;

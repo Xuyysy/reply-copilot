@@ -12,7 +12,8 @@ const adminPanel=read("../src/components/admin/ReferralAdminPanel.tsx");
 
 test("My Account includes V1 referrals beside existing free and paid credit balances",()=>{
  assert.match(account,/import ReferralAndPartnerCards from "\.\/ReferralAndPartnerCards"/);
- assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\}\/>/);
+ assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} renderPartner=/);
+ assert.match(card,/我的推广中心/);
  assert.match(card,/account-referral-rewards/);
  assert.match(card,/\/v1\/referrals\/me/);
  assert.match(card,/\/v1\/referrals\/link/);
