@@ -23,7 +23,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');if(!init.method||init.method==='GET')f.reads.push(u.pathname);
   if(u.pathname==='/v1/me')return f.owner==='guest'?Response.json({code:'UNAUTHORIZED'},{status:401}):f.owner==='error'?Response.json({code:'SERVER_UNAVAILABLE'},{status:503}):Response.json({user:{userId:f.owner}});
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
-  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout,applicationsEnabled:f.appEnabled});
+  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout,applicationsEnabled:f.appEnabled,recruitmentEligible:f.owner==='ordinary'});
   if(u.pathname==='/v1/partners/payout')return Response.json({enabled:true,version:0,locked:false,profile:null});
   if(u.pathname==='/v1/referrals/me')return Response.json({enabled:true,canInvite:true,link:f.link??null,registered:3,rewarded:1,pending:2,earnedCredits:50,bonus:50,invites:[{registeredAt:1700000000000,status:'rewarded',label:'y***'},{registeredAt:1700000000001,status:'pending',label:'z***'}]});
   if(init.method==='POST'){
@@ -106,6 +106,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await press('验证身份并查看本次收款资料');await until(has('synthetic@example.test'));
  assert.deepEqual(await evaluate('fixture.posts.slice(-3).map(x=>[x.path,Object.keys(x.body).sort().join(",")])'),[['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId'],['/v1/admin/partners/manual-report','operationId,sync,userId'],['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId']]);
  assert.equal(await evaluate(disabled('标记已结算')),true);
+ await evaluate('showReferral("administrator","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until('Boolean(document.querySelector("[aria-label=我的邀请链接]"))');assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate(has('私信我')),false);
  await evaluate('fixture.appEnabled=true;showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');
  await press('申请成为推广合伙人');await until(disabled('提交申请'));const x='document.querySelector("[aria-label=\\\"X 账号\\\"]")';
  await evaluate(x+'.focus()');await call('Input.insertText',{text:'@My_X'});await until('!'+disabled('提交申请'));await press('提交申请');await until(has('申请待审核'));assert.equal(await evaluate('fixture.application.x_handle'),'my_x');

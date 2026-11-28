@@ -7,7 +7,7 @@ import PartnerPayoutProfile from "./PartnerPayoutProfile";
 import {Card,CardContent} from "../ui/card";
 
 type Policy={status:"active"|"paused";level:"standard"|"advanced"|"strategic";rate_bps:number;term_months:number|null;effective_at:number};
-type Result={enabled:boolean;policy?:Policy|null;payoutProfileEnabled?:boolean;applicationsEnabled?:boolean};
+type Result={enabled:boolean;policy?:Policy|null;payoutProfileEnabled?:boolean;applicationsEnabled?:boolean;recruitmentEligible?:boolean};
 
 export function usePartnerMembership(owner:string){
  const [result,setResult]=useState<Result|null>(null);
