@@ -63,7 +63,7 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
     check(signal,deadline);
     stage='checkpoint';
     session=await beginSession(db,ownerUserId);
-    job=await openSyncJob(db,session,{providerId:provider.id,source,refresh});
+    job=await openSyncJob(db,session,{providerId:provider.id,legacyProviderId:provider.legacyProviderId,source,refresh});
     while(!job.done&&committed<maxPages){
       stage='identity';httpStatus=null;
       check(signal,deadline);

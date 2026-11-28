@@ -127,11 +127,13 @@ export async function clearOwner(db,session){
 const QUALITY_KEYS=['unsupported','unresolvedActors','foreignTargets','ignored'];
 function validProvider(v){return typeof v==='string'&&/^[a-z0-9-]{1,50}$/.test(v);}
 function validCursor(v){return v===null||typeof v==='string'&&v.length>0&&v.length<=2048;}
-export async function openSyncJob(db,session,{providerId,source,refresh=false}={}){
-  if(!validProvider(providerId)||!['notification','post'].includes(source))throw Error('invalid_job');
+export async function openSyncJob(db,session,{providerId,legacyProviderId,source,refresh=false}={}){
+  if(!validProvider(providerId)||legacyProviderId!==undefined&&(!validProvider(legacyProviderId)||legacyProviderId===providerId)||!['notification','post'].includes(source))throw Error('invalid_job');
   return transaction(db,['session','syncJobs'],'readwrite',async tx=>{
     await assertSession(tx,session);
-    const store=tx.objectStore('syncJobs'),key=[session.ownerUserId,providerId,source],old=await req(store.get(key));
+    const store=tx.objectStore('syncJobs'),key=[session.ownerUserId,providerId,source];let old=await req(store.get(key));
+    // Migrate only the exact combined fingerprint of the current endpoints, never an unknown old cursor.
+    if(!old&&legacyProviderId!==undefined){const legacyKey=[session.ownerUserId,legacyProviderId,source],legacy=await req(store.get(legacyKey));if(legacy){old={...legacy,providerId};await req(store.put(old));await req(store.delete(legacyKey));}}
     if(old&&!refresh)return old;
     // Explicit refresh starts from the head, without deleting previously committed events.
     const job={ownerUserId:session.ownerUserId,providerId,source,revision:(old?.revision??-1)+1,cursor:null,seen:[],pages:0,done:false,qualityPages:0,quality:{unsupported:0,unresolvedActors:0,foreignTargets:0,ignored:0},updatedAt:Date.now()};

@@ -31,3 +31,10 @@ test('legacy response explicit bottom termination, known globalObjects and minim
  const p=api.project(body,'rest',owner);assert.equal(p.done,true);assert.equal(p.nextCursor,null);assert.ok(!JSON.stringify(p).includes('omit'));assert.equal(p.viewerVerified,false);
  assert.equal(normalizePage({status:200,ownerUserId:owner,source:'notification',requestCursor:null,...p},{ownerUserId:owner,source:'notification',cursor:null}).events.length,1);
 });
+test('source checkpoint fingerprints do not change when only the other endpoint changes',async()=>{
+ const notification={kind:'rest',origin,path:'/fixture-notification',params:[]};
+ const post={kind:'search',origin,path:'/fixture-post',params:[]};
+ const first=await api.sourceProviderIds({notification,post});
+ const second=await api.sourceProviderIds({notification,post:{...post,path:'/fixture-post-v2'}});
+ assert.match(first.notification,/^x-web-[a-f0-9]{32}$/);assert.notEqual(first.notification,first.post);assert.equal(first.notification,second.notification);assert.notEqual(first.post,second.post);
+});

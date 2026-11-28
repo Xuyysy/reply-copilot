@@ -109,7 +109,7 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      stage='connect';
      provider=await openProviderSession(providerFactory,b,{signal:task.controller.signal});
      if(!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function')fail('source_unavailable');
-     const guarded={id:provider.id,identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
+     const guarded={identify:async arg=>{await verifyBound();return provider.identify(arg);},readPage:async arg=>{await verifyBound();return provider.readPage(arg);}};
      // One owner-bound task can cover both timeline kinds. Each kind retains an
      // independent durable checkpoint in the existing repository.
      const available=provider.sources===undefined?['notification']:provider.sources;
@@ -123,7 +123,8 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      try{prior=await readOwnerDataset(db,session);}finally{await endSession(db,session);}
      let completedPages=0,completedInserted=0,partialReason=null;
      // Incomplete/oldest sources get a turn before refreshing completed history.
-     const checkpoint=source=>prior.jobs.find(j=>j.providerId===provider.id&&j.source===source);
+     const sourceId=source=>provider.sourceIds?.[source]??provider.id;
+     const checkpoint=source=>prior.jobs.find(j=>j.providerId===sourceId(source)&&j.source===source)??prior.jobs.find(j=>j.providerId===provider.id&&j.source===source);
      const ordered=[...sources].sort((a,b)=>Number(checkpoint(a)?.done===true)-Number(checkpoint(b)?.done===true)||(checkpoint(a)?.updatedAt??0)-(checkpoint(b)?.updatedAt??0));
      const pagesPerSource=Math.floor(30/sources.length),msPerSource=Math.floor(80000/sources.length);
      task.progress={...task.progress,sources:ordered.map(source=>({source,state:'pending',reason:null,pages:0,inserted:0}))};
@@ -131,9 +132,10 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
      for(const source of ordered){
        stage='identity';
        await verifyBound();
-       const refresh=prior.jobs.some(j=>j.providerId===provider.id&&j.source===source&&j.done);
+       const refresh=checkpoint(source)?.done===true;
+       const id=sourceId(source),scoped={...guarded,id,...(id!==provider.id?{legacyProviderId:provider.id}:{})};
        sourceProgress(source,{state:'running'});
-       const result=await syncInteractions(db,guarded,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
+       const result=await syncInteractions(db,scoped,{ownerUserId:b.ownerUserId,source,refresh,maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
          task.progress={...task.progress,pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
          sourceProgress(source,{pages:p.pages,inserted:p.inserted});
          void write('running').catch(()=>{});

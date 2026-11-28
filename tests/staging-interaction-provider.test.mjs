@@ -54,3 +54,10 @@ test('abort cancels the exact connection, including before a delayed start reply
  await assert.rejects(pending,/cancelled/);
  assert.ok(calls.slice(1).every(m=>m.action==='cancel'&&m.connectionId===calls[0].connectionId));
 });
+
+test('provider propagates distinct source fingerprints and rejects invalid supplied maps',async()=>{
+ const id='x-web-'+'a'.repeat(32),notification='x-web-'+'b'.repeat(32),post='x-web-'+'c'.repeat(32);
+ const connect=sourceIds=>createXInteractionProviderFactory({tabs:{sendMessage:async(_id,m)=>({ok:true,value:m.action==='start'?{ownerUserId:'111',handle:'me',sessionId:'opaque',providerId:id,sources:['notification','post'],sourceIds}:{}})}})(binding,{});
+ const p=await connect({notification,post});assert.deepEqual(p.sourceIds,{notification,post});await p.close();
+ for(const ids of [{notification,post:notification},{notification,post:id},{notification},{notification,post:'bad'}])await assert.rejects(connect(ids),/source_unavailable/);
+});

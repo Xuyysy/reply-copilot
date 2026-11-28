@@ -26,7 +26,9 @@ export function createXInteractionProviderFactory(chromeApi){
    const started=identity(await call('start',{authorized:true,background:true}));sessionId=started.sessionId;
    if(!Array.isArray(started.sources)||started.sources.length!==2||!['notification','post'].every(s=>started.sources.includes(s)))throw Error('source_unavailable');
    if(typeof started.providerId!=='string'||!/^x-web-[a-f0-9]{32}$/.test(started.providerId))throw Error('source_unavailable');
-   return {id:started.providerId,sources:['notification','post'],identify:async()=>identity(await call('identity')),readPage:async({ownerUserId,source,cursor})=>{
+   const sourceIds=started.sourceIds;
+   if(sourceIds!==undefined&&(!sourceIds||Object.keys(sourceIds).length!==2||!['notification','post'].every(s=>typeof sourceIds[s]==='string'&&/^x-web-[a-f0-9]{32}$/.test(sourceIds[s])&&sourceIds[s]!==started.providerId)||sourceIds.notification===sourceIds.post))throw Error('source_unavailable');
+   return {id:started.providerId,...(sourceIds?{sourceIds:Object.freeze({...sourceIds})}:{}),sources:['notification','post'],identify:async()=>identity(await call('identity')),readPage:async({ownerUserId,source,cursor})=>{
     if(ownerUserId!==binding.ownerUserId||!['notification','post'].includes(source)||!(cursor===null||typeof cursor==='string'&&cursor.length>0&&cursor.length<=2048))throw Error('invalid_context');
     return call('page',{ownerUserId,source,cursor});
    },close:cancel};

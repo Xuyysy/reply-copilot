@@ -118,6 +118,9 @@
    const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(endpoints)));
    return 'x-web-'+[...new Uint8Array(hash)].slice(0,16).map(n=>n.toString(16).padStart(2,'0')).join('');
  }
+ async function sourceProviderIds(endpoints){
+   return Object.fromEntries(await Promise.all(['notification','post'].map(async source=>[source,await providerId({source,endpoint:endpoints[source]})])));
+ }
  function pageURL(endpoint,cursor,owner){
    if(cursor!==null&&(typeof cursor!=='string'||!cursor||cursor.length>2048))fail('invalid_cursor');
    const url=new URL(endpoint.path,endpoint.origin);
@@ -315,7 +318,7 @@
    }
    return {payload,posts,users,nextCursor:terminal?null:([...bottom][0]??null),done:terminal,terminalEvidence:terminal?'explicit':null,structureVerified:true,ignored,viewerVerified:kind==='graphql'&&stable(viewer.rest_id,viewer.legacy?.id_str)===owner};
  }
- globalThis.ReplyCopilotInteractionInterface=Object.freeze({identityFrom,endpointFrom,pageURL,project});
+ globalThis.ReplyCopilotInteractionInterface=Object.freeze({identityFrom,endpointFrom,pageURL,project,sourceProviderIds});
  if(typeof chrome==='undefined'||!chrome.runtime?.onMessage||typeof location==='undefined'||!ORIGINS.has(location.origin))return;
  let active=null,pendingConnection=null,startGeneration=0,lastRequestAt=0,limitedUntil=0;
  function liveIdentity(cacheOnly=false){
@@ -399,10 +402,11 @@
        const endpoints=background?backgroundEndpoints(i):null;
        cancel();const generation=startGeneration;pendingConnection=background?m.connectionId:null;
        const routeId=background?await providerId(endpoints):null;
+       const sourceIds=background?await sourceProviderIds(endpoints):null;
        if(generation!==startGeneration||background&&pendingConnection!==m.connectionId)fail('cancelled');
        const current=liveIdentity(background);if(current.ownerUserId!==i.ownerUserId||current.handle!==i.handle)fail('identity_changed');
        pendingConnection=null;active={...i,background,connectionId:background?m.connectionId:null,endpoints,endpoint,sessionId:crypto.randomUUID(),controller:new AbortController(),startedAt:Date.now(),pages:0,busy:false,blocked:false,lastRequestAt:0};
-       return {ownerUserId:i.ownerUserId,handle:i.handle,sessionId:active.sessionId,kind:endpoint?.kind??null,...(background?{sources:['notification','post'],providerId:routeId}:{})};
+       return {ownerUserId:i.ownerUserId,handle:i.handle,sessionId:active.sessionId,kind:endpoint?.kind??null,...(background?{sources:['notification','post'],providerId:routeId,sourceIds}:{})};
      }
      if(m.action==='cancel'){if(background&&pendingConnection!==null&&pendingConnection===m.connectionId||active&&(active.connectionId?active.connectionId===m.connectionId:active.sessionId===m.sessionId))cancel();return {};}
      const i=validate(m.sessionId);

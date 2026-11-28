@@ -144,3 +144,22 @@ test('authorized observed response commits once to native workbench database wit
   assert.deepEqual(result.coverage,[{source:'notification',uniqueEvents:2,observedSamples:7,historyComplete:false}]);
  });
 });
+
+test('independent source versions migrate exact legacy cursor and resume unchanged source after other source changes',{timeout:30000},async()=>{
+ await withMomentumBrowser('<script>'+js+'</script>',async({evaluate})=>{
+  const r=await evaluate(`(async()=>{
+   const root='chrome-extension://fixture/',state={},calls=[];let version=0;
+   const c={runtime:{id:'fixture',getURL:p=>root+p},storage:{session:{get:async k=>({[k]:state[k]}),set:async v=>Object.assign(state,v)}},tabs:{query:async()=>[{id:1}],sendMessage:async()=>({ok:true,value:{ownerUserId:'111',handle:'me'}}),create:async()=>({id:10}),update:async()=>({})}};
+   const factory=async()=>({id:version<2?'combined-v1':'combined-v2',...(version?{sourceIds:{notification:'notification-v1',post:version===1?'post-v1':'post-v2'}}:{}),sources:['notification','post'],identify:async()=>({ownerUserId:'111',sessionId:'session'}),readPage:async({source,cursor})=>{calls.push([version,source,cursor]);return {status:200,ownerUserId:'111',source,requestCursor:cursor,structureVerified:true,done:source==='post',nextCursor:source==='post'?null:String(Number(cursor??0)+1),terminalEvidence:source==='post'?'explicit':null,payload:{data:[]},posts:[]}}});
+   const ctl=C({chromeApi:c,openDB:()=>openDB(indexedDB,'independent-source-fingerprints'),providerFactory:factory});
+   const side={id:'fixture',url:root+'sidepanel/sidepanel.html'},page={id:'fixture',url:root+'staging/interaction-workbench.html',tab:{id:10}};
+   const msg=(action,sender=page,extra={})=>ctl.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action,...extra},sender);
+   const run=async()=>{await msg('sync',page,{authorized:true});for(let i=0;i<500;i++){const v=await msg('view');if(!v.busy&&!v.running&&v.dataset)return v;await new Promise(r=>setTimeout(r,5));}throw Error('sync timeout')};
+   await msg('open',side);const first=await run();version=1;const second=await run();version=2;const third=await run();
+   return {first:first.dataset.jobs,second:second.dataset.jobs,third:third.dataset.jobs,firstCursor:calls.find(x=>x[0]===1&&x[1]==='notification')?.[2],secondCursor:calls.find(x=>x[0]===2&&x[1]==='notification')?.[2],newPostCursor:calls.find(x=>x[0]===2&&x[1]==='post')?.[2]};
+  })()`);
+  assert.equal(r.first.find(j=>j.source==='notification').pages,15);assert.equal(r.firstCursor,'15');assert.equal(r.secondCursor,'30');assert.equal(r.newPostCursor,null);
+  assert.equal(r.second.find(j=>j.source==='notification').providerId,'notification-v1');assert.equal(r.second.some(j=>j.providerId==='combined-v1'),false);
+  assert.equal(r.third.find(j=>j.source==='notification').pages,45);assert.ok(r.third.some(j=>j.providerId==='post-v2'&&j.done));
+ });
+});

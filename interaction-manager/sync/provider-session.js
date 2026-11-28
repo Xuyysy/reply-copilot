@@ -18,7 +18,9 @@ export async function openProviderSession(factory,binding,{signal,timeoutMs=1200
   if(closed||signal?.aborted)throw Error('cancelled');
   const sources=raw?.sources===undefined?['notification']:raw.sources;
   if(!raw||typeof raw.id!=='string'||!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(raw.id)||typeof raw.identify!=='function'||typeof raw.readPage!=='function'||!Array.isArray(sources)||sources.length<1||sources.length>2||new Set(sources).size!==sources.length||sources.some(s=>!['notification','post'].includes(s)))throw Error('source_unavailable');
+  const ids=raw.sourceIds;
+  if(ids!==undefined&&(!ids||Object.keys(ids).length!==sources.length||!sources.every(s=>Object.hasOwn(ids,s)&&typeof ids[s]==='string'&&/^[a-z0-9-]{1,50}$/.test(ids[s])&&ids[s]!==raw.id)||new Set(Object.values(ids)).size!==sources.length))throw Error('source_unavailable');
   const invoke=async(name,args)=>{if(closed||controller.signal.aborted)throw Error('cancelled');return raw[name](args);};
-  return Object.freeze({id:raw.id,sources:Object.freeze([...sources]),identify:args=>invoke('identify',args),readPage:args=>invoke('readPage',args),close});
+  return Object.freeze({id:raw.id,...(ids?{sourceIds:Object.freeze({...ids})}:{}),sources:Object.freeze([...sources]),identify:args=>invoke('identify',args),readPage:args=>invoke('readPage',args),close});
  }catch(e){await close();throw e;}finally{clearTimeout(timer);}
 }

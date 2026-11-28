@@ -44,3 +44,9 @@ test('cleanup failure or hung cleanup cannot retain a completed task slot',async
   await s.close();await assert.rejects(s.readPage(),/cancelled/);
  }
 });
+
+test('session lease preserves validated source identifiers separately from transport identity',async()=>{
+ const s=await openProviderSession(async()=>provider({sourceIds:{notification:'notice-v1',post:'post-v1'}}),binding);
+ assert.deepEqual(s.sourceIds,{notification:'notice-v1',post:'post-v1'});assert.ok(Object.isFrozen(s.sourceIds));await s.close();
+ for(const sourceIds of [{notification:'notice-v1'},{notification:'same',post:'same'},{notification:'bad id',post:'post-v1'}])await assert.rejects(openProviderSession(async()=>provider({sourceIds}),binding),/source_unavailable/);
+});
