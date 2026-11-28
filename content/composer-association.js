@@ -114,11 +114,15 @@
     // Canonical ID from the author's timestamp, never a random quote link.
     const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
     if(detailReference){
-      // A recovered source needs independent evidence inside the modal;
-      // never reuse the detail route or the ordinary text-only fallback.
+      // The recovered source uses the same canonical modal ID as the
+      // ordinary legacy path. Additional owned evidence rejects conflicts;
+      // it must not discard a normal independently verified permalink.
       const evidence=extractor.legacyDetailEvidence(article,detailReference);
-      return evidence.conflict||(evidence.otherCanonicalId&&evidence.otherCanonicalId!==expectedDetailId)?
-        'conflicting_status_links':evidence.statusId;
+      if(evidence.conflict||(evidence.otherCanonicalId&&evidence.otherCanonicalId!==expectedDetailId))
+        return 'conflicting_status_links';
+      if(evidence.statusId)return evidence.statusId;
+      const ordinary=extractor.postIdentity?.(article);
+      return ordinary?.statusId||null;
     }
     if(modernLayout||extractor.isModernPost?.(article)){
       const evidence=extractor.modernIdentityEvidence(article);
@@ -148,7 +152,7 @@
     return Boolean(card?.querySelector?.('[data-testid="User-Name"]') &&
       card?.querySelector?.('[data-testid="tweetText"]'));
   }
-  function capturePost(post,initialUrl=globalThis.location?.href) {
+  function capturePost(post,initialUrl=globalThis.location?.href,timelinePreview=null) {
     // Captioned quotes require extra hydration patience, ordinary posts do not.
     // Discover the quote only on the trusted capture, not on every modal scan.
     const markedQuote=Boolean(post.article?.querySelector?.('[data-testid="quoteTweet"]'));
@@ -190,6 +194,12 @@
       captureDetailPreviewSource(post,initialUrl):null;
     return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto,
       ...(detailPreviewSource?{detailPreviewSource}:{}),
+      ...(detailPreviewSource&&timelinePreview?.statusId===post.statusId&&
+        timelinePreview.sourceUrl===post.sourceUrl&&typeof timelinePreview.sourceText==='string'&&
+        normalized(timelinePreview.sourceText)?{timelinePreview:Object.freeze({
+          statusId:timelinePreview.statusId,sourceText:timelinePreview.sourceText,
+          hasCapturedPhoto:timelinePreview.hasCapturedPhoto,hasCapturedMedia:timelinePreview.hasCapturedMedia
+        })}:{}),
       ...(modernCaptionQuote?(post.quoteOnly?{modernQuoteOnly:modernCaptionQuote}:{modernCaptionQuote}):{})};
   }
   function sameContext(post,text) {
@@ -335,6 +345,29 @@
     const body=detailBodies(post.article,media);
     return Object.freeze({owner,author,time:detailTimestamp(post.article),
       texts:Object.freeze([...new Set([presentationNormalize(post.sourceText,media),...body.texts].filter(Boolean))])});
+  }
+  // Preserve the exact caption that the already-working timeline path
+  // would have used, only on a trusted navigation to the same verified ID.
+  // A single short-lived record, not a persistent feed cache.
+  function captureTimelinePreview(article,initialUrl){
+    if(!article?.isConnected||article.closest('[role="dialog"]')||
+       article.parentElement?.closest('article,[data-slot="embedded-tweet-frame"]'))return null;
+    try{
+      const u=new URL(initialUrl);
+      if(u.protocol!=='https:'||!['x.com','twitter.com','www.x.com','www.twitter.com'].includes(u.hostname)||
+         /\/status\/\d+(?:\/|$)/.test(u.pathname)||u.pathname.startsWith('/compose/'))return null;
+    }catch{return null;}
+    const post=globalThis.ZaneReplyCopilotContent.postExtractor.extractPost(article,initialUrl);
+    if(!post.ok||post.modernLayout||post.legacyDetailIdentity||post.quoteOnly||
+       !normalized(post.sourceText)||post.sourceText.length>40000)return null;
+    const captured=capturePost(post,initialUrl);
+    if(captured.hasCapturedQuote)return null;
+    return Object.freeze({statusId:post.statusId,sourceUrl:post.sourceUrl,sourceText:post.sourceText,
+      hasCapturedPhoto:captured.hasCapturedPhoto,hasCapturedMedia:captured.hasCapturedMedia});
+  }
+  function timelineEquivalent(post,candidate){
+    if(!post.timelinePreview||post.timelinePreview.statusId!==post.statusId||!candidate?.text)return false;
+    return sameContext(post.timelinePreview,candidate.text);
   }
   function detailPreviewBefore(article,editor,dialog){
     return visible(article)&&article.closest('[role="dialog"]')===dialog&&
@@ -595,11 +628,24 @@
       const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&!compactDetailConflict&&
         candidates.length===1&&primary?.article&&(!primary.id||primary.id===post.statusId)&&
         compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts));
+      // Reuse the ordinary legacy association rules for detail recovery:
+      // an independently verified parent ID wins; a unique matching
+      // timeline caption (captured on navigation) is ordinary text evidence.
+      // Keep the stronger detail source, route and dialog fences.
+      const priorTimelineMatch=Boolean(post.detailPreviewSource&&post.timelinePreview&&
+        !modernContext&&sourceUnchanged&&!compactDetailConflict&&candidates.length===1&&
+        primary?.article&&detailPreviewBefore(primary.article,node,dialog)&&
+        (!primary.id||primary.id===post.statusId)&&timelineEquivalent(post,primary)&&
+        !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
+          (sameContext(old,primary.text)||sameContext(old,post.timelinePreview.sourceText))));
+      const detailExactMatch=Boolean(post.legacyDetailIdentity&&post.detailPreviewSource&&
+        sourceUnchanged&&candidates.length===1&&primary?.article&&
+        detailPreviewBefore(primary.article,node,dialog)&&!primary.id&&sameContext(post,text)&&
+        (post.legacyDetailKind==='owned'||detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner));
       const detailMatch=post.legacyDetailIdentity?
         candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!detailPreviewBefore(c.article,node,dialog)))||matching.length>1||compactDetailConflict?false:
-        compactDetailMatch?true:
-        candidates.length!==1||matching.length!==1||!normalized(text)?null:
-        sameContext(post,text):null;
+        matching.length===1&&candidates.length===1?true:
+        compactDetailMatch||priorTimelineMatch||detailExactMatch?true:null:null;
       const contextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
         ? !candidates.length?null
           :matching.length>1?false
@@ -616,7 +662,7 @@
           :candidates.some(item=>Boolean(item.id))?false
           // Preserve the original, unique exact-text fallback only when
           // no conflicting status IDs appear in the opened reply dialog.
-          :compactDetailMatch?true
+          :compactDetailMatch||priorTimelineMatch?true
           :uniqueText&&!uniqueText.id&&exactText.length===1?true
           // Only captioned quote layouts get a hydration grace; unrelated
           // non-quote or media text mismatches stay strict/fail-closed.
@@ -630,6 +676,7 @@
         timestampPresent:detailTimestamp(primary.article)!==null,
         conflict:compactDetailConflict,
         matched:compactDetailMatch,
+        timelinePreviewPresent:Boolean(post.timelinePreview),timelinePreviewMatched:priorTimelineMatch,
         sourceTextVariants:Math.min(5,post.detailPreviewSource.texts.length),
         modalTextVariants:Math.min(5,detailBodies(primary.article,post.hasCapturedMedia).texts.length)
       }:null;
@@ -653,5 +700,5 @@
     return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true||post.legacyDetailIdentity===true),
       sourceUnchanged};
   }
-  globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost};
+  globalThis.ZaneReplyCopilotContent.composerAssociation={create,baseline,snapshot,capturePost,captureTimelinePreview};
 })();

@@ -27,6 +27,7 @@
   let settingsRevision = 0;
   let replyPreferenceRevision = 0;
   let pendingActivation = null;
+  let timelineNavigationPreview = null;
   // Staging quote fast path requires an unchanged editor across two reads.
   // The proven 800ms path remains as a conservative fallback.
   const QUOTE_EARLY_CHECK_MS = 360;
@@ -1082,6 +1083,17 @@
     if (recoveryRequired && control) {traceAssociation('blocked','recovery_required');pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
+      // Observe only the user's navigation gesture, never scan the feed.
+      // The next verified detail click must name the same ID and route.
+      if(!active&&!recoveryRequired&&event.type==='pointerdown'&&event.button===0&&
+         !event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey){
+        const target=event.target;
+        const article=target?.closest?.('article');
+        if(article&&!target.closest('[data-zane-reply-copilot],[role="dialog"],button,[role="button"],[contenteditable="true"]')){
+          const preview=api.composerAssociation.captureTimelinePreview?.(article,location.href);
+          if(preview)timelineNavigationPreview={preview,at:performance.now()};
+        }
+      }
       // Translation overlays and unrelated page clicks must not poison the
       // pending reply. A second real composer action still cancels safely.
       if(active&&!active.cancelled&&!active.editor&&
@@ -1113,7 +1125,20 @@
       post.replyRouteVerified=true;
     }
     traceAssociation('capture','reply_control_recognized');
-    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
+    let timelinePreview=null;
+    if(timelineNavigationPreview){
+      const {preview,at}=timelineNavigationPreview;
+      // Read once; never reapply stale data to another click or post.
+      timelineNavigationPreview=null;
+      try{
+        const route=new URL(location.href),source=new URL(preview.sourceUrl);
+        if(performance.now()-at<=120000&&route.origin===source.origin&&
+           route.pathname.replace(/\/$/,'')===source.pathname.replace(/\/$/,'')&&
+           preview.statusId===post.statusId&&preview.sourceUrl===post.sourceUrl)
+          timelinePreview=preview;
+      }catch{}
+    }
+    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post,location.href,timelinePreview)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     const clickAt = performance.now();

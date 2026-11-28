@@ -76,7 +76,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       checks.weakConflictingModal=makeSession().evaluate(facts()).state==='rejected';modalArticle.querySelector('a').remove();
       dlg.querySelector('article').prepend(anchor);anchor.href=url;
       dlg.querySelector('[data-testid="tweetText"]').textContent='Changed caption';
-      checks.wrongText=makeSession().evaluate(facts()).state==='rejected';
+      checks.verifiedIdentityWins=makeSession().evaluate(facts()).state==='bound';
       dlg.querySelector('[data-testid="tweetText"]').textContent='Synthetic caption';
       editor.textContent='existing draft';checks.draft=makeSession().evaluate(facts()).reason==='existing_draft';
       editor.textContent='';
@@ -188,6 +188,28 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       checks.cjkSpacing=state(chinesePost).editor===e;
       inner.querySelector('[data-testid="User-Name"] a').href='https://x.com/other';
       checks.cjkWrongAuthor=state(chinesePost).state!=='bound';
+      // Same successful feed caption, followed by navigation to the full
+      // detail article. Different text projection in the original full body
+      // must not disable the already proven legacy caption matching route.
+      const feed=make('feedPreview',header()+'<a href="'+url+'">Permalink</a><div data-testid="tweetText">A timeline-specific compact preview with native link formatting</div>'+photo('101'));
+      const prior=a.captureTimelinePreview(feed,'https://x.com/home');
+      checks.timelineCapture=prior?.statusId==='101';
+      checks.noCaptureOnDetail=a.captureTimelinePreview(feed,url)===null;
+      const detail=make('navigatedDetail',header()+'<div data-testid="tweetText">A different projection of the full long body for this synthetic post with additional details</div>'+photo('101')+actions('101'));
+      const navigated=a.capturePost(p.extractPost(detail,url),url,prior);
+      e=preview(prior.sourceText+' pic.x.com/ABC123',true);inner.querySelector('time').remove();
+      checks.reuseTimelineCaption=state(navigated).editor===e;
+      checks.noTimelineWithoutNavigation=state(a.capturePost(p.extractPost(detail,url),url)).state!=='bound';
+      checks.wrongCachedId=state(a.capturePost(p.extractPost(detail,url),url,{...prior,statusId:'202'})).state!=='bound';
+      checks.wrongCachedUrl=state(a.capturePost(p.extractPost(detail,url),url,{...prior,sourceUrl:'https://x.com/other/status/101'})).state!=='bound';
+      checks.quarantinedTimeline=state(navigated,compose,[{...prior,statusId:'202'}]).state!=='bound';
+      inner.querySelector('[data-testid="User-Name"] a').href='https://x.com/other';
+      checks.timelineWrongAuthor=state(navigated).state!=='bound';
+      e=preview(prior.sourceText,true);inner.querySelector('time').remove();
+      inner.querySelector('article').insertAdjacentHTML('afterbegin','<a href="https://x.com/other/status/202"><time>Other</time></a>');
+      checks.timelineWrongModalId=state(navigated).state!=='bound';
+      e=preview(prior.sourceText,true);inner.querySelector('time').remove();e.textContent='draft';
+      checks.timelineDraft=state(navigated).reason==='existing_draft';
       $('result').textContent=JSON.stringify(checks);
     };
     const file=path.join(dir,'fixture.html');writeFileSync(file,'<!doctype html><html><body><main></main><output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>');
@@ -197,7 +219,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
     const checks=JSON.parse(match[1]);
-    assert.equal(Object.keys(checks).length,72);
+    assert.equal(Object.keys(checks).length,82);
     assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
