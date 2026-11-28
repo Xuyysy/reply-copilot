@@ -58,6 +58,7 @@ export function normalizeObservations(page,{ownerUserId,source,observedAt=Date.n
 export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,recentOnly=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
   if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||typeof recentOnly!=='boolean'||!Number.isInteger(maxPages)||maxPages<1||maxPages>(recentOnly?3:100)||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
   const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0,stage='identity',httpStatus=null;
+  const counts={accepted:0,existing:0,emptyPages:0,unsupported:0,unresolvedActors:0,foreignTargets:0,ignored:0};
   try{
     const sessionId=identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId);
     check(signal,deadline);
@@ -80,14 +81,19 @@ export async function syncInteractions(db,provider,{ownerUserId,source='notifica
       const common={source,observedAt:parsed.observedAt,users:parsed.users??[],signal};
       const result=await commitBatch(db,session,parsed.events,recentOnly?{...common,recentScan:true}:{...common,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
       job=recentOnly?{cursor:parsed.nextCursor,done:parsed.done,seen:parsed.nextCursor===null?job.seen:[...job.seen,parsed.nextCursor]}:result.job;inserted+=result.inserted;committed++;
-      try{onProgress({pages:committed,inserted,done:job.done,stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
+      // Counts describe committed observations, not unique historical coverage. A
+      // previously stored interaction may recur in another response or source.
+      counts.accepted+=result.accepted;counts.existing+=result.accepted-result.inserted;
+      if(result.accepted===0)counts.emptyPages++;
+      for(const key of ['unsupported','unresolvedActors','foreignTargets','ignored'])counts[key]+=parsed.quality[key];
+      try{onProgress({pages:committed,inserted,done:job.done,counts:{...counts},stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
     }
-    return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,historyComplete:false};
+    return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,counts:{...counts},historyComplete:false};
   }catch(e){
     // Return only known status codes, not provider error bodies, cursors or credentials.
     const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified','workspace_limit']);
     const reason=known.has(e?.message)?e.message:'sync_failed';
-    return {reason,committed,inserted,historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,e?.sourceDiagnostic?.httpStatus??httpStatus,e?.sourceDiagnostic)};
+    return {reason,committed,inserted,counts:{...counts},historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,e?.sourceDiagnostic?.httpStatus??httpStatus,e?.sourceDiagnostic)};
   }finally{if(session)await endSession(db,session).catch(()=>{});}
 }
 // Separate read session; callers must authenticate the currently selected owner first.

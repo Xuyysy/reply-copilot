@@ -16,3 +16,12 @@ export function diagnosticSummary(task){
  if(Array.isArray(task?.sources))for(const s of task.sources){if(['notification','post'].includes(s?.source)&&s.diagnostic)lines.push(format(s.source,s.diagnostic));}
  return lines.join('\n');
 }
+
+// Only fixed numeric counters enter the workbench task summary. No identifiers,
+// cursors, URLs, content, or transport metadata are copied from provider data.
+export function safeObservationCounts(counts,pages,inserted){
+ if(!Number.isSafeInteger(pages)||pages<1||pages>100||!Number.isSafeInteger(inserted)||inserted<0||!counts)return null;
+ const keys=['accepted','existing','emptyPages','unsupported','unresolvedActors','foreignTargets','ignored'];
+ if(keys.some(k=>!Number.isSafeInteger(counts[k])||counts[k]<0||counts[k]>pages*100000)||counts.accepted>pages*1000||counts.existing+inserted!==counts.accepted||counts.emptyPages>pages)return null;
+ return Object.fromEntries(keys.map(k=>[k,counts[k]]));
+}

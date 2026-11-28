@@ -3,7 +3,7 @@ import {syncInteractions} from '../interaction-manager/sync/engine.js';
 import {openProviderSession} from '../interaction-manager/sync/provider-session.js';
 import {createXInteractionProviderFactory} from './interaction-provider.js';
 import {validId,normalizeEvent} from '../interaction-manager/core/events.js';
-import {safeSyncDiagnostic} from '../interaction-manager/sync/diagnostic.js';
+import {safeSyncDiagnostic,safeObservationCounts} from '../interaction-manager/sync/diagnostic.js';
 import {createSchedulePreferences} from '../interaction-manager/sync/schedule-preferences.js';
 const TYPE='XRH_STAGING_ACCOUNT_WORKBENCH';
 const PATHS=Object.freeze({interaction:'staging/interaction-workbench.html',follow:'staging/follow-workbench.html'});
@@ -137,13 +137,15 @@ export function createAccountWorkbenchController({chromeApi=chrome,openDB=openIn
        sourceProgress(source,{state:'running'});
        const result=await syncInteractions(db,scoped,{ownerUserId:b.ownerUserId,source,refresh,recentOnly:syncMode==='recent',maxPages:pagesPerSource,maxMs:msPerSource,signal:task.controller.signal,onProgress:p=>{
          task.progress={...task.progress,pages:completedPages+p.pages,inserted:completedInserted+p.inserted};
-         sourceProgress(source,{pages:p.pages,inserted:p.inserted});
+         const counts=safeObservationCounts(p.counts,p.pages,p.inserted);
+         sourceProgress(source,{pages:p.pages,inserted:p.inserted,...(counts?{counts}:{})});
          void write('running').catch(()=>{});
        }});
        completedPages+=result.committed;completedInserted+=result.inserted;
        task.progress={...task.progress,pages:completedPages,inserted:completedInserted};
        reason=reasonSet.has(result.reason)?result.reason:'sync_failed';
-       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted,...(result.diagnostic&&reason!=='cancelled'?{diagnostic:safeSyncDiagnostic(result.diagnostic.stage,result.diagnostic.reason,result.diagnostic.httpStatus,result.diagnostic)}:{})});
+       const counts=safeObservationCounts(result.counts,result.committed,result.inserted);
+       sourceProgress(source,{state:'stopped',reason,pages:result.committed,inserted:result.inserted,...(counts?{counts}:{}),...(result.diagnostic&&reason!=='cancelled'?{diagnostic:safeSyncDiagnostic(result.diagnostic.stage,result.diagnostic.reason,result.diagnostic.httpStatus,result.diagnostic)}:{})});
        // A page budget boundary has no in-flight read. Allow the other source
        // its reserved pages, but never hide the partial result behind success.
        if(reason==='page_limit')partialReason='page_limit';
