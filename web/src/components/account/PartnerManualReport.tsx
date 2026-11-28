@@ -5,7 +5,7 @@ import {Button} from "../ui/button";
 type Report={enabled:boolean;summary?:{verifiedOrders:number;reviewCount:number;estimatedFen:number|null;recordedFen:number;differenceFen:number|null;complete:boolean};
  payoutProfileRequired?:boolean;recipientReady?:boolean;
  minRequestFen?:number;requestableFen?:number|null;pendingId?:string|null;
- orders?:{domain:string;orderId:string;buyerId?:string;paidAt:number;rateBps:number;state:string;principalFen:number|null;commissionFen:number|null;reason?:string}[];
+ orders?:{domain:string;orderId:string;buyerId?:string;paidAt:number;rateBps:number;state:string;principalFen:number|null;commissionFen:number|null;refundedPrincipalFen?:number;reason?:string}[];
  records?:{id:string;amount_fen:number;status:"pending"|"completed"|"rejected";created_at:number;resolved_at:number|null;reason?:string}[]};
 type Props={language:Language;owner:string;write?:<T>(path:string,body:object)=>Promise<T>};
 export default function PartnerManualReport({language,owner,write}:Props){
@@ -43,8 +43,9 @@ export default function PartnerManualReport({language,owner,write}:Props){
     <p className="text-xs text-muted-foreground">{t("满10元可申请全部待结算金额，管理员人工转账。","Request the full unsettled amount from CNY 10; the administrator transfers manually.")}</p>
    </div>}
    {(!s.complete||s.reviewCount>0)&&<p role="status" className="text-sm text-amber-700">{!s.complete?t("统计范围超限，请联系管理员。","Report limit exceeded; contact the administrator."):t("部分订单暂未核实，不计入待结算金额；已核实佣金可正常申请。","Unverified orders are excluded; verified commission remains available to request.")}</p>}
+   {s.differenceFen!=null&&s.differenceFen<0&&<p role="status" className="text-sm text-amber-700">{t("已结算金额超过当前核实佣金，差额将抵扣后续佣金。","Previously settled commission exceeds verified earnings; the difference offsets future commission.")}</p>}
    <h4 className="font-medium">{t("最近购买记录","Recent purchases")}</h4><p className="text-xs text-muted-foreground">{t("最近 30 条统计范围内订单，待核对订单不计入可申请金额。","Latest 30 orders in scope. Orders under review do not count toward the amount available to request.")}</p>
-   {data?.orders?.map(o=><div className="rounded border p-2 text-sm break-all" key={o.domain+":"+o.orderId}>{new Date(o.paidAt).toLocaleString()} · {o.domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {o.state==="verified"?money(o.commissionFen):t("待核对","Review")}<p className="text-xs text-muted-foreground">{t("订单本金","Order principal")} {money(o.principalFen)} · {t("佣金","Commission")} {money(o.commissionFen)} · {o.orderId}{write&&o.buyerId?" · "+o.buyerId:""} · {o.rateBps/100}%{write&&o.reason?" · "+o.reason:""}</p></div>)}
+   {data?.orders?.map(o=><div className="rounded border p-2 text-sm break-all" key={o.domain+":"+o.orderId}>{new Date(o.paidAt).toLocaleString()} · {o.domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {o.state==="verified"?money(o.commissionFen):t("待核对","Review")}<p className="text-xs text-muted-foreground">{o.refundedPrincipalFen?t("退款后本金","Net principal after refund"):t("订单本金","Order principal")} {money(o.principalFen)}{Boolean(o.refundedPrincipalFen)&&<> · {t("已退本金","Refunded principal")} {money(o.refundedPrincipalFen)}</>} · {t("佣金","Commission")} {money(o.commissionFen)} · {o.orderId}{write&&o.buyerId?" · "+o.buyerId:""} · {o.rateBps/100}%{write&&o.reason?" · "+o.reason:""}</p></div>)}
    {!data?.orders?.length&&<p className="text-sm text-muted-foreground">{t("暂无统计订单。","No matching orders.")}</p>}
    <h4 className="font-medium">{t("申请记录","Settlement requests")}</h4>
    {data?.records?.map(r=><div key={r.id} className="rounded border p-2 text-sm break-all">{new Date(r.created_at).toLocaleString()} · {money(r.amount_fen)} · {r.status==="pending"?t("待处理","Pending"):r.status==="completed"?t("已结算","Settled"):t("已拒绝","Rejected")}{write&&r.reason&&<p className="text-xs">{r.reason}</p>}</div>)}

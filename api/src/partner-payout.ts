@@ -2,6 +2,7 @@ import type {Env} from "./types";
 import {ApiFailure} from "./types";
 import {sessionFor,requireCsrf} from "./auth";
 import {requireAdminSession} from "./admin-auth";
+import {checkPendingSettlement} from "./partner-commission-report";
 import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
 import {payoutKeyValid,normalizeRecipient,encryptRecipient,decryptRecipient,maskRecipient} from "./partner-payout-crypto.mjs";
@@ -56,7 +57,9 @@ export async function adminPartnerPayout(request:Request,env:Env){
  if(!await env.DB.prepare("SELECT 1 FROM partner_policy_versions WHERE user_id=? LIMIT 1").bind(id).first())throw new ApiFailure(404,"USER_NOT_FOUND","尚未指定该推广伙伴。");
  if(!write){const configured=!!await env.DB.prepare("SELECT 1 FROM partner_payout_profiles WHERE user_id=? LIMIT 1").bind(id).first();return response({enabled:true,configured,locked:await pending(env,id)},200,env,request);}
  const requestId=body?.requestId??null;
- if(!body||Object.keys(body).some(k=>!["userId","requestId","reason","operationId"].includes(k))||typeof body.reason!=="string"||body.reason.trim().length<8||body.reason.length>500||typeof body.operationId!=="string"||!/^[a-f0-9-]{36}$/i.test(body.operationId)||(requestId!==null&&(typeof requestId!=="string"||!/^[a-f0-9-]{36}$/i.test(requestId))))throw new ApiFailure(400,"INVALID_REQUEST","收款资料查看参数无效。");
+ if(!body||Object.keys(body).some(k=>!["userId","requestId","reason","operationId","forSettlement"].includes(k))||typeof body.reason!=="string"||body.reason.trim().length<8||body.reason.length>500||typeof body.operationId!=="string"||!/^[a-f0-9-]{36}$/i.test(body.operationId)||(requestId!==null&&(typeof requestId!=="string"||!/^[a-f0-9-]{36}$/i.test(requestId))))throw new ApiFailure(400,"INVALID_REQUEST","收款资料查看参数无效。");
+ if(body.forSettlement!==undefined&&body.forSettlement!==true)throw new ApiFailure(400,"INVALID_REQUEST","结算核对参数无效。");
+ if(body.forSettlement===true&&(!requestId||!await checkPendingSettlement(env,id,requestId)))throw new ApiFailure(409,"PARTNER_SETTLEMENT_CHANGED","申请已处理或可结算金额已变化，请刷新核对，不要转账。");
  const p=requestId?await env.DB.prepare("SELECT p.version,p.ciphertext,p.created_at FROM partner_request_recipients r JOIN partner_payout_profiles p ON p.user_id=r.user_id AND p.version=r.profile_version WHERE r.request_id=? AND r.user_id=?").bind(requestId,id).first<Profile>():await latest(env,id);
  if(!p)throw new ApiFailure(404,"PAYOUT_NOT_CONFIGURED","未提交收款资料或该申请没有收款快照。");
  const value=await open(env,id,p);

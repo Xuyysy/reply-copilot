@@ -5,11 +5,8 @@ import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
 import {payoutEnabled,recipientReady,verifiedRecipientVersion} from "./partner-payout";
-import {boltReadSchemaReady} from "./boltutil/environment";
-import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
+import {partnerCommissionReport,checkPendingSettlement} from "./partner-commission-report";
 
-type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
-type Domain="recharge"|"subscription";
 async function enabled(env:Env){
  const row=await env.DB.prepare("SELECT COUNT(*) n FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1'").first<{n:number}>();
  return row?.n===2;
@@ -18,40 +15,9 @@ async function assigned(env:Env,userId:string){
  return !!await env.DB.prepare("SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=? LIMIT 1").bind(userId,nowMs()).first();
 }
 async function report(env:Env,userId:string,admin:boolean){
- let complete=true;
- const orders=[],boltReady=boltReadSchemaReady(env);
- for(const domain of ["recharge","subscription"] as Domain[]){
-  const p=manualCandidatePlan(domain,userId,boltReady);
-  const found=(await env.DB.prepare(p.sql).bind(...p.params).all<Candidate>()).results;
-  if(found.length>REPORT_LIMIT)complete=false;
-  const candidates=found.slice(0,REPORT_LIMIT).filter(candidateInTerm);
-  // Partition by persisted rail; no second evidence query for fiat-only reports,
-  // never reference crypto tables until the existing schema readiness gate is on.
-  for(const source of ['fiat','boltutil'] as const){
-   const group=candidates.filter(c=>c.payment_source===source);
-   for(let i=0;i<group.length;i+=40){
-    const chunk=group.slice(i,i+40);
-    const plan=source==='boltutil'&&!boltReady?null:manualEvidenceBatchPlan(domain,chunk.map(x=>x.order_id),source==='boltutil');
-    const evidence=plan?(await env.DB.prepare(plan.sql).bind(...plan.params).all<Record<string,unknown>>()).results:[];
-    if(evidence.length>=121)complete=false;
-    const byOrder=new Map<unknown,Record<string,unknown>[]>();
-    for(const e of evidence){const rows=byOrder.get(e.order_id);if(rows)rows.push(e);else byOrder.set(e.order_id,[e]);}
-    for(const c of chunk){
-     const estimate=manualOrderEstimate(domain,c,byOrder.get(c.order_id)??[]);
-     if(estimate)orders.push(estimate);
-    }
-   }
-  }
- }
- const [total,records,pending]=await Promise.all([
-  env.DB.prepare("SELECT COALESCE(SUM(amount_fen),0) total FROM partner_manual_requests WHERE partner_user_id=? AND status='completed'").bind(userId).first<{total:number}>(),
-  env.DB.prepare("SELECT id,amount_fen,status,created_at,resolved_at"+(admin?",reason":"")+" FROM partner_manual_requests WHERE partner_user_id=? ORDER BY created_at DESC,id DESC LIMIT 30").bind(userId).all(),
-  env.DB.prepare("SELECT id FROM partner_manual_requests WHERE partner_user_id=? AND status='pending'").bind(userId).first<{id:string}>()
- ]);
- const summary=summarizeManualOrders(orders,Number(total?.total??0),complete);
+ const r=await partnerCommissionReport(env,userId,admin);
  const payout=await payoutEnabled(env),ready=!payout||await recipientReady(env,userId);
- const latest=orders.sort((a,b)=>b.paidAt-a.paidAt||a.domain.localeCompare(b.domain)||a.orderId.localeCompare(b.orderId)).slice(0,30);
- return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:ready?requestableFen(summary,!!pending):null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{}),pendingId:pending?.id??null,orders:latest.map(o=>admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen}),records:records.results};
+ return {...r,requestableFen:ready?r.requestableFen:null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{})};
 }
 export async function myManualPartnerReport(request:Request,env:Env){
  const {session,token}=await sessionFor(request,env);
@@ -102,7 +68,14 @@ export async function adminManualPartnerReport(request:Request,env:Env){
   return response({enabled:false},200,env,request);
  }
  if(!write){
-  const userId=new URL(request.url).searchParams.get("userId")||"";
+  const params=new URL(request.url).searchParams;
+  const requestId=params.get("requestId");
+  if(requestId!==null){
+   if(!/^[a-f0-9-]{36}$/i.test(requestId))throw new ApiFailure(400,"INVALID_REQUEST","申请标识无效。");
+   const pending=await env.DB.prepare("SELECT partner_user_id FROM partner_manual_requests WHERE id=? AND status='pending'").bind(requestId).first<{partner_user_id:string}>();
+   return response({enabled:true,settlementReady:!!pending&&await checkPendingSettlement(env,pending.partner_user_id,requestId)},200,env,request);
+  }
+  const userId=params.get("userId")||"";
   if(!userId){
    const payout=await payoutEnabled(env);
    const queue=await env.DB.prepare("SELECT r.id,r.partner_user_id,r.amount_fen,r.created_at,u.email"+(payout?",EXISTS(SELECT 1 FROM partner_request_recipients s WHERE s.request_id=r.id) recipient_available":"")+" FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").all();

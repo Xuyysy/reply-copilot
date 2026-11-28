@@ -22,10 +22,12 @@ function identityColumns(domain){
     EXISTS(SELECT 1 FROM payment_transactions x WHERE x.merchant_provider='xiaodou' AND x.epay_trade_no=t.provider_payment_id)
    ELSE 0 END`;
  return `t.provider_trade_id,t.provider_payment_id,t.paid_at transaction_paid_at,(${epayCollision}) epay_identity_collision,
- (SELECT COUNT(*) FROM ${own} x WHERE x.merchant_provider=t.merchant_provider AND
- (x.provider_trade_id=t.provider_trade_id OR x.provider_payment_id=t.provider_payment_id))+
- (SELECT COUNT(*) FROM ${other} x WHERE x.merchant_provider=t.merchant_provider AND
- (x.provider_trade_id=t.provider_trade_id OR x.provider_payment_id=t.provider_payment_id)) identity_count`;
+ (1+EXISTS(SELECT 1 FROM ${own} x WHERE x.provider_trade_id=t.provider_trade_id AND x.merchant_provider=t.merchant_provider AND x.id<>t.id)
+ +EXISTS(SELECT 1 FROM ${other} x WHERE x.provider_trade_id=t.provider_trade_id AND x.merchant_provider=t.merchant_provider)
+ +CASE WHEN t.provider_payment_id IS NOT NULL THEN
+   EXISTS(SELECT 1 FROM ${own} x WHERE x.merchant_provider=t.merchant_provider AND x.provider_payment_id=t.provider_payment_id AND x.id<>t.id)
+   +EXISTS(SELECT 1 FROM ${other} x WHERE x.merchant_provider=t.merchant_provider AND x.provider_payment_id=t.provider_payment_id)
+  ELSE 0 END) identity_count`;
 }
 export function paymentEvidencePlan(domain,orderId){
  if(!validId(orderId)||!['recharge','subscription'].includes(domain))throw new TypeError('PARTNER_ORDER_INVALID');

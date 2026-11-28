@@ -112,6 +112,21 @@ test('recipient profile: owner-only, reauth, encrypted versions, request snapsho
  const applied=await call('partner',report,{expectedAmountFen:1500});assert.equal(applied.status,200,JSON.stringify(applied.body));
  const pendingId=(await call('partner',report)).body.pendingId;
  assert.equal(db.prepare("SELECT profile_version FROM partner_request_recipients WHERE request_id=?").get(pendingId).profile_version,2);
+ const pretransfer={...reveal,requestId:pendingId,forSettlement:true};
+ assert.equal((await call('owner',admin,pretransfer)).status,200);
+ assert.equal((await call('owner',manual+'?requestId='+pendingId)).body.settlementReady,true);
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review' WHERE order_id='local-payout-order'");
+ const stale=await call('owner',admin,pretransfer);assert.equal(stale.status,409);assert.equal(stale.body.code,'PARTNER_SETTLEMENT_CHANGED');assert.equal(stale.body.profile,undefined);
+ assert.equal((await call('owner',manual+'?requestId='+pendingId)).body.settlementReady,false);
+ assert.equal((await call('partner',manual+'?requestId='+pendingId)).status,403);
+ db.exec("UPDATE payment_transactions SET risk_state='clear' WHERE order_id='local-payout-order'");
+ assert.equal((await call('owner',admin,pretransfer)).status,200);
+ // Once an external transfer is completed the admin must be able to record
+ // it, even if evidence changes in the meantime; future balance absorbs debt.
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review' WHERE order_id='local-payout-order'");
+ assert.equal((await call('owner',manual,{requestId:pendingId,operationId:randomUUID(),action:'completed',reason:'synthetic recorded transfer'})).status,200);
+ assert.equal((await call('partner',report)).body.summary.differenceFen,-1500);
+ assert.equal((await call('owner',admin,pretransfer)).status,409);
 
  assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_payout_profiles").get().n,2);
 });

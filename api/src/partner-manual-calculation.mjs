@@ -45,12 +45,12 @@ export function manualOrderEstimate(domain,c,rows){
  if(!candidateInTerm(c))return null;
  const review={domain,orderId:c.order_id,paidAt:c.paid_at,buyerId:c.buyer_id,rateBps:c.rate_bps,state:'review',reason:'evidence_requires_review',principalFen:null,commissionFen:null};
  if(c.buyer_eligible!==1||!Array.isArray(rows)||rows.some(r=>r.buyer_id!==c.buyer_id||r.order_id!==c.order_id||r.paid_at!==c.paid_at))return review;
- const e=c.payment_source==='boltutil'?classifyBoltCommissionEvidence(domain,rows):classifyPaymentEvidence(domain,rows);
+ const e=c.payment_source==='boltutil'?classifyBoltCommissionEvidence(domain,rows):classifyPaymentEvidence(domain,rows,{allowFullyReversed:true});
  if(!e.eligible||!('principalFen' in e)||!('refundedPrincipalFen' in e))return {...review,reason:e.reason};
- // No automatic refund adjustments in this release. Flag affected orders for manual review.
- if(e.refundedPrincipalFen!==0)return {...review,reason:'refund_requires_manual_review'};
- const principal=e.principalFen;
- return {...review,state:'verified',reason:null,principalFen:principal,commissionFen:commissionFen(principal,c.rate_bps)};
+ // Confirmed principal refunds reduce accrual, including full reversal.
+ // Pending/risky or ambiguous refunds remain excluded by the classifier.
+ const principal=e.principalFen-e.refundedPrincipalFen;
+ return {...review,state:'verified',reason:null,principalFen:principal,refundedPrincipalFen:e.refundedPrincipalFen,commissionFen:commissionFen(principal,c.rate_bps)};
 }
 export function summarizeManualOrders(orders,recordedFen,complete){
  if(!int(recordedFen,0))throw new TypeError('PARTNER_REPORT_INVALID');

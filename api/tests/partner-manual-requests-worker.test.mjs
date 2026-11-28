@@ -88,6 +88,8 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
  assert.equal((await ok('partner',me)).pendingId,requestId);
  assert.equal((await ok('other',me+'?userId=partner')).pendingId,second);
  assert.equal((await ok('owner',admin)).queue.length,2);
+ assert.equal((await ok('owner',admin+'?requestId='+requestId)).settlementReady,true);
+ assert.equal((await ok('owner',admin+'?requestId='+second)).settlementReady,false);
  const resolve={requestId,operationId:randomUUID(),action:'completed',reason:'offline workflow state assertion'};
  assert.equal((await call('partner',admin,resolve)).status,403);
  assert.equal((await call('owner',admin,resolve,{'X-CSRF-Token':'invalid'})).status,403);
@@ -114,6 +116,15 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
  await ok('owner',admin,{...resolve,requestId:next,operationId:randomUUID(),action:'rejected'});
  assert.equal((await ok('partner',me)).requestableFen,1000);
  assert.equal((await ok('owner',admin)).queue.length,0);
+ // Confirmed refunds from the actual local refund table reduce only that
+ // order's accrued principal; completed settlement totals remain untouched.
+ db.prepare("INSERT INTO payment_refunds(id,transaction_id,out_refund_no,amount_fen,base_amount_fen,status,reason,created_at,updated_at,succeeded_at) VALUES('refund-next','tx-next','refund-next',2000,2000,'succeeded','offline refund fixture',?,?,?)").run(paid,paid,paid);
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=2000 WHERE order_id='next'");
+ const partial=await ok('partner',me);assert.equal(partial.summary.differenceFen,600);assert.equal(partial.requestableFen,null);
+ assert.equal(partial.orders.find(o=>o.orderId==='next').refundedPrincipalFen,2000);
+ db.prepare("INSERT INTO payment_refunds(id,transaction_id,out_refund_no,amount_fen,base_amount_fen,status,reason,created_at,updated_at,succeeded_at) VALUES('refund-next-rest','tx-next','refund-next-rest',3000,3000,'succeeded','offline refund fixture',?,?,?)").run(paid,paid,paid);
+ db.exec("UPDATE payment_transactions SET principal_refunded_fen=5000,status='refunded' WHERE order_id='next';UPDATE recharge_orders SET status='refunded' WHERE id='next'");
+ const fully=await ok('partner',me);assert.equal(fully.summary.differenceFen,0);assert.equal(fully.orders.find(o=>o.orderId==='next').commissionFen,0);
  db.exec("UPDATE system_settings SET value='0' WHERE key='partner_manual_reporting_enabled'");
  assert.deepEqual(await ok('partner',me),{enabled:false});
  assert.equal((await call('partner',me,{expectedAmountFen:1000})).status,409);

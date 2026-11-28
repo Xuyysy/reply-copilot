@@ -35,7 +35,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
    }
   }
   if(u.pathname===member)return Response.json(f.enabled?report():{enabled:false});
-  if(u.pathname===admin)return Response.json(u.searchParams.has('userId')?report():{enabled:true,queue:f.pending?[f.pending]:[]});
+  if(u.pathname===admin)return Response.json(u.searchParams.has('requestId')?{enabled:true,settlementReady:!!f.pending&&f.earned-f.settled>=f.pending.amount_fen}:u.searchParams.has('userId')?report():{enabled:true,queue:f.pending?[f.pending]:[]});
   if(u.pathname===policyPath)return Response.json({enabled:true,user:{id:'partner',email:'partner@example.test',eligible:true},history:[policy]});
   throw Error('Unexpected API '+u.pathname);
  };

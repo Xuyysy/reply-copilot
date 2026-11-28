@@ -73,3 +73,14 @@ test('BoltUtil commissions use immutable RMB principal, never USDT rounding tail
  assert.doesNotMatch(manualCandidatePlan('subscription','partner').sql,/boltutil_orders/);
  assert.match(manualCandidatePlan('subscription','partner',true).sql,/LEFT JOIN boltutil_orders/);
 });
+
+test('verified partial and complete refunds reduce earned commission, uncertain refunds do not count',()=>{
+ const c={order_id:'order',buyer_id:'buyer',paid_at:100,registered_at:1,first_authorized_at:1,term_months:null,rate_bps:1500,buyer_eligible:1};
+ const row={order_id:'order',buyer_id:'buyer',transaction_count:1,merchant_provider:'xiaodou',payment_protocol:'rsa2',currency:'CNY',risk_state:'clear',refund_pending:0,order_status:'paid',payment_status:'paid',payment_proof:1,applied_proof:1,paid_at:100,applied_at:100,transaction_paid_at:100,provider_trade_id:'merchant-out',provider_payment_id:null,epay_trade_no:null,identity_count:1,epay_identity_collision:0,principal_fen:1990,buyer_fen:1990,principal_refunded_fen:990,refund_proof_fen:990};
+ const partial=manualOrderEstimate('recharge',c,[row]);assert.equal(partial.state,'verified');assert.equal(partial.principalFen,1000);assert.equal(partial.refundedPrincipalFen,990);assert.equal(partial.commissionFen,150);
+ const full=manualOrderEstimate('recharge',c,[{...row,order_status:'refunded',payment_status:'refunded',principal_refunded_fen:1990,refund_proof_fen:1990}]);
+ assert.equal(full.state,'verified');assert.equal(full.commissionFen,0);assert.equal(summarizeManualOrders([full],298,true).differenceFen,-298);
+ for(const patch of [{refund_pending:1},{refund_proof_fen:0},{principal_refunded_fen:1991,refund_proof_fen:1991}]){
+  assert.equal(manualOrderEstimate('recharge',c,[{...row,...patch}]).state,'review');
+ }
+});
