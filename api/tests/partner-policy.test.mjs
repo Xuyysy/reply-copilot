@@ -100,8 +100,11 @@ test('partner candidate excludes automated transfers and schedulers, gates manua
  assert.doesNotMatch(router,/scheduledPartner|\/v1\/partners\/alipay|\/v1\/admin\/partners\/(?:discovery|accrual-review|payout-review|order-preview|alipay-requests)/);
  assert.match(card,/if\(!result\?\.enabled\|\|!result\.policy\)return null/);
  assert.match(card,/api<Result>\("\/v1\/partners\/me"\)/);
- assert.match(account,/<ReferralInviteCard language=\{language\}\/>/);
- assert.match(account,/<PartnerMembershipCard key=\{data\.account\.user\.userId\}/);
+ const wrapper=readFileSync(new URL('../../web/src/components/account/ReferralAndPartnerCards.tsx',import.meta.url),'utf8');
+ assert.match(account,/<ReferralAndPartnerCards key=\{data\.account\.user\.userId\} owner=\{data\.account\.user\.userId\} language=\{language\}\/>/);
+ assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\}\/>/);
+ assert.match(wrapper,/<PartnerMembershipCard owner=\{owner\} language=\{language\} onRecruitment=\{setShowRecruitment\}\/>/);
+ assert.match(card,/value\.enabled===true&&value\.policy===null/);
  assert.match(admin,/<PartnerAdminPanel language=\{language\} write=\{write\}/);
  assert.doesNotMatch(card,/PartnerAlipayRecipient|PartnerPayoutRequests|referral-share|\/promote\//);
 });
