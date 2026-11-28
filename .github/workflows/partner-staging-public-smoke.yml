@@ -1,7 +1,7 @@
-name: Partner Staging public safety smoke (no writes)
+name: Partner V2 Staging public safety smoke (no writes)
 on:
   push:
-    branches: ['chatgpt/partner-staging-public-smoke-20261127']
+    branches: ['chatgpt/partner-v2-staging-public-smoke-20261128']
     paths: ['.github/workflows/partner-staging-public-smoke.yml']
 permissions:
   contents: read
@@ -26,6 +26,11 @@ jobs:
             echo "PASS $path HTTP $code"
           }
           check /health 200
+          check /v1/referrals/me 401
+          check /v1/partners/payout 401
+          check /v1/admin/partners/payout 401
+          check /v1/admin/partners/list 401
+          check /v1/admin/partners/invites 401
           check /v1/partners/me 401
           check /v1/partners/manual-report 401
           check /v1/admin/partners/policy 401
@@ -36,4 +41,4 @@ jobs:
             grep -qi '<html' "$tmp/page"
             echo "PASS $page HTTP $code"
           done
-          echo 'PARTNER_STAGING_PUBLIC_SMOKE_OK: 8 GET requests; no authentication, no database writes, no payments'
+          echo 'PARTNER_V2_STAGING_PUBLIC_SMOKE_OK: 13 GET requests; no authentication, no database writes, no payments'
