@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {adminOperationPayload} from '../src/lib/admin-operation-payload.ts';
 import { readFile } from 'node:fs/promises';
 const source = await readFile(new URL('../src/components/admin/AdminDashboard.tsx', import.meta.url), 'utf8');
 const mk99SettingsSource = await readFile(new URL('../src/components/admin/MerchantPaymentSettings.tsx', import.meta.url), 'utf8');
@@ -10,7 +11,16 @@ test('admin mutation identity survives network errors and reauthentication', () 
   assert.match(source, /cause\.code !== "ADMIN_REAUTH_REQUIRED"/);
   assert.match(source, /result = await send\(\)/);
   assert.match(source, /if \(busyGuard\.current\) return; busyGuard\.current = true/);
-  assert.match(source, /payload\.reason\.trim\(\)\.length < 8/);
+  assert.match(source, /adminOperationPayload\(path,body,reasonRef\.current\)/);
+  assert.match(source, /if \(!valid\) throw new Error/);
+  const syncPath='/v1/admin/partners/manual-report';
+  assert.deepEqual(adminOperationPayload(syncPath,{sync:true,userId:'partner'},''),{payload:{sync:true,userId:'partner'},valid:true});
+  assert.deepEqual(adminOperationPayload(syncPath,{sync:true,userId:'partner'},'stale reason must not leak'),{payload:{sync:true,userId:'partner'},valid:true});
+  for(const [path,body] of [[syncPath,{requestId:'request',action:'completed'}],[syncPath,{sync:true,userId:'partner',unexpected:true}],['/v1/admin/users/bulk-status',{sync:true,userId:'partner'}]]){
+    assert.equal(adminOperationPayload(path,body,'').valid,false);
+    assert.equal(adminOperationPayload(path,body,'short').valid,false);
+  }
+  assert.deepEqual(adminOperationPayload(syncPath,{requestId:'request',action:'completed',reason:'verified offline transfer'},''),{payload:{requestId:'request',action:'completed',reason:'verified offline transfer'},valid:true});
   assert.match(source, /type="password" autoComplete="current-password"/);
   assert.doesNotMatch(source, /window\.prompt|window\.confirm/);
 });
