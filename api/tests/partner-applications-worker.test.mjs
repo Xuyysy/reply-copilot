@@ -1,0 +1,77 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {randomUUID,createHash,createHmac} from 'node:crypto';
+import {fixture,worker} from './helpers/payment-v2.mjs';
+test('partner applications: X handle required, private queue, reauth, stale review and atomic approval',async t=>{
+ const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
+ for(const file of ['partners_v1a_policy_proposal.sql','partner_applications_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+file,import.meta.url),'utf8'));
+ const old=globalThis.fetch;globalThis.fetch=async()=>{throw Error('external forbidden')};t.after(()=>{globalThis.fetch=old});
+ Object.assign(f.env,{ADMIN_PORTAL_ENABLED:'1',PAYMENTS_ENABLED:'0',XIAODOU_WEBHOOKS_ENABLED:'0'});
+ const tokens={};
+ for(const [id,role] of [['owner','admin'],['applicant','user'],['other','user'],['ineligible','user'],['manual','user']]){
+  const token=randomUUID().replaceAll('-','')+randomUUID().replaceAll('-','');tokens[id]=token;
+  db.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,role) VALUES(?,?,1,1,?,'fixture',?)").run(id,id+'@example.test',id,role);
+  db.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES(?,?,?,'web',1,?)").run('s-'+id,createHash('sha256').update(token).digest('hex'),id,Date.now()+3600000);
+ }
+ db.exec("INSERT INTO site_administrator(id,user_id,bound_at) VALUES(1,'owner',1); UPDATE users SET is_test_account=1 WHERE id='ineligible'; UPDATE system_settings SET value='1' WHERE key='partner_program_enabled'");
+ const me='/v1/partners/application',policy='/v1/partners/me',admin='/v1/admin/partners/applications',grant='/v1/admin/partners/policy';
+ async function call(id,path,body,extra={}){
+  const token=tokens[id];const r=await worker.fetch(new Request(f.env.API_ORIGIN+path,{method:body===undefined?'GET':'POST',headers:{Origin:f.env.WEB_ORIGIN,'Content-Type':'application/json','X-Reply-Copilot-Action':'1',...(token?{Cookie:'rc_session='+token,'X-CSRF-Token':createHmac('sha256',f.env.AUTH_HASH_SECRET).update('csrf:'+token).digest('hex')}:{ }),...extra},...(body===undefined?{}:{body:JSON.stringify(body)})}),f.env);
+  return {status:r.status,body:await r.json(),cache:r.headers.get('Cache-Control')};
+ }
+ async function ok(...args){const r=await call(...args);assert.equal(r.status,200,JSON.stringify(r.body));return r.body;}
+ const count=table=>db.prepare('SELECT COUNT(*) n FROM '+table).get().n;
+ assert.deepEqual(await ok('applicant',me),{enabled:false});
+ assert.equal((await call('applicant',me,{xHandle:'abc'})).status,409);
+ assert.deepEqual(await ok('applicant',policy),{enabled:true,policy:null});
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_applications_enabled'");
+ assert.equal((await call(null,me)).status,401);
+ assert.equal((await call('other',admin)).status,403);
+ assert.deepEqual(await ok('applicant',policy),{enabled:true,policy:null,applicationsEnabled:true});
+ assert.equal((await call('applicant',me,{xHandle:'@okay'},{'X-CSRF-Token':'bad'})).status,403);
+ for(const xHandle of ['', '@', 'https://x.com/abc','a/b','a.b','a b','用户名','a'.repeat(16)])assert.equal((await call('applicant',me,{xHandle})).status,400,xHandle);
+ assert.equal((await call('applicant',me,{xHandle:'abc',userId:'other'})).status,400);
+ assert.equal((await call('ineligible',me,{xHandle:'test'})).status,409);
+ assert.equal((await call('owner',me,{xHandle:'test'})).status,409);
+ const a=(await ok('applicant',me,{xHandle:'@My_X123'})).application;
+ assert.equal(a.x_handle,'my_x123');assert.equal(a.status,'pending');assert.equal(count('partner_policy_versions'),0);
+ assert.equal((await call('applicant',me,{xHandle:'different'})).status,409);
+ assert.equal((await ok('other',me+'?userId=applicant')).application,null);
+ const q=await call('owner',admin);assert.equal(q.cache,'no-store');assert.equal(q.body.items[0].email,'applicant@example.test');assert.equal(q.body.items[0].x_handle,'my_x123');
+ const deny={applicationId:a.id,operationId:randomUUID(),action:'rejected',reason:'synthetic review decision'};
+ assert.equal((await call('owner',admin,deny)).status,403);
+ db.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('s-owner',?)").run(Date.now()+3600000);
+ assert.equal((await call('other',admin,deny)).status,403);
+ assert.equal((await call('owner',admin,deny,{'X-CSRF-Token':'bad'})).status,403);
+ assert.equal((await call('owner',admin,{...deny,reason:'short'})).status,400);
+ await ok('owner',admin,deny);
+ assert.equal((await call('owner',admin,deny)).status,409);
+ assert.equal((await ok('applicant',me)).application.status,'rejected');
+ assert.equal((await ok('owner',admin+'?status=rejected')).items.length,1);
+ const b=(await ok('applicant',me,{xHandle:'new_handle'})).application;
+ assert.notEqual(a.id,b.id);
+ const terms={userId:'applicant',status:'active',level:'standard',rateBps:1500,termMonths:12,expectedVersion:0,reason:'synthetic approved after review'};
+ const approve={...terms,applicationId:b.id,operationId:randomUUID(),action:'approved'};
+ assert.equal((await call('owner',admin,{...approve,applicationId:a.id})).status,409);
+ assert.equal((await call('owner',admin,{...approve,userId:'other'})).status,409);
+ assert.equal((await call('owner',admin,{...approve,rateBps:1499})).status,400);
+ assert.equal(count('partner_policy_versions'),0);
+ await ok('owner',admin,approve);
+ assert.equal((await call('owner',admin,approve)).status,409);
+ assert.equal((await ok('applicant',me)).application.status,'approved');
+ assert.equal((await ok('applicant',policy)).policy.rate_bps,1500);
+ assert.equal((await call('applicant',me,{xHandle:'another'})).status,409);
+ assert.equal((await ok('owner',admin+'?status=approved')).items[0].id,b.id);
+ assert.equal((await ok('owner',admin)).items.length,0);
+ const manual=(await ok('manual',me,{xHandle:'manual'})).application;
+ await ok('owner',grant,{...terms,userId:'manual',operationId:randomUUID()});
+ assert.equal((await ok('manual',me)).application.id,manual.id);
+ assert.equal((await ok('manual',me)).application.status,'approved');
+ assert.equal(count('partner_policy_versions'),2);
+ assert.throws(()=>db.prepare("UPDATE partner_applications SET x_handle='tamper' WHERE id=?").run(b.id),/immutable/);
+ assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+ db.exec("UPDATE system_settings SET value='0' WHERE key='partner_applications_enabled'");
+ assert.deepEqual(await ok('other',me),{enabled:false});
+ assert.equal((await call('other',me,{xHandle:'valid'})).status,409);
+});
