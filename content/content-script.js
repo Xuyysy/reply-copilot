@@ -263,7 +263,7 @@
   }
   function matchedComposer(post) {
     if (!hasRuntimeContext() || active?.post!==post || active.cancelled) return {editor:null,matchedPost:false};
-    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts);
+    const facts=api.composerAssociation.snapshot(document,post,active.initialUrl,location.href,performance.now(),quarantinedPosts,recorder?.wantsFacts?.()===true);
     diagnosticTap('facts',facts);
     const result=active.association.evaluate(facts);
     if(result.state==='waiting')traceAssociation('waiting',result.reason);

@@ -281,8 +281,8 @@
   }
   // A native expansion link can independently name the parent even when
   // the modal's timestamp is unlinked. It is not an ordinary body hyperlink.
-  function detailExpansionId(article,initialUrl){
-    const controls=expandControls(article),ids=new Set();
+  function detailExpansionId(article,initialUrl,controls=expandControls(article)){
+    const ids=new Set();
     for(const control of controls){
       for(const link of [control,...control.querySelectorAll('a[href]')]){
         if(!link.matches('a[href]')||link.closest('article')!==article||
@@ -312,10 +312,10 @@
     }catch{}
     return null;
   }
-  function detailBodies(article,media){
+  function detailBodies(article,media,readExpands=()=>expandControls(article)){
     const bodies=ownedDetailNodes(article,'[data-testid="tweetText"]');
     if(bodies.length!==1)return {texts:[],expanded:false};
-    const body=bodies[0],expands=expandControls(article);
+    const body=bodies[0],expands=readExpands();
     if(expands.length>1)return {texts:[],expanded:false};
     const expand=expands[0],inside=expand&&body.contains(expand);
     // Keep two representations: rendered text and DOM text (including emoji
@@ -417,44 +417,59 @@
       !article.contains(editor)&&!article.closest('[contenteditable="true"],[data-zane-reply-copilot]')&&
       Boolean(article.compareDocumentPosition(editor)&4);
   }
-  function detailContextConflict(post,article,initialUrl){
-    const owner=detailRouteOwner(post,initialUrl);
-    const evidence=globalThis.ZaneReplyCopilotContent.postExtractor.legacyDetailEvidence(article,initialUrl);
-    const expansionId=detailExpansionId(article,initialUrl);
-    const author=detailAuthor(article,initialUrl),time=detailTimestamp(article),captured=post.detailPreviewSource;
+  // Only within a single synchronous snapshot. Do not cache across
+  // DOM mutations, focus events, generation or pre-insertion validation.
+  // Lazy evaluation preserves the old short-circuit behavior.
+  function scanDetailArticle(post,article,initialUrl){
+    const once=read=>{let done=false,value;return ()=>{if(!done){value=read();done=true;}return value;};};
+    const expands=once(()=>expandControls(article));
+    return {
+      owner:once(()=>detailRouteOwner(post,initialUrl)),
+      evidence:once(()=>globalThis.ZaneReplyCopilotContent.postExtractor.legacyDetailEvidence(article,initialUrl)),
+      expands,
+      expansionId:once(()=>detailExpansionId(article,initialUrl,expands())),
+      author:once(()=>detailAuthor(article,initialUrl)),
+      time:once(()=>detailTimestamp(article)),
+      bodies:once(()=>detailBodies(article,post.hasCapturedMedia,expands)),
+      quote:once(()=>detailQuoteCheck(post,article,initialUrl))
+    };
+  }
+  function detailContextConflict(post,scan){
+    const owner=scan.owner(),evidence=scan.evidence();
+    const expansionId=scan.expansionId();
+    const author=scan.author(),time=scan.time(),captured=post.detailPreviewSource;
     return Boolean(expansionId&&expansionId!==post.statusId)||evidence.conflict||(evidence.statusId&&evidence.statusId!==post.statusId)||
       (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId)||
       Boolean(author&&author!==owner)||
       Boolean(captured&&captured.time!==null&&time!==null&&captured.time!==time);
   }
-  function compactDetailPreview(post,article,editor,dialog,text,initialUrl,currentUrl,quarantinedPosts){
-    const captured=post.detailPreviewSource,owner=detailRouteOwner(post,initialUrl);
+  function compactDetailPreview(post,article,editor,dialog,text,initialUrl,currentUrl,quarantinedPosts,scan,sourceScan){
+    const captured=post.detailPreviewSource,owner=scan.owner();
     if(!captured||!owner||captured.owner!==owner||
        post.quoteOnly||!article?.matches?.('article[data-testid="tweet"]')||
        !detailPreviewBefore(article,editor,dialog)||!routeAllowed(initialUrl,currentUrl,post.statusId,true)||
        editor.closest('[inert],[aria-hidden="true"]')||
        article.querySelector('article,[data-slot="embedded-tweet-frame"]')||
        (!post.hasCapturedQuote&&article.querySelector('[data-testid="quoteTweet"]'))||
-       (post.hasCapturedQuote&&detailQuoteCheck(post,article,initialUrl).conflict))return false;
+       (post.hasCapturedQuote&&scan.quote().conflict))return false;
     try{
       const u=new URL(currentUrl);
       if(u.pathname!=='/compose/post'||u.hash||u.username||u.password)return false;
     }catch{return false;}
-    const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
-    const evidence=extractor.legacyDetailEvidence(article,initialUrl);
-    if(!evidence.eligible||detailContextConflict(post,article,initialUrl))return false;
-    const author=detailAuthor(article,initialUrl),timestamp=detailTimestamp(article);
+    const evidence=scan.evidence();
+    if(!evidence.eligible||detailContextConflict(post,scan))return false;
+    const author=scan.author(),timestamp=scan.time();
     if(post.article?.isConnected){
-      const sourceAuthor=detailAuthor(post.article,initialUrl),sourceTime=detailTimestamp(post.article);
+      const sourceAuthor=sourceScan.author(),sourceTime=sourceScan.time();
       if((sourceAuthor&&sourceAuthor!==owner)||
          (captured.time!==null&&sourceTime!==null&&sourceTime!==captured.time))return false;
-      const current=detailBodies(post.article,post.hasCapturedMedia).texts;
+      const current=sourceScan.bodies().texts;
       if(!current.some(v=>captured.texts.includes(v)))return false;
     }
     const matchingTime=captured.time!==null&&timestamp===captured.time;
     const matchingAuthor=author===owner;
-    const expansionId=detailExpansionId(article,initialUrl);
-    const modal=detailBodies(article,post.hasCapturedMedia);
+    const expansionId=scan.expansionId();
+    const modal=scan.bodies();
     if(!modal.texts.length)return false;
     const oldAmbiguous=quarantinedPosts.some(old=>old?.statusId!==post.statusId&&(
       modal.texts.some(v=>{
@@ -527,7 +542,7 @@
     }
     return false;
   }
-  function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[]) {
+  function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[],includeCompactEvidence=false) {
     const api=globalThis.ZaneReplyCopilotContent;
     const original=post.article?.isConnected&&!post.legacyDetailIdentity?api.postExtractor.extractPost(post.article):null;
     const sourceUnchanged=!post.article?.isConnected||(post.legacyDetailIdentity?
@@ -541,6 +556,12 @@
       for (const editor of dialog.querySelectorAll(selector)) if(nodes.has(editor)||eligibleEditor(editor,post)){nodes.add(editor);found=true;}
       if(found)visibleDialogCount++;
     }
+    const detailScans=post.detailPreviewSource?new Map():null;
+    const scanFor=article=>{
+      let scan=detailScans.get(article);
+      if(!scan){scan=scanDetailArticle(post,article,initialUrl);detailScans.set(article,scan);}
+      return scan;
+    };
     const editors=[...nodes].map(node=>{
       const dialog=node.closest('[role="dialog"]');
       const modernContext=post.modernLayout===true||Boolean(post.replyRouteVerified&&hybridNativeEditor(node));
@@ -669,13 +690,13 @@
         matching.length!==1?null:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
       if(linkless&&modernMatch===true)statusId=routeId;
-      const detailQuoteEvidence=post.detailPreviewSource&&!modernContext&&primary?.article&&post.hasCapturedQuote?
-        detailQuoteCheck(post,primary.article,initialUrl):null;
-      const compactDetailConflict=Boolean(post.detailPreviewSource&&!modernContext&&primary?.article&&
-        (detailContextConflict(post,primary.article,initialUrl)||detailQuoteEvidence?.conflict));
+      const detailScan=detailScans&&!modernContext&&primary?.article?scanFor(primary.article):null;
+      const detailQuoteEvidence=detailScan&&post.hasCapturedQuote?detailScan.quote():null;
+      const compactDetailConflict=Boolean(detailScan&&
+        (detailContextConflict(post,detailScan)||detailQuoteEvidence?.conflict));
       const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&!compactDetailConflict&&
         candidates.length===1&&primary?.article&&(!primary.id||primary.id===post.statusId)&&
-        compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts));
+        compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts,detailScan,scanFor(post.article)));
       // Reuse the ordinary legacy association rules for detail recovery:
       // an independently verified parent ID wins; a unique matching
       // timeline caption (captured on navigation) is ordinary text evidence.
@@ -689,11 +710,11 @@
       const detailExactMatch=Boolean(!post.quoteOnly&&post.legacyDetailIdentity&&post.detailPreviewSource&&
         sourceUnchanged&&candidates.length===1&&primary?.article&&
         detailPreviewBefore(primary.article,node,dialog)&&!primary.id&&sameContext(post,text)&&
-        (post.legacyDetailKind==='owned'||detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner));
+        (post.legacyDetailKind==='owned'||detailScan.author()===post.detailPreviewSource.owner));
       const verifiedQuoteOnly=Boolean(post.quoteOnly&&post.detailPreviewSource&&detailQuoteEvidence?.matched&&
         sourceUnchanged&&candidates.length===1&&primary?.article&&
         detailPreviewBefore(primary.article,node,dialog)&&!compactDetailConflict&&
-        detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner&&
+        detailScan.author()===post.detailPreviewSource.owner&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
       const detailMatch=post.legacyDetailIdentity?
         candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!detailPreviewBefore(c.article,node,dialog)))||matching.length>1||compactDetailConflict?false:
@@ -723,16 +744,16 @@
           :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
-      const compactEvidence=post.detailPreviewSource&&!modernContext&&primary?.article?{
-        expansion:expandControls(primary.article).length===1,
-        expansionIdPresent:Boolean(detailExpansionId(primary.article,initialUrl)),
-        authorMatches:detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner,
-        timestampPresent:detailTimestamp(primary.article)!==null,
+      const compactEvidence=includeCompactEvidence&&detailScan?{
+        expansion:detailScan.expands().length===1,
+        expansionIdPresent:Boolean(detailScan.expansionId()),
+        authorMatches:detailScan.author()===post.detailPreviewSource.owner,
+        timestampPresent:detailScan.time()!==null,
         conflict:compactDetailConflict,
         matched:compactDetailMatch,
         timelinePreviewPresent:Boolean(post.timelinePreview),timelinePreviewMatched:priorTimelineMatch,
         sourceTextVariants:Math.min(5,post.detailPreviewSource.texts.length),
-        modalTextVariants:Math.min(5,detailBodies(primary.article,post.hasCapturedMedia).texts.length)
+        modalTextVariants:Math.min(5,detailScan.bodies().texts.length)
       }:null;
       const contextDetail=routeConflict?"route_preview_conflict":
         linkless&&contextMatches===true?"verified_route_preview":
