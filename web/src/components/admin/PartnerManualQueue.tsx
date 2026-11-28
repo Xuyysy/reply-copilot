@@ -20,7 +20,7 @@ export default function PartnerManualQueue({language,write}:{language:Language;w
  async function reveal(){
   if(lock.current||!selected||!selected.recipient_available)return;
   lock.current=true;setBusy(true);setError("");setRecipient(null);setConfirmed(false);
-  try{const r=await write<{profile:{name:string;account:string}}>("/v1/admin/partners/payout",{userId:selected.partner_user_id,requestId:selected.id,reason:"Verify recipient for manual settlement"});setRecipient(r.profile);}
+  try{const r=await write<{profile:{name:string;account:string}}>("/v1/admin/partners/payout",{userId:selected.partner_user_id,requestId:selected.id,forSettlement:true,reason:"Verify recipient for manual settlement"});setRecipient(r.profile);}
   catch(e){setError(readableError(e,language));}finally{lock.current=false;setBusy(false);}
  }
  async function resolve(action:"completed"|"rejected"){

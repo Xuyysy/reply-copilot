@@ -6,6 +6,7 @@ import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
 import {payoutEnabled,recipientReady,verifiedRecipientVersion} from "./partner-payout";
 import {boltReadSchemaReady} from "./boltutil/environment";
+import {commissionLedgerEnabled,ledgerReport,syncCommissionLedger,checkLedgerSettlement} from "./partner-commission-ledger";
 import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
@@ -17,7 +18,7 @@ async function enabled(env:Env){
 async function assigned(env:Env,userId:string){
  return !!await env.DB.prepare("SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=? LIMIT 1").bind(userId,nowMs()).first();
 }
-async function report(env:Env,userId:string,admin:boolean){
+async function legacyReport(env:Env,userId:string,admin:boolean){
  let complete=true;
  const orders=[],boltReady=boltReadSchemaReady(env);
  for(const domain of ["recharge","subscription"] as Domain[]){
@@ -53,6 +54,12 @@ async function report(env:Env,userId:string,admin:boolean){
  const latest=orders.sort((a,b)=>b.paidAt-a.paidAt||a.domain.localeCompare(b.domain)||a.orderId.localeCompare(b.orderId)).slice(0,30);
  return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:ready?requestableFen(summary,!!pending):null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{}),pendingId:pending?.id??null,orders:latest.map(o=>admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen}),records:records.results};
 }
+async function report(env:Env,userId:string,admin:boolean,ledger:boolean,cursor:string|null=null){
+ if(!ledger){if(cursor!==null)throw new ApiFailure(400,"INVALID_REQUEST","订单分页尚未开放。");return {...await legacyReport(env,userId,admin),ledgerEnabled:false,syncPending:false,nextCursor:null};}
+ const r=await ledgerReport(env,userId,admin,cursor);
+ const payout=await payoutEnabled(env),ready=!payout||await recipientReady(env,userId);
+ return {...r,requestableFen:ready?r.requestableFen:null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{})};
+}
 export async function myManualPartnerReport(request:Request,env:Env){
  const {session,token}=await sessionFor(request,env);
  if(session.kind!=="web")throw new ApiFailure(403,"FORBIDDEN","请使用网页登录账户。");
@@ -67,9 +74,15 @@ export async function myManualPartnerReport(request:Request,env:Env){
   if(write)throw new ApiFailure(403,"FORBIDDEN","当前账户未获得推广资格。");
   return response({enabled:false},200,env,request);
  }
- const current=await report(env,session.user_id,false);
- if(!write)return response(current,200,env,request);
+ const ledger=await commissionLedgerEnabled(env);
+ if(!write)return response(await report(env,session.user_id,false,ledger,new URL(request.url).searchParams.get("cursor")),200,env,request);
  const body=await jsonBody(request,4096);
+ if(Object.keys(body).length===1&&body.sync===true){
+  if(!ledger)throw new ApiFailure(409,"PARTNER_LEDGER_DISABLED","账本尚未开放。");
+  await syncCommissionLedger(env,session.user_id);
+  return response(await report(env,session.user_id,false,true),200,env,request);
+ }
+ const current=await report(env,session.user_id,false,ledger);
  const amount=current.requestableFen;
  if(Object.keys(body).length!==1||!Number.isSafeInteger(body.expectedAmountFen)||amount===null||body.expectedAmountFen!==amount||amount>1000000000000)
   throw new ApiFailure(409,"PARTNER_REQUEST_UNAVAILABLE","未达到10元、已有申请或金额已变化，请刷新后重试。");
@@ -80,6 +93,9 @@ export async function myManualPartnerReport(request:Request,env:Env){
  if(current.payoutProfileRequired&&recipientVersion===null)throw new ApiFailure(409,"PAYOUT_NOT_CONFIGURED","收款资料无法核实，请重新填写后再申请。");
  const recipientGuard=current.payoutProfileRequired?" AND (SELECT MAX(version) FROM partner_payout_profiles WHERE user_id=?)=?":"";
  const recipientParams=current.payoutProfileRequired?[session.user_id,recipientVersion]:[];
+ const ledgerGuard=ledger?" AND NOT EXISTS(SELECT 1 FROM partner_commission_dirty WHERE partner_user_id=?) AND COALESCE((SELECT earned_fen-settled_fen FROM partner_commission_totals WHERE partner_user_id=?),0)=?":"";
+ const ledgerParams=ledger?[session.user_id,session.user_id,amount]:[];
+ const settledGuard=ledger?"COALESCE((SELECT settled_fen FROM partner_commission_totals WHERE partner_user_id=?),0)":"(SELECT COALESCE(SUM(amount_fen),0) FROM partner_manual_requests WHERE partner_user_id=? AND status='completed')";
  const now=nowMs();
  // This is an application for HUMAN reconciliation only, not a payment
  // instruction. Recheck completed sum, current membership and gates at insert.
@@ -88,9 +104,10 @@ export async function myManualPartnerReport(request:Request,env:Env){
  EXISTS(SELECT 1 FROM users WHERE id=? AND role='user' AND status='active' AND email_verified_at IS NOT NULL AND archived_at IS NULL AND is_test_account=0)
  AND EXISTS(SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=?)
  AND (SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1')=2
- AND (SELECT COALESCE(SUM(amount_fen),0) FROM partner_manual_requests WHERE partner_user_id=? AND status='completed')=?
+ AND ${settledGuard}=?
+ AND COALESCE((SELECT value FROM system_settings WHERE key='partner_commission_ledger_enabled'),'0')=?${ledgerGuard}
  AND COALESCE((SELECT value FROM system_settings WHERE key='partner_payout_profile_enabled'),'0')=?${recipientGuard}
- ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,current.payoutProfileRequired?'1':'0',...recipientParams).run();
+ ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,ledger?'1':'0',...ledgerParams,current.payoutProfileRequired?'1':'0',...recipientParams).run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_REQUEST_CONFLICT","申请状态已变化，请刷新。");
  return response({ok:true},200,env,request);
 }
@@ -102,7 +119,15 @@ export async function adminManualPartnerReport(request:Request,env:Env){
   return response({enabled:false},200,env,request);
  }
  if(!write){
-  const userId=new URL(request.url).searchParams.get("userId")||"";
+  const params=new URL(request.url).searchParams;
+  const requestId=params.get("requestId");
+  if(requestId!==null){
+   if(!/^[a-f0-9-]{36}$/i.test(requestId))throw new ApiFailure(400,"INVALID_REQUEST","申请标识无效。");
+   if(!await commissionLedgerEnabled(env))return response({ledgerEnabled:false,settlementReady:null},200,env,request);
+   const r=await env.DB.prepare("SELECT partner_user_id FROM partner_manual_requests WHERE id=? AND status='pending'").bind(requestId).first<{partner_user_id:string}>();
+   return response({ledgerEnabled:true,settlementReady:!!r&&await checkLedgerSettlement(env,r.partner_user_id,requestId)},200,env,request);
+  }
+  const userId=params.get("userId")||"";
   if(!userId){
    const payout=await payoutEnabled(env);
    const queue=await env.DB.prepare("SELECT r.id,r.partner_user_id,r.amount_fen,r.created_at,u.email"+(payout?",EXISTS(SELECT 1 FROM partner_request_recipients s WHERE s.request_id=r.id) recipient_available":"")+" FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").all();
@@ -110,9 +135,15 @@ export async function adminManualPartnerReport(request:Request,env:Env){
   }
   if(!/^[A-Za-z0-9_-]{1,80}$/.test(userId))throw new ApiFailure(400,"INVALID_REQUEST","用户标识无效。");
   if(!await assigned(env,userId))throw new ApiFailure(404,"USER_NOT_FOUND","尚未指定该推广伙伴。");
-  return response(await report(env,userId,true),200,env,request);
+  return response(await report(env,userId,true,await commissionLedgerEnabled(env),params.get('cursor')),200,env,request);
  }
  const body=await jsonBody(request,4096);
+ if(body.sync===true){
+  if(Object.keys(body).sort().join(",")!=="operationId,sync,userId"||typeof body.userId!=="string"||!/^[A-Za-z0-9_-]{1,80}$/.test(body.userId)||typeof body.operationId!=="string"||!/^[a-f0-9-]{36}$/i.test(body.operationId))throw new ApiFailure(400,"INVALID_REQUEST","账本同步参数无效。");
+  if(!await commissionLedgerEnabled(env)||!await assigned(env,body.userId))throw new ApiFailure(409,"PARTNER_LEDGER_DISABLED","账本或合伙人尚未开放。");
+  await syncCommissionLedger(env,body.userId);
+  return response(await report(env,body.userId,true,true),200,env,request);
+ }
  const {requestId,action,operationId,reason}=body;
  if(Object.keys(body).sort().join(",")!=="action,operationId,reason,requestId"||
  typeof requestId!=="string"||! /^[a-f0-9-]{36}$/i.test(requestId)||
