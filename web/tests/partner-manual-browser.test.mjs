@@ -18,7 +18,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const policy={version:1,status:'active',level:'standard',rate_bps:2000,term_months:null,effective_at:1700000000000,reason:'synthetic policy'};
  window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false,dirty:false,appEnabled:false,application:null};
  const f=window.fixture,member='/v1/partners/manual-report',admin='/v1/admin/partners/manual-report',policyPath='/v1/admin/partners/policy';
- const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
+ const report=()=>({enabled:true,payoutProfileRequired:f.payout,recipientReady:!f.payout,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');if(!init.method||init.method==='GET')f.reads.push(u.pathname);
   if(u.pathname==='/v1/me')return f.owner==='guest'?Response.json({code:'UNAUTHORIZED'},{status:401}):f.owner==='error'?Response.json({code:'SERVER_UNAVAILABLE'},{status:503}):Response.json({user:{userId:f.owner}});
@@ -97,7 +97,16 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await press('购买记录');await until(has('受邀用户 y***'));assert.equal(await evaluate(has('最近邀请注册')),false);assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/manual-report").length'),1);
  await press('邀请注册');await until(has('最近邀请注册'));assert.equal(await evaluate(has('受邀用户 y***')),false);
  await press('购买记录');await until(has('受邀用户 y***'));assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/manual-report").length'),1);
- await press('结算记录');await until(has('支付宝收款资料'));await until(has('申请记录'));assert.equal(await evaluate(has('受邀用户 y***')),false);assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/payout").length'),1);assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
+ await press('设置收款资料');await until(has('支付宝收款资料'));await until(has('申请记录'));
+ const payoutRegion='document.querySelector("[role=region][aria-label=支付宝收款资料]")';
+ await until('document.activeElement==='+payoutRegion);
+ assert.equal(await evaluate('document.querySelector("[data-testid=partner-payout-profile] input")!==null'),true);
+ assert.equal(await evaluate('(()=>{const r='+payoutRegion+'.getBoundingClientRect();return r.top>=0&&r.top<innerHeight})()'),true);
+ assert.equal(await evaluate(has('受邀用户 y***')),false);
+ await evaluate('window.scrollTo(0,0)');await press('设置收款资料');await until('document.activeElement==='+payoutRegion);
+ assert.equal(await evaluate('(()=>{const r='+payoutRegion+'.getBoundingClientRect();return r.top>=0&&r.top<innerHeight})()'),true);
+ assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/payout").length'),1);
+ assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
  await evaluate('fixture.payout=false');
  await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef",false)');await until('Boolean(document.querySelector("[aria-label=我的邀请链接]"))');assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate('fixture.posts.length'),4);
  // Reproduce the actual generic administrator payload path: a clean request
