@@ -18,6 +18,7 @@ import {adminOperationsInsights,acknowledgeExpiredCreditAlert} from "./admin-ope
 import {previewCampaign,createCampaign,listCampaigns,campaignDetail,runCampaign,closeCampaign} from "./campaigns";
 import {myReferrals,createReferralLink,adminReferralOverview} from "./referrals";
 import {myPartnerPolicy,adminPartnerPolicy,adminPartnerDirectory,adminPartnerInvites} from "./partners";
+import {myPartnerApplication,adminPartnerApplications} from "./partner-applications";
 import {myManualPartnerReport,adminManualPartnerReport} from "./partner-manual-report";
 import {myPartnerPayout,adminPartnerPayout} from "./partner-payout";
 import {adminPaymentControl,updateAdminPaymentControl,adminPaymentPlatformCheck,adminChangePassword,adminRevokeOtherSessions} from "./admin-controls";
@@ -185,6 +186,8 @@ export default {
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/payout") return await adminPartnerPayout(request,env);
       if (request.method === "GET" && path === "/v1/admin/partners/list") return await adminPartnerDirectory(request,env);
       if (request.method === "GET" && path === "/v1/admin/partners/invites") return await adminPartnerInvites(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/partners/application") return await myPartnerApplication(request,env);
+      if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/applications") return await adminPartnerApplications(request,env);
       if (request.method === "GET" && path === "/v1/partners/me") return await myPartnerPolicy(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/admin/partners/policy") return await adminPartnerPolicy(request,env);
       if (["GET","POST"].includes(request.method) && path === "/v1/partners/manual-report") return await myManualPartnerReport(request,env);

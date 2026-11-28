@@ -5,6 +5,7 @@ import { sessionFor } from "./auth";
 import { response } from "./http";
 import { jsonBody, nowMs } from "./security";
 import {payoutEnabled} from "./partner-payout";
+import {partnerApplicationsEnabled} from "./partner-applications";
 import { parsePartnerPolicy, partnerPolicyAppendPlan, partnerPolicyAtPlan } from "./partner-policy.mjs";
 
 async function enabled(env: Env): Promise<boolean> {
@@ -27,7 +28,7 @@ export async function myPartnerPolicy(request:Request,env:Env):Promise<Response>
   if(!await enabled(env))return response({enabled:false},200,env,request);
   const user=await env.DB.prepare("SELECT 1 FROM users WHERE id=? AND role='user' AND status='active' AND email_verified_at IS NOT NULL AND archived_at IS NULL AND is_test_account=0").bind(session.user_id).first();
   const policy=user?await current(env,session.user_id):null;
-  if(!policy)return response({enabled:true,policy:null},200,env,request);
+  if(!policy)return response({enabled:true,policy:null,...(user&&await partnerApplicationsEnabled(env)?{applicationsEnabled:true}:{})},200,env,request);
   // Eligibility-only milestone. Never touch cash ledgers or infer financial balances.
   // The invitation card continues to display the existing referral statistics.
   return response({enabled:true,policy,...(await payoutEnabled(env)?{payoutProfileEnabled:true}:{})},200,env,request);
