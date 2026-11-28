@@ -83,6 +83,46 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       const other=document.createElement('div');other.contentEditable='true';other.setAttribute('role','textbox');other.style.minHeight='20px';dlg.append(other);
       checks.multiEditor=makeSession().evaluate(facts()).reason==='multiple_editors';other.remove();
       original.remove();checks.detachedSource=makeSession().evaluate(facts()).editor===editor;
+      dlg.remove();
+      // V3 diagnostic (4): identity verified, one fresh focused editor,
+      // two nested role dialogs, parent article present, no verified ID,
+      // and a presentation-only preview mismatch. Synthetic text/IDs.
+      const header=(owner='example',date='2026-11-25T03:51:00.000Z')=>
+        '<div data-testid="User-Name"><a href="https://x.com/'+owner+'">@'+owner+'</a></div><time datetime="'+date+'">Nov 25</time>';
+      const prefix='A sufficiently long synthetic original caption for the compact preview test';
+      const full=prefix+' with additional detail in the original long post';
+      const source=make('detailSource',header()+'<div data-testid="tweetText">'+full+'</div>'+photo('101')+actions('101'));
+      const compactPost=a.capturePost(p.extractPost(source,url),url);
+      checks.compactSourceCaptured=compactPost.detailPreviewSource?.owner==='example';
+      const normalSource=make('normalSource',header()+'<a href="'+url+'">Permalink</a><div data-testid="tweetText">'+full+'</div>'+photo('101'));
+      const normalPost=a.capturePost(p.extractPost(normalSource,url),url);
+      checks.normalDetailSourceCaptured=normalPost.ok&&!normalPost.legacyDetailIdentity&&normalPost.detailPreviewSource?.owner==='example';
+      const before=a.baseline(document,compactPost);
+      const outer=document.createElement('div');outer.setAttribute('role','dialog');
+      const inner=document.createElement('div');inner.setAttribute('role','dialog');inner.setAttribute('aria-modal','true');outer.append(inner);document.body.append(outer);
+      const preview=(body,expand=false,owner='example',date='2026-11-25T03:51:00.000Z',link='')=>{
+        inner.innerHTML='<article data-testid="tweet">'+header(owner,date)+link+'<div data-testid="tweetText">'+body+'</div>'+
+          (expand?'<button data-testid="tweet-text-show-more-link">Show more</button>':'')+'</article>'+
+          '<div role="textbox" data-testid="tweetTextarea_0" contenteditable="true" style="min-height:20px"></div>';
+        const e=inner.querySelector('[contenteditable]');e.focus();return e;
+      };
+      const state=(p=compactPost,now=compose,quarantine=[])=>a.create({trusted:true,statusId:'101',requestId:'compact',now:0,...before}).evaluate(a.snapshot(document,p,url,now,20,quarantine));
+      let e=preview(prefix+' pic.x.com/ABC123',true);
+      checks.compactTruncated=state().editor===e;
+      checks.compactNormalDetail=state(normalPost).editor===e;
+      checks.compactFullMedia=state(compactPost).state==='bound';
+      e=preview(full+' https:// pic.x.com/ABC123');
+      checks.compactFull=state().editor===e;
+      preview(prefix,false);checks.compactNoExpand=state().state!=='bound';
+      preview(prefix,true,'other');checks.compactWrongAuthor=state().state!=='bound';
+      preview(prefix,true,'example','2026-11-25T03:52:00.000Z');checks.compactWrongTime=state().state!=='bound';
+      preview(prefix,true,'example','2026-11-25T03:51:00.000Z','<a href="https://x.com/example/status/202">Other</a>');checks.compactWrongId=state().state!=='bound';
+      preview('A different substantial synthetic caption that cannot match the captured source',true);checks.compactWrongText=state().state!=='bound';
+      preview(prefix,true);checks.compactQuoteRoute=state(compactPost,compose+'?quote=101').state!=='bound';
+      checks.compactQuarantined=state(compactPost,compose,[{...compactPost,statusId:'202'}]).state!=='bound';
+      const noTime=inner.querySelector('time');noTime.removeAttribute('datetime');checks.compactNoTime=state().state!=='bound';
+      e=preview(prefix,true);e.textContent='draft';checks.compactDraft=state().reason==='existing_draft';
+      e=preview(prefix,true);source.querySelector('[data-testid="tweetText"]').textContent='Changed source';checks.compactSourceChanged=state().state!=='bound';
       $('result').textContent=JSON.stringify(checks);
     };
     const file=path.join(dir,'fixture.html');writeFileSync(file,'<!doctype html><html><body><main></main><output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>');
@@ -92,7 +132,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
     const checks=JSON.parse(match[1]);
-    assert.equal(Object.keys(checks).length,34);
+    assert.equal(Object.keys(checks).length,50);
     assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

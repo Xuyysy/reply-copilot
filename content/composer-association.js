@@ -148,7 +148,7 @@
     return Boolean(card?.querySelector?.('[data-testid="User-Name"]') &&
       card?.querySelector?.('[data-testid="tweetText"]'));
   }
-  function capturePost(post) {
+  function capturePost(post,initialUrl=globalThis.location?.href) {
     // Captioned quotes require extra hydration patience, ordinary posts do not.
     // Discover the quote only on the trusted capture, not on every modal scan.
     const markedQuote=Boolean(post.article?.querySelector?.('[data-testid="quoteTweet"]'));
@@ -185,7 +185,12 @@
         }
       }
     }
-    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto,...(modernCaptionQuote?(post.quoteOnly?{modernQuoteOnly:modernCaptionQuote}:{modernCaptionQuote}):{})};
+    const detailPreviewSource=!post.modernLayout&&!post.quoteOnly&&!hasCapturedQuote&&
+      initialUrl&&/\/status\/\d+(?:[/?#]|$)/.test(initialUrl)?
+      captureDetailPreviewSource(post,initialUrl):null;
+    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto,
+      ...(detailPreviewSource?{detailPreviewSource}:{}),
+      ...(modernCaptionQuote?(post.quoteOnly?{modernQuoteOnly:modernCaptionQuote}:{modernCaptionQuote}):{})};
   }
   function sameContext(post,text) {
     const source=normalized(post.sourceText),copy=normalized(text);
@@ -195,6 +200,109 @@
     // including a presentation space after https://. This is auxiliary text
     // comparison only: never navigate to it or treat it as identity evidence.
     return /^(?:(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+\s*){1,4}$/.test(copy.slice(source.length).trim());
+  }
+  // A legacy reply preview may omit the parent permalink and render only
+  // a shortened caption plus the media's presentation URL. Capture the
+  // author/time from the exact clicked detail article before X opens it.
+  // These values are transient DOM evidence, never diagnostic payloads.
+  function detailRouteOwner(post,initialUrl){
+    try{
+      const u=new URL(initialUrl),source=new URL(post.sourceUrl);
+      const m=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/?$/);
+      if(u.protocol!=='https:'||!['x.com','twitter.com','www.x.com','www.twitter.com'].includes(u.hostname)||
+         u.username||u.password||u.hash||!m||m[2]!==post.statusId||
+         source.origin!==u.origin||source.pathname.replace(/\/$/,'')!==u.pathname.replace(/\/$/,''))return null;
+      return m[1].toLowerCase();
+    }catch{return null;}
+  }
+  function ownedDetailNodes(article,selector){
+    const p=globalThis.ZaneReplyCopilotContent.postExtractor;
+    return [...(article?.querySelectorAll?.(selector)||[])].filter(node=>
+      node.closest('article')===article&&!p.isQuoteContent(node,article)&&
+      !node.closest('[contenteditable="true"],[data-zane-reply-copilot]'));
+  }
+  function detailAuthor(article,initialUrl){
+    const headers=ownedDetailNodes(article,'[data-testid="User-Name"]');
+    if(headers.length!==1)return null;
+    const handles=new Set();
+    for(const node of headers[0].querySelectorAll('a[href]')){
+      if(node.closest('article')!==article||node.closest('[data-testid="User-Name"]')!==headers[0])continue;
+      try{
+        const base=new URL(initialUrl),u=new URL(node.getAttribute('href'),base);
+        const m=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
+        if(u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&!u.search&&m)handles.add(m[1].toLowerCase());
+      }catch{}
+    }
+    return handles.size===1?handles.values().next().value:null;
+  }
+  function detailTimestamp(article){
+    const times=ownedDetailNodes(article,'time[datetime]').filter(n=>!n.closest('[data-testid="tweetText"]'));
+    if(times.length!==1)return null;
+    const raw=times[0].getAttribute('datetime');
+    if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(raw||''))return null;
+    const value=Date.parse(raw);
+    return Number.isFinite(value)?value:null;
+  }
+  function captureDetailPreviewSource(post,initialUrl){
+    const owner=detailRouteOwner(post,initialUrl);
+    if(!owner||!post.article||detailAuthor(post.article,initialUrl)!==owner||
+       !normalized(post.sourceText))return null;
+    return Object.freeze({owner,time:detailTimestamp(post.article)});
+  }
+  function mediaPresentationText(text,post){
+    const s=normalized(text);
+    if(!post.hasCapturedMedia)return s;
+    // Only X's literal image presentation suffix, not arbitrary links,
+    // punctuation, handles, or words. Never visit or transmit the URL.
+    return s.replace(/(?:\s+(?:https:\/\/\s?)?pic\.x\.com\/[A-Za-z0-9]+){1,4}$/,'').trim();
+  }
+  function compactDetailPreview(post,article,editor,dialog,text,initialUrl,currentUrl,quarantinedPosts){
+    const captured=post.detailPreviewSource;
+    const owner=detailRouteOwner(post,initialUrl);
+    if(!captured||!owner||captured.owner!==owner||!post.article?.isConnected||
+       post.hasCapturedQuote||post.quoteOnly||!article?.matches?.('article[data-testid="tweet"]')||
+       !beforeEditor(article,editor,dialog)||!routeAllowed(initialUrl,currentUrl,post.statusId,true))return false;
+    try{
+      const u=new URL(currentUrl);
+      if(u.pathname!=='/compose/post'||u.hash||u.username||u.password)return false;
+    }catch{return false;}
+    // No reply-preview match may bypass a contradictory parent ID, even
+    // when the old legacy contextId helper returned null for a weak link.
+    const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
+    const evidence=extractor.legacyDetailEvidence(article,initialUrl);
+    if(!evidence.eligible||evidence.conflict||
+       (evidence.statusId&&evidence.statusId!==post.statusId)||
+       (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId))return false;
+    if(detailAuthor(article,initialUrl)!==owner||
+       detailAuthor(post.article,initialUrl)!==owner||
+       normalized(extractor.postText(post.article))!==normalized(post.sourceText))return false;
+    const timestamp=detailTimestamp(article);
+    // No fuzzy text or author-only matching. A known conflicting timestamp
+    // is a hard failure. For an omitted permalink require the same exact
+    // native timestamp even for a full media-caption match.
+    if(captured.time===null||timestamp!==captured.time||
+       detailTimestamp(post.article)!==captured.time)return false;
+    if(quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
+       (sameContext(old,text)||old?.detailPreviewSource?.owner===owner&&old.detailPreviewSource.time===timestamp)))return false;
+    const full=mediaPresentationText(post.sourceText,post);
+    let preview=normalized(text);
+    const expand=ownedDetailNodes(article,'[data-testid="tweet-text-show-more-link"]');
+    if(expand.length>1)return false;
+    if(expand.length===1){
+      const label=normalized(expand[0].textContent);
+      // Some X variants put the localized expansion label inside tweetText.
+      // Remove it only if the explicit owned X expansion element is there.
+      const body=expand[0].closest('[data-testid="tweetText"]');
+      if(body&&label&&preview.endsWith(' '+label))preview=preview.slice(0,-label.length).trim();
+    }
+    preview=mediaPresentationText(preview,post);
+    if(full&&preview===full)return true;
+    if(expand.length!==1)return false;
+    preview=preview.replace(/(?:\u2026|\.{3})$/,'').trim();
+    // Only a positively marked truncation of a substantial exact prefix.
+    // No substring or edit-distance match; original full caption remains
+    // the prompt source, not the display-only truncated modal.
+    return Array.from(preview).length>=40&&full.length>preview.length&&full.startsWith(preview);
   }
   function routeAllowed(initial,current,statusId,modern=false) {
     if(!modern&&initial===current)return true;
@@ -372,8 +480,12 @@
         matching.length!==1?null:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
       if(linkless&&modernMatch===true)statusId=routeId;
+      const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&
+        candidates.length===1&&primary?.article&&(!primary.id||primary.id===post.statusId)&&
+        compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts));
       const detailMatch=post.legacyDetailIdentity?
         candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!beforeEditor(c.article,node,dialog)))||matching.length>1?false:
+        compactDetailMatch?true:
         candidates.length!==1||matching.length!==1||!normalized(text)?null:
         sameContext(post,text):null;
       const contextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
@@ -392,6 +504,7 @@
           :candidates.some(item=>Boolean(item.id))?false
           // Preserve the original, unique exact-text fallback only when
           // no conflicting status IDs appear in the opened reply dialog.
+          :compactDetailMatch?true
           :uniqueText&&!uniqueText.id&&exactText.length===1?true
           // Only captioned quote layouts get a hydration grace; unrelated
           // non-quote or media text mismatches stay strict/fail-closed.
