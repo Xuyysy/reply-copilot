@@ -36,3 +36,27 @@ test('background unavailable source is fail-closed, repeated worker creation kee
  await assert.rejects(c.dispatch({type:'XRH_STAGING_ACCOUNT_WORKBENCH',feature:'interaction',action:'sync',authorized:true},page),/source_unavailable/);
  assert.equal(f.created.length,1);
 });
+
+test('schedule interval is owner-scoped preference only; never enables live work',async()=>{
+ const f=fixture();await f.dispatch('interaction','open',f.side);const page=f.page('interaction',11);
+ const read=()=>f.dispatch('interaction','schedule-preferences',page);
+ assert.deepEqual(await read(),{intervalMinutes:60,enabled:false,reason:'source_unverified'});
+ await f.dispatch('interaction','schedule-interval',page,{intervalMinutes:30,enabled:true});
+ assert.deepEqual(await read(),{intervalMinutes:30,enabled:false,reason:'source_unverified'});
+ await assert.rejects(f.dispatch('interaction','schedule-interval',page,{intervalMinutes:1}),/invalid_context/);
+ await assert.rejects(f.dispatch('interaction','schedule-enable',page,{authorized:true}),/invalid_context/);
+ f.change();await assert.rejects(read(),/identity_changed/);await f.dispatch('interaction','open',f.side);
+ assert.equal((await f.dispatch('interaction','schedule-preferences',f.page('interaction',12))).intervalMinutes,60);
+ assert.ok(f.sent.every(t=>t==='XRH_STAGING_WORKBENCH_IDENTITY'));
+});
+
+test('a view requested for the old binding cannot proceed after same-owner rebinding while reading task state',async()=>{
+ const f=fixture();await f.dispatch('interaction','open',f.side);
+ const original=f.c.storage.session.get;let reached,release;
+ const ready=new Promise(r=>reached=r);
+ f.c.storage.session.get=async key=>{if(key==='xrh-interaction-task-111'){reached();await new Promise(r=>release=r);}return original(key);};
+ const view=f.dispatch('interaction','view',f.page('interaction',11));const rejected=assert.rejects(view,/identity_changed/);
+ await ready;
+ const b=f.data['xrh-workbench-interaction'];f.data['xrh-workbench-interaction']={...b,bindingId:'new-binding'};
+ release();await rejected;
+});

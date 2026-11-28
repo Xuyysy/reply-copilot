@@ -16,7 +16,8 @@ OUT = ROOT / "dist/ci"
 SITE = "https://staging.x-reply-helper.top"
 API = "https://api-staging.x-reply-helper.top"
 EXT_ID = "kaaehkpihjenlhjjfjcopkjhegmfmchk"
-PERMISSIONS = {"contextMenus", "storage", "sidePanel", "clipboardWrite"}
+# Explicitly approved Staging-only alarm permission. Reject any other expansion.
+PERMISSIONS = {"contextMenus", "storage", "sidePanel", "clipboardWrite", "alarms"}
 
 
 def sha256(path):

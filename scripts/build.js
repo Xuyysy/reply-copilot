@@ -47,7 +47,8 @@ if (packagedChannel) {
     cpSync(path.join(root,"follow-manager"),path.join(output,"follow-manager"),{recursive:true});
     // Explicit, inspected-tab DevTools QA panel only; no background capture.
     manifest.devtools_page = "follow-manager/v2/devtools.html";
-    // Isolated interaction pilot: no Production/development changes or new permissions.
+    // Staging-only local alarm capability; no additional host permissions.
+    manifest.permissions = [...new Set([...manifest.permissions,"alarms"])];
     manifest.content_scripts[0].js.push("staging/interaction-capture.js","staging/interaction-interface.js");
     const panelPath=path.join(output,"sidepanel","sidepanel.html");
     const panel=readFileSync(panelPath,"utf8");

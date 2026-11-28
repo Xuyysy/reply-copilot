@@ -44,11 +44,14 @@ async function assertSession(tx,session){
   const current=await req(tx.objectStore('session').get('active'));
   if(!current||!validId(session?.ownerUserId)||current.token!==session.token||current.ownerUserId!==session.ownerUserId)throw Error('stale_session');
 }
-export async function commitBatch(db,session,inputs,{source,cursor=null,reason='partial',observedAt=Date.now(),users=[],checkpoint=null,signal=null}={}){
+export async function commitBatch(db,session,inputs,{source,cursor=null,reason='partial',observedAt=Date.now(),users=[],checkpoint=null,signal=null,observedSample=false,recentScan=false}={}){
   if(!Array.isArray(inputs)||inputs.length>1000||!['notification','post','archive','authorized-api'].includes(source)||!['partial','source_exhausted','cancelled','limited','schema_changed'].includes(reason)||!(cursor===null||typeof cursor==='string'&&cursor.length<=2048)||!Number.isSafeInteger(observedAt)||observedAt<=0)throw Error('invalid_batch');
   if(!Array.isArray(users)||users.length>2000)throw Error('invalid_users');
+  const observationOnly=observedSample||recentScan;
+  if(observedSample&&recentScan||observationOnly&&(checkpoint||cursor!==null||reason!=='partial'||!['notification','post'].includes(source)))throw Error('invalid_batch');
   const records=new Map();let rejected=0;
   for(const input of inputs){const event=normalizeEvent(input,session?.ownerUserId);if(!event||event.source!==source){rejected++;continue;}records.set(event.eventId,mergeEvent(records.get(event.eventId),event));}
+  if(observationOnly&&rejected)throw Error('invalid_batch');
   return transaction(db,checkpoint?['session','events','coverage','users','syncJobs']:['session','events','coverage','users'],'readwrite',async tx=>{
     await assertSession(tx,session);
     if(signal?.aborted)throw Error('cancelled');
@@ -65,16 +68,16 @@ export async function commitBatch(db,session,inputs,{source,cursor=null,reason='
     const events=tx.objectStore('events');
     // Cap the live synchronized account transactionally, not only at render time.
     // If the page exceeds the cap, the whole page and checkpoint roll back.
-    const existingCount=checkpoint?await req(events.index('owner').count(IDBKeyRange.only(session.ownerUserId))):0;
+    const existingCount=(checkpoint||observationOnly)?await req(events.index('owner').count(IDBKeyRange.only(session.ownerUserId))):0;
     let inserted=0,sourceNew=0;
-    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old){inserted++;if(checkpoint&&existingCount+inserted>50000)throw Error('workspace_limit');}if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
+    for(const e of records.values()){const old=await req(events.get(e.eventId));if(!old){inserted++;if((checkpoint||observationOnly)&&existingCount+inserted>50000)throw Error('workspace_limit');}if(!old?.sources?.includes(source))sourceNew++;await req(events.put(mergeEvent(old,e)));}
     const participants=new Set([...records.values()].flatMap(e=>[e.actorUserId,e.targetUserId]));
     const userStore=tx.objectStore('users');
     for(const u of users){if(!u||!participants.has(u.userId)||typeof u.handle!=='string'||! /^[A-Za-z0-9_]{1,15}$/.test(u.handle)||!Number.isSafeInteger(u.observedAt)||u.observedAt<=0||u.observedAt>observedAt)continue;const key=[session.ownerUserId,u.userId],old=await req(userStore.get(key));if(!old||old.observedAt<=u.observedAt)await req(userStore.put({ownerUserId:session.ownerUserId,userId:u.userId,handle:u.handle,observedAt:u.observedAt}));}
     // Never label a source exhaustion as complete account history.
     const coverage=tx.objectStore('coverage'),key=[session.ownerUserId,source];
     const old=await req(coverage.get(key));
-    await req(coverage.put({ownerUserId:session.ownerUserId,source,cursor,reason,lastObservedAt:observedAt,uniqueEvents:(old?.uniqueEvents??0)+sourceNew,rejected:(old?.rejected??0)+rejected,historyComplete:false}));
+    await req(coverage.put({ownerUserId:session.ownerUserId,source,cursor:observationOnly?(old?.cursor??null):cursor,reason:observationOnly?(old?.reason??'partial'):reason,...(recentScan||old?.recentPages?{recentPages:(old?.recentPages??0)+(recentScan?1:0)}:{}),...(observedSample||old?.observedSamples?{observedSamples:(old?.observedSamples??0)+(observedSample?1:0)}:{}),lastObservedAt:observedAt,uniqueEvents:(old?.uniqueEvents??0)+sourceNew,rejected:(old?.rejected??0)+rejected,historyComplete:false}));
     if(signal?.aborted)throw Error('cancelled');
     if(job){const quality=Object.fromEntries(QUALITY_KEYS.map(k=>[k,(job.quality?.[k]??0)+(checkpoint.quality?.[k]??0)]));const next={...job,quality,qualityPages:(job.qualityPages??0)+(checkpoint.quality?1:0),revision:job.revision+1,pages:job.pages+1,cursor:checkpoint.nextCursor,done:checkpoint.done,seen:checkpoint.nextCursor===null?job.seen:[...job.seen,checkpoint.nextCursor],updatedAt:observedAt};await req(tx.objectStore('syncJobs').put(next));if(signal?.aborted)throw Error('cancelled');return {inserted,accepted:records.size,rejected,job:next};}
     return {inserted,accepted:records.size,rejected};
@@ -125,11 +128,13 @@ export async function clearOwner(db,session){
 const QUALITY_KEYS=['unsupported','unresolvedActors','foreignTargets','ignored'];
 function validProvider(v){return typeof v==='string'&&/^[a-z0-9-]{1,50}$/.test(v);}
 function validCursor(v){return v===null||typeof v==='string'&&v.length>0&&v.length<=2048;}
-export async function openSyncJob(db,session,{providerId,source,refresh=false}={}){
-  if(!validProvider(providerId)||!['notification','post'].includes(source))throw Error('invalid_job');
+export async function openSyncJob(db,session,{providerId,legacyProviderId,source,refresh=false}={}){
+  if(!validProvider(providerId)||legacyProviderId!==undefined&&(!validProvider(legacyProviderId)||legacyProviderId===providerId)||!['notification','post'].includes(source))throw Error('invalid_job');
   return transaction(db,['session','syncJobs'],'readwrite',async tx=>{
     await assertSession(tx,session);
-    const store=tx.objectStore('syncJobs'),key=[session.ownerUserId,providerId,source],old=await req(store.get(key));
+    const store=tx.objectStore('syncJobs'),key=[session.ownerUserId,providerId,source];let old=await req(store.get(key));
+    // Migrate only the exact combined fingerprint of the current endpoints, never an unknown old cursor.
+    if(!old&&legacyProviderId!==undefined){const legacyKey=[session.ownerUserId,legacyProviderId,source],legacy=await req(store.get(legacyKey));if(legacy){old={...legacy,providerId};await req(store.put(old));await req(store.delete(legacyKey));}}
     if(old&&!refresh)return old;
     // Explicit refresh starts from the head, without deleting previously committed events.
     const job={ownerUserId:session.ownerUserId,providerId,source,revision:(old?.revision??-1)+1,cursor:null,seen:[],pages:0,done:false,qualityPages:0,quality:{unsupported:0,unresolvedActors:0,foreignTargets:0,ignored:0},updatedAt:Date.now()};
@@ -148,7 +153,7 @@ export async function readOwnerDataset(db,session){
     const rows=await req(store.getAll(range));
     const users=await req(tx.objectStore('users').index('owner').getAll(range));
     const ownerRange=IDBKeyRange.bound([owner],[owner,[]]);
-    const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected})=>({source,reason,lastObservedAt,uniqueEvents,rejected,historyComplete:false}));
+    const coverage=(await req(tx.objectStore('coverage').getAll(ownerRange))).map(({source,reason,lastObservedAt,uniqueEvents,rejected,observedSamples,recentPages})=>({source,reason,lastObservedAt,uniqueEvents,rejected,...(Number.isSafeInteger(observedSamples)&&observedSamples>0?{observedSamples}:{}),...(Number.isSafeInteger(recentPages)&&recentPages>0?{recentPages}:{}),historyComplete:false}));
     const jobs=(await req(tx.objectStore('syncJobs').getAll(ownerRange))).map(({providerId,source,pages,done,updatedAt,quality,qualityPages})=>({providerId,source,pages,done,updatedAt,quality,qualityPages}));
     return {ownerUserId:owner,rows,users,coverage,jobs};
   });

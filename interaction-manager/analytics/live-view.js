@@ -1,10 +1,13 @@
-import {primaryEvents,validId} from '../core/events.js';
+import {primaryEvents,validId,mergeEvent} from '../core/events.js';
 import {rankInteractions} from './ranking.js';
 const TYPES=new Set(['all','like','repost','reply','quote','mention']);
 const DAY=86400000;
 function select(data,{type='all',direction='inbound',days=null,now=Date.now(),sort='count',query=''}={}){
  if(!validId(data?.ownerUserId)||!Array.isArray(data.rows)||!TYPES.has(type)||!['inbound','outbound','both'].includes(direction)||!(days===null||Number.isInteger(days)&&days>0&&days<=3650)||!Number.isFinite(now)||!['count','weighted','recent'].includes(sort))throw Error('invalid_view');
- const rows=primaryEvents(data.rows.filter(e=>e.ownerUserId===data.ownerUserId&&e.evidenceQuality==='confirmed')).filter(e=>type==='all'||e.type===type);
+ // Use the same canonical observations for ranking, detail, and date filters.
+ const unique=new Map();
+ for(const e of data.rows)if(e.ownerUserId===data.ownerUserId&&e.evidenceQuality==='confirmed')unique.set(e.eventId,mergeEvent(unique.get(e.eventId),e));
+ const rows=primaryEvents([...unique.values()]).filter(e=>type==='all'||e.type===type);
  return {rows,options:{ownerUserId:data.ownerUserId,direction,days,now,sort},query:String(query).trim().toLowerCase().replace(/^@/,'').slice(0,40)};
 }
 export function analyzeLiveDataset(data,settings={}){

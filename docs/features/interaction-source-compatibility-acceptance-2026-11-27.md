@@ -1,0 +1,87 @@
+# PR #266：互动助手真实数据源兼容性验收记录
+
+日期：2026-11-27（Asia/Shanghai）。审查基准：`eb0d0fc15699b5e09ff6189f87425ccf52bb8c8c`。沿用分支 `codex/account-operations-provider-readiness-20261126`，PR 保持 Draft。
+
+## 结论与证据等级
+
+**真实数据源验收未完成，不能据此批准上线。** 用户明确确认尚未具备获平台授权、已登录的隔离测试环境，本轮改为源码兼容性审查、隔离测试及阻塞记录。
+
+- 真实 X 请求：0；真实账号凭据读取、导出、上传：0；真实响应采集：0。
+- 未打开或修改真实 Chrome Profile，未安装/替换插件，未部署 Staging/Production，未执行远端 D1 SQL。
+- 所有新增响应、账号 ID、CSRF 字符串和通知均为代码生成的合成 fixture，**不是脱敏后的真实接口样本**。Chrome/IndexedDB 回归使用隔离本地环境。
+- 代码可证明拒绝及不兼容时的停止策略；不能证明当前 X 接口可访问、实际响应结构相符、真实分页或五类数据完整。
+- 当前定期同步策略/本地调度存储仍是独立控制面，不是已注册的后台定时抓取；本轮没有重写或接线该状态机。
+
+## 两路实现审查
+
+| 数据源 | 当前实现与验证证据 | 尚未验证的真实条件 |
+| --- | --- | --- |
+| 通知 | 同源只读通知接口；可识别 REST `globalObjects` 或已知 GraphQL viewer timeline；仅投影必要关系；合成测试验证 actor、target、归属和游标 | 账号是否获准访问；当前 REST/GraphQL 路由、参数和字段是否仍有效；真实通知类型和返回上限 |
+| 帖子 | 同源 `SearchTimeline`；owner handle 约束的 Latest 搜索；仅接收已知 timeline 的明确回复、引用和 mention 实体 | 固定 query ID 或当前只读路由元数据是否有效；搜索可见范围、实际返回模块、遗漏与延迟；不能把查询条件当作数值账号归属证明 |
+
+保留原有独立页面、IndexedDB、排行榜及双源引擎。没有新增官方付费 API、页面互动被动采集或数据归档导入。现有路由元数据只用于操作路径/布尔参数，不读取被观察请求的响应或认证头；本次进一步排除了 REST 元数据中的凭据类参数名。
+
+运行时身份仍是页内 numeric `twid` 与唯一可见自主页 handle 的本地交叉校验，不是独立服务端身份认证。通知响应提供 viewer ID 时必须一致；帖子搜索没有 viewer 身份证明，需依赖当前绑定和每条明确目标关系。读取前后与提交前的身份/绑定校验仍保留。现有传输在真正运行时使用浏览器原生会话和页内临时 CSRF；本轮未执行该路径接触真实账号。未来真实测试须确认正常会话只读使用在平台授权范围内，不得索取、上传或另存凭据。
+
+## 五种互动：源码与合成覆盖矩阵
+
+| 类型 | 允许计数的明确证据 | 本轮合成验证 | 真实覆盖 |
+| --- | --- | --- | --- |
+| 点赞 like | 已知 `heart_icon` 通知；明确 actor 和归属当前 owner 的目标帖 | REST/GraphQL 投影到规范化关系通过 | 未测；聚合通知不能保证完整动作历史或精确动作时间 |
+| 转发 repost | 已知 `retweet_icon` 通知及目标帖 owner | REST/GraphQL 通过 | 未测；当前帖子传输不补齐所有无 mention 的纯转发，不能声称两源均完整覆盖 |
+| 回复 reply | 明确回复目标用户 ID 与目标帖 ID | 当前投影→规范化链通过；外部目标不会归入当前账号 | 未测；仅有正文或搜索命中不算证据 |
+| 引用 quote | 嵌入被引用帖的明确 ID 与作者 ID | 当前投影→规范化链通过 | 未测；被删、不可见、未返回的引用目标不能猜测补齐 |
+| 提及 mention | 结构化 `user_mentions` 中的 numeric ID | 明确实体通过；仅正文 `@handle` 不计数；既有主语义合并测试保留 | 未测；回复/引用隐含 mention 不重复累计 |
+
+统计表示本机已观测、可去重的关系，不表示真实发送评论数或全量动作次数。聚合通知的 like/repost 动作时间保持未知，日期筛选排除未知时间是现有业务规则，不能用通知聚合更新时间或本地采集时间代替。`source_exhausted` 仅表示本轮接口明确终止，不证明完整历史。
+
+## 确认的源码缺陷与最小修复
+
+以下均由合成输入在实际投影路径复现，**不是已观测的真实 X 故障**。
+
+1. **未知通知被投影器提前吞掉。** 下游已有 unknown/out-of-scope 分类，但输入在到达分类器前已被过滤，可能把未知/混合通知页误记为空页成功。现在未知 icon 明确报 `schema_changed`；只有 actor 完整且无目标帖的已知 `person_icon` 被最小化转交既有 out-of-scope 分类。非目标通知不计互动；目标帖、actor 或结构不合格时拒绝。既有未知结构拒绝断言保留。
+2. **矛盾 viewer ID 被降级。** `rest_id` 与 `legacy.id_str` 不一致时原先得到 null，绕过了有值时的比较。现在显式身份有冲突/非法值均报 `owner_mismatch`，不继续投影。
+3. **挑战/不兼容后连接未锁止。** 明确 `cf-mitigated: challenge` 现在按 `forbidden` 停止，不读挑战正文、不转发正文、不尝试解决挑战。HTTP 200 的 HTML/登录页或未知 JSON 按 `schema_changed` 停止；该连接不再允许后续页请求。未出现明确挑战证据的异常只称结构不兼容，不能宣称平台已封禁或已触发认证挑战。
+4. **REST 路由元数据参数过滤不一致。** 原 `include_*` 规则可带入名字含 auth/token/cookie/session 等字段。现在显式剔除凭据类名字，保留正常只读参数；测试只使用虚构值。
+
+新增用例先在旧实现失败，再由对应修复通过。没有放宽必需字段、账号归属、游标、支付或权限校验；没有修改数据库或调度状态机。
+
+## 分页、限流与停止条件
+
+沿用严格 terminal/cursor 证明、重复游标检测、路由指纹检查点及源间预算，不根据“本页无互动”推断已结束。合成回归验证正常 cursor 传递、互斥终止、歧义 cursor、账号变化、401/403/429、HTTP 200 挑战和未知结构。保留每连接最多 30 页/90 秒、双源预算、每请求 12 秒、最少 1.8 秒间隔和 tab 内 cooldown；这些是代码上限，不是平台认可的请求配额，也不是实测平台限流窗口。
+
+拒绝、挑战或不兼容时：停止当前连接及本轮同步，保留先前已经提交的数据/检查点，不提交当前失败页，不继续尝试其他来源绕过拒绝，不自动换路由/账号/代理。真实出现故障时仅记录 source、HTTP 状态或有界错误码、页数、终止原因和匿名计数；不提交请求头、Cookie、Token、完整 URL、游标、正文、HAR 或账号敏感信息。
+
+## 后续真实验收门禁（尚未执行）
+
+1. 准备平台授权覆盖两路只读接口及允许频率的专用隔离 Profile，由用户本人登录；无需向 Codex 提供凭据。插件安装和环境操作使用明确批准的流程，本轮不执行。
+2. 使用本次单一候选制品，核对安装来源与真实扩展 ID，绑定正确 X 标签页；先查本地状态，不开始自动循环抓取。
+3. 只执行一次小规模、有界读取。分别记录两路的实际访问结果及字段/模块是否与现有解析器匹配。任一路拒绝、挑战或不兼容立即停止，记录阻塞后再审查，不能继续换接口试探。
+4. 只有自然返回 next cursor 时才验证后续页。实际账号没有多页或某类互动时，标为未覆盖，不构造真实互动、不自动发帖补样本。不得故意耗尽配额制造 429；正常返回的限流头只能证明当次观察，未触发的限流行为仍属模拟验证。
+5. 对五类自然样本逐一核对明确的 actor/target 与账号隔离；不导出原始响应。账号切换、停止、MV3 重启、重复刷新分别检查本地记录与检查点是否安全；不要把有界恢复称为浏览器重启后的自动定时同步。
+6. 填写验收结论为通过/部分覆盖/阻塞，并列出未测项目；有阻塞时 PR 继续 Draft，不部署 Production。
+
+## 本轮验证结果
+
+结果以完成后的 PR 评论及 exact-SHA Push/PR CI 为准。本报告不把旧 SHA 的测试结果转记为本次通过，不使用模拟结果填写“真实覆盖”列。完整日志保存在本轮隔离工作目录并由标准 CI 上传测试日志制品；不额外触发托管财务、线上接口或部署工作流。
+
+本轮本地验证：完整 `npm test` 为 1416/1416，通过 1416、失败/跳过/取消均 0，退出码 0；针对性兼容/传输回归 22/22；API 与 Web TypeScript 退出码均 0；`git diff --check` 通过。独立只读复审未发现本增量的 P0/P1/P2 阻断。以上全为源码及隔离合成测试，真实覆盖仍未测。
+
+## 2026-11-27 用户实机反馈与诊断补充
+用户截图显示通知源 `schema_changed`，已提交 0 页 / 新增 0 条，帖子源未执行。不能据此确认具体 HTTP 状态、返回字段或是否受到访问限制。未采集真实响应。新增通用同步阶段、有限错误码及已知 HTTP 状态的本地诊断投影；未知状态显示 unknown，且不会保存响应正文、请求头、地址、游标或账号凭据。现有传输、停止条件及授权门禁不变；不自动重试，不启用备用来源。该增量用于可审计故障报告，不声称修复真实接口。
+
+## 2026-11-27 开源源码逐项复核与独立解析增量
+
+检查了以下 **固定 Git commit** 的具体文件，而不是用仓库名称推断能力：
+
+- [X-Insights 通知解析](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/notifications.ts)：已知 GraphQL `TimelineNotification` 与旧版 REST `globalObjects`、显式 actor/target。其英文文本推断和采集时间回填不适合本文的保守互动计数。
+- [X-Insights 帖子解析](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/tweet.ts)：`TweetWithVisibilityResults` 包装、缺字段与引用；只复用高层兼容性测试模式。
+- [Xplore 正规化测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/normalizer.test.ts) 与 [X API 测试](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/x-client.test.ts)：`timeline` / `timeline_v2` 变体、模块、底部游标、错误停止和测试隔离；未复制会话请求、签名或凭据处理逻辑。
+
+新增纯函数 `inspectNotificationTimelineEnvelope` 与离线通知 adapter 连接：明确读取经提供的 `viewer_v2/viewer → notification_timeline/timeline/timeline_v2 → instructions`，拒绝矛盾 owner、含糊游标、无终止证据、异常长度，接受已知条目/模块/替换节点，仍要求显式 actor、目标帖 owner，未知互动时间保持 null，未知图标不会推断为已确认互动。测试只使用合成 JSON。**此项是独立数据解析能力，不修改 `staging/interaction-interface.js` 的浏览器认证请求或其投影函数。** 现有页内投影仍可能在送达本 adapter 之前报 `schema_changed`；此次提交不能宣称实机源恢复，亦不解除自动同步门禁。所有代码自行实现，无复制第三方源文件。
+
+## 2026-11-27 Staging GraphQL 浏览器投影补齐
+
+继续审查固定版本 [X-Insights](https://github.com/arslandevs/X-Insights/blob/bc56bd0d9ad71cb8e1f9de35dfbf9cfcfb5eb595/src/parse/notifications.ts)、[Xplore](https://github.com/devploit/Xplore/blob/2e1d175bca3acbdb853f0d34a88aacbe6fb57179/tests/unit/normalizer.test.ts)、[fa0311 GraphQL 通知类型](https://github.com/fa0311/twitter-openapi-typescript/blob/de8bfafc68326b18454688311c32e34c524636ef/twitter-openapi-typescript-generated/src/models/NotificationsResult.ts) 与 [xsh REST 代码](https://github.com/benoitpetit/xsh/blob/5bdd43e61f1be5fb0979953da72625ccea767efd/core/api_notifications.go)。仅借鉴公开结构和测试思路，自行编写兼容逻辑，不复制源代码或修改授权会话请求。
+
+本次仅在 Staging 纯浏览器投影支持既有 GraphQL 通知的 `notification_timeline`、旧版 `timeline`/`timeline_v2`、模块条目及替换条目；所有通知仍通过明确 actor/target 校验。未知图标、身份冲突、无 terminal 证明、歧义游标、非法数组均继续拒绝；未改 HTTP 请求、认证、端点、节流或自动同步。离线测试不代表 X 实际接口可用、动作数据完整或实机 `schema_changed` 已解决。此 PR 保持 Draft，后续必须在平台授权环境经实测验收。

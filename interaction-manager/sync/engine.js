@@ -6,6 +6,7 @@ import {parsePostEvidence} from '../adapters/post-evidence.js';
 import {decodeWebPostRecords} from '../adapters/web-post-records.js';
 import {beginSession,endSession,openSyncJob,commitBatch,readEventPage,readCoverage,readUsers} from '../storage/repository.js';
 import {rankInteractions} from '../analytics/ranking.js';
+import {safeSyncDiagnostic} from './diagnostic.js';
 const STATUS=new Map([[401,'unauthenticated'],[403,'forbidden'],[429,'rate_limited']]);
 const validCursor=v=>v===null||typeof v==='string'&&v.length>0&&v.length<=2048;
 const fail=code=>{throw Error(code);};
@@ -31,6 +32,11 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   if(typeof page.done!=='boolean'||!validCursor(page.nextCursor)||page.done!==(page.nextCursor===null)||!page.done&&page.nextCursor===cursor)fail('invalid_pagination');
   // Provider is responsible for proving a known timeline shape and explicit terminal evidence.
   if(page.structureVerified!==true||page.done&&page.terminalEvidence!=='explicit')fail('schema_changed');
+  return {...normalizeObservations(page,{ownerUserId,source,observedAt}),nextCursor:page.nextCursor,done:page.done};
+}
+// One explicitly observed browser response is evidence, not a sync checkpoint.
+export function normalizeObservations(page,{ownerUserId,source,observedAt=Date.now()}){
+  if(!validId(ownerUserId)||!['notification','post'].includes(source)||page?.structureVerified!==true)fail('schema_changed');
   // The provider may supply an explicit bounded array of structured posts.
   // Never traverse arbitrary response trees or assume a referenced post is an event.
   const decoded=page.webPosts===undefined?null:decodeWebPostRecords(page.webPosts,{observedAt});
@@ -44,36 +50,50 @@ export function normalizePage(page,{ownerUserId,source,cursor,observedAt=Date.no
   }
   parsed.users=[...(parsed.users??[]),...(decoded?.users??[]),...(Array.isArray(page.users)?page.users:[]).map(u=>({...u,observedAt}))];
   if(parsed.stats?.truncated||parsed.events.length>1000)fail('page_limit');
-  if(source==='notification'&&parsed.stats.rows>0&&parsed.stats.unsupported===parsed.stats.rows)fail('schema_changed');
+  if(source==='notification'&&parsed.stats.unsupported>0&&parsed.stats.unsupported+parsed.stats.outOfScope===parsed.stats.rows)fail('schema_changed');
   const count=v=>Number.isSafeInteger(v)&&v>=0&&v<=100000?v:0;
-  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored))};
-  return {...parsed,quality,nextCursor:page.nextCursor,done:page.done,observedAt};
+  const quality={unsupported:count(parsed.stats?.unsupported),unresolvedActors:count(parsed.stats?.unresolvedActors),foreignTargets:count(parsed.stats?.foreignTargets),ignored:Math.min(100000,count(page.ignored)+count(decoded?.ignored)+count(parsed.stats?.outOfScope))};
+  return {...parsed,quality,observedAt};
 }
-export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
-  if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||!Number.isInteger(maxPages)||maxPages<1||maxPages>100||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
-  const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0;
+export async function syncInteractions(db,provider,{ownerUserId,source='notification',refresh=false,recentOnly=false,maxPages=30,maxMs=90000,signal,onProgress=()=>{}}={}){
+  if(!validId(ownerUserId)||!['notification','post'].includes(source)||!provider||typeof provider.identify!=='function'||typeof provider.readPage!=='function'||typeof recentOnly!=='boolean'||!Number.isInteger(maxPages)||maxPages<1||maxPages>(recentOnly?3:100)||!Number.isInteger(maxMs)||maxMs<1||maxMs>120000)fail('invalid_sync');
+  const deadline=Date.now()+maxMs;let session=null,job=null,inserted=0,committed=0,stage='identity',httpStatus=null;
+  const counts={accepted:0,existing:0,emptyPages:0,unsupported:0,unresolvedActors:0,foreignTargets:0,ignored:0};
   try{
     const sessionId=identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId);
     check(signal,deadline);
+    stage='checkpoint';
     session=await beginSession(db,ownerUserId);
-    job=await openSyncJob(db,session,{providerId:provider.id,source,refresh});
+    job=recentOnly?{cursor:null,seen:[],done:false}:await openSyncJob(db,session,{providerId:provider.id,legacyProviderId:provider.legacyProviderId,source,refresh});
     while(!job.done&&committed<maxPages){
+      stage='identity';httpStatus=null;
       check(signal,deadline);
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
+      stage='read';
       const page=await bounded(()=>provider.readPage({ownerUserId,source,cursor:job.cursor,signal}),signal,deadline);
+      stage='validate';httpStatus=page?.status;
       const parsed=normalizePage(page,{ownerUserId,source,cursor:job.cursor});
       if(parsed.nextCursor!==null&&job.seen.includes(parsed.nextCursor))fail('cursor_cycle');
+      stage='identity';
       identity(await bounded(()=>provider.identify({signal}),signal,deadline),ownerUserId,sessionId);
       check(signal,deadline);
-      const result=await commitBatch(db,session,parsed.events,{source,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',observedAt:parsed.observedAt,users:parsed.users??[],signal,checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
-      job=result.job;inserted+=result.inserted;committed++;
-      try{onProgress({pages:committed,inserted,done:job.done,stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
+      stage='commit';
+      const common={source,observedAt:parsed.observedAt,users:parsed.users??[],signal};
+      const result=await commitBatch(db,session,parsed.events,recentOnly?{...common,recentScan:true}:{...common,cursor:parsed.nextCursor,reason:parsed.done?'source_exhausted':'partial',checkpoint:{providerId:provider.id,revision:job.revision,nextCursor:parsed.nextCursor,done:parsed.done,quality:parsed.quality}});
+      job=recentOnly?{cursor:parsed.nextCursor,done:parsed.done,seen:parsed.nextCursor===null?job.seen:[...job.seen,parsed.nextCursor]}:result.job;inserted+=result.inserted;committed++;
+      // Counts describe committed observations, not unique historical coverage. A
+      // previously stored interaction may recur in another response or source.
+      counts.accepted+=result.accepted;counts.existing+=result.accepted-result.inserted;
+      if(result.accepted===0)counts.emptyPages++;
+      for(const key of ['unsupported','unresolvedActors','foreignTargets','ignored'])counts[key]+=parsed.quality[key];
+      try{onProgress({pages:committed,inserted,done:job.done,counts:{...counts},stats:parsed.stats??{rejected:parsed.rejected}});}catch{}
     }
-    return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,historyComplete:false};
+    return {reason:job.done?'source_exhausted':'page_limit',committed,inserted,counts:{...counts},historyComplete:false};
   }catch(e){
     // Return only known status codes, not provider error bodies, cursors or credentials.
     const known=new Set(['cancelled','time_limit','identity_changed','unauthenticated','forbidden','rate_limited','source_error','response_mismatch','invalid_pagination','schema_changed','page_limit','cursor_cycle','stale_session','stale_checkpoint','history_limit','invalid_job','invalid_checkpoint','open_notifications','owner_unverified','endpoint_not_observed','owner_mismatch','session_limit','invalid_cursor','ambiguous_cursor','terminal_unverified','workspace_limit']);
-    return {reason:known.has(e?.message)?e.message:'sync_failed',committed,inserted,historyComplete:false};
+    const reason=known.has(e?.message)?e.message:'sync_failed';
+    return {reason,committed,inserted,counts:{...counts},historyComplete:false,diagnostic:safeSyncDiagnostic(stage,e?.message,e?.sourceDiagnostic?.httpStatus??httpStatus,e?.sourceDiagnostic)};
   }finally{if(session)await endSession(db,session).catch(()=>{});}
 }
 // Separate read session; callers must authenticate the currently selected owner first.

@@ -62,6 +62,9 @@ export function selectUsers(snapshot,options={},protectedIds=new Set()){
  const knownRange=(n,min,max)=>((min===null||min===undefined)&&(max===null||max===undefined))||(Number.isSafeInteger(n)&&(min==null||n>=min)&&(max==null||n<=max));
  const filtered=[...unique.values()].filter(u=>{
   const r=map[u.userId];if(!r)return false;
+  // Positive membership is meaningful even for an unfinished snapshot.
+  if(options.kind==="followers"&&r.follower!==true)return false;
+  if(options.kind==="following"&&r.following!==true)return false;
   if(options.kind==="mutual"&&!(r.follower===true&&r.following===true))return false;
   if(options.kind==="notFollowingBack"&&!(r.following===true&&r.follower===false))return false;
   if(options.kind==="iHaveNotFollowedBack"&&!(r.follower===true&&r.following===false))return false;
