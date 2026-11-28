@@ -3,9 +3,9 @@
 import os, json, urllib.request, urllib.error, pathlib, hashlib, uuid, time, sys, base64
 ACCOUNT='cb5fc919a9f05dcf39b3ca29c9538a1f'
 SCRIPT='reply-copilot-api-staging'
-OLD='2c154f68-0555-4bdd-bcfa-53620a060e77'
-OLD_DEP='9fe5b989-f42e-41b9-ae6a-63b87e088463'
-SOURCE='8dcc42b4f60588719090d9f0ac2ebde7770476cf'
+OLD='b90982d3-1642-4e69-a811-d3bbf8e14c3a'
+OLD_DEP='e90cb372-e0e0-448f-8b6f-6fb75e661fd3'
+SOURCE='15765c7cc62bff992745879c2f48410a5bccf3ed'
 DB='cd44bb44-b525-42c4-b286-2cc84dae7fdb'
 mode=os.environ.get('RELEASE_MODE')
 confirmation=os.environ.get('RELEASE_CONFIRMATION')
@@ -90,7 +90,7 @@ assert oldbind==before['bindings'],'ACTIVE_SETTINGS_VERSION_MISMATCH'
 assert oldbind.get(key_name)=={'type':'secret_text'},'MISSING_PAYOUT_KEY'
 assert len(oldbind)==63,'UNEXPECTED_BINDING_COUNT'
 assert oldbind.get('BOLTUTIL_SCHEMA_READY')=={'type':'plain_text','text':'1'},'BOLT_SCHEMA_NOT_READY'
-assert old['script']['etag']=='0b31cf12507c6ac20ff4dd3e51acb81dc3c2bbd7862a5a3946911cd4ceaefd62','OLD_CODE_DRIFT'
+assert old['script']['etag']=='5d6c141900aac2fc4d7ecff947f30617ac283e06ae013eac8f39aebc6f668f3f','OLD_CODE_DRIFT'
 expected_bindings=oldbind
 expected_settings={**before,'bindings':expected_bindings}
 assert oldbind['DB']=={'type':'d1','id':DB}
