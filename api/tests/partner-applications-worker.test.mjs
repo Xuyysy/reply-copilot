@@ -5,7 +5,7 @@ import {randomUUID,createHash,createHmac} from 'node:crypto';
 import {fixture,worker} from './helpers/payment-v2.mjs';
 test('partner applications: X handle required, private queue, reauth, stale review and atomic approval',async t=>{
  const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
- for(const file of ['partners_v1a_policy_proposal.sql','partner_applications_proposal.sql','partner_x_accounts_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+file,import.meta.url),'utf8'));
+ for(const file of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partner_applications_proposal.sql','partner_x_accounts_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+file,import.meta.url),'utf8'));
  const old=globalThis.fetch;globalThis.fetch=async()=>{throw Error('external forbidden')};t.after(()=>{globalThis.fetch=old});
  Object.assign(f.env,{ADMIN_PORTAL_ENABLED:'1',PAYMENTS_ENABLED:'0',XIAODOU_WEBHOOKS_ENABLED:'0'});
  const tokens={};

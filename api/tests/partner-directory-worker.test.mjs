@@ -27,4 +27,21 @@ test('partner directory persists authorization, referral privacy, and minimum ra
  assert.equal((await call('other',list)).status,403);assert.equal((await call('partner',invites)).status,403);
  const own=await call('partner',mine);assert.equal(own.status,200);assert.equal(own.body.invites.length,1);assert.equal(own.body.invites[0].label,'b***');assert.ok(!JSON.stringify(own.body.invites).includes('buyer@example.test'));
  assert.deepEqual((await call('other',mine+'?userId=partner')).body.invites,[]);
+ // Existing authorized partner has no application record; schema remains gated.
+ assert.equal(r.body.xAccountsEnabled,undefined);
+ for(const n of ['partner_applications_proposal.sql','partner_x_accounts_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+n,import.meta.url),'utf8'));
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_x_accounts_enabled'");
+ assert.equal((await call('owner',list)).body.items[0].x_handle,null);
+ const binding='/v1/admin/partners/x-account',edit={userId:'partner',xHandle:'@Legacy_X',expectedVersion:0,operationId:randomUUID(),reason:'legacy identity verified'};
+ db.exec("DELETE FROM admin_reauth_sessions WHERE session_id='s-owner'");
+ assert.equal((await call('owner',binding,edit)).status,403);
+ db.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('s-owner',?)").run(Date.now()+60000);
+ assert.equal((await call('owner',binding,edit)).status,200);
+ assert.equal((await call('owner',list)).body.items[0].x_handle,'legacy_x');
+ assert.equal((await call('owner',binding,{...edit,xHandle:'renamed',expectedVersion:1,operationId:randomUUID()})).status,200);
+ const result=(await call('owner',list)).body.items[0];assert.equal(result.x_handle,'renamed');assert.equal(result.x_handle_version,2);assert.equal(result.rate_bps,1500);assert.equal(result.registered,1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_policy_versions').get().n,1);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_applications').get().n,0);
+ assert.equal(db.prepare('SELECT COUNT(*) n FROM partner_x_account_versions').get().n,2);
+ assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
 });
