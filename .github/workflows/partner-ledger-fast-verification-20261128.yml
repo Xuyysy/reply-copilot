@@ -1,0 +1,22 @@
+name: Partner ledger focused local verification
+on:
+  push:
+    branches: ['chatgpt/partner-ledger-fast-verification-20261128']
+permissions:
+  contents: read
+jobs:
+  local:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+      - run: npm --prefix api ci
+      - run: npm --prefix api run typecheck
+      - run: node --test --test-concurrency=1 api/tests/partner-manual-calculation.test.mjs api/tests/partner-manual-requests-worker.test.mjs api/tests/partner-payout-worker.test.mjs api/tests/partner-commission-ledger.test.mjs api/tests/boltutil-integration.test.mjs api/tests/partner-commission-ledger-workerd.test.mjs
