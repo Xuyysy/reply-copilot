@@ -12,10 +12,10 @@ from unittest.mock import patch
 from types import SimpleNamespace
 
 SCRIPT=pathlib.Path(__file__).resolve().parents[1]/'scripts/guarded-partner-ledger-staging-20261128.py'
-OLD='ab576a6a-ba95-44a4-8bf5-327d65b84599'
-OLD_DEP='ac1e3558-9f81-44d8-840c-bd6268c4f3ff'
+OLD='9999956a-cc4b-4a02-83de-5bf4ced23c04'
+OLD_DEP='5e982cb8-4d2b-48c7-9161-a68c6b7e065b'
 NEW='00000000-0000-4000-8000-000000000001'
-SOURCE='6500656525347e4a0b72777df5bbc9b5db6aa232'
+SOURCE='41e24315d061123f9eecc1c1a1c509e39ee55d79'
 PREFIX='https://api.cloudflare.com/client/v4/accounts/cb5fc919a9f05dcf39b3ca29c9538a1f/workers/scripts/reply-copilot-api-staging'
 BINDINGS=[
  {'name':'DB','type':'d1','id':'cd44bb44-b525-42c4-b286-2cc84dae7fdb'},
@@ -42,7 +42,7 @@ class Fake:
             elif path=='/settings':result={'bindings':NEW_BINDINGS if self.active==NEW else BINDINGS,'compatibility_date':'2026-10-14','compatibility_flags':[]}
             elif path=='/schedules':result={'schedules':[{'cron':'0 3 * * *'}]}
             elif path in ('/versions/'+OLD,'/versions/'+NEW):
-                result={'resources':{'bindings':(BINDINGS[:-1] if self.bad_upload else NEW_BINDINGS) if path.endswith(NEW) else BINDINGS,'script_runtime':{'usage_model':'standard'},'script':{'handlers':['fetch','scheduled'],'etag':'93b9a153182aa945f6da486687cfaa83fcee060fd7a53daa99874a2480a4ccfd'}}}
+                result={'resources':{'bindings':(BINDINGS[:-1] if self.bad_upload else NEW_BINDINGS) if path.endswith(NEW) else BINDINGS,'script_runtime':{'usage_model':'standard'},'script':{'handlers':['fetch','scheduled'],'etag':'b53bdf18e992601518548e0b5e931b57491e6e67c895a9abe39b065eab42c452'}}}
             else:raise AssertionError('unexpected GET '+path)
         elif method=='POST' and path=='/versions':
             assert self.active==OLD and self.latest==OLD
