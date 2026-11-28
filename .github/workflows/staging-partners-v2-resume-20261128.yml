@@ -1,0 +1,53 @@
+name: Activate already uploaded partner V2 Staging Worker
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        type: choice
+        options: [check, deploy]
+        default: check
+        required: true
+      confirmation:
+        description: CHECK_ONLY or ACTIVATE_UPLOADED_PARTNERS_V2_STAGING_WORKER
+        type: string
+        required: true
+      schema_readiness:
+        type: boolean
+        default: false
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: xrh-staging-worker-release
+  cancel-in-progress: false
+jobs:
+  resume:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'Xuyysy/reply-copilot' && github.actor == 'Xuyysy'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment:
+      name: staging
+      url: https://api-staging.x-reply-helper.top
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Confirm exact prior approved build and isolated acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46011865502 | jq -e '.head_sha=="58ab69a5d907003d006401290b391f9fd3c52da2" and .event=="push" and .conclusion=="success"'
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46012157835 | jq -e '.head_sha=="a36f3ed13762de295e534a2163020c44e92416d7" and .conclusion=="success"'
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46095169362 | jq -e '.head_sha=="37ae1156a33b3b7a0f413bde488db8f6226da0bd" and .event=="workflow_dispatch" and .conclusion=="failure"'
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46095169362/jobs | jq -e 'any(.jobs[];.name=="build" and .conclusion=="success") and any(.jobs[];.id==140824853255 and .name=="release" and .conclusion=="failure")'
+          test "$(gh api repos/Xuyysy/reply-copilot/git/ref/heads/chatgpt/partner-acceptance-feedback-20261127 --jq .object.sha)" = "58ab69a5d907003d006401290b391f9fd3c52da2"
+      - name: Validate or activate pinned already uploaded Staging version
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+          SCHEMA_READINESS: ${{ inputs.schema_readiness }}
+        run: python3 scripts/guarded-partner-v2-staging-resume-20261128.py

@@ -1,0 +1,22 @@
+name: Partner V2 resume activation offline tests
+on:
+  push:
+    branches: ['chatgpt/partner-v2-resume-staging-20261128']
+  pull_request:
+    paths:
+      - 'scripts/guarded-partner-v2-staging-resume-20261128.py'
+      - 'tests/test_partner_v2_staging_resume.py'
+      - '.github/workflows/staging-partners-v2-resume-20261128.yml'
+      - '.github/workflows/staging-partners-v2-resume-offline.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 -m py_compile scripts/guarded-partner-v2-staging-resume-20261128.py
+      - run: python3 -m unittest discover -s tests -p 'test_partner_v2_staging_resume.py' -v
