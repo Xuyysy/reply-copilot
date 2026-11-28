@@ -15,18 +15,20 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  import {adminOperationPayload} from './src/lib/admin-operation-payload';
  const root=createRoot(document.getElementById('root'));
  const policy={version:1,status:'active',level:'standard',rate_bps:2000,term_months:null,effective_at:1700000000000,reason:'synthetic policy'};
- window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false,dirty:false};
+ window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false,dirty:false,appEnabled:false,application:null};
  const f=window.fixture,member='/v1/partners/manual-report',admin='/v1/admin/partners/manual-report',policyPath='/v1/admin/partners/policy';
  const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');if(!init.method||init.method==='GET')f.reads.push(u.pathname);
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
-  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout});
+  if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout,applicationsEnabled:f.appEnabled});
   if(u.pathname==='/v1/partners/payout')return Response.json({enabled:true,version:0,locked:false,profile:null});
   if(u.pathname==='/v1/referrals/me')return Response.json({enabled:true,canInvite:true,link:f.link??null,registered:3,rewarded:1,pending:2,earnedCredits:50,bonus:50,invites:[{registeredAt:1700000000000,status:'rewarded',label:'y***'},{registeredAt:1700000000001,status:'pending',label:'z***'}]});
   if(init.method==='POST'){
    if(init.headers['X-CSRF-Token']!=='fixture-csrf')throw Error('Missing CSRF');
    const b=JSON.parse(init.body);f.posts.push({path:u.pathname,body:b});
+   if(u.pathname==='/v1/partners/application'){if(!/^@?[a-zA-Z0-9_]{1,15}$/.test(b.xHandle)||f.application?.status==='pending')throw Error('Invalid application');f.application={id:'fixture-application',user_id:'ordinary',email:'ordinary@example.test',x_handle:b.xHandle.replace(/^@/,'').toLowerCase(),status:'pending',created_at:1700000000000};return Response.json({enabled:true,canApply:true,application:f.application});}
+   if(u.pathname==='/v1/admin/partners/applications'){if(b.applicationId!==f.application?.id||b.action!=='approved'||b.userId!=='ordinary'||b.rateBps!==1500||b.termMonths!==12||b.reason.length<8||!b.operationId)throw Error('Invalid approval');f.application.status='approved';return Response.json({ok:true});}
    if(u.pathname===member){
     if(f.hold)await new Promise(resolve=>window.releaseRequest=resolve);
     if(b.expectedAmountFen!==report().requestableFen||f.pending)return Response.json({code:'PARTNER_REQUEST_CONFLICT',message:'conflict'},{status:409});
@@ -46,7 +48,10 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
   }
   if(u.pathname===member)return Response.json(f.enabled?report():{enabled:false});
   if(u.pathname===admin)return Response.json(u.searchParams.has('requestId')?{ledgerEnabled:true,settlementReady:!f.dirty}:u.searchParams.has('userId')?report():{enabled:true,queue:f.pending?[{...f.pending,recipient_available:1}]:[],ledgerEnabled:f.payout,payoutProfileEnabled:f.payout});
-  if(u.pathname===policyPath)return Response.json({enabled:true,user:{id:'partner',email:'partner@example.test',eligible:true},history:[policy]});
+  if(u.pathname==='/v1/partners/application')return Response.json({enabled:f.appEnabled,canApply:true,application:f.application});
+  if(u.pathname==='/v1/admin/partners/applications')return Response.json({enabled:f.appEnabled,items:f.application?.status===u.searchParams.get('status')?[f.application]:[]});
+  if(u.pathname==='/v1/admin/partners/list')return Response.json({enabled:true,items:[]});
+  if(u.pathname===policyPath){const id=u.searchParams.get('q')||'partner';return Response.json({enabled:true,user:{id,email:id+'@example.test',eligible:true},history:id==='ordinary'&&f.application?.status!=='approved'?[]:[policy]});}
   throw Error('Unexpected API '+u.pathname);
  };
  window.showMember=(owner='partner',language='zh')=>{f.owner=owner;root.render(<Membership key={owner} owner={owner} language={language}/>);};
@@ -95,5 +100,12 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await press('验证身份并查看本次收款资料');await until(has('synthetic@example.test'));
  assert.deepEqual(await evaluate('fixture.posts.slice(-3).map(x=>[x.path,Object.keys(x.body).sort().join(",")])'),[['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId'],['/v1/admin/partners/manual-report','operationId,sync,userId'],['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId']]);
  assert.equal(await evaluate(disabled('标记已结算')),true);
+ await evaluate('fixture.appEnabled=true;showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');
+ await press('申请成为推广合伙人');await until(disabled('提交申请'));const x='document.querySelector("[aria-label=\\\"X 账号\\\"]")';
+ await evaluate(x+'.focus()');await call('Input.insertText',{text:'@My_X'});await until('!'+disabled('提交申请'));await press('提交申请');await until(has('申请待审核'));assert.equal(await evaluate('fixture.application.x_handle'),'my_x');
+ await evaluate('showAdmin()');await press('查看合伙人申请');await until(has('@my_x'));assert.equal(await evaluate('document.querySelector("[data-testid=partner-applications-queue] a").href'),'https://x.com/my_x');await press('审核并设置规则');await until(has('正在审核申请'));
+ const term='[...document.querySelectorAll("label")].find(e=>e.textContent.includes("约定合作期限（月）")).querySelector("input")';await evaluate('('+term+').focus()');await call('Input.insertText',{text:'12'});
+ const reason='[...document.querySelectorAll("label")].find(e=>e.textContent.includes("操作原因（至少 8 字）")).querySelector("input")';await evaluate('('+reason+').focus()');await call('Input.insertText',{text:'synthetic application approval'});
+ await until('!'+disabled('批准申请并授权'));await press('批准申请并授权');await until('fixture.application.status==="approved"');await until(has('暂无申请'));
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });
