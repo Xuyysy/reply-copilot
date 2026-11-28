@@ -15,7 +15,7 @@ SCRIPT=pathlib.Path(__file__).resolve().parents[1]/'scripts/guarded-partner-appl
 OLD='b90982d3-1642-4e69-a811-d3bbf8e14c3a'
 OLD_DEP='e90cb372-e0e0-448f-8b6f-6fb75e661fd3'
 NEW='00000000-0000-4000-8000-000000000001'
-SOURCE='24f8045c5ba689d945edebda9b31b28bf1676723'
+SOURCE='15765c7cc62bff992745879c2f48410a5bccf3ed'
 PREFIX='https://api.cloudflare.com/client/v4/accounts/cb5fc919a9f05dcf39b3ca29c9538a1f/workers/scripts/reply-copilot-api-staging'
 BINDINGS=[
  {'name':'DB','type':'d1','id':'cd44bb44-b525-42c4-b286-2cc84dae7fdb'},
