@@ -201,7 +201,7 @@
     }catch{return null;}
   }
   function legacyDetailEvidence(article,referenceUrl) {
-    const none={statusId:null,conflict:false};
+    const none={statusId:null,conflict:false,eligible:false};
     if(!article?.matches?.('article[data-testid="tweet"]')||
        article.parentElement?.closest?.('article,[data-slot="embedded-tweet-frame"]'))return none;
     const owned=node=>{
@@ -243,7 +243,32 @@
     }
     if(conflict||ids.size>1||otherCanonical.size>1||
        (ids.size===1&&[...otherCanonical].some(id=>!ids.has(id))))return {statusId:null,conflict:true};
-    return {statusId:ids.size===1?ids.values().next().value:null,conflict:false};
+    return {statusId:ids.size===1?ids.values().next().value:null,conflict:false,
+      eligible:true,otherCanonicalId:otherCanonical.size===1?otherCanonical.values().next().value:null};
+  }
+  // In the old X conversation, the focal tweet uses tabindex=-1, unlike
+  // surrounding replies. That marker alone is NOT enough: require the
+  // primary column, unique outer focal cell, owned native reply control
+  // and a separate detail composer. The modal must later corroborate ID
+  // and original text independently before any AI request is made.
+  function legacyFocalShape(article) {
+    if(!article?.matches?.('article[data-testid="tweet"][tabindex="-1"]')||
+       article.closest('[role="dialog"]'))return false;
+    const column=article.closest('[data-testid="primaryColumn"]');
+    const cell=article.closest('[data-testid="cellInnerDiv"]');
+    if(!column||!cell||!column.contains(cell))return false;
+    const top=node=>!node.parentElement?.closest('article,[data-slot="embedded-tweet-frame"]')&&!node.closest('[role="dialog"]');
+    const focal=[...column.querySelectorAll('article[data-testid="tweet"][tabindex="-1"]')].filter(top);
+    if(focal.length!==1||focal[0]!==article)return false;
+    const replies=[...article.querySelectorAll('button[data-testid="reply"],[role="button"][data-testid="reply"]')].filter(node=>
+      node.closest('article')===article&&!isQuoteContent(node,article)&&
+      !node.closest('[data-testid="tweetText"]')&&node.closest('[role="group"]')?.closest('article')===article);
+    if(replies.length!==1)return false;
+    const inline=[...column.querySelectorAll('[data-testid="tweetTextarea_0"][contenteditable="true"]')].filter(node=>
+      !node.closest('article,[role="dialog"]')&&
+      node.closest('[data-testid="cellInnerDiv"]')!==cell&&
+      Boolean(cell.compareDocumentPosition(node)&4));
+    return inline.length===1;
   }
   function legacyDetailIdentity(article,detailUrl) {
     // Never treat a background comment, quote or reply preview as the
@@ -251,8 +276,10 @@
     const route=detailStatusLink(detailUrl,detailUrl);
     if(route?.kind!=='canonical'||article?.closest?.('[role="dialog"]'))return null;
     const evidence=legacyDetailEvidence(article,detailUrl);
-    return !evidence.conflict&&evidence.statusId===route.id?
-      {statusId:route.id,sourceUrl:route.sourceUrl}:null;
+    if(evidence.conflict||!evidence.eligible)return null;
+    const ownedMatch=evidence.statusId===route.id;
+    const focalMatch=!evidence.statusId&&(!evidence.otherCanonicalId||evidence.otherCanonicalId===route.id)&&legacyFocalShape(article);
+    return ownedMatch||focalMatch?{statusId:route.id,sourceUrl:route.sourceUrl}:null;
   }
   function postIdentity(article) {
     if (!article?.matches?.("article")) return null;
