@@ -63,6 +63,8 @@ main { padding:17px 15px 78px; }
 .quick-settings input[type="checkbox"]:checked::before { transform:translateX(15px); }
 .quick-links .dashboard-actions { display:grid;grid-template-columns:repeat(2,minmax(0,1fr)); }
 .quick-links .button { width:100%; }
+.quick-links .partner-nav-button { grid-column:1/-1;gap:7px;min-height:38px;font-size:13px;font-weight:700; }
+.quick-links .partner-nav-button span { font-size:14px;line-height:1; }
 .supported-flow { padding-top:12px;padding-bottom:12px; }
 .supported-flow>p { margin-bottom:0; }
 footer { background:var(--bg);border-color:var(--line); }

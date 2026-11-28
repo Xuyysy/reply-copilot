@@ -216,7 +216,7 @@ document.addEventListener('click',async event=>{
     catch{$('account-summary').textContent='官网购买页面暂不可用，请稍后重试。';}
     return;
   }
-  const destinations={'nav-website':'/','nav-account':'/account','nav-pricing':'/pricing','nav-guide':'/guide'};
+  const destinations={'nav-website':'/','nav-account':'/account','nav-pricing':'/pricing','nav-guide':'/guide','nav-partners':'/partners'};
   if(destinations[button.id]){try{await accountClient.openWebsite(destinations[button.id]);}catch{$('account-summary').textContent='官网地址暂不可用。';}return;}
   if(['settings','footer-settings'].includes(button.id)){chrome.runtime.openOptionsPage();return;}
 });
