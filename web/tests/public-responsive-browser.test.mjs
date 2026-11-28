@@ -23,7 +23,7 @@ function staticFixture(route) {
     + safeBody + '<script>window.momentumReady=true</script></html>';
 }
 
-const routes = ["index", "guide", "login", "account", "faq", "feedback", "pricing", "checkout", "privacy", "terms", "refunds"];
+const routes = ["index", "guide", "login", "account", "faq", "feedback", "pricing", "checkout", "privacy", "terms", "refunds", "partners"];
 
 test("real built user pages fit phone, tablet and desktop viewports", { timeout: 180_000 }, async () => {
   for (const route of routes) {
@@ -38,6 +38,11 @@ test("real built user pages fit phone, tablet and desktop viewports", { timeout:
         assert.ok(result.body <= result.view + 1, route+"@"+width+": body overflows "+JSON.stringify(result));
         assert.ok(result.main, route+": missing accessible main landmark");
         assert.equal(result.nav === "none", width > 820, route+"@"+width+": mobile nav");
+      }
+      if (route === "partners") {
+        assert.equal(await evaluate('document.querySelectorAll(".partner-nav-entry[href=\'/partners\']").length'), 1);
+        assert.equal(await evaluate('document.querySelectorAll(".mobile-nav-list a[href=\'/partners\']").length'), 1);
+        assert.equal(await evaluate('document.querySelector(".partner-nav-entry").getAttribute("aria-current")'), "page");
       }
       if (route === "index") {
         assert.equal(await evaluate('Boolean(document.querySelector("#creator-momentum .momentum-v2-chart"))'), true);

@@ -1,4 +1,4 @@
-import {useState,useRef,type ReactNode} from "react";
+import {useState,useRef,useEffect,type ReactNode} from "react";
 import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
@@ -18,6 +18,17 @@ export default function PartnerManualReport({language,owner,write,inviteRecords,
  const unified=inviteRecords!==undefined&&!write;
  const [recordTab,setRecordTab]=useState<RecordTab>("invite");
  const [payoutVisited,setPayoutVisited]=useState(false);
+ const payoutSection=useRef<HTMLDivElement>(null);
+ const [payoutJump,setPayoutJump]=useState(0);
+ // The recipient form is lazy-mounted under Settlements. Focus and scroll
+ // only after React commits the visible panel, including repeated clicks.
+ useEffect(()=>{
+  if(!payoutJump)return;
+  const target=payoutSection.current;
+  if(!target||target.hidden)return;
+  target.focus({preventScroll:true});
+  target.scrollIntoView({block:"start",behavior:"instant"});
+ },[payoutJump]);
  const chooseTab=(tab:RecordTab)=>{setRecordTab(tab);if(tab==="settlement")setPayoutVisited(true);if(tab!=="invite"&&!opened&&!lock.current)void refresh();};
  const [pageCursor,setPageCursor]=useState<string|null>(null),[previous,setPrevious]=useState<(string|null)[]>([]);
  const money=(v:number|null|undefined)=>v==null?"—":new Intl.NumberFormat(language==="zh"?"zh-CN":"en-US",{style:"currency",currency:"CNY"}).format(v/100);
@@ -54,7 +65,7 @@ export default function PartnerManualReport({language,owner,write,inviteRecords,
   {s&&<>
    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">{[[t("累计核实分成","Verified commission"),money(s.estimatedFen)],[t("已结算","Settled"),money(s.recordedFen)],[t("待结算","Unsettled"),money(s.differenceFen)]].map(([label,value])=><div key={label} className="rounded bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{label}</p><strong>{value}</strong></div>)}</div>
    {!write&&<div className="space-y-2">
-    {data?.payoutProfileRequired&&!data.recipientReady&&<p role="status" className="text-sm text-amber-700">{t("请先填写支付宝收款资料，然后刷新分成记录。","Complete your Alipay recipient profile and refresh before applying.")}{unified&&payoutContent&&<Button type="button" variant="link" size="sm" onClick={()=>chooseTab("settlement")}>{t("设置收款资料","Set recipient")}</Button>}</p>}
+    {data?.payoutProfileRequired&&!data.recipientReady&&<p role="status" className="text-sm text-amber-700">{t("请先填写支付宝收款资料，然后刷新分成记录。","Complete your Alipay recipient profile and refresh before applying.")}{unified&&payoutContent&&<Button type="button" variant="link" size="sm" onClick={()=>{chooseTab("settlement");setPayoutJump(n=>n+1);}}>{t("设置收款资料","Set recipient")}</Button>}</p>}
     <Button type="button" disabled={busy||data?.requestableFen==null||!!data.pendingId} onClick={()=>void apply()}>{data?.pendingId?t("申请处理中","Application pending"):t("申请结算","Request settlement")+(data?.requestableFen!=null?" "+money(data.requestableFen):"")}</Button>
     <p className="text-xs text-muted-foreground">{t(`满${(data?.minRequestFen??1000)/100}元可申请全部待结算金额，管理员人工转账。`,`Request the full unsettled amount from CNY ${(data?.minRequestFen??1000)/100}; the administrator transfers manually.`)}</p>
    </div>}
@@ -68,7 +79,7 @@ export default function PartnerManualReport({language,owner,write,inviteRecords,
    </div>
   </div>}
   {unified&&recordTab==="invite"&&inviteRecords}
-  {payoutContent&&(!unified||payoutVisited)&&<div hidden={unified&&recordTab!=="settlement"} key={data?.pendingId??"no-pending"}>{payoutContent}</div>}
+  {payoutContent&&(!unified||payoutVisited)&&<div ref={payoutSection} tabIndex={-1} role="region" aria-label={t("支付宝收款资料","Alipay recipient details")} className="scroll-mt-28 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary" hidden={unified&&recordTab!=="settlement"} key={data?.pendingId??"no-pending"}>{payoutContent}</div>}
   {s&&(!unified||recordTab==="purchase")&&<>
    <h4 className="font-medium">{data?.ledgerEnabled?t("购买记录","Purchases"):t("最近购买记录","Recent purchases")}</h4><p className="text-xs text-muted-foreground">{data?.ledgerEnabled?t("每页30条，分页不影响累计佣金。","30 orders per page; pagination does not affect the total."):t("最近 30 条统计范围内订单，待核对订单不计入可申请金额。","Latest 30 orders in scope. Orders under review do not count toward the amount available to request.")}</p>
    <div className="divide-y" data-testid="partner-purchase-list">

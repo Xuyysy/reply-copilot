@@ -4,19 +4,22 @@ import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
 import PartnerManualReport from "../account/PartnerManualReport";
 import PartnerManualQueue from "./PartnerManualQueue";
+import PartnerApplicationQueue,{type Application} from "./PartnerApplicationQueue";
 import PartnerRecipientReveal from "./PartnerRecipientReveal";
+import PartnerXAccountEditor from "./PartnerXAccountEditor";
 import {Input} from "../ui/input";
 import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 
 type Policy={version:number;status:"active"|"paused";level:string;rate_bps:number;term_months:number|null;effective_at:number;reason:string};
 type Result={enabled:boolean;payoutProfileEnabled?:boolean;user?:{id:string;email:string;eligible:boolean};history?:Policy[]};
-type Directory={enabled:boolean;items?:{id:string;email:string;status:string;level:string;rate_bps:number;registered:number;activated:number;account_status:string;payout_configured?:number}[];payoutProfileEnabled?:boolean;hasMore?:boolean;offset?:number};
+type Directory={enabled:boolean;items?:{id:string;email:string;status:string;level:string;rate_bps:number;registered:number;activated:number;account_status:string;payout_configured?:number;x_handle?:string|null;x_handle_version?:number}[];xAccountsEnabled?:boolean;payoutProfileEnabled?:boolean;hasMore?:boolean;offset?:number};
 type InvitePage={enabled:boolean;items?:{invited_user_id:string;email:string;status:string;registered_at:number}[];hasMore?:boolean;offset?:number};
 type Props={language:Language;write:<T>(path:string,body:object)=>Promise<T>};
 const endpoint="/v1/admin/partners/policy";
 export default function PartnerAdminPanel({language,write}:Props){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [q,setQ]=useState("");
+ const [application,setApplication]=useState<Application|null>(null),[applicationRevision,setApplicationRevision]=useState(0);
  const [data,setData]=useState<Result|null>(null);
  const [level,setLevel]=useState("standard");
  const [status,setStatus]=useState("active");
@@ -41,9 +44,9 @@ export default function PartnerAdminPanel({language,write}:Props){
   setLevel(p?.level||"standard");setStatus(p?.status||"active");
   setRate(p?String(p.rate_bps/100):"15");setTerm(p?(p.term_months===null?"unlimited":String(p.term_months)):"");setReason("");setInvites(null);inviteSeq.current++;if(next.user&&p)void loadInvites(next.user.id);
  }
- async function search(value=q){
+ async function search(value=q,review:Application|null=null){
   if(lock.current||!value.trim())return;
-  setQ(value);
+  setQ(value);setApplication(review);
   lock.current=true;setBusy(true);setData(null);setError("");setNotice("");
   try{await load(value.trim());}catch(e){setError(readableError(e,language));}
   finally{lock.current=false;setBusy(false);}
@@ -52,12 +55,13 @@ export default function PartnerAdminPanel({language,write}:Props){
   const target=data?.user;
   const bps=Math.round(Number(rate)*100);
   const months=term==="unlimited"?null:Number(term);
-  if(lock.current||!target||!/^\d{1,3}(\.\d{1,2})?$/.test(rate)||bps<(status==="active"?1500:1)||bps>10000||
+  if(lock.current||!target||(application&&(current||application.user_id!==target.id||status!=="active"))||!/^\d{1,3}(\.\d{1,2})?$/.test(rate)||bps<(status==="active"?1500:1)||bps>10000||
    (months!==null&&(!/^\d{1,3}$/.test(term)||months<1||months>120))||reason.trim().length<8||
    (status==="active"&&!target.eligible)||(status==="paused"&&current?.status!=="active"))return;
   lock.current=true;setBusy(true);setError("");setNotice("");
   try{
-   await write(endpoint,{userId:target.id,status,level,rateBps:bps,termMonths:months,reason:reason.trim(),expectedVersion:current?.version||0});
+   await write(application?"/v1/admin/partners/applications":endpoint,{...(application?{applicationId:application.id,action:"approved"}:{}),userId:target.id,status,level,rateBps:bps,termMonths:months,reason:reason.trim(),expectedVersion:current?.version||0});
+   setApplication(null);setApplicationRevision(v=>v+1);
    await load(target.id);void loadDirectory();setNotice(t("规则已保存，历史版本保留。","Policy saved; history retained."));
   }catch(e){
    setError(readableError(e,language)+" "+t("请重新查询确认实际状态。","Search again to confirm the actual state."));
@@ -66,23 +70,25 @@ export default function PartnerAdminPanel({language,write}:Props){
  }
  return <Card><CardHeader><CardTitle>{t("推广伙伴 · 资格与规则","Partners · Eligibility and policy")}</CardTitle></CardHeader>
  <CardContent className="space-y-4">
+  <PartnerApplicationQueue language={language} write={write} refreshKey={applicationRevision} parentBusy={busy} onReview={r=>void search(r.user_id,r)}/>
   <PartnerManualQueue language={language} write={write}/>
   <p className="text-sm text-muted-foreground">{t("管理指定伙伴及约定分成。满10元申请，由管理员人工转账并标记完成。","Manage assigned partners and commission terms. Requests start at CNY 10; transfer externally and mark settled.")}</p>
-  <section className="space-y-2 rounded-lg border p-3" data-testid="partner-directory"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{t("合伙人列表","Partner directory")}</h3><Button type="button" variant="outline" disabled={directoryBusy} onClick={()=>void loadDirectory()}>{t("刷新列表","Refresh list")}</Button></div>{directoryError&&<p role="alert">{directoryError}</p>}{directory?.enabled&&(!directory.items?.length?<p className="text-sm">{t("暂无合伙人","No partners yet")}</p>:directory.items.map(r=><div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"><div className="min-w-0 break-all text-sm"><strong>{r.email}</strong><p>{r.status==="active"?t("已授权","Authorized"):t("已暂停","Paused")} · {r.rate_bps/100}% · {t("注册","Registered")} {r.registered} · {t("激活","Activated")} {r.activated}{directory.payoutProfileEnabled&&<span> · {r.payout_configured?t("已填收款资料","Recipient provided"):t("待填收款资料","Recipient missing")}</span>}</p></div><Button type="button" variant="outline" disabled={busy} onClick={()=>void search(r.id)}>{t("查看详情","Details")}</Button></div>))}{directory?.enabled&&<div className="flex gap-2"><Button type="button" variant="outline" disabled={directoryBusy||!(directory.offset??0)} onClick={()=>void loadDirectory(Math.max(0,(directory.offset??0)-30))}>{t("上一页","Previous")}</Button><Button type="button" variant="outline" disabled={directoryBusy||!directory.hasMore} onClick={()=>void loadDirectory((directory.offset??0)+30)}>{t("下一页","Next")}</Button></div>}</section>
+  <section className="space-y-2 rounded-lg border p-3" data-testid="partner-directory"><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold">{t("合伙人列表","Partner directory")}</h3><Button type="button" variant="outline" disabled={directoryBusy} onClick={()=>void loadDirectory()}>{t("刷新列表","Refresh list")}</Button></div>{directoryError&&<p role="alert">{directoryError}</p>}{directory?.enabled&&(!directory.items?.length?<p className="text-sm">{t("暂无合伙人","No partners yet")}</p>:directory.items.map(r=><div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border p-2"><div className="min-w-0 break-all text-sm"><strong>{r.email}</strong>{directory.xAccountsEnabled&&<PartnerXAccountEditor key={r.id+":"+r.x_handle_version+":"+r.x_handle} userId={r.id} handle={r.x_handle??null} version={r.x_handle_version??0} language={language} write={write} onSaved={()=>loadDirectory(directory.offset??0)}/>}<p>{r.status==="active"?t("已授权","Authorized"):t("已暂停","Paused")} · {r.rate_bps/100}% · {t("注册","Registered")} {r.registered} · {t("激活","Activated")} {r.activated}{directory.payoutProfileEnabled&&<span> · {r.payout_configured?t("已填收款资料","Recipient provided"):t("待填收款资料","Recipient missing")}</span>}</p></div><Button type="button" variant="outline" disabled={busy} onClick={()=>void search(r.id)}>{t("查看详情","Details")}</Button></div>))}{directory?.enabled&&<div className="flex gap-2"><Button type="button" variant="outline" disabled={directoryBusy||!(directory.offset??0)} onClick={()=>void loadDirectory(Math.max(0,(directory.offset??0)-30))}>{t("上一页","Previous")}</Button><Button type="button" variant="outline" disabled={directoryBusy||!directory.hasMore} onClick={()=>void loadDirectory((directory.offset??0)+30)}>{t("下一页","Next")}</Button></div>}</section>
   <form className="flex flex-wrap gap-2" onSubmit={e=>{e.preventDefault();void search();}}>
-   <Input aria-label={t("用户 ID 或邮箱","User ID or email")} placeholder={t("输入用户 ID 或邮箱，授权新合伙人","Enter user ID or email to authorize a partner")} value={q} onChange={e=>{setQ(e.target.value);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
+   <Input aria-label={t("用户 ID 或邮箱","User ID or email")} placeholder={t("输入用户 ID 或邮箱，授权新合伙人","Enter user ID or email to authorize a partner")} value={q} onChange={e=>{setQ(e.target.value);setApplication(null);setData(null);setNotice("");}} disabled={busy} maxLength={254} className="flex-1" required/>
    <Button disabled={busy||!q.trim()}>{t("查询","Search")}</Button>
   </form>
   {data?.enabled===false&&<p role="status">{t("推广计划默认关闭，需单独审核后启用。","Program disabled pending separate rollout approval.")}</p>}
   {data?.user&&<form className="space-y-3" onSubmit={e=>{e.preventDefault();void save();}}>
    <p className="break-all font-medium">{data.user.email} · {data.user.id}</p>
+   {application&&<p className="text-sm font-semibold">{t("正在审核申请","Reviewing application")} @{application.x_handle}</p>}
    {!data.user.eligible&&<p>{t("账户不符合启用资格。","Account is not eligible for activation.")}</p>}
    <label className="block text-sm">{t("状态","Status")}<select className="block w-full rounded border p-2" value={status} disabled={busy} onChange={e=>setStatus(e.target.value)}><option value="active">{t("启用","Active")}</option>{current?.status==="active"&&<option value="paused">{t("暂停","Paused")}</option>}{current?.status==="paused"&&<option value="paused" disabled>{t("已暂停","Paused")}</option>}</select></label>
    <label className="block text-sm">{t("等级","Level")}<select className="block w-full rounded border p-2" value={level} disabled={busy} onChange={e=>setLevel(e.target.value)}><option value="standard">{t("普通","Standard")}</option><option value="advanced">{t("高级","Advanced")}</option><option value="strategic">{t("战略","Strategic")}</option></select></label>
    <label className="block text-sm">{t("约定佣金比例（%）","Configured commission rate (%)")}<Input value={rate} disabled={busy} onChange={e=>setRate(e.target.value)} inputMode="decimal" required maxLength={6}/></label>
    <label className="block text-sm">{t("约定合作期限（月）或 unlimited","Configured term (months) or unlimited")}<Input value={term} disabled={busy} onChange={e=>setTerm(e.target.value)} required maxLength={9}/></label>
    <label className="block text-sm">{t("操作原因（至少 8 字）","Reason (at least 8 characters)")}<Input value={reason} disabled={busy} onChange={e=>setReason(e.target.value)} required minLength={8} maxLength={500}/></label>
-   <Button disabled={busy||reason.trim().length<8||!rate||!term||(status==="active"&&!data.user.eligible)||(status==="paused"&&current?.status!=="active")}>{current?t("保存合作规则","Save policy"):t("授权推广伙伴","Authorize partner")}</Button>
+   <Button disabled={busy||Boolean(application&&(current||status!=="active"))||reason.trim().length<8||!rate||!term||(status==="active"&&!data.user.eligible)||(status==="paused"&&current?.status!=="active")}>{application?t("批准申请并授权","Approve and authorize"):current?t("保存合作规则","Save policy"):t("授权推广伙伴","Authorize partner")}</Button>
   </form>}
   {data?.history?.length? <div className="space-y-2"><h3 className="font-medium">{t("最近 20 个规则版本","Last 20 policy versions")}</h3>{data.history.map(p=><div key={p.version} className="rounded border p-2 text-sm break-all">v{p.version} · {p.status} · {p.level} · {p.rate_bps/100}% · {p.term_months??"unlimited"} · {new Date(p.effective_at).toLocaleString()}<p>{p.reason}</p></div>)}</div>:null}
   {data?.user&&current&&<section className="space-y-2"><h3 className="font-semibold">{t("受邀注册记录","Referral registrations")}</h3>{inviteError&&<p role="alert">{inviteError}</p>}{invites?.items?.length?invites.items.map(r=><div key={r.invited_user_id} className="rounded border p-2 text-sm break-all">{r.email} · {new Date(r.registered_at).toLocaleString()} · {r.status==="rewarded"?t("已激活","Activated"):t("待激活","Pending")}</div>):invites&&<p>{t("暂无注册记录","No registrations")}</p>}{invites&&<div className="flex gap-2"><Button type="button" variant="outline" disabled={!(invites.offset??0)} onClick={()=>void loadInvites(data.user!.id,Math.max(0,(invites.offset??0)-30))}>{t("上一页","Previous")}</Button><Button type="button" variant="outline" disabled={!invites.hasMore} onClick={()=>void loadInvites(data.user!.id,(invites.offset??0)+30)}>{t("下一页","Next")}</Button></div>}</section>}

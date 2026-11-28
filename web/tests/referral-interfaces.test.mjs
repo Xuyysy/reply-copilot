@@ -5,14 +5,18 @@ import {readFileSync} from "node:fs";
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const account=read("../src/components/account/AccountDashboard.tsx");
 const card=read("../src/components/account/ReferralInviteCard.tsx");
+const pitch=read("../src/components/account/PartnerPromotionPitch.tsx");
 const wrapper=read("../src/components/account/ReferralAndPartnerCards.tsx");
 const login=read("../src/components/auth/AuthPanel.tsx");
 const admin=read("../src/components/admin/AdminDashboard.tsx");
 const adminPanel=read("../src/components/admin/ReferralAdminPanel.tsx");
 
-test("My Account includes V1 referrals beside existing free and paid credit balances",()=>{
- assert.match(account,/import ReferralAndPartnerCards from "\.\/ReferralAndPartnerCards"/);
- assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} renderPartner=/);
+test("Partners owns V1 referrals and My Account retains only a navigation link",()=>{
+ const dashboard=read("../src/components/account/PartnerDashboard.tsx");
+ assert.doesNotMatch(account,/<ReferralAndPartnerCards|import ReferralAndPartnerCards/);
+ assert.match(account,/href="\/partners"/);
+ assert.match(dashboard,/<ReferralAndPartnerCards key=\{state\.owner\} owner=\{state\.owner\} language=\{language\}/);
+ assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} applicationsEnabled=\{result\?\.applicationsEnabled===true\} renderPartner=/);
  assert.match(card,/我的推广中心/);
  assert.match(card,/account-referral-rewards/);
  assert.match(card,/\/v1\/referrals\/me/);
@@ -27,8 +31,19 @@ test("My Account includes V1 referrals beside existing free and paid credit bala
  assert.match(card,/你和好友各额外获得 50 次/);
  assert.match(card,/both you and your friend earn 50 extra credits each/);
  assert.match(card,/合计 250 次/);
- assert.match(card,/保持你原有的内容和更新节奏，偶尔分享几次自己的邀请链接就可以/);
- assert.match(card,/Keep posting your own content as usual and share your referral link from time to time/);
+ assert.match(pitch,/让你的每一份流量更有价值/);
+ assert.match(pitch,/边冲 X 原创者收益，边赚推广佣金/);
+ assert.match(pitch,/分享好用的工具、真实的使用心得、X 运营经验或原创文章/);
+ assert.match(pitch,/sharing useful tools, honest reviews, tips for growing on X, or original articles/);
+ assert.match(pitch,/同一份内容，多一份收益/);
+ assert.match(pitch,/data-testid="partner-promotion-highlight"[^>]+border-l-4[^>]+bg-primary\/5/);
+ assert.match(pitch,/data-testid="partner-promotion-slogan"[^>]+text-xl font-bold[^>]+sm:text-2xl/);
+ assert.match(pitch,/approved\?rateBps\/100\+"%":"15%\+"/);
+ assert.match(wrapper,/partnerRateBps=\{hasPartner&&result\.policy\?\.status==="active"\?result\.policy\.rate_bps:undefined\}/);
+ assert.match(card,/partnerRateBps!==undefined&&!showRecruitment&&/);
+ assert.match(card,/<PartnerPromotionPitch language=\{language\} rateBps=\{partnerRateBps\}/);
+ assert.match(card,/<PartnerPromotionPitch language=\{language\}\/>/);
+ assert.match(dashboard,/<PartnerPromotionPitch language=\{language\} guest\/>/);
  assert.match(card,/普通邀请的免费额度奖励，每30天最多20位/);
   assert.match(card,/推广合伙人的现金佣金不受此人数限制/);
  assert.match(card,/Free-credit rewards are limited to 20 successful referrals per rolling 30 days/);

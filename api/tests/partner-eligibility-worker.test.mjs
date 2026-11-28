@@ -35,7 +35,7 @@ test('eligibility-only Worker: explicit assignment, authorization, pause, replay
  assert.deepEqual(await ok('partner',me),{enabled:false});
  assert.equal((await call('ordinary',admin+'?q=partner')).status,403);
  db.exec("UPDATE system_settings SET value='1' WHERE key='partner_program_enabled'");
- assert.deepEqual(await ok('partner',me),{enabled:true,policy:null});
+ assert.deepEqual(await ok('partner',me),{enabled:true,policy:null,recruitmentEligible:true});
  assert.equal((await call('owner',admin,grant)).status,403);
  db.prepare("INSERT INTO admin_reauth_sessions(session_id,expires_at) VALUES('session-owner',?)").run(Date.now()+3600000);
  assert.equal((await call('owner',admin,grant,{'X-CSRF-Token':'invalid'})).status,403);
@@ -46,7 +46,7 @@ test('eligibility-only Worker: explicit assignment, authorization, pause, replay
  const actual=await call('partner',me);assert.equal(actual.status,200);assert.equal(actual.cache,'no-store');
  assert.equal(actual.body.policy.user_id,'partner');assert.equal(actual.body.policy.rate_bps,2000);
  assert.deepEqual(Object.keys(actual.body).sort(),['enabled','policy']);
- assert.deepEqual(await ok('ordinary',me+'?userId=partner'),{enabled:true,policy:null});
+ assert.deepEqual(await ok('ordinary',me+'?userId=partner'),{enabled:true,policy:null,recruitmentEligible:true});
  const lookup=await ok('owner',admin+'?q=partner%40example.test');
  assert.equal(lookup.user.id,'partner');assert.equal(lookup.history.length,1);
  await new Promise(resolve=>setTimeout(resolve,5));

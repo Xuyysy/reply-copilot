@@ -6,7 +6,7 @@ import {usePartnerMembership,PartnerMembershipContent} from "./PartnerMembership
 // Cash reporting and the recipient profile remain independently gated and lazy.
 export default function ReferralAndPartnerCards({language,owner}:{language:Language;owner:string}){
  const result=usePartnerMembership(owner);
- const showRecruitment=result?.enabled===true&&result.policy===null;
+ const showRecruitment=result?.enabled===true&&result.recruitmentEligible===true&&result.policy===null;
  const hasPartner=result?.enabled===true&&!!result.policy;
- return <ReferralInviteCard language={language} showRecruitment={showRecruitment} renderPartner={hasPartner?(invites)=><PartnerMembershipContent owner={owner} language={language} result={result} inviteRecords={invites}/>:undefined}/>;
+ return <ReferralInviteCard language={language} showRecruitment={showRecruitment} applicationsEnabled={result?.applicationsEnabled===true} renderPartner={hasPartner?(invites)=><PartnerMembershipContent owner={owner} language={language} result={result} inviteRecords={invites}/>:undefined} partnerRateBps={hasPartner&&result.policy?.status==="active"?result.policy.rate_bps:undefined}/>;
 }

@@ -5,6 +5,8 @@ import { sessionFor } from "./auth";
 import { response } from "./http";
 import { jsonBody, nowMs } from "./security";
 import {payoutEnabled} from "./partner-payout";
+import {partnerApplicationsEnabled} from "./partner-applications";
+import {partnerXAccountsEnabled,partnerXDirectoryColumns} from "./partner-x-accounts";
 import { parsePartnerPolicy, partnerPolicyAppendPlan, partnerPolicyAtPlan } from "./partner-policy.mjs";
 
 async function enabled(env: Env): Promise<boolean> {
@@ -27,7 +29,7 @@ export async function myPartnerPolicy(request:Request,env:Env):Promise<Response>
   if(!await enabled(env))return response({enabled:false},200,env,request);
   const user=await env.DB.prepare("SELECT 1 FROM users WHERE id=? AND role='user' AND status='active' AND email_verified_at IS NOT NULL AND archived_at IS NULL AND is_test_account=0").bind(session.user_id).first();
   const policy=user?await current(env,session.user_id):null;
-  if(!policy)return response({enabled:true,policy:null},200,env,request);
+  if(!policy)return response({enabled:true,policy:null,...(user?{recruitmentEligible:true,...(await partnerApplicationsEnabled(env)?{applicationsEnabled:true}:{})}:{})},200,env,request);
   // Eligibility-only milestone. Never touch cash ledgers or infer financial balances.
   // The invitation card continues to display the existing referral statistics.
   return response({enabled:true,policy,...(await payoutEnabled(env)?{payoutProfileEnabled:true}:{})},200,env,request);
@@ -70,14 +72,14 @@ export async function adminPartnerDirectory(request:Request,env:Env):Promise<Res
  if(!await enabled(env))return response({enabled:false},200,env,request);
  const raw=new URL(request.url).searchParams.get("offset")||"0";
  if(!/^(0|[1-9][0-9]{0,3})$/.test(raw))throw new ApiFailure(400,"INVALID_OFFSET","分页参数无效。");
- const offset=Number(raw),payout=await payoutEnabled(env);
+ const offset=Number(raw),payout=await payoutEnabled(env),xAccounts=await partnerXAccountsEnabled(env);
  const rows=await env.DB.prepare(`SELECT u.id,u.email,u.status account_status,p.version,p.status,p.level,p.rate_bps,p.term_months,p.effective_at,
  (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id) registered,
- (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id AND i.status='rewarded') activated${payout?',EXISTS(SELECT 1 FROM partner_payout_profiles k WHERE k.user_id=u.id) payout_configured':''}
+ (SELECT COUNT(*) FROM referral_invites i WHERE i.inviter_user_id=u.id AND i.status='rewarded') activated${payout?',EXISTS(SELECT 1 FROM partner_payout_profiles k WHERE k.user_id=u.id) payout_configured':''}${xAccounts?partnerXDirectoryColumns:''}
  FROM partner_policy_versions p JOIN users u ON u.id=p.user_id
  WHERE p.version=(SELECT MAX(v.version) FROM partner_policy_versions v WHERE v.user_id=p.user_id)
  ORDER BY p.effective_at DESC,u.id LIMIT 31 OFFSET ?`).bind(offset).all();
- return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset,...(payout?{payoutProfileEnabled:true}:{})},200,env,request);
+ return response({enabled:true,items:rows.results.slice(0,30),hasMore:rows.results.length>30,offset,...(payout?{payoutProfileEnabled:true}:{}),...(xAccounts?{xAccountsEnabled:true}:{})},200,env,request);
 }
 export async function adminPartnerInvites(request:Request,env:Env):Promise<Response>{
  await requireAdminSession(request,env);
