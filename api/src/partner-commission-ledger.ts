@@ -65,22 +65,26 @@ export async function syncCommissionLedger(env:Env,userId:string){
  .bind(q.buyer_id,e?.paidAt??0,e?.rateBps??0,e?.state??'excluded',e?.principalFen??null,e?.commissionFen??null,e?.reason??null,q.domain,q.order_id,userId,q.token);
  }));
 }
-export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:string|null){
- const before=parseCommissionCursor(cursor);
- const pageGuard=before?" AND (paid_at,domain,order_id)<(?,?,?)":"";
- const [totals,records,page]=await Promise.all([
-  env.DB.prepare(`SELECT COALESCE(t.earned_fen,0) earned,COALESCE(t.settled_fen,0) settled,COALESCE(t.verified_count,0) verified,COALESCE(t.review_count,0) review,
-  EXISTS(SELECT 1 FROM partner_commission_dirty q WHERE q.partner_user_id=u.id) dirty,
-  (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId
-  FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null}>(),
-  env.DB.prepare("SELECT id,amount_fen,status,created_at,resolved_at"+(admin?",reason":"")+" FROM partner_manual_requests WHERE partner_user_id=? ORDER BY created_at DESC,id DESC LIMIT 30").bind(userId).all(),
-  env.DB.prepare("SELECT domain,order_id orderId,paid_at paidAt,rate_bps rateBps,state,principal_fen principalFen,commission_fen commissionFen"+(admin?",buyer_user_id buyerId,reason":"")+" FROM partner_commission_entries WHERE partner_user_id=? AND state<>'excluded'"+pageGuard+" ORDER BY paid_at DESC,domain DESC,order_id DESC LIMIT 31").bind(userId,...(before?[before.paidAt,before.domain,before.orderId]:[])).all<Entry>()
- ]);
+export async function ledgerBalance(env:Env,userId:string){
+ const totals=await env.DB.prepare(`SELECT COALESCE(t.earned_fen,0) earned,COALESCE(t.settled_fen,0) settled,COALESCE(t.verified_count,0) verified,COALESCE(t.review_count,0) review,
+ EXISTS(SELECT 1 FROM partner_commission_dirty q WHERE q.partner_user_id=u.id) dirty,
+ (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId
+ FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null}>();
  if(!totals)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
  const complete=totals.dirty===0;
  const summary={verifiedOrders:totals.verified,reviewCount:totals.review,estimatedFen:complete?totals.earned:null,recordedFen:totals.settled,differenceFen:complete?totals.earned-totals.settled:null,complete};
+ return {summary,requestableFen:requestableFen(summary,!!totals.pendingId),pendingId:totals.pendingId,syncPending:!complete};
+}
+export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:string|null){
+ const before=parseCommissionCursor(cursor);
+ const pageGuard=before?" AND (paid_at,domain,order_id)<(?,?,?)":"";
+ const [balance,records,page]=await Promise.all([
+  ledgerBalance(env,userId),
+  env.DB.prepare("SELECT id,amount_fen,status,created_at,resolved_at"+(admin?",reason":"")+" FROM partner_manual_requests WHERE partner_user_id=? ORDER BY created_at DESC,id DESC LIMIT 30").bind(userId).all(),
+  env.DB.prepare("SELECT domain,order_id orderId,paid_at paidAt,rate_bps rateBps,state,principal_fen principalFen,commission_fen commissionFen"+(admin?",buyer_user_id buyerId,reason":"")+" FROM partner_commission_entries WHERE partner_user_id=? AND state<>'excluded'"+pageGuard+" ORDER BY paid_at DESC,domain DESC,order_id DESC LIMIT 31").bind(userId,...(before?[before.paidAt,before.domain,before.orderId]:[])).all<Entry>()
+ ]);
  const orders=page.results.slice(0,30),last=orders.at(-1);
- return {enabled:true,ledgerEnabled:true,syncPending:!complete,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:requestableFen(summary,!!totals.pendingId),pendingId:totals.pendingId,orders,records:records.results,nextCursor:page.results.length>30&&last?last.paidAt+":"+last.domain+":"+last.orderId:null};
+ return {enabled:true,ledgerEnabled:true,...balance,minRequestFen:MIN_REQUEST_FEN,orders,records:records.results,nextCursor:page.results.length>30&&last?last.paidAt+":"+last.domain+":"+last.orderId:null};
 }
 export async function checkLedgerSettlement(env:Env,userId:string,requestId:string){
  const row=await env.DB.prepare(`SELECT 1 FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id JOIN partner_commission_totals t ON t.partner_user_id=r.partner_user_id

@@ -89,6 +89,12 @@ test('incremental commission ledger: historical backlog, bounded sync, page, ato
  assert.equal(count('partner_commission_dirty'),0);
  assert.equal(count('partner_commission_entries'),125);
  assert.equal((await ok('partner',me,{sync:true})).summary.estimatedFen,25000);
+ // Paid evidence corrected later must invalidate the already cached amount.
+ db.exec("UPDATE provider_payment_events SET amount_fen=999 WHERE transaction_id='tx-new-000'");
+ assert.equal(count('partner_commission_dirty'),1);
+ result=await ok('partner',me,{sync:true});assert.equal(result.summary.estimatedFen,24800);
+ db.exec("UPDATE provider_payment_events SET amount_fen=1000 WHERE transaction_id='tx-new-000'");
+ result=await ok('partner',me,{sync:true});assert.equal(result.summary.estimatedFen,25000);
  const all=new Set();let page=result;
  for(let i=0;i<5;i++){
   for(const o of page.orders){assert.ok(!all.has(o.orderId));all.add(o.orderId);assert.equal(o.buyerId,undefined);}
@@ -98,6 +104,14 @@ test('incremental commission ledger: historical backlog, bounded sync, page, ato
  }
  assert.equal(all.size,125);
  assert.equal((await call('partner',me+'?cursor=invalid')).status,400);
+ // A collision with a newly created subscription must invalidate an
+ // already cached credit order, even before the second order is paid.
+ db.prepare("INSERT INTO subscription_orders(id,user_id,plan_version_id,kind,amount_fen,quoted_at,quote_expires_at,created_at,updated_at) VALUES('collision-sub','ordinary','basic-v1','purchase',6990,?,?,?,?)").run(paid,paid+300000,paid,paid);
+ db.prepare("INSERT INTO subscription_payment_transactions(id,order_id,merchant_provider,merchant_account,provider_trade_id,provider_payment_id,payment_channel,amount_fen,notification_sign_type,created_at,updated_at) VALUES('collision-tx','collision-sub','mk99','fixture','collision-out','trade-new-000','ALIPAY_H5',6990,'MD5',?,?)").run(paid,paid);
+ assert.equal(count('partner_commission_dirty'),1);
+ result=await ok('partner',me,{sync:true});assert.equal(result.summary.estimatedFen,24800);
+ db.exec("UPDATE subscription_payment_transactions SET provider_payment_id='other-trade' WHERE id='collision-tx'");
+ result=await ok('partner',me,{sync:true});assert.equal(result.summary.estimatedFen,25000);
  // Replayed settlement doesn't enqueue unchanged state.
  db.exec("UPDATE recharge_orders SET status='paid',paid_at=paid_at,credited_at=credited_at WHERE id='new-000'");
  assert.equal(count('partner_commission_dirty'),0);

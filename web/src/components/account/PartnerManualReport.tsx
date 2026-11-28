@@ -14,28 +14,29 @@ export default function PartnerManualReport({language,owner,write}:Props){
  const url=endpoint+(write?"?userId="+encodeURIComponent(owner):"");
  const [data,setData]=useState<Report|null>(null),[error,setError]=useState(""),[busy,setBusy]=useState(false),[opened,setOpened]=useState(false);
  const lock=useRef(false);
+ const [pageCursor,setPageCursor]=useState<string|null>(null),[previous,setPrevious]=useState<(string|null)[]>([]);
  const money=(v:number|null|undefined)=>v==null?"—":new Intl.NumberFormat(language==="zh"?"zh-CN":"en-US",{style:"currency",currency:"CNY"}).format(v/100);
- async function refresh(cursor?:string){
+ async function refresh(cursor?:string|null,history:(string|null)[]=[]){
 
   if(lock.current)return;
   lock.current=true;setBusy(true);setError("");setOpened(true);
   try{
    let result=await api<Report>(url+(cursor?(write?"&":"?")+"cursor="+encodeURIComponent(cursor):""));
    if(!cursor&&result.syncPending&&!write)result=await api<Report>(endpoint,{method:"POST",body:JSON.stringify({sync:true})});
-   setData(result);
+   setData(result);setPageCursor(cursor??null);setPrevious(history);
   }catch(e){setData(null);setError(readableError(e,language));}
   finally{lock.current=false;setBusy(false);}
  }
  async function syncAdmin(){
   if(!write||lock.current)return;
   lock.current=true;setBusy(true);setError("");
-  try{setData(await write<Report>(endpoint,{sync:true,userId:owner}));}catch(e){setError(readableError(e,language));}finally{lock.current=false;setBusy(false);}
+  try{setData(await write<Report>(endpoint,{sync:true,userId:owner}));setPageCursor(null);setPrevious([]);}catch(e){setError(readableError(e,language));}finally{lock.current=false;setBusy(false);}
  }
  async function apply(){
   const amount=data?.requestableFen;
   if(write||lock.current||amount==null||amount<1000||data?.pendingId)return;
   lock.current=true;setBusy(true);setError("");
-  try{await api(endpoint,{method:"POST",body:JSON.stringify({expectedAmountFen:amount})});setData(await api<Report>(url));}
+  try{await api(endpoint,{method:"POST",body:JSON.stringify({expectedAmountFen:amount})});setData(await api<Report>(url));setPageCursor(null);setPrevious([]);}
   catch(e){setData(null);setError(readableError(e,language)+" "+t("请刷新确认申请状态。","Refresh to check application status."));}
   finally{lock.current=false;setBusy(false);}
  }
@@ -54,9 +55,9 @@ export default function PartnerManualReport({language,owner,write}:Props){
    </div>}
    {(!s.complete||s.reviewCount>0)&&<p role="status" className="text-sm text-amber-700">{!s.complete?(data?.syncPending?t("正在分批核实新订单，请继续刷新至同步完成。","New orders are being reconciled in batches. Refresh until complete."):t("统计范围超限，请联系管理员。","Report limit exceeded; contact the administrator.")):t("部分订单暂未核实，不计入待结算金额；已核实佣金可正常申请。","Unverified orders are excluded; verified commission remains available to request.")}</p>}
    {write&&data?.syncPending&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void syncAdmin()}>{t("同步佣金","Sync commission")}</Button>}
-   <h4 className="font-medium">{t("最近购买记录","Recent purchases")}</h4><p className="text-xs text-muted-foreground">{t("最近 30 条统计范围内订单，待核对订单不计入可申请金额。","Latest 30 orders in scope. Orders under review do not count toward the amount available to request.")}</p>
+   <h4 className="font-medium">{data?.ledgerEnabled?t("购买记录","Purchases"):t("最近购买记录","Recent purchases")}</h4><p className="text-xs text-muted-foreground">{data?.ledgerEnabled?t("每页30条，分页不影响累计佣金。","30 orders per page; pagination does not affect the total."):t("最近 30 条统计范围内订单，待核对订单不计入可申请金额。","Latest 30 orders in scope. Orders under review do not count toward the amount available to request.")}</p>
    {data?.orders?.map(o=><div className="rounded border p-2 text-sm break-all" key={o.domain+":"+o.orderId}>{new Date(o.paidAt).toLocaleString()} · {o.domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {o.state==="verified"?money(o.commissionFen):t("待核对","Review")}<p className="text-xs text-muted-foreground">{t("订单本金","Order principal")} {money(o.principalFen)} · {t("佣金","Commission")} {money(o.commissionFen)} · {o.orderId}{write&&o.buyerId?" · "+o.buyerId:""} · {o.rateBps/100}%{write&&o.reason?" · "+o.reason:""}</p></div>)}
-   {data?.nextCursor&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void refresh(data.nextCursor!)}>{t("下一页","Next page")}</Button>}
+   {data?.ledgerEnabled&&<div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" disabled={busy||previous.length===0} onClick={()=>void refresh(previous.at(-1)??null,previous.slice(0,-1))}>{t("上一页","Previous page")}</Button><span className="text-xs">{t("第","Page ")}{previous.length+1}{t("页","")}</span><Button type="button" variant="outline" disabled={busy||!data.nextCursor} onClick={()=>void refresh(data.nextCursor!,[...previous,pageCursor])}>{t("下一页","Next page")}</Button></div>}
    {!data?.orders?.length&&<p className="text-sm text-muted-foreground">{t("暂无统计订单。","No matching orders.")}</p>}
    <h4 className="font-medium">{t("申请记录","Settlement requests")}</h4>
    {data?.records?.map(r=><div key={r.id} className="rounded border p-2 text-sm break-all">{new Date(r.created_at).toLocaleString()} · {money(r.amount_fen)} · {r.status==="pending"?t("待处理","Pending"):r.status==="completed"?t("已结算","Settled"):t("已拒绝","Rejected")}{write&&r.reason&&<p className="text-xs">{r.reason}</p>}</div>)}

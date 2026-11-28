@@ -82,17 +82,19 @@ async function refresh(f,order,opts={}){
 // Real authenticated BoltUtil settlement (mock provider), then actual partner
 // report handler. No actual funds, networks, or remote database.
 function setupPartnerCommission(f){
- for(const file of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])
+ for(const file of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql','partner_commission_ledger_proposal.sql'])
   f.sql.exec(readFileSync(new URL('../sql-proposals/'+file,import.meta.url),'utf8'));
  for(const id of ['partner','owner'])f.sql.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,role) VALUES(?,?,1,1,?,'fixture-hash',?)").run(id,id+'@example.test',id,id==='owner'?'admin':'user');
- f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled')");
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled','partner_commission_ledger_enabled')");
  f.sql.prepare("INSERT INTO partner_policy_versions(user_id,version,status,level,rate_bps,term_months,effective_at,authorized_by,reason) VALUES('partner',1,'active','standard',1500,NULL,1,'owner','offline BoltUtil commission')").run();
  f.sql.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,registered_at) VALUES('test-user','partner','0123456789abcdef',1)").run();
  const token='c'.repeat(64);
  f.sql.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES('partner-session',?,'partner','web',1,?)").run(createHash('sha256').update(token).digest('hex'),Date.now()+60000);
  return async()=>{
-  const res=await worker.fetch(new Request(f.env.API_ORIGIN+'/v1/partners/manual-report',{headers:{Origin:f.env.WEB_ORIGIN,Cookie:'rc_session='+token}}),f.env);
-  const body=await res.json();assert.equal(res.status,200,JSON.stringify(body));return body;
+  const url=f.env.API_ORIGIN+'/v1/partners/manual-report',headers={Origin:f.env.WEB_ORIGIN,Cookie:'rc_session='+token,'Content-Type':'application/json','X-Reply-Copilot-Action':'1','X-CSRF-Token':createHmac('sha256',f.env.AUTH_HASH_SECRET).update('csrf:'+token).digest('hex')};
+  let res=await worker.fetch(new Request(url,{headers}),f.env),body=await res.json();assert.equal(res.status,200,JSON.stringify(body));assert.equal(body.ledgerEnabled,true);
+  if(body.syncPending){res=await worker.fetch(new Request(url,{method:'POST',headers,body:JSON.stringify({sync:true})}),f.env);body=await res.json();assert.equal(res.status,200,JSON.stringify(body));}
+  assert.equal(body.syncPending,false);return body;
  };
 }
 

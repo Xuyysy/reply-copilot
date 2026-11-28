@@ -6,7 +6,7 @@ import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
 import {payoutEnabled,recipientReady,verifiedRecipientVersion} from "./partner-payout";
 import {boltReadSchemaReady} from "./boltutil/environment";
-import {commissionLedgerEnabled,ledgerReport,syncCommissionLedger,checkLedgerSettlement} from "./partner-commission-ledger";
+import {commissionLedgerEnabled,ledgerReport,ledgerBalance,syncCommissionLedger,checkLedgerSettlement} from "./partner-commission-ledger";
 import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
@@ -82,7 +82,11 @@ export async function myManualPartnerReport(request:Request,env:Env){
   await syncCommissionLedger(env,session.user_id);
   return response(await report(env,session.user_id,false,true),200,env,request);
  }
- const current=await report(env,session.user_id,false,ledger);
+ // A settlement submission needs only the balance, not a history page.
+ const current=ledger?await (async()=>{
+  const balance=await ledgerBalance(env,session.user_id),payout=await payoutEnabled(env),ready=!payout||await recipientReady(env,session.user_id);
+  return {...balance,requestableFen:ready?balance.requestableFen:null,payoutProfileRequired:payout};
+ })():await legacyReport(env,session.user_id,false);
  const amount=current.requestableFen;
  if(Object.keys(body).length!==1||!Number.isSafeInteger(body.expectedAmountFen)||amount===null||body.expectedAmountFen!==amount||amount>1000000000000)
   throw new ApiFailure(409,"PARTNER_REQUEST_UNAVAILABLE","未达到10元、已有申请或金额已变化，请刷新后重试。");
@@ -131,7 +135,7 @@ export async function adminManualPartnerReport(request:Request,env:Env){
   if(!userId){
    const payout=await payoutEnabled(env);
    const queue=await env.DB.prepare("SELECT r.id,r.partner_user_id,r.amount_fen,r.created_at,u.email"+(payout?",EXISTS(SELECT 1 FROM partner_request_recipients s WHERE s.request_id=r.id) recipient_available":"")+" FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id WHERE r.status='pending' ORDER BY r.created_at,r.id LIMIT 50").all();
-   return response({enabled:true,queue:queue.results,...(payout?{payoutProfileEnabled:true}:{})},200,env,request);
+   return response({enabled:true,queue:queue.results,ledgerEnabled:await commissionLedgerEnabled(env),...(payout?{payoutProfileEnabled:true}:{})},200,env,request);
   }
   if(!/^[A-Za-z0-9_-]{1,80}$/.test(userId))throw new ApiFailure(400,"INVALID_REQUEST","用户标识无效。");
   if(!await assigned(env,userId))throw new ApiFailure(404,"USER_NOT_FOUND","尚未指定该推广伙伴。");

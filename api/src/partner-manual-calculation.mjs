@@ -3,11 +3,13 @@ import {boltCommissionEvidencePlan,classifyBoltCommissionEvidence} from './partn
 const id=x=>typeof x==='string'&&/^[A-Za-z0-9_-]{1,80}$/.test(x);
 const int=(x,min,max=Number.MAX_SAFE_INTEGER)=>Number.isSafeInteger(x)&&x>=min&&x<=max;
 export const REPORT_LIMIT=100;
+/** @param {string} domain @param {string} userId @param {boolean} boltReady @param {string[] | null} orderIds */
 export function manualCandidatePlan(domain,userId,boltReady=false,orderIds=null){
  if(!id(userId)||!['recharge','subscription'].includes(domain))throw new TypeError('PARTNER_REPORT_INVALID');
  if(orderIds!==null&&(!Array.isArray(orderIds)||!orderIds.length||orderIds.length>40||orderIds.some(x=>!id(x))||new Set(orderIds).size!==orderIds.length))throw new TypeError('PARTNER_REPORT_INVALID');
  const filter=orderIds?' AND o.id IN ('+orderIds.map(()=>'?').join(',')+')':'';
  const orders=domain==='recharge'?'recharge_orders':'subscription_orders';
+ const from=orderIds?`${orders} o CROSS JOIN referral_invites r ON r.invited_user_id=o.user_id`:`referral_invites r JOIN ${orders} o ON o.user_id=r.invited_user_id`;
  const boltJoin=boltReady?` LEFT JOIN boltutil_orders bo ON bo.${domain==='recharge'?'credit_order_id':'subscription_order_id'}=o.id`:'';
  const boltCondition=[...(domain==='recharge'?["o.payment_method='boltutil'"]:[]),...(boltReady?["bo.id IS NOT NULL"]:[])].join(' OR ')||'0';
  return {sql:`SELECT o.id order_id,o.user_id buyer_id,o.paid_at,r.registered_at,
@@ -15,7 +17,7 @@ export function manualCandidatePlan(domain,userId,boltReady=false,orderIds=null)
   p.version,p.status,p.rate_bps,p.term_months,
   (SELECT MIN(v.effective_at) FROM partner_policy_versions v WHERE v.user_id=p.user_id AND v.status='active') first_authorized_at,
   CASE WHEN b.role='user' AND b.status='active' AND b.is_test_account=0 AND b.archived_at IS NULL AND b.email_verified_at IS NOT NULL THEN 1 ELSE 0 END buyer_eligible
-  FROM referral_invites r JOIN ${orders} o ON o.user_id=r.invited_user_id${boltJoin}
+  FROM ${from}${boltJoin}
   JOIN users b ON b.id=r.invited_user_id
   JOIN partner_policy_versions p ON p.user_id=r.inviter_user_id AND p.version=(SELECT v.version FROM partner_policy_versions v WHERE v.user_id=r.inviter_user_id AND v.effective_at<=o.paid_at ORDER BY v.effective_at DESC LIMIT 1)
   WHERE r.inviter_user_id=? AND r.invited_user_id<>r.inviter_user_id AND o.paid_at>0 AND r.registered_at<=o.paid_at AND p.status='active'${filter}
