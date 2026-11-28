@@ -550,51 +550,67 @@
   // existing exact-ID/text fast path failed. No feed scan, prefetch or
   // delay; require independent modal time or native route evidence.
   function verifiedTimelinePreview(post,article,editor,dialog,initialUrl,currentUrl,original,quarantinedPosts){
-    if(!article||!post.article?.isConnected||!original?.ok||original.statusId!==post.statusId||
-       original.sourceUrl!==post.sourceUrl||normalized(original.sourceText)!==normalized(post.sourceText)||
+    if(!article||!post.article?.isConnected||!original?.ok||
        !detailPreviewBefore(article,editor,dialog)||editor.closest('[inert],[aria-hidden="true"]')||
-       !article.matches('article[data-testid="tweet"]')||article.querySelector('article,[data-slot="embedded-tweet-frame"]'))return false;
+       !article.matches('article[data-testid="tweet"]')||article.querySelector('article,[data-slot="embedded-tweet-frame"]'))return null;
+    if(original.statusId!==post.statusId||original.sourceUrl!==post.sourceUrl||
+       normalized(original.sourceText)!==normalized(post.sourceText))return false;
     let owner,routeId;
     try{
       const initial=new URL(initialUrl),current=new URL(currentUrl),source=new URL(post.sourceUrl);
       const m=source.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/?$/);
       if(initial.protocol!=='https:'||!['x.com','twitter.com','www.x.com','www.twitter.com'].includes(initial.hostname)||
          initial.origin!==source.origin||current.origin!==initial.origin||!m||m[2]!==post.statusId||
-         /\/status\/\d+(?:\/|$)/.test(initial.pathname)||initial.pathname.startsWith('/compose/')||
-         current.pathname!=='/compose/post'||current.hash||current.username||current.password||
+         /\/status\/\d+(?:\/|$)/.test(initial.pathname)||initial.pathname.startsWith('/compose/'))return null;
+      if(current.pathname!=='/compose/post'||current.hash||current.username||current.password||
          current.searchParams.has('quote')||current.searchParams.has('quote_tweet_id')||
          current.searchParams.getAll('in_reply_to').length>1)return false;
       owner=m[1].toLowerCase();routeId=current.searchParams.get('in_reply_to');
       if(routeId!==null&&routeId!==post.statusId)return false;
-    }catch{return false;}
+    }catch{return null;}
     const source=scanDetailArticle(post,post.article,initialUrl),modal=scanDetailArticle(post,article,initialUrl);
-    if(source.author()!==owner||modal.author()!==owner)return false;
+    const sourceAuthor=source.author(),modalAuthor=modal.author();
+    if((sourceAuthor&&sourceAuthor!==owner)||(modalAuthor&&modalAuthor!==owner))return false;
     const sourceTime=source.time(),modalTime=modal.time();
     if(sourceTime!==null&&modalTime!==null&&sourceTime!==modalTime)return false;
-    // A long similar prefix alone is insufficient on a feed.
-    if(routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime))return false;
     const sourceEvidence=source.evidence(),modalEvidence=modal.evidence();
-    if(!sourceEvidence.eligible||!modalEvidence.eligible||
-       [sourceEvidence,modalEvidence].some(e=>e.conflict||(e.statusId&&e.statusId!==post.statusId)||
+    if([sourceEvidence,modalEvidence].some(e=>e.conflict||(e.statusId&&e.statusId!==post.statusId)||
          (e.otherCanonicalId&&e.otherCanonicalId!==post.statusId)))return false;
     const expandedId=modal.expansionId();
     if(expandedId&&expandedId!==post.statusId)return false;
     const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId);
     const modalQuote=captureDetailQuote(article,initialUrl,post.statusId);
     if(post.hasCapturedQuote){
-      if(!sourceQuote||!modalQuote||sourceQuote.conflict||modalQuote.conflict||
-         sourceQuote.text!==modalQuote.text||(sourceQuote.id&&modalQuote.id&&sourceQuote.id!==modalQuote.id))return false;
+      if(sourceQuote?.conflict||modalQuote?.conflict||
+         (sourceQuote&&modalQuote&&(sourceQuote.text!==modalQuote.text||
+           (sourceQuote.id&&modalQuote.id&&sourceQuote.id!==modalQuote.id))))return false;
+      if(!sourceQuote||!modalQuote)return null;
     }else if(sourceQuote||modalQuote)return false;
+    // Missing evidence is not an explicit contradiction. Preserve the
+    // existing hydration wait, but never let known conflicts reach it.
+    if(sourceAuthor!==owner||modalAuthor!==owner||
+       !sourceEvidence.eligible||!modalEvidence.eligible||
+       (routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime)))return null;
     if(post.quoteOnly){
       return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
     }
     const full=source.bodies(),short=modal.bodies();
-    if(!full.texts.length||!short.texts.length)return false;
+    if(!full.texts.length||!short.texts.length)return null;
+    // Rendered labels can be truncated or identical for different links.
+    // The visible body link destinations must agree, independently of
+    // text variants. Extra source links are allowed only after a marked
+    // native expansion. Exclude the native Show more control itself.
+    const hrefs=target=>ownedDetailNodes(target,'[data-testid="tweetText"] a[href]')
+      .filter(link=>!link.closest('[data-testid="tweet-text-show-more-link"]'))
+      .map(link=>link.href);
+    const sourceLinks=hrefs(post.article),modalLinks=hrefs(article);
+    if(modalLinks.some((href,i)=>href!==sourceLinks[i])||
+       (!short.expanded&&sourceLinks.length!==modalLinks.length))return false;
     const matches=(long,value)=>{
       if(long===value)return true;
       const prefix=value.replace(/(?:\u2026|\.{3})$/,'').trim();
-      return (short.expanded||prefix!==value)&&Array.from(prefix).length>=40&&
+      return short.expanded&&Array.from(prefix).length>=40&&
         long.length>prefix.length&&long.startsWith(prefix);
     };
     if(quarantinedPosts.some(old=>old?.statusId!==post.statusId&&short.texts.some(value=>
@@ -804,9 +820,9 @@
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
       const timelineFallback=existingContextMatches!==true&&!modernContext&&!post.legacyDetailIdentity&&
-        !post.detailPreviewSource&&sourceUnchanged&&candidates.length===1&&primary?.article&&!primary.id&&
-        verifiedTimelinePreview(post,primary.article,node,dialog,initialUrl,currentUrl,original,quarantinedPosts);
-      const contextMatches=timelineFallback?true:existingContextMatches;
+        !post.detailPreviewSource&&sourceUnchanged&&candidates.length===1&&primary?.article&&!primary.id?
+        verifiedTimelinePreview(post,primary.article,node,dialog,initialUrl,currentUrl,original,quarantinedPosts):null;
+      const contextMatches=timelineFallback===null?existingContextMatches:timelineFallback;
       const compactEvidence=includeCompactEvidence&&detailScan?{
         expansion:detailScan.expands().length===1,
         expansionIdPresent:Boolean(detailScan.expansionId()),

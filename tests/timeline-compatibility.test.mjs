@@ -111,8 +111,8 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       long_timestamp_verified:'bound',long_wrong_timestamp:'rejected',long_wrong_author:'rejected',
       long_wrong_route:'rejected',long_duplicate_route:'rejected',long_exact_route:'bound',
       long_quarantined_prefix:'rejected',long_source_changed:'rejected',same_tco_timestamp:'bound',
-      different_tco_timestamp:'rejected',captioned_quote_timestamp:'bound',captioned_quote_conflict:'waiting',
-      quote_only_timestamp:'bound',quote_only_wrong_quoted_id:'waiting',
+      different_tco_timestamp:'rejected',captioned_quote_timestamp:'bound',captioned_quote_conflict:'rejected',
+      quote_only_timestamp:'bound',quote_only_wrong_quoted_id:'rejected',
       history_conflicting_timestamps:'failed',arbitrary_history_link:'failed'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
