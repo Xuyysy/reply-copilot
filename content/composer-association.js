@@ -121,6 +121,8 @@
       if(evidence.conflict||(evidence.otherCanonicalId&&evidence.otherCanonicalId!==expectedDetailId))
         return 'conflicting_status_links';
       if(evidence.statusId)return evidence.statusId;
+      // A lone arbitrary link is not an independently verified permalink.
+      if(evidence.otherCanonicalId)return null;
       const ordinary=extractor.postIdentity?.(article);
       return ordinary?.statusId||null;
     }
@@ -189,16 +191,19 @@
         }
       }
     }
-    const detailPreviewSource=!post.modernLayout&&!post.quoteOnly&&!hasCapturedQuote&&
-      initialUrl&&/\/status\/\d+(?:[/?#]|$)/.test(initialUrl)?
-      captureDetailPreviewSource(post,initialUrl):null;
-    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto,
+    const legacyDetailRoute=!post.modernLayout&&initialUrl&&/\/status\/\d+(?:[/?#]|$)/.test(initialUrl);
+    const detailPreviewSource=legacyDetailRoute?captureDetailPreviewSource(post,initialUrl):null;
+    const detailQuoteSource=legacyDetailRoute&&hasCapturedQuote?captureDetailQuote(post.article,initialUrl,post.statusId):null;
+    const detailNativeVideo=Boolean(legacyDetailRoute&&ownedDetailNodes(post.article,'video').length);
+    return {...post,hasCapturedPhoto,hasCapturedQuote,hasCapturedMedia:hasCapturedMedia||hasCapturedPhoto||detailNativeVideo,
       ...(detailPreviewSource?{detailPreviewSource}:{}),
+      ...(detailQuoteSource?{detailQuoteSource}:{}),
       ...(detailPreviewSource&&timelinePreview?.statusId===post.statusId&&
         timelinePreview.sourceUrl===post.sourceUrl&&typeof timelinePreview.sourceText==='string'&&
         normalized(timelinePreview.sourceText)?{timelinePreview:Object.freeze({
           statusId:timelinePreview.statusId,sourceText:timelinePreview.sourceText,
-          hasCapturedPhoto:timelinePreview.hasCapturedPhoto,hasCapturedMedia:timelinePreview.hasCapturedMedia
+          hasCapturedPhoto:timelinePreview.hasCapturedPhoto,hasCapturedMedia:timelinePreview.hasCapturedMedia,
+          quoteOnly:timelinePreview.quoteOnly===true,hasCapturedQuote:timelinePreview.hasCapturedQuote===true
         })}:{}),
       ...(modernCaptionQuote?(post.quoteOnly?{modernQuoteOnly:modernCaptionQuote}:{modernCaptionQuote}):{})};
   }
@@ -341,7 +346,7 @@
     if(!owner||!post.article||!normalized(post.sourceText))return null;
     const author=detailAuthor(post.article,initialUrl);
     if(author&&author!==owner)return null;
-    const media=Boolean(post.article.querySelector('[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]'));
+    const media=Boolean(ownedDetailNodes(post.article,'[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"],video').length);
     const body=detailBodies(post.article,media);
     return Object.freeze({owner,author,time:detailTimestamp(post.article),
       texts:Object.freeze([...new Set([presentationNormalize(post.sourceText,media),...body.texts].filter(Boolean))])});
@@ -358,16 +363,54 @@
          /\/status\/\d+(?:\/|$)/.test(u.pathname)||u.pathname.startsWith('/compose/'))return null;
     }catch{return null;}
     const post=globalThis.ZaneReplyCopilotContent.postExtractor.extractPost(article,initialUrl);
-    if(!post.ok||post.modernLayout||post.legacyDetailIdentity||post.quoteOnly||
+    if(!post.ok||post.modernLayout||post.legacyDetailIdentity||
        !normalized(post.sourceText)||post.sourceText.length>40000)return null;
     const captured=capturePost(post,initialUrl);
-    if(captured.hasCapturedQuote)return null;
     return Object.freeze({statusId:post.statusId,sourceUrl:post.sourceUrl,sourceText:post.sourceText,
-      hasCapturedPhoto:captured.hasCapturedPhoto,hasCapturedMedia:captured.hasCapturedMedia});
+      hasCapturedPhoto:captured.hasCapturedPhoto,hasCapturedMedia:captured.hasCapturedMedia,
+      quoteOnly:post.quoteOnly===true,hasCapturedQuote:captured.hasCapturedQuote});
   }
   function timelineEquivalent(post,candidate){
-    if(!post.timelinePreview||post.timelinePreview.statusId!==post.statusId||!candidate?.text)return false;
+    if(!post.timelinePreview||post.timelinePreview.statusId!==post.statusId||!candidate?.text||
+       post.timelinePreview.quoteOnly!==Boolean(post.quoteOnly)||
+       post.timelinePreview.hasCapturedQuote!==Boolean(post.hasCapturedQuote))return false;
     return sameContext(post.timelinePreview,candidate.text);
+  }
+  // Capture exactly one explicit quoted card, independently of the outer
+  // author. Never borrow its ID as the target. Read-only DOM evidence.
+  function captureDetailQuote(article,initialUrl,outerId){
+    const cards=[...article.querySelectorAll('[data-testid="quoteTweet"],div[role="link"]')].filter(card=>
+      card.closest('article')===article&&
+      (card.matches('[data-testid="quoteTweet"]')||
+       card.querySelector('[data-testid="User-Name"]')&&card.querySelector('[data-testid="tweetText"]')));
+    const roots=cards.filter(card=>!cards.some(other=>other!==card&&other.contains(card)));
+    if(!roots.length)return null;
+    if(roots.length!==1)return {conflict:true};
+    const card=roots[0],bodies=[...card.querySelectorAll('[data-testid="tweetText"]')];
+    if(bodies.length!==1)return {conflict:true};
+    const ids=new Set();
+    for(const time of card.querySelectorAll('time')){
+      const link=time.closest('a[href*="/status/"]');
+      if(!link||!card.contains(link))continue;
+      try{
+        const base=new URL(initialUrl),u=new URL(link.getAttribute('href'),base);
+        const match=u.pathname.match(/^\/[A-Za-z0-9_]{1,15}\/status\/(\d+)(?:\/history)?\/?$/);
+        if(u.origin!==base.origin||!match||u.username||u.password||u.hash)return {conflict:true};
+        ids.add(match[1]);
+      }catch{return {conflict:true};}
+    }
+    if(ids.size>1||ids.has(outerId))return {conflict:true};
+    const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(bodies[0]));
+    return text?Object.freeze({id:ids.values().next().value||null,text}):{conflict:true};
+  }
+  function detailQuoteCheck(post,article,initialUrl){
+    if(!post.hasCapturedQuote)return {conflict:Boolean(captureDetailQuote(article,initialUrl,post.statusId)),matched:false};
+    const captured=post.detailQuoteSource,modal=captureDetailQuote(article,initialUrl,post.statusId);
+    if(!modal)return {conflict:false,matched:false};
+    if(!captured||captured.conflict||modal.conflict||
+       (captured.id&&modal.id&&captured.id!==modal.id)||
+       captured.text!==modal.text)return {conflict:true,matched:false};
+    return {conflict:false,matched:Boolean(captured.id&&modal.id===captured.id)};
   }
   function detailPreviewBefore(article,editor,dialog){
     return visible(article)&&article.closest('[role="dialog"]')===dialog&&
@@ -387,10 +430,12 @@
   function compactDetailPreview(post,article,editor,dialog,text,initialUrl,currentUrl,quarantinedPosts){
     const captured=post.detailPreviewSource,owner=detailRouteOwner(post,initialUrl);
     if(!captured||!owner||captured.owner!==owner||
-       post.hasCapturedQuote||post.quoteOnly||!article?.matches?.('article[data-testid="tweet"]')||
+       post.quoteOnly||!article?.matches?.('article[data-testid="tweet"]')||
        !detailPreviewBefore(article,editor,dialog)||!routeAllowed(initialUrl,currentUrl,post.statusId,true)||
        editor.closest('[inert],[aria-hidden="true"]')||
-       article.querySelector('article,[data-testid="quoteTweet"],[data-slot="embedded-tweet-frame"]'))return false;
+       article.querySelector('article,[data-slot="embedded-tweet-frame"]')||
+       (!post.hasCapturedQuote&&article.querySelector('[data-testid="quoteTweet"]'))||
+       (post.hasCapturedQuote&&detailQuoteCheck(post,article,initialUrl).conflict))return false;
     try{
       const u=new URL(currentUrl);
       if(u.pathname!=='/compose/post'||u.hash||u.username||u.password)return false;
@@ -624,7 +669,10 @@
         matching.length!==1?null:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
       if(linkless&&modernMatch===true)statusId=routeId;
-      const compactDetailConflict=Boolean(post.detailPreviewSource&&!modernContext&&primary?.article&&detailContextConflict(post,primary.article,initialUrl));
+      const detailQuoteEvidence=post.detailPreviewSource&&!modernContext&&primary?.article&&post.hasCapturedQuote?
+        detailQuoteCheck(post,primary.article,initialUrl):null;
+      const compactDetailConflict=Boolean(post.detailPreviewSource&&!modernContext&&primary?.article&&
+        (detailContextConflict(post,primary.article,initialUrl)||detailQuoteEvidence?.conflict));
       const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&!compactDetailConflict&&
         candidates.length===1&&primary?.article&&(!primary.id||primary.id===post.statusId)&&
         compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts));
@@ -638,18 +686,24 @@
         (!primary.id||primary.id===post.statusId)&&timelineEquivalent(post,primary)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
           (sameContext(old,primary.text)||sameContext(old,post.timelinePreview.sourceText))));
-      const detailExactMatch=Boolean(post.legacyDetailIdentity&&post.detailPreviewSource&&
+      const detailExactMatch=Boolean(!post.quoteOnly&&post.legacyDetailIdentity&&post.detailPreviewSource&&
         sourceUnchanged&&candidates.length===1&&primary?.article&&
         detailPreviewBefore(primary.article,node,dialog)&&!primary.id&&sameContext(post,text)&&
         (post.legacyDetailKind==='owned'||detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner));
+      const verifiedQuoteOnly=Boolean(post.quoteOnly&&post.detailPreviewSource&&detailQuoteEvidence?.matched&&
+        sourceUnchanged&&candidates.length===1&&primary?.article&&
+        detailPreviewBefore(primary.article,node,dialog)&&!compactDetailConflict&&
+        detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner&&
+        !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
       const detailMatch=post.legacyDetailIdentity?
         candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!detailPreviewBefore(c.article,node,dialog)))||matching.length>1||compactDetailConflict?false:
-        matching.length===1&&candidates.length===1?true:
-        compactDetailMatch||priorTimelineMatch||detailExactMatch?true:null:null;
+        matching.length===1&&candidates.length===1?(!post.quoteOnly||!quotePreview.seen||quotedPreviewMatches):
+        verifiedQuoteOnly||(!post.quoteOnly&&(compactDetailMatch||priorTimelineMatch||detailExactMatch))?true:null:null;
       const contextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
         ? !candidates.length?null
-          :matching.length>1?false
+          :matching.length>1||compactDetailConflict?false
           :matching.length===1?(!quotePreview.seen || quotedPreviewMatches)
+          :verifiedQuoteOnly?true
           // Quote text alone cannot identify the reply target. Wait for
           // X's outer parent to hydrate instead of rejecting prematurely.
           :candidates.some(item=>Boolean(item.id))?false:null

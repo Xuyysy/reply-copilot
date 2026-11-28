@@ -185,15 +185,15 @@
   // Legacy detail pages can expose a non-linked timestamp and native
   // photo/video or analytics URLs instead of a canonical permalink.
   // These are evidence only when owned by this exact outer tweet.
-  const DETAIL_MEDIA='[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]';
+  const DETAIL_MEDIA='[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"],video';
   function detailStatusLink(raw,base) {
     if(!raw||!base)return null;
     try {
       const origin=new URL(base),url=new URL(raw,origin);
       if(origin.protocol!=='https:'||!STATUS_HOSTS.has(origin.hostname)||
          url.origin!==origin.origin||url.username||url.password||url.hash)return null;
-      const alias=url.pathname.match(/^\/i(?:\/web)?\/status\/(\d+)\/?$/);
-      if(alias)return {id:alias[1],kind:'alias'};
+      const alias=url.pathname.match(/^\/i(?:\/web)?\/status\/(\d+)(?:\/(history))?\/?$/);
+      if(alias)return {id:alias[1],kind:alias[2]||'alias'};
       const match=url.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)(?:\/(photo\/[1-9]\d*|video\/[1-9]\d*|analytics|history))?\/?$/);
       if(!match)return null;
       return {id:match[2],kind:match[3]||'canonical',
@@ -210,7 +210,9 @@
       return !card||!article.contains(card);
     };
     const bodies=[...article.querySelectorAll('[data-testid="tweetText"]')].filter(owned);
-    if(bodies.length!==1)return none;
+    // Quote-only posts have no outer caption. Still require a real quote
+    // card with readable context; its links never become parent evidence.
+    if(bodies.length>1||(!bodies.length&&!quoteText(article)))return none;
     const outsideBody=node=>owned(node)&&!node.closest('[data-testid="tweetText"]');
     const ids=new Set(),otherCanonical=new Set();
     let conflict=false;
@@ -294,7 +296,9 @@
        (evidence.statusId&&evidence.statusId!==post.statusId)||
        (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId))return false;
     const norm=s=>(s||'').replace(/\s+/g,' ').trim();
-    if(!norm(post.sourceText)||norm(legacyPostText(article))!==norm(post.sourceText))return false;
+    const currentText=post.quoteOnly?quoteText(article):legacyPostText(article);
+    if(!norm(post.sourceText)||norm(currentText)!==norm(post.sourceText))return false;
+    if(post.quoteOnly&&legacyPostText(article))return false;
     if(evidence.statusId===post.statusId)return true;
     // Opening the native modal can remove the background detail composer.
     // Only the already captured article may retain its focal qualification.

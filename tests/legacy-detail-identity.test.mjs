@@ -210,6 +210,49 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       checks.timelineWrongModalId=state(navigated).state!=='bound';
       e=preview(prior.sourceText,true);inner.querySelector('time').remove();e.textContent='draft';
       checks.timelineDraft=state(navigated).reason==='existing_draft';
+      // Captioned video, ordinary repost and explicitly quoted post share
+      // the same reply-editor association. The quoted ID is never the parent.
+      const videoCaption='Synthetic video caption describing the visible post';
+      const videoSource=make('videoDetail',header()+'<div data-testid="tweetText">'+videoCaption+'</div><a href="'+url+'/video/1"><video controls></video></a>');
+      const videoPost=a.capturePost(p.extractPost(videoSource,url),url);
+      checks.nativeVideoIdentity=videoPost.ok&&videoPost.statusId==='101'&&videoPost.hasCapturedMedia;
+      e=preview(videoCaption+' pic.x.com/Video1');inner.querySelector('time').remove();
+      checks.videoCompact=state(videoPost).editor===e;
+      const repostSource=make('repost','<div data-testid="socialContext">Other person reposted</div>'+header()+'<div data-testid="tweetText">'+full+'</div>'+photo('101')+actions('101'));
+      const repostPost=a.capturePost(p.extractPost(repostSource,url),url);
+      checks.repostOriginalIdentity=repostPost.ok&&repostPost.statusId==='101'&&repostPost.detailPreviewSource.owner==='example';
+      e=preview(full);inner.querySelector('time').remove();
+      checks.repostReply=state(repostPost).editor===e;
+      const quoteMarkup=(id='202',body='Synthetic quoted original content')=>'<div data-testid="quoteTweet"><div data-testid="User-Name"><a href="https://x.com/quoted">@quoted</a></div><a href="https://x.com/quoted/status/'+id+'"><time>Now</time></a><div data-testid="tweetText">'+body+'</div></div>';
+      const qSource=make('quoteDetail',header()+'<div data-testid="tweetText">'+full+'</div>'+quoteMarkup()+actions('101'));
+      const qPost=a.capturePost(p.extractPost(qSource,url),url);
+      checks.quoteCaptionSource=qPost.ok&&qPost.statusId==='101'&&qPost.hasCapturedQuote&&qPost.detailQuoteSource.id==='202';
+      e=preview(prefix,true);inner.querySelector('time').remove();inner.querySelector('article').insertAdjacentHTML('beforeend',quoteMarkup());
+      checks.quoteCaptionReply=state(qPost).editor===e;
+      inner.querySelector('[data-testid="quoteTweet"] a[href*="/status/"]').href='https://x.com/quoted/status/303';
+      checks.quoteCaptionConflict=state(qPost).state!=='bound';
+      const qoSource=make('quoteOnlyDetail',header()+quoteMarkup()+actions('101'));
+      const qoPost=a.capturePost(p.extractPost(qoSource,url),url);
+      checks.quoteOnlySource=qoPost.ok&&qoPost.quoteOnly&&qoPost.statusId==='101'&&qoPost.sourceText==='Synthetic quoted original content';
+      e=preview('');inner.querySelector('time').remove();inner.querySelector('article > [data-testid="tweetText"]').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend',quoteMarkup());
+      checks.quoteOnlyReply=state(qoPost).editor===e;
+      inner.querySelector('[data-testid="quoteTweet"] a[href*="/status/"]').href='https://x.com/quoted/status/303';
+      checks.quoteOnlyWrongQuotedId=state(qoPost).state!=='bound';
+      e=preview('');inner.querySelector('time').remove();inner.querySelector('article > [data-testid="tweetText"]').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend',quoteMarkup('202','Different quoted content'));
+      checks.quoteOnlyWrongText=state(qoPost).state!=='bound';
+      e=preview('');inner.querySelector('time').remove();inner.querySelector('article > [data-testid="tweetText"]').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend',quoteMarkup());
+      inner.querySelector('[data-testid="User-Name"] a').href='https://x.com/other';
+      checks.quoteOnlyWrongOuterAuthor=state(qoPost).state!=='bound';
+      e=preview('');inner.querySelector('time').remove();inner.querySelector('article > [data-testid="tweetText"]').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend',quoteMarkup());
+      e.textContent='draft';checks.quoteOnlyDraft=state(qoPost).reason==='existing_draft';
+      const editedAlias=make('editedAlias',header()+'<a href="https://x.com/i/web/status/101/history"><time>Edited</time></a><div data-testid="tweetText">'+full+'</div>');
+      checks.editedAliasHistory=p.extractPost(editedAlias,url).statusId==='101';
+      const noCaptionVideo=make('noCaptionVideo',header()+'<a href="'+url+'/video/1"><video></video></a>');
+      checks.noInventedVideoContent=!p.extractPost(noCaptionVideo,url).ok;
       $('result').textContent=JSON.stringify(checks);
     };
     const file=path.join(dir,'fixture.html');writeFileSync(file,'<!doctype html><html><body><main></main><output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>');
@@ -219,7 +262,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
     const checks=JSON.parse(match[1]);
-    assert.equal(Object.keys(checks).length,82);
+    assert.equal(Object.keys(checks).length,97);
     assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
