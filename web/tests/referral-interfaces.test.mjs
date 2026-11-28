@@ -5,13 +5,14 @@ import {readFileSync} from "node:fs";
 const read=path=>readFileSync(new URL(path,import.meta.url),"utf8");
 const account=read("../src/components/account/AccountDashboard.tsx");
 const card=read("../src/components/account/ReferralInviteCard.tsx");
+const wrapper=read("../src/components/account/ReferralAndPartnerCards.tsx");
 const login=read("../src/components/auth/AuthPanel.tsx");
 const admin=read("../src/components/admin/AdminDashboard.tsx");
 const adminPanel=read("../src/components/admin/ReferralAdminPanel.tsx");
 
 test("My Account includes V1 referrals beside existing free and paid credit balances",()=>{
- assert.match(account,/import ReferralInviteCard from "\.\/ReferralInviteCard"/);
- assert.match(account,/<ReferralInviteCard language=\{language\}\/>/);
+ assert.match(account,/import ReferralAndPartnerCards from "\.\/ReferralAndPartnerCards"/);
+ assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\}\/>/);
  assert.match(card,/account-referral-rewards/);
  assert.match(card,/\/v1\/referrals\/me/);
  assert.match(card,/\/v1\/referrals\/link/);

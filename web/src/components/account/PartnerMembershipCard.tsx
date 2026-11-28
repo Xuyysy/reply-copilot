@@ -9,15 +9,15 @@ import {Card,CardContent,CardHeader,CardTitle} from "../ui/card";
 type Policy={status:"active"|"paused";level:"standard"|"advanced"|"strategic";rate_bps:number;term_months:number|null;effective_at:number};
 type Result={enabled:boolean;policy?:Policy|null;payoutProfileEnabled?:boolean};
 
-export default function PartnerMembershipCard({language,owner}:{language:Language;owner:string}){
+export default function PartnerMembershipCard({language,owner,onRecruitment}:{language:Language;owner:string;onRecruitment?:(show:boolean)=>void}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [result,setResult]=useState<Result|null>(null);
  useEffect(()=>{
-  let live=true;setResult(null);
-  void api<Result>("/v1/partners/me").then(value=>{if(live)setResult(value);})
+  let live=true;setResult(null);onRecruitment?.(false);
+  void api<Result>("/v1/partners/me").then(value=>{if(live){setResult(value);onRecruitment?.(value.enabled===true&&value.policy===null);}})
    .catch(()=>{if(live)setResult(null);});
   return()=>{live=false;};
- },[owner]);
+ },[owner,onRecruitment]);
  // No public eligibility checker, no panel for an unassigned account, and no
  // optimistic visibility while the authenticated server response is pending.
  if(!result?.enabled||!result.policy)return null;
@@ -34,7 +34,7 @@ export default function PartnerMembershipCard({language,owner}:{language:Languag
     <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{t("约定佣金比例","Configured commission rate")}</p><strong>{new Intl.NumberFormat(language==="zh"?"zh-CN":"en-US",{maximumFractionDigits:2}).format(p.rate_bps/100)}%</strong></div>
     <div className="rounded-lg bg-muted/40 p-3"><p className="text-xs text-muted-foreground">{t("约定合作期限","Configured term")}</p><strong>{p.term_months===null?t("不限期","Unlimited"):t(p.term_months+" 个月",p.term_months+" months")}</strong></div>
    </div>
-   <p className="text-xs text-muted-foreground">{t("使用原有邀请链接，分成由管理员人工核对和转账。","Use your existing invite link. Commission is reviewed and transferred manually by the administrator.")}</p>
+   <p className="text-xs text-muted-foreground">{t("使用原有邀请链接，系统自动核实符合条件的订单，管理员人工转账。","Use your existing invite link. Qualifying purchases are verified automatically; the administrator transfers manually.")}</p>
    {result.payoutProfileEnabled&&<PartnerPayoutProfile key={owner+":recipient"} language={language}/>}
    <PartnerManualReport key={owner} language={language} owner={owner}/>
   </CardContent>

@@ -11,7 +11,7 @@ type ReferralMine={
  invitedBy?:{status:string;registeredAt:number;rewardedAt:number|null}|null;
  invites?:{registeredAt:number;status:string;label:string}[];
 };
-export default function ReferralInviteCard({language}:{language:Language}){
+export default function ReferralInviteCard({language,showRecruitment}:{language:Language;showRecruitment:boolean}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
  const [data,setData]=useState<ReferralMine|null>(null);
  const [loading,setLoading]=useState(true);
@@ -52,8 +52,8 @@ export default function ReferralInviteCard({language}:{language:Language}){
     {data.link?<div className="flex flex-wrap items-center gap-2">
       <input aria-label={t("我的邀请链接","My invite link")} readOnly value={data.link} onFocus={e=>e.target.select()} className="min-w-0 flex-1 rounded-md border bg-muted/30 p-2 text-xs"/>
       <Button type="button" size="sm" variant="outline" onClick={()=>void copy()}><Copy size={15}/>{t("复制链接","Copy link")}</Button>
-     </div>:
-      <div className="space-y-3 rounded-lg bg-muted/40 p-3" data-testid="partner-recruitment">
+     </div>:<Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button>}
+    {showRecruitment&&<div className="space-y-3 rounded-lg bg-muted/40 p-3" data-testid="partner-recruitment">
        <h3 className="font-semibold">{t("想让流量变现？成为推广合伙人","Turn your audience into income. Become a partner.")}</h3>
        <div className="grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-lg border bg-background p-3"><p className="text-xs text-muted-foreground">{t("你的推广佣金","Your commission")}</p><strong className="block text-2xl text-emerald-600">15%+</strong><p className="text-xs text-muted-foreground">{t("符合条件的购买订单","Qualifying purchases")}</p></div>
@@ -63,8 +63,7 @@ export default function ReferralInviteCard({language}:{language:Language}){
        <p className="text-sm">{t("成为合伙人后，粉丝产生的符合条件的充值及订阅订单，还能为你带来最低 15% 的约定佣金收入。","Approved partners also earn an agreed commission of at least 15% on qualifying credit and subscription purchases made by their referrals.")}</p>
        <p className="text-sm font-semibold">{t("粉丝更划算，你也有收益。","A better deal for your audience, extra income for you.")}</p>
        <p className="text-sm">{t("想成为合伙人获得现金返佣？请先私信我，审核通过后开通。","Want to earn cash commissions? DM me first for approval and activation.")}{" "}<a href="https://x.com/yyx1945969" target="_blank" rel="noopener noreferrer" className="font-medium text-primary underline underline-offset-4">{t("在 X 上私信 @yyx1945969","DM @yyx1945969 on X")}</a></p>
-       <Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button>
-       <p className="text-xs text-muted-foreground">{t("普通邀请奖励无需申请合作，生成链接不代表开通现金返佣。","Standard referral rewards do not require approval. Creating a link does not activate cash commissions.")}</p>
+       <p className="text-xs text-muted-foreground">{data.link?t("审核开通后，继续使用已有邀请链接，无需重新生成。","After approval, keep using your existing invite link; no new link is needed."):t("普通邀请奖励无需申请合作，生成链接不代表开通现金返佣。","Standard referral rewards do not require approval. Creating a link does not activate cash commissions.")}</p>
       </div>}
     <p className="text-xs text-muted-foreground">{t("30 天内最多奖励 20 位有效邀请。仅新注册用户可通过链接建立邀请关系。","Up to 20 rewarded referrals per rolling 30 days. Only newly created accounts can be attributed.")}</p>
    </div>}

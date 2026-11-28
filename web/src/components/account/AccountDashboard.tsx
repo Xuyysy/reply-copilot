@@ -1,7 +1,6 @@
 import {subscriptionStatus,type SubscriptionOrder} from './SubscriptionCheckout';
 import {BoltOrderActions,BoltPaymentBadge,BoltStandaloneOrderRow,boltPaymentStatus,type BoltOrder} from './AccountBoltOrder';
-import ReferralInviteCard from "./ReferralInviteCard";
-import PartnerMembershipCard from "./PartnerMembershipCard";
+import ReferralAndPartnerCards from "./ReferralAndPartnerCards";
 import {loadAccountSnapshot} from "../../lib/account-load.mjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Loader2, RefreshCw, X } from "lucide-react";
@@ -468,8 +467,7 @@ export default function AccountDashboard() {
       </AlertDescription>
     </Alert>}
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">{[[usage.subscription?.status==="active"?t("原有免费及永久次数", "Welcome and permanent credits"):t("剩余可生成次数", "Generations remaining"), usage.quota.totalRemaining], [t("免费额度", "Free credits"), usage.quota.freeRemaining], [t("永久付费额度", "Permanent purchased credits"), usage.quota.paidRemaining]].map(([label, value], index) => <Card key={String(label)} className={index === 0 ? "border-primary/30 bg-[#f3f8fd]" : ""}><CardContent className="p-6"><p className="text-sm text-muted-foreground">{label}</p><strong className="mt-3 block text-4xl font-semibold tracking-tight">{value}</strong></CardContent></Card>)}</div>
-    <ReferralInviteCard language={language}/>
-    <PartnerMembershipCard key={data.account.user.userId} owner={data.account.user.userId} language={language}/>
+    <ReferralAndPartnerCards key={data.account.user.userId} owner={data.account.user.userId} language={language}/>
     {code && authorization !== "pending" && <Alert role="status" variant={authorization === "expired" || authorization === "invalid" || authorization === "used" || authorization === "error" ? "destructive" : "default"}><AlertDescription className="flex flex-wrap items-center gap-3">{authorization === "checking" ? t("正在检查设备码…", "Checking device code…") : authorization === "approved" ? waitingForExtension : authorization === "expired" ? t("设备码已过期，请返回插件重新发起绑定。", "This code expired. Start again in the extension.") : authorization === "used" && (connected || connectionProblem || autoBinding) ? waitingForExtension : authorization === "used" ? t("设备码已使用，不能再次授权。请在插件检查连接状态，或重新发起绑定。", "This code was used. Check the extension or start again.") : authorization === "invalid" ? t("设备码无效，请返回插件重新发起绑定。", "Invalid code. Start again in the extension.") : message || t("暂时无法检查设备码。", "Unable to check the code.")}{connectionProblem && proof && <Button variant="outline" size="sm" onClick={retryConnection}>{t("重新检查连接", "Check connection again")}</Button>}{authorization === "error" && <Button variant="outline" size="sm" onClick={() => void checkAuthorization()}>{t("重试", "Retry")}</Button>}<Button variant="ghost" size="sm" onClick={dismissAuthorization}>{t("关闭提示", "Dismiss")}</Button></AlertDescription></Alert>}
     <Dialog open={dialogOpen && (authorization === "pending" || authorization === "approved")} onOpenChange={open => { if (!open && !busy && !autoBinding) dismissAuthorization(); }}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto" onOpenAutoFocus={event => { if (bindingTitle.current) { event.preventDefault(); bindingTitle.current.focus({preventScroll:true}); } }} onEscapeKeyDown={event => { if (autoBinding || busy) event.preventDefault(); }} onInteractOutside={event => { if (autoBinding || busy) event.preventDefault(); }} showCloseButton={!busy && !autoBinding} closeLabel={t("关闭", "Close")}>

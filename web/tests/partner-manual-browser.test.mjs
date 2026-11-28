@@ -9,6 +9,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  try{
  await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';
  import Membership from './src/components/account/PartnerMembershipCard';
+ import ReferralAndPartner from './src/components/account/ReferralAndPartnerCards';
  import Admin from './src/components/admin/PartnerAdminPanel';
  import {api} from './src/lib/api';
  const root=createRoot(document.getElementById('root'));
@@ -20,6 +21,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
   if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null});
+  if(u.pathname==='/v1/referrals/me')return Response.json({enabled:true,canInvite:true,link:f.link??null});
   if(init.method==='POST'){
    if(init.headers['X-CSRF-Token']!=='fixture-csrf')throw Error('Missing CSRF');
    const b=JSON.parse(init.body);f.posts.push({path:u.pathname,body:b});
@@ -40,6 +42,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
   throw Error('Unexpected API '+u.pathname);
  };
  window.showMember=(owner='partner',language='zh')=>{f.owner=owner;root.render(<Membership key={owner} owner={owner} language={language}/>);};
+ window.showReferral=(owner,link,enabled=true)=>{f.owner=owner;f.link=link;f.enabled=enabled;root.render(<ReferralAndPartner key={owner+':'+link+':'+enabled} owner={owner} language="zh"/>);};
  window.showAdmin=()=>root.render(<Admin language="zh" write={(p,b)=>api(p,{method:'POST',body:JSON.stringify({...b,operationId:'fixture-operation'})})}/>);
  window.showMember();`,resolveDir:web,loader:'tsx'},bundle:true,platform:'browser',format:'iife',define:{'import.meta.env.PUBLIC_API_BASE_URL':'"https://account.fixture.invalid"','import.meta.env.DEV':'false'},outfile:path.join(dir,'app.js')});
  const {readdirSync}=await import('node:fs');const css=readdirSync(path.join(web,'dist/_astro')).find(x=>x.endsWith('.css'));
@@ -68,5 +71,9 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await evaluate('showMember()');await press('查看分成');await until(has('已拒绝'));assert.equal(await evaluate(disabled('申请结算')),false);
  await call('Emulation.setDeviceMetricsOverride',{width:375,height:850,deviceScaleFactor:1,mobile:true});assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
  await evaluate('showMember("ordinary")');await until('!document.querySelector("[data-testid=partner-membership]")');assert.equal(await evaluate('fixture.posts.length'),4);
+ await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until(has('想让流量变现'));assert.equal(await evaluate('Boolean(document.querySelector("[aria-label=我的邀请链接]"))'),true);assert.equal(await evaluate(has('审核开通后，继续使用已有邀请链接')),true);assert.equal(await evaluate('Boolean('+button('生成我的邀请链接')+')'),false);
+ await evaluate('showReferral("ordinary",null)');await until(has('想让流量变现'));assert.equal(await evaluate('Boolean('+button('生成我的邀请链接')+')'),true);
+ await evaluate('showReferral("partner","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef")');await until(has('推广伙伴'));assert.equal(await evaluate(has('想让流量变现')),false);
+ await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef",false)');await until('Boolean(document.querySelector("[aria-label=我的邀请链接]"))');assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate('fixture.posts.length'),4);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });
