@@ -30,7 +30,7 @@ test("Partners owns V1 referrals and My Account retains only a navigation link",
  assert.match(card,/你和好友各额外获得 50 次/);
  assert.match(card,/both you and your friend earn 50 extra credits each/);
  assert.match(card,/合计 250 次/);
- assert.match(card,/保持你原有的内容和更新节奏，偶尔分享几次自己的邀请链接就可以/);
+ assert.match(card,/保持你原有的内容和更新节奏，通过分享实用工具、使用心得或原创文章，自然地融入你的专属邀请链接/);
  assert.match(card,/Keep posting your own content as usual and share your referral link from time to time/);
  assert.match(card,/普通邀请的免费额度奖励，每30天最多20位/);
   assert.match(card,/推广合伙人的现金佣金不受此人数限制/);
