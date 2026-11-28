@@ -53,7 +53,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const press=async t=>{await until(button(t));await evaluate('('+button(t)+').click()');};
  const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
  const disabled=t=>'Boolean(('+button(t)+')?.disabled)';
- await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('本笔推广佣金')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate(has('注册于')),true);assert.equal(await evaluate(disabled('申请结算')),true);
+ await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('订单本金')),true);assert.equal(await evaluate(has('佣金比例')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate('Boolean(document.querySelector("[data-testid=partner-purchase-list]"))'),true);assert.equal(await evaluate(disabled('申请结算')),true);
  assert.deepEqual(await evaluate('fixture.posts'),[]);
  await evaluate('fixture.earned=1000');await press('刷新');await until('!'+disabled('申请结算'));await evaluate('fixture.hold=true');
  await evaluate('('+button('申请结算')+').click();('+button('申请结算')+').click()');
