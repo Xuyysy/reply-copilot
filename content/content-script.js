@@ -212,7 +212,7 @@
   }
   function quarantineActivation(post) {
     if (!post?.statusId || typeof post.sourceText !== 'string') return;
-    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto) };
+    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto), hasCapturedMedia: Boolean(post.hasCapturedMedia), detailPreviewSource:post.detailPreviewSource };
     const withoutSame = quarantinedPosts.filter(item => item.statusId !== retained.statusId);
     withoutSame.unshift(retained);
     quarantinedPosts.splice(0, quarantinedPosts.length, ...withoutSame.slice(0, 8));
@@ -557,7 +557,7 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
-      if((current.post.modernLayout||current.post.legacyDetailIdentity||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
+      if((current.post.modernLayout||current.post.legacyDetailIdentity||current.post.detailPreviewSource||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
         if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
         return;
       }

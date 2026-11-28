@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "x-Reply-Helper",
   "short_name": "x-Reply-Helper",
-  "version": "0.3.17",
-  "version_name": "0.3.17",
+  "version": "0.3.18",
+  "version_name": "0.3.18",
   "description": "x-Reply-Helper：用你的语气生成可编辑的 X 回复草稿。",
   "icons": {
     "16": "icons/icon-16.png",

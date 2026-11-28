@@ -221,19 +221,28 @@
       node.closest('article')===article&&!p.isQuoteContent(node,article)&&
       !node.closest('[contenteditable="true"],[data-zane-reply-copilot]'));
   }
+  // Native header links are preferable; compact previews can render an
+  // unlinked @handle. Missing is not a contradiction, ambiguous is.
   function detailAuthor(article,initialUrl){
     const headers=ownedDetailNodes(article,'[data-testid="User-Name"]');
-    if(headers.length!==1)return null;
+    if(headers.length!==1)return headers.length>1?'!conflict':null;
     const handles=new Set();
     for(const node of headers[0].querySelectorAll('a[href]')){
       if(node.closest('article')!==article||node.closest('[data-testid="User-Name"]')!==headers[0])continue;
       try{
         const base=new URL(initialUrl),u=new URL(node.getAttribute('href'),base);
-        const m=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
-        if(u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&!u.search&&m)handles.add(m[1].toLowerCase());
+        const match=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/?$/);
+        if(u.origin===base.origin&&!u.username&&!u.password&&!u.hash&&!u.search&&match)handles.add(match[1].toLowerCase());
       }catch{}
     }
-    return handles.size===1?handles.values().next().value:null;
+    if(handles.size>1)return '!conflict';
+    if(handles.size===1)return handles.values().next().value;
+    for(const node of headers[0].querySelectorAll('span,div')){
+      if(node.children.length||node.closest('article')!==article)continue;
+      const match=normalized(node.textContent).match(/^@([A-Za-z0-9_]{1,15})$/);
+      if(match)handles.add(match[1].toLowerCase());
+    }
+    return handles.size>1?'!conflict':handles.size===1?handles.values().next().value:null;
   }
   function detailTimestamp(article){
     const times=ownedDetailNodes(article,'time[datetime]').filter(n=>!n.closest('[data-testid="tweetText"]'));
@@ -243,66 +252,117 @@
     const value=Date.parse(raw);
     return Number.isFinite(value)?value:null;
   }
+  function expandControls(article){
+    return ownedDetailNodes(article,'[data-testid="tweet-text-show-more-link"],button,a,[role="button"]').filter(n=>
+      n.matches('[data-testid="tweet-text-show-more-link"]')||
+      /^(?:show more|read more|显示更多|顯示更多|查看更多|展开全文|全文を表示|さらに表示|もっと見る|voir plus|mostrar más|mehr anzeigen)$/i.test(normalized(n.textContent)));
+  }
+  function presentationNormalize(text,media){
+    let s=normalized((text||'').normalize('NFC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,''));
+    if(media)s=s.replace(/(?:\s+(?:https:\/\/\s?)?pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+){1,4}$/i,'').trim();
+    return s;
+  }
+  function detailBodies(article,media){
+    const bodies=ownedDetailNodes(article,'[data-testid="tweetText"]');
+    if(bodies.length!==1)return {texts:[],expanded:false};
+    const body=bodies[0],expands=expandControls(article);
+    if(expands.length>1)return {texts:[],expanded:false};
+    const expand=expands[0],inside=expand&&body.contains(expand);
+    // Keep two representations: rendered text and DOM text (including emoji
+    // alt). Hidden background articles can change innerText on modal open.
+    // Do not remove arbitrary links, words or punctuation.
+    const read=node=>{
+      if(node===expand||node.nodeType===1&&node.matches('[data-zane-reply-copilot],[data-testid="tweetTranslation"],[data-testid="translation"]'))return '';
+      if(node.nodeType===3)return node.textContent||'';
+      if(node.nodeType!==1)return '';
+      if(node.tagName==='IMG')return node.getAttribute('alt')||'';
+      if(node.tagName==='BR')return ' ';
+      const result=[...node.childNodes].map(read).join('');
+      return /^(?:DIV|P|LI)$/.test(node.tagName)?' '+result+' ':result;
+    };
+    const stripLabel=s=>{
+      s=normalized(s);
+      const label=inside?normalized(expand.textContent):'';
+      if(label&&s.endsWith(label))s=s.slice(0,-label.length).trim();
+      return presentationNormalize(s,media);
+    };
+    const rendered=globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body);
+    const texts=[...new Set([stripLabel(rendered),presentationNormalize(read(body),media)].filter(Boolean))];
+    return {texts,expanded:Boolean(expand)};
+  }
   function captureDetailPreviewSource(post,initialUrl){
     const owner=detailRouteOwner(post,initialUrl);
-    if(!owner||!post.article||detailAuthor(post.article,initialUrl)!==owner||
-       !normalized(post.sourceText))return null;
-    return Object.freeze({owner,time:detailTimestamp(post.article)});
+    if(!owner||!post.article||!normalized(post.sourceText))return null;
+    const author=detailAuthor(post.article,initialUrl);
+    if(author&&author!==owner)return null;
+    const media=Boolean(post.article.querySelector('[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"]'));
+    const body=detailBodies(post.article,media);
+    return Object.freeze({owner,author,time:detailTimestamp(post.article),
+      texts:Object.freeze([...new Set([presentationNormalize(post.sourceText,media),...body.texts].filter(Boolean))])});
   }
-  function mediaPresentationText(text,post){
-    const s=normalized(text);
-    if(!post.hasCapturedMedia)return s;
-    // Only X's literal image presentation suffix, not arbitrary links,
-    // punctuation, handles, or words. Never visit or transmit the URL.
-    return s.replace(/(?:\s+(?:https:\/\/\s?)?pic\.x\.com\/[A-Za-z0-9]+){1,4}$/,'').trim();
+  function detailPreviewBefore(article,editor,dialog){
+    return visible(article)&&article.closest('[role="dialog"]')===dialog&&
+      !article.contains(editor)&&!article.closest('[contenteditable="true"],[data-zane-reply-copilot]')&&
+      Boolean(article.compareDocumentPosition(editor)&4);
+  }
+  function detailContextConflict(post,article,initialUrl){
+    const owner=detailRouteOwner(post,initialUrl);
+    const evidence=globalThis.ZaneReplyCopilotContent.postExtractor.legacyDetailEvidence(article,initialUrl);
+    const author=detailAuthor(article,initialUrl),time=detailTimestamp(article),captured=post.detailPreviewSource;
+    return evidence.conflict||(evidence.statusId&&evidence.statusId!==post.statusId)||
+      (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId)||
+      Boolean(author&&author!==owner)||
+      Boolean(captured&&captured.time!==null&&time!==null&&captured.time!==time);
   }
   function compactDetailPreview(post,article,editor,dialog,text,initialUrl,currentUrl,quarantinedPosts){
-    const captured=post.detailPreviewSource;
-    const owner=detailRouteOwner(post,initialUrl);
-    if(!captured||!owner||captured.owner!==owner||!post.article?.isConnected||
+    const captured=post.detailPreviewSource,owner=detailRouteOwner(post,initialUrl);
+    if(!captured||!owner||captured.owner!==owner||
        post.hasCapturedQuote||post.quoteOnly||!article?.matches?.('article[data-testid="tweet"]')||
-       !beforeEditor(article,editor,dialog)||!routeAllowed(initialUrl,currentUrl,post.statusId,true))return false;
+       !detailPreviewBefore(article,editor,dialog)||!routeAllowed(initialUrl,currentUrl,post.statusId,true)||
+       editor.closest('[inert],[aria-hidden="true"]')||
+       article.querySelector('article,[data-testid="quoteTweet"],[data-slot="embedded-tweet-frame"]'))return false;
     try{
       const u=new URL(currentUrl);
       if(u.pathname!=='/compose/post'||u.hash||u.username||u.password)return false;
     }catch{return false;}
-    // No reply-preview match may bypass a contradictory parent ID, even
-    // when the old legacy contextId helper returned null for a weak link.
     const extractor=globalThis.ZaneReplyCopilotContent.postExtractor;
     const evidence=extractor.legacyDetailEvidence(article,initialUrl);
-    if(!evidence.eligible||evidence.conflict||
-       (evidence.statusId&&evidence.statusId!==post.statusId)||
-       (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId))return false;
-    if(detailAuthor(article,initialUrl)!==owner||
-       detailAuthor(post.article,initialUrl)!==owner||
-       normalized(extractor.postText(post.article))!==normalized(post.sourceText))return false;
-    const timestamp=detailTimestamp(article);
-    // No fuzzy text or author-only matching. A known conflicting timestamp
-    // is a hard failure. For an omitted permalink require the same exact
-    // native timestamp even for a full media-caption match.
-    if(captured.time===null||timestamp!==captured.time||
-       detailTimestamp(post.article)!==captured.time)return false;
-    if(quarantinedPosts.some(old=>old?.statusId!==post.statusId&&
-       (sameContext(old,text)||old?.detailPreviewSource?.owner===owner&&old.detailPreviewSource.time===timestamp)))return false;
-    const full=mediaPresentationText(post.sourceText,post);
-    let preview=normalized(text);
-    const expand=ownedDetailNodes(article,'[data-testid="tweet-text-show-more-link"]');
-    if(expand.length>1)return false;
-    if(expand.length===1){
-      const label=normalized(expand[0].textContent);
-      // Some X variants put the localized expansion label inside tweetText.
-      // Remove it only if the explicit owned X expansion element is there.
-      const body=expand[0].closest('[data-testid="tweetText"]');
-      if(body&&label&&preview.endsWith(' '+label))preview=preview.slice(0,-label.length).trim();
+    if(!evidence.eligible||detailContextConflict(post,article,initialUrl))return false;
+    const author=detailAuthor(article,initialUrl),timestamp=detailTimestamp(article);
+    if(post.article?.isConnected){
+      const sourceAuthor=detailAuthor(post.article,initialUrl),sourceTime=detailTimestamp(post.article);
+      if((sourceAuthor&&sourceAuthor!==owner)||
+         (captured.time!==null&&sourceTime!==null&&sourceTime!==captured.time))return false;
+      const current=detailBodies(post.article,post.hasCapturedMedia).texts;
+      if(!current.some(v=>captured.texts.includes(v)))return false;
     }
-    preview=mediaPresentationText(preview,post);
-    if(full&&preview===full)return true;
-    if(expand.length!==1)return false;
-    preview=preview.replace(/(?:\u2026|\.{3})$/,'').trim();
-    // Only a positively marked truncation of a substantial exact prefix.
-    // No substring or edit-distance match; original full caption remains
-    // the prompt source, not the display-only truncated modal.
-    return Array.from(preview).length>=40&&full.length>preview.length&&full.startsWith(preview);
+    const matchingTime=captured.time!==null&&timestamp===captured.time;
+    const matchingAuthor=author===owner;
+    const modal=detailBodies(article,post.hasCapturedMedia);
+    if(!modal.texts.length)return false;
+    const oldAmbiguous=quarantinedPosts.some(old=>old?.statusId!==post.statusId&&(
+      modal.texts.some(v=>{
+        const q=presentationNormalize(old.sourceText,old.hasCapturedMedia||old.hasCapturedPhoto);
+        const prefix=v.replace(/(?:\u2026|\.{3})$/,'').trim();
+        return q&&(q===v||(prefix.length>=40&&q.startsWith(prefix)));
+      })||(matchingTime&&old?.detailPreviewSource?.owner===owner&&old.detailPreviewSource.time===timestamp)));
+    if(oldAmbiguous)return false;
+    // Editor-first corroboration: the state machine has already required a
+    // trusted captured click, no old modal, one new focused empty editor.
+    // The modal itself need not repeat a permalink or exact datetime.
+    // A timestamp/author/status contradiction still fails closed.
+    for(const full of captured.texts)for(const value of modal.texts){
+      if(full===value&&(matchingAuthor||matchingTime||Array.from(value).length>=40))return true;
+      const prefix=value.replace(/(?:\u2026|\.{3})$/,'').trim();
+      const marked=modal.expanded||prefix!==value;
+      const length=Array.from(prefix).length;
+      // Some compact previews omit the expansion control; allow only a long
+      // exact prefix with the same native handle, not general similarity.
+      if(full.length>prefix.length&&full.startsWith(prefix)&&
+         ((marked&&length>=40&&(matchingAuthor||matchingTime))||
+          (marked&&length>=80)||(matchingAuthor&&length>=100)))return true;
+    }
+    return false;
   }
   function routeAllowed(initial,current,statusId,modern=false) {
     if(!modern&&initial===current)return true;
@@ -480,11 +540,12 @@
         matching.length!==1?null:
         modernQuotes.length>0&&!modernQuotes.every(t=>normalized(t)===normalized(post.quotedText))?false:true;
       if(linkless&&modernMatch===true)statusId=routeId;
-      const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&
+      const compactDetailConflict=Boolean(post.detailPreviewSource&&!modernContext&&primary?.article&&detailContextConflict(post,primary.article,initialUrl));
+      const compactDetailMatch=Boolean(post.detailPreviewSource&&!modernContext&&sourceUnchanged&&!compactDetailConflict&&
         candidates.length===1&&primary?.article&&(!primary.id||primary.id===post.statusId)&&
         compactDetailPreview(post,primary.article,node,dialog,text,initialUrl,currentUrl,quarantinedPosts));
       const detailMatch=post.legacyDetailIdentity?
-        candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!beforeEditor(c.article,node,dialog)))||matching.length>1?false:
+        candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!detailPreviewBefore(c.article,node,dialog)))||matching.length>1||compactDetailConflict?false:
         compactDetailMatch?true:
         candidates.length!==1||matching.length!==1||!normalized(text)?null:
         sameContext(post,text):null;
@@ -496,7 +557,7 @@
           // X's outer parent to hydrate instead of rejecting prematurely.
           :candidates.some(item=>Boolean(item.id))?false:null
         :!candidates.length?null
-          :matching.length>1?false
+          :matching.length>1||compactDetailConflict?false
           // A uniquely verified parent status ID is the strongest evidence.
         // X may hydrate its caption text later, especially around quotes.
         :matching.length===1?true
