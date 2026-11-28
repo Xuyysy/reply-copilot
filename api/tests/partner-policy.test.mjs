@@ -107,7 +107,7 @@ test('partner candidate excludes automated transfers and schedulers, gates manua
  assert.match(dashboard,/<ReferralAndPartnerCards key=\{state\.owner\} owner=\{state\.owner\} language=\{language\}\/>/);
  assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} applicationsEnabled=\{result\?\.applicationsEnabled===true\} renderPartner=/);
  assert.match(wrapper,/<PartnerMembershipContent owner=\{owner\} language=\{language\} result=\{result\} inviteRecords=\{invites\}/);
- assert.match(wrapper,/result\?\.enabled===true&&result\.policy===null/);
+ assert.match(wrapper,/result\?\.enabled===true&&result\.recruitmentEligible===true&&result\.policy===null/);
  assert.match(wrapper,/usePartnerMembership\(owner\)/);
  assert.match(admin,/<PartnerAdminPanel language=\{language\} write=\{write\}/);
  assert.doesNotMatch(card,/PartnerAlipayRecipient|PartnerPayoutRequests|referral-share|\/promote\//);
