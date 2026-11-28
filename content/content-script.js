@@ -27,6 +27,7 @@
   let settingsRevision = 0;
   let replyPreferenceRevision = 0;
   let pendingActivation = null;
+  let timelineNavigationPreview = null;
   // Staging quote fast path requires an unchanged editor across two reads.
   // The proven 800ms path remains as a conservative fallback.
   const QUOTE_EARLY_CHECK_MS = 360;
@@ -212,7 +213,7 @@
   }
   function quarantineActivation(post) {
     if (!post?.statusId || typeof post.sourceText !== 'string') return;
-    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto) };
+    const retained = { statusId: post.statusId, sourceText: post.sourceText, hasCapturedPhoto: Boolean(post.hasCapturedPhoto), hasCapturedMedia: Boolean(post.hasCapturedMedia), detailPreviewSource:post.detailPreviewSource };
     const withoutSame = quarantinedPosts.filter(item => item.statusId !== retained.statusId);
     withoutSame.unshift(retained);
     quarantinedPosts.splice(0, quarantinedPosts.length, ...withoutSame.slice(0, 8));
@@ -295,7 +296,7 @@
       return;
     }
     if(!hasRuntimeContext()||active!==session||session.cancelled||session.editor||
-       !session.post.hasCapturedQuote||session.copyOnly||session.post.modernLayout)return;
+       !session.post.hasCapturedQuote||session.copyOnly||session.post.modernLayout||session.post.legacyDetailIdentity)return;
     session.offeringQuoteCopyOnly=true;
     try {
     const facts=api.composerAssociation.snapshot(document,session.post,session.initialUrl,location.href,performance.now(),quarantinedPosts);
@@ -405,7 +406,7 @@
     active.acquireTimer=setTimeout(()=>{
       if (active===session && !session.editor && !session.copyOnly) rejectAssociation("association_expired");
     },9000);
-    if(post.hasCapturedQuote&&!post.modernLayout){
+    if(post.hasCapturedQuote&&!post.modernLayout&&!post.legacyDetailIdentity){
       session.copyOnlyFastTimer=setTimeout(()=>{
         void offerQuoteCopyOnly(session,QUOTE_STABILITY_MS);
       },QUOTE_EARLY_CHECK_MS);
@@ -557,7 +558,7 @@
       if (!contextAlive) return;
       if (active !== current || current.requestId !== requestId || current.cancelled) return;
       if (!response?.ok) throw new Error("无法读取插件设置");
-      if((current.post.modernLayout||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
+      if((current.post.modernLayout||current.post.legacyDetailIdentity||current.post.detailPreviewSource||current.editor?.localName==='textarea')&&matchedComposer(current.post).editor!==current.editor){
         if(active===current&&!current.cancelled)rejectAssociation('reply_context_unconfirmed');
         return;
       }
@@ -1082,6 +1083,17 @@
     if (recoveryRequired && control) {traceAssociation('blocked','recovery_required');pendingActivation=null;return;}
     if (!control || control.closest('[data-zane-reply-copilot]')) {
       pendingActivation=null;
+      // Observe only the user's navigation gesture, never scan the feed.
+      // The next verified detail click must name the same ID and route.
+      if(!active&&!recoveryRequired&&event.type==='pointerdown'&&event.button===0&&
+         !event.metaKey&&!event.ctrlKey&&!event.shiftKey&&!event.altKey){
+        const target=event.target;
+        const article=target?.closest?.('article');
+        if(article&&!target.closest('[data-zane-reply-copilot],[role="dialog"],button,[role="button"],[contenteditable="true"]')){
+          const preview=api.composerAssociation.captureTimelinePreview?.(article,location.href);
+          if(preview)timelineNavigationPreview={preview,at:performance.now()};
+        }
+      }
       // Translation overlays and unrelated page clicks must not poison the
       // pending reply. A second real composer action still cancels safely.
       if(active&&!active.cancelled&&!active.editor&&
@@ -1113,7 +1125,20 @@
       post.replyRouteVerified=true;
     }
     traceAssociation('capture','reply_control_recognized');
-    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
+    let timelinePreview=null;
+    if(timelineNavigationPreview){
+      const {preview,at}=timelineNavigationPreview;
+      // Read once; never reapply stale data to another click or post.
+      timelineNavigationPreview=null;
+      try{
+        const route=new URL(location.href),source=new URL(preview.sourceUrl);
+        if(performance.now()-at<=120000&&route.origin===source.origin&&
+           route.pathname.replace(/\/$/,'')===source.pathname.replace(/\/$/,'')&&
+           preview.statusId===post.statusId&&preview.sourceUrl===post.sourceUrl)
+          timelinePreview=preview;
+      }catch{}
+    }
+    pendingActivation={control,post:Object.freeze(api.composerAssociation.capturePost(post,location.href,timelinePreview)),baseline:api.composerAssociation.baseline(document,post),at:performance.now(),initialUrl:location.href};
   }
   function onDocumentClick(event) {
     const clickAt = performance.now();

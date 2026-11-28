@@ -286,6 +286,7 @@
         editors:value.editors.slice(0,5).map(e=>({modal:e.modal===true,focused:e.focused===true,empty:e.empty===true,
           editor:describe(e.node),
           contextDetail:e.contextDetail,
+          ...(e.compactEvidence?{compactEvidence:e.compactEvidence}:{}),
           contextIdentityPresent:Boolean(e.contextStatusId),contextArticleCount:Math.min(100,e.contextArticleCount||0),
           contextTextPresent:e.contextTextPresent===true,contextTextMatches:e.contextTextMatches===true,
           contextMatches:e.contextMatches===null?'pending':e.contextMatches===true?'match':'mismatch'}))};
