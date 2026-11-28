@@ -31,7 +31,7 @@ test("Partners owns V1 referrals and My Account retains only a navigation link",
  assert.match(card,/both you and your friend earn 50 extra credits each/);
  assert.match(card,/合计 250 次/);
  assert.match(card,/保持你原有的内容和更新节奏，通过分享实用工具、使用心得或原创文章，自然地融入你的专属邀请链接/);
- assert.match(card,/Keep posting your own content as usual and share your referral link from time to time/);
+ assert.match(card,/Keep creating as usual and naturally include your referral link when sharing useful tools, personal insights, or original articles/);
  assert.match(card,/普通邀请的免费额度奖励，每30天最多20位/);
   assert.match(card,/推广合伙人的现金佣金不受此人数限制/);
  assert.match(card,/Free-credit rewards are limited to 20 successful referrals per rolling 30 days/);
