@@ -162,7 +162,11 @@
       .some(card=>card.querySelector?.('[data-testid="User-Name"]')&&card.querySelector?.('[data-testid="tweetText"]'));
     const hasCapturedQuote=markedQuote||roleLinkQuote||
       Boolean(post.modernLayout&&post.article?.querySelector?.('[data-slot="embedded-tweet-frame"]'));
-    const hasCapturedMedia=Boolean(post.article?.querySelector?.('[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]'));
+    const mediaSelector='[data-testid="tweetPhoto"], [data-testid="videoPlayer"], [data-testid="videoComponent"]';
+    const mediaNode=post.article?.querySelector?.(mediaSelector+(post.modernLayout?'':',video'));
+    const hasCapturedMedia=Boolean(mediaNode&&(mediaNode.localName!=='video'||mediaNode.matches?.(mediaSelector)||
+      (mediaNode.closest('article')===post.article&&!globalThis.ZaneReplyCopilotContent.postExtractor.isQuoteContent(mediaNode,post.article))||
+      post.article.querySelector(mediaSelector)||ownedDetailNodes(post.article,'video').length));
     const hasCapturedPhoto=[...(post.article?.querySelectorAll?.('a[href*="/photo/"]')||[])].some(a=>{
       if(a.closest('article')!==post.article)return false;
       try {const u=new URL(a.href);return u.protocol==='https:' && /^(?:www\.)?(?:x\.com|twitter\.com)$/.test(u.hostname) && new RegExp('^/[^/]+/status/'+post.statusId+'/photo/\\d+$').test(u.pathname);}catch{return false;}
@@ -214,7 +218,7 @@
     // X's modal can append a plain picture reference absent from feed text,
     // including a presentation space after https://. This is auxiliary text
     // comparison only: never navigate to it or treat it as identity evidence.
-    return /^(?:(?:https:\/\/ ?)?pic\.x\.com\/[A-Za-z0-9]+\s*){1,4}$/.test(copy.slice(source.length).trim());
+    return /^(?:(?:https:\/\/ ?)?pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+\s*){1,4}$/.test(copy.slice(source.length).trim());
   }
   // A legacy reply preview may omit the parent permalink and render only
   // a shortened caption plus the media's presentation URL. Capture the
@@ -542,6 +546,61 @@
     }
     return false;
   }
+  // Fallback only for a canonically captured legacy feed post whose
+  // existing exact-ID/text fast path failed. No feed scan, prefetch or
+  // delay; require independent modal time or native route evidence.
+  function verifiedTimelinePreview(post,article,editor,dialog,initialUrl,currentUrl,original,quarantinedPosts){
+    if(!article||!post.article?.isConnected||!original?.ok||original.statusId!==post.statusId||
+       original.sourceUrl!==post.sourceUrl||normalized(original.sourceText)!==normalized(post.sourceText)||
+       !detailPreviewBefore(article,editor,dialog)||editor.closest('[inert],[aria-hidden="true"]')||
+       !article.matches('article[data-testid="tweet"]')||article.querySelector('article,[data-slot="embedded-tweet-frame"]'))return false;
+    let owner,routeId;
+    try{
+      const initial=new URL(initialUrl),current=new URL(currentUrl),source=new URL(post.sourceUrl);
+      const m=source.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/?$/);
+      if(initial.protocol!=='https:'||!['x.com','twitter.com','www.x.com','www.twitter.com'].includes(initial.hostname)||
+         initial.origin!==source.origin||current.origin!==initial.origin||!m||m[2]!==post.statusId||
+         /\/status\/\d+(?:\/|$)/.test(initial.pathname)||initial.pathname.startsWith('/compose/')||
+         current.pathname!=='/compose/post'||current.hash||current.username||current.password||
+         current.searchParams.has('quote')||current.searchParams.has('quote_tweet_id')||
+         current.searchParams.getAll('in_reply_to').length>1)return false;
+      owner=m[1].toLowerCase();routeId=current.searchParams.get('in_reply_to');
+      if(routeId!==null&&routeId!==post.statusId)return false;
+    }catch{return false;}
+    const source=scanDetailArticle(post,post.article,initialUrl),modal=scanDetailArticle(post,article,initialUrl);
+    if(source.author()!==owner||modal.author()!==owner)return false;
+    const sourceTime=source.time(),modalTime=modal.time();
+    if(sourceTime!==null&&modalTime!==null&&sourceTime!==modalTime)return false;
+    // A long similar prefix alone is insufficient on a feed.
+    if(routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime))return false;
+    const sourceEvidence=source.evidence(),modalEvidence=modal.evidence();
+    if(!sourceEvidence.eligible||!modalEvidence.eligible||
+       [sourceEvidence,modalEvidence].some(e=>e.conflict||(e.statusId&&e.statusId!==post.statusId)||
+         (e.otherCanonicalId&&e.otherCanonicalId!==post.statusId)))return false;
+    const expandedId=modal.expansionId();
+    if(expandedId&&expandedId!==post.statusId)return false;
+    const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId);
+    const modalQuote=captureDetailQuote(article,initialUrl,post.statusId);
+    if(post.hasCapturedQuote){
+      if(!sourceQuote||!modalQuote||sourceQuote.conflict||modalQuote.conflict||
+         sourceQuote.text!==modalQuote.text||(sourceQuote.id&&modalQuote.id&&sourceQuote.id!==modalQuote.id))return false;
+    }else if(sourceQuote||modalQuote)return false;
+    if(post.quoteOnly){
+      return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
+        !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
+    }
+    const full=source.bodies(),short=modal.bodies();
+    if(!full.texts.length||!short.texts.length)return false;
+    const matches=(long,value)=>{
+      if(long===value)return true;
+      const prefix=value.replace(/(?:\u2026|\.{3})$/,'').trim();
+      return (short.expanded||prefix!==value)&&Array.from(prefix).length>=40&&
+        long.length>prefix.length&&long.startsWith(prefix);
+    };
+    if(quarantinedPosts.some(old=>old?.statusId!==post.statusId&&short.texts.some(value=>
+      matches(presentationNormalize(old.sourceText,old.hasCapturedMedia||old.hasCapturedPhoto),value))))return false;
+    return full.texts.some(long=>short.texts.some(value=>matches(long,value)));
+  }
   function snapshot(document,post,initialUrl,currentUrl,now,quarantinedPosts=[],includeCompactEvidence=false) {
     const api=globalThis.ZaneReplyCopilotContent;
     const original=post.article?.isConnected&&!post.legacyDetailIdentity?api.postExtractor.extractPost(post.article):null;
@@ -720,7 +779,7 @@
         candidates.some(c=>(c.id&&c.id!==post.statusId)||(c.article&&!detailPreviewBefore(c.article,node,dialog)))||matching.length>1||compactDetailConflict?false:
         matching.length===1&&candidates.length===1?(!post.quoteOnly||!quotePreview.seen||quotedPreviewMatches):
         verifiedQuoteOnly||(!post.quoteOnly&&(compactDetailMatch||priorTimelineMatch||detailExactMatch))?true:null:null;
-      const contextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
+      const existingContextMatches=post.legacyDetailIdentity?detailMatch:modernContext?modernMatch:post.quoteOnly
         ? !candidates.length?null
           :matching.length>1||compactDetailConflict?false
           :matching.length===1?(!quotePreview.seen || quotedPreviewMatches)
@@ -744,6 +803,10 @@
           :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
+      const timelineFallback=existingContextMatches!==true&&!modernContext&&!post.legacyDetailIdentity&&
+        !post.detailPreviewSource&&sourceUnchanged&&candidates.length===1&&primary?.article&&!primary.id&&
+        verifiedTimelinePreview(post,primary.article,node,dialog,initialUrl,currentUrl,original,quarantinedPosts);
+      const contextMatches=timelineFallback?true:existingContextMatches;
       const compactEvidence=includeCompactEvidence&&detailScan?{
         expansion:detailScan.expands().length===1,
         expansionIdPresent:Boolean(detailScan.expansionId()),
@@ -769,7 +832,7 @@
         empty:!api.composerAdapter.hasContent(node),contextStatusId:statusId,
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)||routeQuoteText),
-        contextTextMatches:Boolean(primary&&sameContext(post,text)||quoteRoutePreview),
+        contextTextMatches:Boolean(primary&&exactText.includes(primary)||quoteRoutePreview),
         contextMatches,contextDetail,compactEvidence};
     });
     return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true||post.legacyDetailIdentity===true),

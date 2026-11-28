@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
-import {spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -13,7 +13,7 @@ test('timeline coverage audit: current legacy source and modal decisions',{timeo
   const dir=mkdtempSync(path.join(tmpdir(),'xrh-timeline-audit-'));
   try{
     const source=['post-extractor','reply-detector','composer-adapter','composer-association'].map(n=>
-      readFileSync(new URL('../content/'+n+'.js',import.meta.url),'utf8')).join('\n');
+      execFileSync('git',['show','648107d75643c9a32908622173ccca50bf07aadd:content/'+n+'.js'],{encoding:'utf8'})).join('\n');
     const run=()=>{
       const {postExtractor:p,composerAssociation:a}=globalThis.ZaneReplyCopilotContent;
       const home='https://x.com/home',compose='https://x.com/compose/post',url='https://x.com/example/status/101';

@@ -165,7 +165,19 @@
       if (time.closest("article") !== article || isQuoteContent(time, article)) continue;
       const link = time.closest('a[href*="/status/"]');
       if (!link?.href || (typeof link.closest === "function" && link.closest("article") !== article)) continue;
-      const identity = statusLink(link);
+      let identity = statusLink(link);
+      // Edited timeline posts may put /history on the author's timestamp.
+      // Only a native owned timestamp can supply this canonical identity;
+      // arbitrary history links and username-less aliases are not enough.
+      if(!identity){
+        try{
+          const u=new URL(link.href);
+          const match=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/history\/?$/);
+          if(match&&u.protocol==='https:'&&STATUS_HOSTS.has(u.hostname)&&
+             !u.username&&!u.password&&!u.hash)
+            identity={sourceUrl:u.origin+'/'+match[1]+'/status/'+match[2],statusId:match[2]};
+        }catch{}
+      }
       if (identity) timed.set(identity.statusId,identity);
       // If a quote card loses its wrapper marker, never guess its timestamp
       // belongs to the outer post. Conflicting IDs fail closed.
