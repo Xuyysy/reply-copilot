@@ -43,27 +43,27 @@ jobs:
             check:CHECK_ONLY:false|deploy:DEPLOY_PARTNER_LEDGER_STAGING_WORKER:true) ;;
             *) exit 1 ;;
           esac
-          gh api repos/Xuyysy/reply-copilot/actions/runs/46112219667 | jq -e '
-            .head_sha == "6500656525347e4a0b72777df5bbc9b5db6aa232" and
-            .head_branch == "chatgpt/partner-incremental-ledger-20261128" and
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46114606451 | jq -e '
+            .head_sha == "41e24315d061123f9eecc1c1a1c509e39ee55d79" and
+            .head_branch == "chatgpt/staging-partner-minimum-test-20261128" and
             .head_repository.full_name == "Xuyysy/reply-copilot" and
             .event == "push" and .path == ".github/workflows/ci.yml" and
             .status == "completed" and .conclusion == "success"'
-          gh api repos/Xuyysy/reply-copilot/actions/runs/46112219667/jobs | jq -e '
+          gh api repos/Xuyysy/reply-copilot/actions/runs/46114606451/jobs | jq -e '
             any(.jobs[]; .conclusion=="success" and
             any(.steps[]; .name=="Run full suite and preserve the exit code" and .conclusion=="success") and
             any(.steps[]; .name=="Upload immutable Staging Pages bundle" and .conclusion=="success"))'
-          test "$(gh api repos/Xuyysy/reply-copilot/git/ref/heads/chatgpt/partner-incremental-ledger-20261128 --jq .object.sha)" = "6500656525347e4a0b72777df5bbc9b5db6aa232"
+          test "$(gh api repos/Xuyysy/reply-copilot/git/ref/heads/chatgpt/staging-partner-minimum-test-20261128 --jq .object.sha)" = "41e24315d061123f9eecc1c1a1c509e39ee55d79"
           gh api repos/Xuyysy/reply-copilot/actions/runs/46110956633 | jq -e '.head_sha=="1d5a27a645d038cc54d2c229628414dce784dc77" and .status=="completed" and .conclusion=="success"'
       - uses: actions/checkout@v4
         with:
-          ref: '6500656525347e4a0b72777df5bbc9b5db6aa232'
+          ref: '41e24315d061123f9eecc1c1a1c509e39ee55d79'
           persist-credentials: false
       - name: Validate pinned Staging target
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "6500656525347e4a0b72777df5bbc9b5db6aa232"
+          test "$(git rev-parse HEAD)" = "41e24315d061123f9eecc1c1a1c509e39ee55d79"
           python3 - <<'PY'
           import json
           st=json.load(open('api/wrangler.jsonc'))['env']['staging']
@@ -87,11 +87,11 @@ jobs:
           p=pathlib.Path(os.environ['RUNNER_TEMP'])/'worker-artifact'
           assert (p/'index.js').is_file()
           assert not any(x.suffix in ('.wasm','.mjs') or x.suffix=='.js' and x.name!='index.js' for x in p.rglob('*') if x.is_file())
-          (p/'manifest.json').write_text(json.dumps({'sourceSha':'6500656525347e4a0b72777df5bbc9b5db6aa232','sha256':hashlib.sha256((p/'index.js').read_bytes()).hexdigest(),'target':'reply-copilot-api-staging'}))
+          (p/'manifest.json').write_text(json.dumps({'sourceSha':'41e24315d061123f9eecc1c1a1c509e39ee55d79','sha256':hashlib.sha256((p/'index.js').read_bytes()).hexdigest(),'target':'reply-copilot-api-staging'}))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: partner-staging-worker-6500656525347e4a0b72777df5bbc9b5db6aa232
+          name: partner-staging-worker-41e24315d061123f9eecc1c1a1c509e39ee55d79
           path: |
             ${{ runner.temp }}/worker-artifact/index.js
             ${{ runner.temp }}/worker-artifact/manifest.json
@@ -111,7 +111,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          name: partner-staging-worker-6500656525347e4a0b72777df5bbc9b5db6aa232
+          name: partner-staging-worker-41e24315d061123f9eecc1c1a1c509e39ee55d79
           path: ${{ runner.temp }}/worker-artifact
       - name: Check or deploy Staging only; no database operation
         env:
