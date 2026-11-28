@@ -48,6 +48,9 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       const compactZhQuote='<div role="link"><div data-testid="User-Name"><span>@quoted</span></div><time>4h</time>'+text(zhQuote+' <a href="https://t.co/PicToken">pic.x.com/Quote123</a>')+'</div>';
       const zhSource=header+permalink+text(zhCaption)+mediaOnlyQuote;
       const zhModal=header+exactTime+text(zhCaption+' '+expandedQuoteLink)+compactZhQuote;
+      const parentMedia='<a href="'+url+'/photo/1"><div data-testid="tweetPhoto"><img alt="Image"></div></a>';
+      const parentGroup='<div role="group"><button data-testid="reply">Reply</button><a href="'+url+'/analytics">Views</a></div>';
+      const noOuterTime=zhModal.replace(exactTime,'<time>1h</time>');
       const specs=[
         {name:'plain',source:header+permalink+text(caption),modal:header+permalink+text(caption)},
         {name:'long_verified_modal_id',source:header+permalink+text(full)+photo,modal:header+permalink+text(caption)+more},
@@ -112,7 +115,13 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
         {name:'zh_owned_quote_media_id_wrong_outer_time',source:zhSource,modal:zhModal.replace(exactTime,wrongTime)},
         {name:'zh_owned_quote_media_id_wrong_outer_route',source:zhSource,modal:zhModal,route:compose+'?in_reply_to=999'},
         {name:'zh_owned_quote_media_id_quarantined',source:zhSource,modal:zhModal,quarantine:[{statusId:'999',sourceText:'又叒叒叒一位同学通过了！！！ 让我们恭喜他！！！ 希望各位也能早日上岸！！！'}]},
-        {name:'zh_body_link_not_quote_media_evidence',source:zhSource.replace('<a href="'+quoteUrl+'/photo/1"><div data-testid="tweetPhoto"><img alt="Image"></div></a>','<div data-testid="tweetPhoto"><img alt="Image"></div>'),modal:zhModal}
+        {name:'zh_body_link_not_quote_media_evidence',source:zhSource.replace('<a href="'+quoteUrl+'/photo/1"><div data-testid="tweetPhoto"><img alt="Image"></div></a>','<div data-testid="tweetPhoto"><img alt="Image"></div>'),modal:zhModal},
+        {name:'zh_outer_native_media_proof',source:zhSource+parentMedia,modal:noOuterTime+parentMedia},
+        {name:'zh_outer_native_analytics_proof',source:zhSource+parentGroup,modal:noOuterTime+parentGroup},
+        {name:'zh_outer_native_media_conflict',source:zhSource+parentMedia,modal:noOuterTime+parentMedia.replace('/status/101/','/status/999/')},
+        {name:'zh_outer_analytics_without_native_reply',source:zhSource,modal:noOuterTime+'<a href="'+url+'/analytics">Views</a>'},
+        {name:'zh_outer_native_media_wrong_author',source:zhSource+parentMedia,modal:noOuterTime.replace('https://x.com/example','https://x.com/other')+parentMedia},
+        {name:'zh_outer_native_media_wrong_time',source:zhSource+parentMedia,modal:zhModal.replace(exactTime,wrongTime)+parentMedia}
       ];
       const results=[];
       for(const item of specs){
@@ -179,7 +188,10 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       zh_owned_quote_media_id_wrong_link:'rejected',zh_owned_quote_media_id_no_outer_proof:'rejected',
       zh_owned_quote_media_id_wrong_inner_text:'rejected',zh_owned_quote_media_id_wrong_inner_author:'rejected',
       zh_owned_quote_media_id_wrong_outer_time:'rejected',zh_owned_quote_media_id_wrong_outer_route:'rejected',
-      zh_owned_quote_media_id_quarantined:'rejected',zh_body_link_not_quote_media_evidence:'rejected'
+      zh_owned_quote_media_id_quarantined:'rejected',zh_body_link_not_quote_media_evidence:'rejected',
+      zh_outer_native_media_proof:'bound',zh_outer_native_analytics_proof:'bound',
+      zh_outer_native_media_conflict:'rejected',zh_outer_analytics_without_native_reply:'rejected',
+      zh_outer_native_media_wrong_author:'rejected',zh_outer_native_media_wrong_time:'rejected'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
 });

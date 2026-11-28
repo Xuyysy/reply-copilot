@@ -697,7 +697,8 @@
     let modalQuote=captureDetailQuote(article,initialUrl,post.statusId,true);
     const outerCorroborated=sourceAuthor===owner&&modalAuthor===owner&&
       sourceEvidence.eligible&&modalEvidence.eligible&&
-      (routeId===post.statusId||(sourceTime!==null&&sourceTime===modalTime));
+      (routeId===post.statusId||modalEvidence.statusId===post.statusId||expandedId===post.statusId||
+       (sourceTime!==null&&sourceTime===modalTime));
     // A compact modal can omit the inner permalink and replace the
     // source's native media with a pic link. Recover the INNER identity
     // only from an exact attached quote destination plus the same author
@@ -722,9 +723,7 @@
     }else if(sourceQuote||modalQuote)return result(false,'unexpected_quote');
     // Missing evidence is not an explicit contradiction. Preserve the
     // existing hydration wait, but never let known conflicts reach it.
-    if(sourceAuthor!==owner||modalAuthor!==owner||
-       !sourceEvidence.eligible||!modalEvidence.eligible||
-       (routeId!==post.statusId&&(sourceTime===null||modalTime!==sourceTime)))return result(null,'outer_evidence_missing');
+    if(!outerCorroborated)return result(null,'outer_evidence_missing');
     if(post.quoteOnly){
       return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
