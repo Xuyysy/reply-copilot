@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {classifyPaymentEvidence} from '../src/partner-payment-proof.mjs';
+import {classifyBoltCommissionEvidence} from '../src/partner-boltutil-proof.mjs';
 import {commissionFen,termEnd,candidateInTerm,manualCandidatePlan,manualEvidenceBatchPlan,summarizeManualOrders,requestableFen,manualOrderEstimate} from '../src/partner-manual-calculation.mjs';
 
 test('manual report uses integer fen, historical rate and calendar term',()=>{
@@ -51,4 +52,24 @@ test('automatic Xiaodou RSA2 and Epay recharge use their actual trusted payment 
  }
  assert.equal(classifyPaymentEvidence('subscription',[{...row,order_kind:'purchase'}]).eligible,false);
  assert.equal(classifyPaymentEvidence('recharge',[{...row,payment_protocol:'epay',epay_trade_no:'epay',provider_payment_id:'conflict'}]).eligible,false);
+});
+
+test('BoltUtil commissions use immutable RMB principal, never USDT rounding tail or current rate',()=>{
+ const row={order_status:'paid',payment_status:'paid',order_match:1,fiat_conflict:0,identity_present:1,identity_count:1,payment_proof:1,applied_proof:1,paid_at:100,applied_at:100,bolt_paid_at:100,bolt_applied_at:100,principal_fen:1990,cny_per_usdt_micros:7000000,quoted_usdt_micros:2842858,payable_usdt_micros:2842860,paid_usdt_micros:2842860,network:'TRC20',token_decimals:6,payable_token_raw:'2842860',order_kind:'recharge',order_id:'order',buyer_id:'buyer'};
+ const c={order_id:'order',buyer_id:'buyer',paid_at:100,registered_at:1,first_authorized_at:1,term_months:null,rate_bps:1500,buyer_eligible:1,payment_source:'boltutil'};
+ assert.equal(manualOrderEstimate('recharge',c,[row]).commissionFen,298);
+ for(const network of ['TRC20','POLYGON','ERC20','SOLANA','BEP20']){
+  const decimals=network==='BEP20'?18:6;
+  const r={...row,network,token_decimals:decimals,payable_token_raw:(2842860n*10n**BigInt(decimals-6)).toString()};
+  assert.equal(classifyBoltCommissionEvidence('recharge',[r]).eligible,true);
+  for(const kind of ['purchase','renewal','upgrade'])assert.equal(classifyBoltCommissionEvidence('subscription',[{...r,order_kind:kind}]).eligible,true);
+ }
+ for(const patch of [{order_status:'manual_review'},{payment_status:'pending'},{fiat_conflict:1},{identity_count:2},{order_match:0},{identity_present:0},{payment_proof:0},{applied_proof:0},{paid_usdt_micros:2842859},{quoted_usdt_micros:2842857},{principal_fen:1991},{payable_token_raw:'2842859'},{bolt_paid_at:99},{bolt_applied_at:null},{network:'unknown'}]){
+  assert.equal(classifyBoltCommissionEvidence('recharge',[{...row,...patch}]).eligible,false,JSON.stringify(patch));
+ }
+ assert.equal(classifyBoltCommissionEvidence('recharge',[row,row]).eligible,false);
+ const plan=manualEvidenceBatchPlan('subscription',['a','b'],true);
+ assert.deepEqual(plan.params,['a','b']);assert.match(plan.sql,/JOIN boltutil_orders/);assert.match(plan.sql,/IN \(\?,\?\) LIMIT 121$/);
+ assert.doesNotMatch(manualCandidatePlan('subscription','partner').sql,/boltutil_orders/);
+ assert.match(manualCandidatePlan('subscription','partner',true).sql,/LEFT JOIN boltutil_orders/);
 });

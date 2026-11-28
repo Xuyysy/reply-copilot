@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import {createHmac} from 'node:crypto';
-import {fixture,withProvider} from './helpers/payment-v2.mjs';
+import {createHmac,createHash} from 'node:crypto';
+import {fixture,withProvider,worker} from './helpers/payment-v2.mjs';
+import {manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate} from '../src/partner-manual-calculation.mjs';
 
 const NETWORKS=[
  ['TRC20',6,'T'+'1'.repeat(33),'f'.repeat(64)],
@@ -77,10 +78,29 @@ async function refresh(f,order,opts={}){
    }});
  },()=>f.call('/v1/boltutil/orders/'+order.id+'/refresh',{body:{}}));
 }
+
+// Real authenticated BoltUtil settlement (mock provider), then actual partner
+// report handler. No actual funds, networks, or remote database.
+function setupPartnerCommission(f){
+ for(const file of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])
+  f.sql.exec(readFileSync(new URL('../sql-proposals/'+file,import.meta.url),'utf8'));
+ for(const id of ['partner','owner'])f.sql.prepare("INSERT INTO users(id,email,email_verified_at,created_at,username,password_hash,role) VALUES(?,?,1,1,?,'fixture-hash',?)").run(id,id+'@example.test',id,id==='owner'?'admin':'user');
+ f.sql.exec("UPDATE system_settings SET value='1' WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled')");
+ f.sql.prepare("INSERT INTO partner_policy_versions(user_id,version,status,level,rate_bps,term_months,effective_at,authorized_by,reason) VALUES('partner',1,'active','standard',1500,NULL,1,'owner','offline BoltUtil commission')").run();
+ f.sql.prepare("INSERT INTO referral_invites(invited_user_id,inviter_user_id,referral_code,registered_at) VALUES('test-user','partner','0123456789abcdef',1)").run();
+ const token='c'.repeat(64);
+ f.sql.prepare("INSERT INTO sessions(id,token_hash,user_id,kind,created_at,expires_at) VALUES('partner-session',?,'partner','web',1,?)").run(createHash('sha256').update(token).digest('hex'),Date.now()+60000);
+ return async()=>{
+  const res=await worker.fetch(new Request(f.env.API_ORIGIN+'/v1/partners/manual-report',{headers:{Origin:f.env.WEB_ORIGIN,Cookie:'rc_session='+token}}),f.env);
+  const body=await res.json();assert.equal(res.status,200,JSON.stringify(body));return body;
+ };
+}
+
 for(const [network] of NETWORKS){
  test('BoltUtil '+network+' permanent credit checkout -> payment -> exactly-once grant',async()=>{
    const f=setup();
    try{
+     const report=setupPartnerCommission(f);
      const initial=await create(f,network);
      assert.equal(initial.status,201,JSON.stringify(initial.body));
      assert.equal(initial.body.order.status,'pending');
@@ -102,11 +122,15 @@ for(const [network] of NETWORKS){
      assert.equal(count(f,'credit_batches'),2); // signup + one paid purchase
      assert.equal(count(f,'boltutil_payment_events'),1);
      assert.equal(row(f,"SELECT count(*) n FROM credit_ledger WHERE kind='purchase_grant'").n,1);
+     const commission=await report();assert.equal(commission.summary.reviewCount,0);assert.equal(commission.summary.estimatedFen,Math.floor(expectedCny*0.15));assert.equal(commission.orders[0].principalFen,expectedCny);
+     f.env.BOLTUTIL_CNY_PER_USDT_MICROS='9000000';f.env.BOLTUTIL_ENABLED='0';
+     assert.equal((await report()).summary.estimatedFen,commission.summary.estimatedFen,'historical commission unaffected by current rate or sales switch');
    }finally{f.sql.close();}
  });
  test('BoltUtil '+network+' subscription purchase -> verified 30-day quota, no paid credits',async()=>{
    const f=setup();
    try{
+     const report=setupPartnerCommission(f);
      const created=await create(f,network,'subscription','basic');
      assert.equal(created.status,201,JSON.stringify(created.body));
      const result=await refresh(f,created.body.order);
@@ -120,6 +144,8 @@ for(const [network] of NETWORKS){
      assert.equal(account.body.subscription.dailyLimit,500);
      assert.equal(count(f,'subscription_periods'),1);
      assert.equal(row(f,'SELECT paid_balance FROM credit_accounts WHERE user_id=?','test-user').paid_balance,0);
+     const base=row(f,'SELECT base_amount_fen FROM boltutil_orders WHERE id=?',created.body.order.id).base_amount_fen;
+     const commission=await report();assert.equal(commission.summary.reviewCount,0);assert.equal(commission.summary.estimatedFen,Math.floor(base*0.15));assert.equal(commission.orders[0].principalFen,base);
    }finally{f.sql.close();}
  });
 }

@@ -5,9 +5,10 @@ import {requireAdminSession} from "./admin-auth";
 import {response} from "./http";
 import {jsonBody,nowMs} from "./security";
 import {payoutEnabled,recipientReady,verifiedRecipientVersion} from "./partner-payout";
+import {boltReadSchemaReady} from "./boltutil/environment";
 import {REPORT_LIMIT,manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,summarizeManualOrders,requestableFen,candidateInTerm,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 
-type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number};
+type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
 type Domain="recharge"|"subscription";
 async function enabled(env:Env){
  const row=await env.DB.prepare("SELECT COUNT(*) n FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1'").first<{n:number}>();
@@ -18,19 +19,27 @@ async function assigned(env:Env,userId:string){
 }
 async function report(env:Env,userId:string,admin:boolean){
  let complete=true;
- const orders=[];
+ const orders=[],boltReady=boltReadSchemaReady(env);
  for(const domain of ["recharge","subscription"] as Domain[]){
-  const p=manualCandidatePlan(domain,userId);
+  const p=manualCandidatePlan(domain,userId,boltReady);
   const found=(await env.DB.prepare(p.sql).bind(...p.params).all<Candidate>()).results;
   if(found.length>REPORT_LIMIT)complete=false;
   const candidates=found.slice(0,REPORT_LIMIT).filter(candidateInTerm);
-  for(let i=0;i<candidates.length;i+=40){
-   const chunk=candidates.slice(i,i+40),plan=manualEvidenceBatchPlan(domain,chunk.map(x=>x.order_id));
-   const evidence=(await env.DB.prepare(plan.sql).bind(...plan.params).all<Record<string,unknown>>()).results;
-   if(evidence.length>=121)complete=false;
-   for(const c of chunk){
-    const estimate=manualOrderEstimate(domain,c,evidence.filter(e=>e.order_id===c.order_id));
-    if(estimate)orders.push(estimate);
+  // Partition by persisted rail; no second evidence query for fiat-only reports,
+  // never reference crypto tables until the existing schema readiness gate is on.
+  for(const source of ['fiat','boltutil'] as const){
+   const group=candidates.filter(c=>c.payment_source===source);
+   for(let i=0;i<group.length;i+=40){
+    const chunk=group.slice(i,i+40);
+    const plan=source==='boltutil'&&!boltReady?null:manualEvidenceBatchPlan(domain,chunk.map(x=>x.order_id),source==='boltutil');
+    const evidence=plan?(await env.DB.prepare(plan.sql).bind(...plan.params).all<Record<string,unknown>>()).results:[];
+    if(evidence.length>=121)complete=false;
+    const byOrder=new Map<unknown,Record<string,unknown>[]>();
+    for(const e of evidence){const rows=byOrder.get(e.order_id);if(rows)rows.push(e);else byOrder.set(e.order_id,[e]);}
+    for(const c of chunk){
+     const estimate=manualOrderEstimate(domain,c,byOrder.get(c.order_id)??[]);
+     if(estimate)orders.push(estimate);
+    }
    }
   }
  }
