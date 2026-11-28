@@ -1,7 +1,7 @@
 import type {Env} from "./types";
 import {ApiFailure} from "./types";
 import {boltReadSchemaReady} from "./boltutil/environment";
-import {manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,requestableFen,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
+import {manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,requestableFen} from "./partner-manual-calculation.mjs";
 type Domain="recharge"|"subscription";
 type Dirty={domain:Domain;order_id:string;token:string;buyer_id:string};
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
@@ -68,12 +68,13 @@ export async function syncCommissionLedger(env:Env,userId:string){
 export async function ledgerBalance(env:Env,userId:string){
  const totals=await env.DB.prepare(`SELECT COALESCE(t.earned_fen,0) earned,COALESCE(t.settled_fen,0) settled,COALESCE(t.verified_count,0) verified,COALESCE(t.review_count,0) review,
  EXISTS(SELECT 1 FROM partner_commission_dirty q WHERE q.partner_user_id=u.id) dirty,
- (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId
- FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null}>();
+ (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId,
+ CASE WHEN ?='staging' AND EXISTS(SELECT 1 FROM system_settings s WHERE s.key='partner_staging_min_request_user' AND s.value=u.id AND s.updated_at>CAST(unixepoch('now') AS INTEGER)*1000) THEN 200 ELSE 1000 END minRequestFen
+ FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(env.ENVIRONMENT,userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null;minRequestFen:number}>();
  if(!totals)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
  const complete=totals.dirty===0;
  const summary={verifiedOrders:totals.verified,reviewCount:totals.review,estimatedFen:complete?totals.earned:null,recordedFen:totals.settled,differenceFen:complete?totals.earned-totals.settled:null,complete};
- return {summary,requestableFen:requestableFen(summary,!!totals.pendingId),pendingId:totals.pendingId,syncPending:!complete};
+ return {summary,requestableFen:requestableFen(summary,!!totals.pendingId,totals.minRequestFen),minRequestFen:totals.minRequestFen,pendingId:totals.pendingId,syncPending:!complete};
 }
 export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:string|null){
  const before=parseCommissionCursor(cursor);
@@ -84,7 +85,7 @@ export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:st
   env.DB.prepare("SELECT domain,order_id orderId,paid_at paidAt,rate_bps rateBps,state,principal_fen principalFen,commission_fen commissionFen"+(admin?",buyer_user_id buyerId,reason":"")+" FROM partner_commission_entries WHERE partner_user_id=? AND state<>'excluded'"+pageGuard+" ORDER BY paid_at DESC,domain DESC,order_id DESC LIMIT 31").bind(userId,...(before?[before.paidAt,before.domain,before.orderId]:[])).all<Entry>()
  ]);
  const orders=page.results.slice(0,30),last=orders.at(-1);
- return {enabled:true,ledgerEnabled:true,...balance,minRequestFen:MIN_REQUEST_FEN,orders,records:records.results,nextCursor:page.results.length>30&&last?last.paidAt+":"+last.domain+":"+last.orderId:null};
+ return {enabled:true,ledgerEnabled:true,...balance,orders,records:records.results,nextCursor:page.results.length>30&&last?last.paidAt+":"+last.domain+":"+last.orderId:null};
 }
 export async function checkLedgerSettlement(env:Env,userId:string,requestId:string){
  const row=await env.DB.prepare(`SELECT 1 FROM partner_manual_requests r JOIN users u ON u.id=r.partner_user_id JOIN partner_commission_totals t ON t.partner_user_id=r.partner_user_id

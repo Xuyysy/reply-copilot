@@ -89,7 +89,7 @@ export async function myManualPartnerReport(request:Request,env:Env){
  })():await legacyReport(env,session.user_id,false);
  const amount=current.requestableFen;
  if(Object.keys(body).length!==1||!Number.isSafeInteger(body.expectedAmountFen)||amount===null||body.expectedAmountFen!==amount||amount>1000000000000)
-  throw new ApiFailure(409,"PARTNER_REQUEST_UNAVAILABLE","未达到10元、已有申请或金额已变化，请刷新后重试。");
+  throw new ApiFailure(409,"PARTNER_REQUEST_UNAVAILABLE","未达到最低申请金额、已有申请或金额已变化，请刷新后重试。");
  // Only a valid submission authenticates the encrypted recipient. Bind its
  // verified version in the same guarded INSERT so a concurrent edit cannot
  // switch the account between validation and the trigger's snapshot.
@@ -97,6 +97,8 @@ export async function myManualPartnerReport(request:Request,env:Env){
  if(current.payoutProfileRequired&&recipientVersion===null)throw new ApiFailure(409,"PAYOUT_NOT_CONFIGURED","收款资料无法核实，请重新填写后再申请。");
  const recipientGuard=current.payoutProfileRequired?" AND (SELECT MAX(version) FROM partner_payout_profiles WHERE user_id=?)=?":"";
  const recipientParams=current.payoutProfileRequired?[session.user_id,recipientVersion]:[];
+ const minimumGuard=" AND (? >= 1000 OR (?=\'staging\' AND ? >= 200 AND EXISTS(SELECT 1 FROM system_settings s WHERE s.key=\'partner_staging_min_request_user\' AND s.value=? AND s.updated_at>CAST(unixepoch(\'now\') AS INTEGER)*1000)))";
+ const minimumParams=[amount,env.ENVIRONMENT,amount,session.user_id];
  const ledgerGuard=ledger?" AND NOT EXISTS(SELECT 1 FROM partner_commission_dirty WHERE partner_user_id=?) AND COALESCE((SELECT earned_fen-settled_fen FROM partner_commission_totals WHERE partner_user_id=?),0)=?":"";
  const ledgerParams=ledger?[session.user_id,session.user_id,amount]:[];
  const settledGuard=ledger?"COALESCE((SELECT settled_fen FROM partner_commission_totals WHERE partner_user_id=?),0)":"(SELECT COALESCE(SUM(amount_fen),0) FROM partner_manual_requests WHERE partner_user_id=? AND status='completed')";
@@ -109,9 +111,9 @@ export async function myManualPartnerReport(request:Request,env:Env){
  AND EXISTS(SELECT 1 FROM partner_policy_versions WHERE user_id=? AND effective_at<=?)
  AND (SELECT COUNT(*) FROM system_settings WHERE key IN ('partner_program_enabled','partner_manual_reporting_enabled') AND value='1')=2
  AND ${settledGuard}=?
- AND COALESCE((SELECT value FROM system_settings WHERE key='partner_commission_ledger_enabled'),'0')=?${ledgerGuard}
+ AND COALESCE((SELECT value FROM system_settings WHERE key='partner_commission_ledger_enabled'),'0')=?${ledgerGuard}${minimumGuard}
  AND COALESCE((SELECT value FROM system_settings WHERE key='partner_payout_profile_enabled'),'0')=?${recipientGuard}
- ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,ledger?'1':'0',...ledgerParams,current.payoutProfileRequired?'1':'0',...recipientParams).run();
+ ON CONFLICT DO NOTHING`).bind(crypto.randomUUID(),session.user_id,amount,now,session.user_id,session.user_id,now,session.user_id,current.summary.recordedFen,ledger?'1':'0',...ledgerParams,...minimumParams,current.payoutProfileRequired?'1':'0',...recipientParams).run();
  if(result.meta.changes!==1)throw new ApiFailure(409,"PARTNER_REQUEST_CONFLICT","申请状态已变化，请刷新。");
  return response({ok:true},200,env,request);
 }

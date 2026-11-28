@@ -10,7 +10,7 @@ import {manualCandidatePlan,manualEvidenceBatchPlan} from '../src/partner-manual
 // data, real funds, refund operations, credentials or release actions.
 test('incremental commission ledger: historical backlog, bounded sync, page, atomic balance and risk invalidation',async t=>{
  const f=fixture({released:false}),db=f.sql;t.after(()=>db.close());
- for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
+ for(const name of ['0027_referral_rewards_v1.sql','partners_v1a_policy_proposal.sql','partners_manual_record_proposal.sql','partners_payout_profile_proposal.sql'])db.exec(readFileSync(new URL('../sql-proposals/'+name,import.meta.url),'utf8'));
  // Verify both read queries against the full local schema even with no orders.
  for(const domain of ['recharge','subscription']){
   for(const p of [manualCandidatePlan(domain,'partner'),manualEvidenceBatchPlan(domain,['nonexistent-order'])])
@@ -123,6 +123,11 @@ test('incremental commission ledger: historical backlog, bounded sync, page, ato
  result=await ok('partner',me,{sync:true});assert.equal(result.summary.reviewCount,1);assert.equal(result.requestableFen,24800);
  db.exec("UPDATE payment_transactions SET risk_state='clear' WHERE order_id='new-000'");
  result=await ok('partner',me,{sync:true});assert.equal(result.requestableFen,25000);assert.equal(result.summary.reviewCount,0);
+ // Rebuild only the empty request table, preserving all existing ledger/profile rows.
+ const minimumMigration=readFileSync(new URL('../sql-proposals/partner_staging_minimum_proposal.sql',import.meta.url),'utf8');
+ db.exec('BEGIN');db.exec(minimumMigration);db.exec('COMMIT');
+ assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
+ assert.equal((await ok('partner',me)).minRequestFen,1000);
  // Verify application and completed balance atomically; not a real transfer.
  await ok('partner',me,{expectedAmountFen:25000});
  const requestId=(await ok('partner',me)).pendingId;
@@ -137,4 +142,37 @@ test('incremental commission ledger: historical backlog, bounded sync, page, ato
  try{assert.equal((await ok('partner',me)).requestableFen,1200);}
  finally{f.env.DB.prepare=originalPrepare;}
  assert.ok(queries.length<=14,JSON.stringify(queries));assert.ok(!queries.some(q=>/provider_payment_events|JOIN recharge_orders|JOIN subscription_orders/.test(q)));
+ // Clear the preceding synthetic 1200-fen balance, then add exactly 298 fen.
+ await ok('partner',me,{expectedAmountFen:1200});
+ await ok('owner',admin,{requestId:(await ok('partner',me)).pendingId,operationId:randomUUID(),action:'completed',reason:'offline synthetic settlement'});
+ paidOrder('minimum-test',1490);result=await ok('partner',me,{sync:true});
+ assert.equal(result.summary.differenceFen,298);assert.equal(result.requestableFen,null);
+ assert.equal((await call('partner',me,{expectedAmountFen:298})).status,409);
+ assert.throws(()=>db.prepare("INSERT INTO partner_manual_requests(id,partner_user_id,amount_fen,created_at) VALUES(?,?,?,?)").run(randomUUID(),'partner',298,Date.now()),/minimum not reached/);
+ db.prepare("INSERT INTO system_settings(key,value,updated_at) VALUES('partner_staging_min_request_user','partner',?)").run(Date.now()+3600000);
+ assert.equal((await ok('partner',me)).minRequestFen,200);
+ assert.equal((await ok('partner',me)).requestableFen,298);
+ assert.equal((await ok('other',me)).minRequestFen,1000);
+ // Production must keep the old minimum even if the setting exists.
+ f.env.ENVIRONMENT='production';
+ assert.equal((await ok('partner',me)).minRequestFen,1000);
+ assert.equal((await call('partner',me,{expectedAmountFen:298})).status,409);
+ f.env.ENVIRONMENT='staging';
+ // Exercise the actual encrypted payout snapshot using a synthetic recipient.
+ f.env.PARTNER_PAYOUT_ENCRYPTION_KEY=Buffer.alloc(32,17).toString('base64');
+ db.exec("UPDATE system_settings SET value='1' WHERE key='partner_payout_profile_enabled'");
+ await ok('partner','/v1/partners/payout',{name:'Synthetic Recipient',account:'synthetic@example.test',expectedVersion:0});
+ assert.equal((await call('partner',me,{expectedAmountFen:200})).status,409);
+ await ok('partner',me,{expectedAmountFen:298});
+ const small=(await ok('partner',me)).pendingId;
+ assert.equal(db.prepare("SELECT amount_fen FROM partner_manual_requests WHERE id=?").get(small).amount_fen,298);
+ assert.equal(db.prepare("SELECT COUNT(*) n FROM partner_request_recipients WHERE request_id=?").get(small).n,1);
+ assert.equal((await call('partner',me,{expectedAmountFen:298})).status,409);
+ await ok('owner',admin,{requestId:small,operationId:randomUUID(),action:'rejected',reason:'offline test no transfer'});
+ result=await ok('partner',me);assert.equal(result.summary.differenceFen,298);
+ db.exec("UPDATE system_settings SET updated_at=1 WHERE key='partner_staging_min_request_user'");
+ result=await ok('partner',me);assert.equal(result.minRequestFen,1000);assert.equal(result.requestableFen,null);
+ assert.throws(()=>db.prepare("INSERT INTO partner_manual_requests(id,partner_user_id,amount_fen,created_at) VALUES(?,?,?,?)").run(randomUUID(),'partner',298,Date.now()),/minimum not reached/);
+ db.exec('BEGIN');try{assert.throws(()=>db.exec(minimumMigration));}finally{db.exec('ROLLBACK');}
+ assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(),[]);
 });

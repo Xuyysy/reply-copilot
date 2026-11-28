@@ -68,7 +68,7 @@ export function summarizeManualOrders(orders,recordedFen,complete){
  return {verifiedOrders:reviewed.length,reviewCount,estimatedFen:complete?total:null,recordedFen,differenceFen:complete?total-recordedFen:null,complete};
 }
 export const MIN_REQUEST_FEN=1000;
-export function requestableFen(summary,pending){
- if(pending||!summary?.complete||!int(summary.differenceFen,MIN_REQUEST_FEN,1000000000000))return null;
+export function requestableFen(summary,pending,minRequestFen=MIN_REQUEST_FEN){
+ if(pending||!summary?.complete||!int(summary.differenceFen,minRequestFen,1000000000000))return null;
  return summary.differenceFen;
 }

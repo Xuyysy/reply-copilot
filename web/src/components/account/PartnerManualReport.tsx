@@ -34,7 +34,7 @@ export default function PartnerManualReport({language,owner,write}:Props){
  }
  async function apply(){
   const amount=data?.requestableFen;
-  if(write||lock.current||amount==null||amount<1000||data?.pendingId)return;
+  if(write||lock.current||amount==null||amount<(data?.minRequestFen??1000)||data?.pendingId)return;
   lock.current=true;setBusy(true);setError("");
   try{await api(endpoint,{method:"POST",body:JSON.stringify({expectedAmountFen:amount})});setData(await api<Report>(url));setPageCursor(null);setPrevious([]);}
   catch(e){setData(null);setError(readableError(e,language)+" "+t("请刷新确认申请状态。","Refresh to check application status."));}
@@ -51,7 +51,7 @@ export default function PartnerManualReport({language,owner,write}:Props){
    {!write&&<div className="space-y-2">
     {data?.payoutProfileRequired&&!data.recipientReady&&<p role="status" className="text-sm text-amber-700">{t("请先填写支付宝收款资料，然后刷新分成记录。","Complete your Alipay recipient profile and refresh before applying.")}</p>}
     <Button type="button" disabled={busy||data?.requestableFen==null||!!data.pendingId} onClick={()=>void apply()}>{data?.pendingId?t("申请处理中","Application pending"):t("申请结算","Request settlement")+(data?.requestableFen!=null?" "+money(data.requestableFen):"")}</Button>
-    <p className="text-xs text-muted-foreground">{t("满10元可申请全部待结算金额，管理员人工转账。","Request the full unsettled amount from CNY 10; the administrator transfers manually.")}</p>
+    <p className="text-xs text-muted-foreground">{t(`满${(data?.minRequestFen??1000)/100}元可申请全部待结算金额，管理员人工转账。`,`Request the full unsettled amount from CNY ${(data?.minRequestFen??1000)/100}; the administrator transfers manually.`)}</p>
    </div>}
    {(!s.complete||s.reviewCount>0)&&<p role="status" className="text-sm text-amber-700">{!s.complete?(data?.syncPending?t("正在分批核实新订单，请继续刷新至同步完成。","New orders are being reconciled in batches. Refresh until complete."):t("统计范围超限，请联系管理员。","Report limit exceeded; contact the administrator.")):t("部分订单暂未核实，不计入待结算金额；已核实佣金可正常申请。","Unverified orders are excluded; verified commission remains available to request.")}</p>}
    {write&&data?.syncPending&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void syncAdmin()}>{t("同步佣金","Sync commission")}</Button>}
