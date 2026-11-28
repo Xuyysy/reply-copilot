@@ -52,7 +52,11 @@ async function legacyReport(env:Env,userId:string,admin:boolean){
  const summary=summarizeManualOrders(orders,Number(total?.total??0),complete);
  const payout=await payoutEnabled(env),ready=!payout||await recipientReady(env,userId);
  const latest=orders.sort((a,b)=>b.paidAt-a.paidAt||a.domain.localeCompare(b.domain)||a.orderId.localeCompare(b.orderId)).slice(0,30);
- return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:ready?requestableFen(summary,!!pending):null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{}),pendingId:pending?.id??null,orders:latest.map(o=>admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen}),records:records.results};
+ // Only resolve labels for the displayed page, never return raw email or expose other partners\x27 referrals.
+ const buyerIds=[...new Set(latest.map(o=>o.buyerId))];
+ const labels=buyerIds.length?(await env.DB.prepare("SELECT r.invited_user_id buyerId,substr(u.email,1,1)||\x27***\x27 buyerLabel,r.registered_at registeredAt FROM referral_invites r JOIN users u ON u.id=r.invited_user_id WHERE r.inviter_user_id=? AND r.invited_user_id IN ("+buyerIds.map(()=>"?").join(",")+")").bind(userId,...buyerIds).all<{buyerId:string;buyerLabel:string;registeredAt:number}>()).results:[];
+ const byBuyer=new Map(labels.map(r=>[r.buyerId,{buyerLabel:r.buyerLabel,registeredAt:r.registeredAt}]));
+ return {enabled:true,summary,minRequestFen:MIN_REQUEST_FEN,requestableFen:ready?requestableFen(summary,!!pending):null,...(payout?{payoutProfileRequired:true,recipientReady:ready}:{}),pendingId:pending?.id??null,orders:latest.map(o=>({...admin?o:{domain:o.domain,orderId:o.orderId,paidAt:o.paidAt,rateBps:o.rateBps,state:o.state,principalFen:o.principalFen,commissionFen:o.commissionFen},...(byBuyer.get(o.buyerId)??{buyerLabel:null,registeredAt:null})})),records:records.results};
 }
 async function report(env:Env,userId:string,admin:boolean,ledger:boolean,cursor:string|null=null){
  if(!ledger){if(cursor!==null)throw new ApiFailure(400,"INVALID_REQUEST","订单分页尚未开放。");return {...await legacyReport(env,userId,admin),ledgerEnabled:false,syncPending:false,nextCursor:null};}

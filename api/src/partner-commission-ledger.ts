@@ -78,11 +78,11 @@ export async function ledgerBalance(env:Env,userId:string){
 }
 export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:string|null){
  const before=parseCommissionCursor(cursor);
- const pageGuard=before?" AND (paid_at,domain,order_id)<(?,?,?)":"";
+ const pageGuard=before?" AND (e.paid_at,e.domain,e.order_id)<(?,?,?)":"";
  const [balance,records,page]=await Promise.all([
   ledgerBalance(env,userId),
   env.DB.prepare("SELECT id,amount_fen,status,created_at,resolved_at"+(admin?",reason":"")+" FROM partner_manual_requests WHERE partner_user_id=? ORDER BY created_at DESC,id DESC LIMIT 30").bind(userId).all(),
-  env.DB.prepare("SELECT domain,order_id orderId,paid_at paidAt,rate_bps rateBps,state,principal_fen principalFen,commission_fen commissionFen"+(admin?",buyer_user_id buyerId,reason":"")+" FROM partner_commission_entries WHERE partner_user_id=? AND state<>'excluded'"+pageGuard+" ORDER BY paid_at DESC,domain DESC,order_id DESC LIMIT 31").bind(userId,...(before?[before.paidAt,before.domain,before.orderId]:[])).all<Entry>()
+  env.DB.prepare("SELECT e.domain,e.order_id orderId,e.paid_at paidAt,e.rate_bps rateBps,e.state,e.principal_fen principalFen,e.commission_fen commissionFen,CASE WHEN u.id IS NOT NULL THEN substr(u.email,1,1)||'***' ELSE NULL END buyerLabel,r.registered_at registeredAt"+(admin?",e.buyer_user_id buyerId,e.reason":"")+" FROM partner_commission_entries e LEFT JOIN referral_invites r ON r.invited_user_id=e.buyer_user_id AND r.inviter_user_id=e.partner_user_id LEFT JOIN users u ON u.id=r.invited_user_id WHERE e.partner_user_id=? AND e.state<>'excluded'"+pageGuard+" ORDER BY e.paid_at DESC,e.domain DESC,e.order_id DESC LIMIT 31").bind(userId,...(before?[before.paidAt,before.domain,before.orderId]:[])).all<Entry & {buyerLabel:string|null;registeredAt:number|null}>()
  ]);
  const orders=page.results.slice(0,30),last=orders.at(-1);
  return {enabled:true,ledgerEnabled:true,...balance,orders,records:records.results,nextCursor:page.results.length>30&&last?last.paidAt+":"+last.domain+":"+last.orderId:null};

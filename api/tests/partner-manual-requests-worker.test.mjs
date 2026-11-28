@@ -75,7 +75,7 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
  db.exec("UPDATE payment_transactions SET merchant_provider='xiaodou',provider_payment_id=NULL,payment_protocol='epay',epay_trade_no='epay-boundary' WHERE order_id='boundary'");
  db.exec("UPDATE provider_payment_events SET merchant_provider='xiaodou' WHERE transaction_id='tx-boundary'");
  const exact=await ok('partner',me);
- assert.equal(exact.summary.estimatedFen,1000);assert.equal(exact.summary.reviewCount,1);assert.equal(exact.orders.find(o=>o.orderId==='boundary').state,'verified');assert.equal(exact.requestableFen,1000);
+ assert.equal(exact.summary.estimatedFen,1000);assert.equal(exact.summary.reviewCount,1);assert.equal(exact.orders.find(o=>o.orderId==='boundary').state,'verified');assert.equal(exact.orders.find(o=>o.orderId==='boundary').buyerLabel,'o***');assert.equal(exact.orders.find(o=>o.orderId==='boundary').buyerId,undefined);assert.equal(exact.requestableFen,1000);
  assert.equal((await call('partner',me,{expectedAmountFen:1001})).status,409);
  await ok('partner',me,{expectedAmountFen:1000});
  const requestId=(await ok('partner',me)).pendingId,second=randomUUID();

@@ -16,7 +16,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const policy={version:1,status:'active',level:'standard',rate_bps:2000,term_months:null,effective_at:1700000000000,reason:'synthetic policy'};
  window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false};
  const f=window.fixture,member='/v1/partners/manual-report',admin='/v1/admin/partners/manual-report',policyPath='/v1/admin/partners/policy';
- const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[],records:f.records});
+ const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
@@ -53,7 +53,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const press=async t=>{await until(button(t));await evaluate('('+button(t)+').click()');};
  const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
  const disabled=t=>'Boolean(('+button(t)+')?.disabled)';
- await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(disabled('申请结算')),true);
+ await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('本笔推广佣金')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate(has('注册于')),true);assert.equal(await evaluate(disabled('申请结算')),true);
  assert.deepEqual(await evaluate('fixture.posts'),[]);
  await evaluate('fixture.earned=1000');await press('刷新');await until('!'+disabled('申请结算'));await evaluate('fixture.hold=true');
  await evaluate('('+button('申请结算')+').click();('+button('申请结算')+').click()');

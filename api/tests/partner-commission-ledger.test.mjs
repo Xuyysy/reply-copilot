@@ -97,12 +97,14 @@ test('incremental commission ledger: historical backlog, bounded sync, page, ato
  result=await ok('partner',me,{sync:true});assert.equal(result.summary.estimatedFen,25000);
  const all=new Set();let page=result;
  for(let i=0;i<5;i++){
-  for(const o of page.orders){assert.ok(!all.has(o.orderId));all.add(o.orderId);assert.equal(o.buyerId,undefined);}
+  for(const o of page.orders){assert.ok(!all.has(o.orderId));all.add(o.orderId);assert.equal(o.buyerId,undefined);assert.equal(o.buyerLabel,'o***');assert.equal(o.registeredAt,paid);assert.ok(!JSON.stringify(o).includes('ordinary@example.test'));}
   if(!page.nextCursor)break;
   page=await ok('partner',me+'?cursor='+encodeURIComponent(page.nextCursor));
   assert.equal(page.summary.estimatedFen,25000);
  }
  assert.equal(all.size,125);
+ assert.deepEqual((await ok('other',me)).orders,[]);
+ const adminPage=await ok('owner',admin+'?userId=partner');assert.equal(adminPage.orders[0].buyerId,'ordinary');assert.equal(adminPage.orders[0].buyerLabel,'o***');
  assert.equal((await call('partner',me+'?cursor=invalid')).status,400);
  // A collision with a newly created subscription must invalidate an
  // already cached credit order, even before the second order is paid.

@@ -1,11 +1,12 @@
 import {useState,useRef} from "react";
+import {UserRound} from "lucide-react";
 import {api} from "../../lib/api";
 import {phrase,readableError,type Language} from "../../lib/language";
 import {Button} from "../ui/button";
 type Report={enabled:boolean;summary?:{verifiedOrders:number;reviewCount:number;estimatedFen:number|null;recordedFen:number;differenceFen:number|null;complete:boolean};
  payoutProfileRequired?:boolean;recipientReady?:boolean;ledgerEnabled?:boolean;syncPending?:boolean;nextCursor?:string|null;
  minRequestFen?:number;requestableFen?:number|null;pendingId?:string|null;
- orders?:{domain:string;orderId:string;buyerId?:string;paidAt:number;rateBps:number;state:string;principalFen:number|null;commissionFen:number|null;reason?:string}[];
+ orders?:{domain:string;orderId:string;buyerId?:string;buyerLabel?:string|null;registeredAt?:number|null;paidAt:number;rateBps:number;state:string;principalFen:number|null;commissionFen:number|null;reason?:string}[];
  records?:{id:string;amount_fen:number;status:"pending"|"completed"|"rejected";created_at:number;resolved_at:number|null;reason?:string}[]};
 type Props={language:Language;owner:string;write?:<T>(path:string,body:object)=>Promise<T>};
 export default function PartnerManualReport({language,owner,write}:Props){
@@ -56,7 +57,21 @@ export default function PartnerManualReport({language,owner,write}:Props){
    {(!s.complete||s.reviewCount>0)&&<p role="status" className="text-sm text-amber-700">{!s.complete?(data?.syncPending?t("正在分批核实新订单，请继续刷新至同步完成。","New orders are being reconciled in batches. Refresh until complete."):t("统计范围超限，请联系管理员。","Report limit exceeded; contact the administrator.")):t("部分订单暂未核实，不计入待结算金额；已核实佣金可正常申请。","Unverified orders are excluded; verified commission remains available to request.")}</p>}
    {write&&data?.syncPending&&<Button type="button" variant="outline" disabled={busy} onClick={()=>void syncAdmin()}>{t("同步佣金","Sync commission")}</Button>}
    <h4 className="font-medium">{data?.ledgerEnabled?t("购买记录","Purchases"):t("最近购买记录","Recent purchases")}</h4><p className="text-xs text-muted-foreground">{data?.ledgerEnabled?t("每页30条，分页不影响累计佣金。","30 orders per page; pagination does not affect the total."):t("最近 30 条统计范围内订单，待核对订单不计入可申请金额。","Latest 30 orders in scope. Orders under review do not count toward the amount available to request.")}</p>
-   {data?.orders?.map(o=><div className="rounded border p-2 text-sm break-all" key={o.domain+":"+o.orderId}>{new Date(o.paidAt).toLocaleString()} · {o.domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")} · {o.state==="verified"?money(o.commissionFen):t("待核对","Review")}<p className="text-xs text-muted-foreground">{t("订单本金","Order principal")} {money(o.principalFen)} · {t("佣金","Commission")} {money(o.commissionFen)} · {o.orderId}{write&&o.buyerId?" · "+o.buyerId:""} · {o.rateBps/100}%{write&&o.reason?" · "+o.reason:""}</p></div>)}
+   {data?.orders?.map(o=><div className="rounded-lg border p-3 space-y-3 text-sm" key={o.domain+":"+o.orderId} data-testid="partner-purchase-record">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+     <div className="flex min-w-0 items-start gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted"><UserRound size={18}/></span><div className="min-w-0"><p className="font-semibold break-all">{t("受邀用户","Referred user")} {o.buyerLabel??t("暂不可显示","Unavailable")}</p>{o.registeredAt!=null&&<p className="text-xs text-muted-foreground">{t("注册于","Registered on")} {new Date(o.registeredAt).toLocaleString()}</p>}</div></div>
+     <div className="text-right"><p className="text-xs text-muted-foreground">{t("本笔推广佣金","Commission from this order")}</p><strong className={o.state==="verified"?"text-xl text-emerald-600 tabular-nums":"text-sm text-amber-700"}>{o.state==="verified"&&o.commissionFen!=null?"+"+money(o.commissionFen):t("待核实","Under review")}</strong></div>
+    </div>
+    <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted/30 p-3 sm:grid-cols-3">
+     <div><p className="text-xs text-muted-foreground">{t("购买类型","Purchase type")}</p><p className="font-medium">{o.domain==="recharge"?t("次数套餐","Credits"):t("订阅","Subscription")}</p></div>
+     <div><p className="text-xs text-muted-foreground">{t("订单本金","Order principal")}</p><p className="font-medium tabular-nums">{money(o.principalFen)}</p></div>
+     <div><p className="text-xs text-muted-foreground">{t("计佣比例","Commission rate")}</p><p className="font-medium">{o.rateBps/100}%</p></div>
+     <div className="col-span-2"><p className="text-xs text-muted-foreground">{t("购买时间","Purchase time")}</p><p>{new Date(o.paidAt).toLocaleString()}</p></div>
+     <div><p className="text-xs text-muted-foreground">{t("核实状态","Verification")}</p><p className={o.state==="verified"?"font-medium text-emerald-700":"font-medium text-amber-700"}>{o.state==="verified"?t("已计入累计佣金","Included in total"):t("暂未计入佣金","Not included yet")}</p></div>
+    </div>
+    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t("订单详情","Order details")}</summary><p className="mt-1 break-all">{t("订单编号","Order ID")}：{o.orderId}</p>{write&&o.buyerId&&<p className="break-all">{t("用户编号","User ID")}：{o.buyerId}</p>}{write&&o.reason&&<p className="break-all">{o.reason}</p>}</details>
+   </div>)}
+   {!!data?.orders?.length&&<p className="text-xs text-muted-foreground">{t("用户标识与邀请记录采用相同脱敏方式，可能重名；已核实佣金不代表已转账。","Buyer labels are masked as in the referral list and may repeat. Verified commission does not mean a transfer has been made.")}</p>}
    {data?.ledgerEnabled&&<div className="flex flex-wrap items-center gap-2"><Button type="button" variant="outline" disabled={busy||previous.length===0} onClick={()=>void refresh(previous.at(-1)??null,previous.slice(0,-1))}>{t("上一页","Previous page")}</Button><span className="text-xs">{t("第","Page ")}{previous.length+1}{t("页","")}</span><Button type="button" variant="outline" disabled={busy||!data.nextCursor} onClick={()=>void refresh(data.nextCursor!,[...previous,pageCursor])}>{t("下一页","Next page")}</Button></div>}
    {!data?.orders?.length&&<p className="text-sm text-muted-foreground">{t("暂无统计订单。","No matching orders.")}</p>}
    <h4 className="font-medium">{t("申请记录","Settlement requests")}</h4>
