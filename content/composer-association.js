@@ -253,14 +253,49 @@
     return Number.isFinite(value)?value:null;
   }
   function expandControls(article){
-    return ownedDetailNodes(article,'[data-testid="tweet-text-show-more-link"],button,a,[role="button"]').filter(n=>
+    const matches=ownedDetailNodes(article,'[data-testid="tweet-text-show-more-link"],button,a,[role="button"]').filter(n=>
       n.matches('[data-testid="tweet-text-show-more-link"]')||
       /^(?:show more|read more|显示更多|顯示更多|查看更多|展开全文|全文を表示|さらに表示|もっと見る|voir plus|mostrar más|mehr anzeigen)$/i.test(normalized(n.textContent)));
+    // A wrapper and its native link/button may both match; count one control.
+    return matches.filter(n=>!matches.some(other=>other!==n&&other.contains(n)));
   }
   function presentationNormalize(text,media){
     let s=normalized((text||'').normalize('NFC').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,''));
     if(media)s=s.replace(/(?:\s+(?:https:\/\/\s?)?pic\.(?:x|twitter)\.com\/[A-Za-z0-9]+){1,4}$/i,'').trim();
     return s;
+  }
+  // A native expansion link can independently name the parent even when
+  // the modal's timestamp is unlinked. It is not an ordinary body hyperlink.
+  function detailExpansionId(article,initialUrl){
+    const controls=expandControls(article),ids=new Set();
+    for(const control of controls){
+      for(const link of [control,...control.querySelectorAll('a[href]')]){
+        if(!link.matches('a[href]')||link.closest('article')!==article||
+           inQuotedCard(link)||!(control.matches('[data-testid="tweet-text-show-more-link"]')||
+           link.matches('[data-testid="tweet-text-show-more-link"]')))continue;
+        try{
+          const base=new URL(initialUrl),url=new URL(link.getAttribute('href'),base);
+          const match=url.pathname.match(/^\/(?:[A-Za-z0-9_]{1,15}|i\/web)\/status\/(\d+)\/?$/);
+          if(url.origin===base.origin&&!url.username&&!url.password&&!url.hash&&match)ids.add(match[1]);
+        }catch{}
+      }
+    }
+    return ids.size>1?'!conflict':ids.size===1?ids.values().next().value:null;
+  }
+  function detailLinkToken(node){
+    if(!node.matches('a[href]'))return null;
+    try{
+      const url=new URL(node.getAttribute('href'),node.ownerDocument.baseURI);
+      // Compare the actual hyperlink target, not shortened display labels.
+      // Only unambiguous X t.co redirect tokens; no link fetching/resolving.
+      if(url.protocol==='https:'&&url.hostname==='t.co'&&!url.username&&!url.password&&
+         !url.search&&!url.hash&&/^\/[A-Za-z0-9]+$/.test(url.pathname)){
+        const label=normalized(node.textContent);
+        if(/^(?:https?:\/\/)?pic\.(?:x|twitter)\.com\//i.test(label))return null;
+        return ' \uE000'+url.pathname.slice(1)+'\uE001 ';
+      }
+    }catch{}
+    return null;
   }
   function detailBodies(article,media){
     const bodies=ownedDetailNodes(article,'[data-testid="tweetText"]');
@@ -271,13 +306,14 @@
     // Keep two representations: rendered text and DOM text (including emoji
     // alt). Hidden background articles can change innerText on modal open.
     // Do not remove arbitrary links, words or punctuation.
-    const read=node=>{
-      if(node===expand||node.nodeType===1&&node.matches('[data-zane-reply-copilot],[data-testid="tweetTranslation"],[data-testid="translation"]'))return '';
+    const read=(node,links=false)=>{
+      if(node===expand||node.nodeType===1&&node.matches('[data-zane-reply-copilot],[data-testid="tweetTranslation"],[data-testid="translation"],.immersive-translate-translation,.immersive-translate-translation-wrapper,.immersive-translate-target-translation-block-wrapper,.immersive-translate-target-translation-inline-wrapper,[data-imt-translation-only="1"],[data-immersive-translate-translation],[data-immersive-translate-translation-element]'))return '';
       if(node.nodeType===3)return node.textContent||'';
       if(node.nodeType!==1)return '';
       if(node.tagName==='IMG')return node.getAttribute('alt')||'';
       if(node.tagName==='BR')return ' ';
-      const result=[...node.childNodes].map(read).join('');
+      if(links){const token=detailLinkToken(node);if(token)return token;}
+      const result=[...node.childNodes].map(child=>read(child,links)).join('');
       return /^(?:DIV|P|LI)$/.test(node.tagName)?' '+result+' ':result;
     };
     const stripLabel=s=>{
@@ -287,7 +323,7 @@
       return presentationNormalize(s,media);
     };
     const rendered=globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body);
-    const texts=[...new Set([stripLabel(rendered),presentationNormalize(read(body),media)].filter(Boolean))];
+    const texts=[...new Set([stripLabel(rendered),presentationNormalize(read(body),media),presentationNormalize(read(body,true),media)].filter(Boolean))];
     return {texts,expanded:Boolean(expand)};
   }
   function captureDetailPreviewSource(post,initialUrl){
@@ -308,8 +344,9 @@
   function detailContextConflict(post,article,initialUrl){
     const owner=detailRouteOwner(post,initialUrl);
     const evidence=globalThis.ZaneReplyCopilotContent.postExtractor.legacyDetailEvidence(article,initialUrl);
+    const expansionId=detailExpansionId(article,initialUrl);
     const author=detailAuthor(article,initialUrl),time=detailTimestamp(article),captured=post.detailPreviewSource;
-    return evidence.conflict||(evidence.statusId&&evidence.statusId!==post.statusId)||
+    return Boolean(expansionId&&expansionId!==post.statusId)||evidence.conflict||(evidence.statusId&&evidence.statusId!==post.statusId)||
       (evidence.otherCanonicalId&&evidence.otherCanonicalId!==post.statusId)||
       Boolean(author&&author!==owner)||
       Boolean(captured&&captured.time!==null&&time!==null&&captured.time!==time);
@@ -338,6 +375,7 @@
     }
     const matchingTime=captured.time!==null&&timestamp===captured.time;
     const matchingAuthor=author===owner;
+    const expansionId=detailExpansionId(article,initialUrl);
     const modal=detailBodies(article,post.hasCapturedMedia);
     if(!modal.texts.length)return false;
     const oldAmbiguous=quarantinedPosts.some(old=>old?.statusId!==post.statusId&&(
@@ -347,6 +385,10 @@
         return q&&(q===v||(prefix.length>=40&&q.startsWith(prefix)));
       })||(matchingTime&&old?.detailPreviewSource?.owner===owner&&old.detailPreviewSource.time===timestamp)));
     if(oldAmbiguous)return false;
+    // A native Show more permalink is strong independent target evidence;
+    // as with the normal verified-ID path, display differences are allowed.
+    // The source body, route, editor and contradictory metadata were checked.
+    if(expansionId===post.statusId&&modal.expanded)return true;
     // Editor-first corroboration: the state machine has already required a
     // trusted captured click, no old modal, one new focused empty editor.
     // The modal itself need not repeat a permalink or exact datetime.
@@ -361,6 +403,15 @@
       if(full.length>prefix.length&&full.startsWith(prefix)&&
          ((marked&&length>=40&&(matchingAuthor||matchingTime))||
           (marked&&length>=80)||(matchingAuthor&&length>=100)))return true;
+      // Native long previews may wrap CJK text and emoji differently. For
+      // a positively marked long preview with matching author, compare
+      // exact characters after removing presentation whitespace and VS16.
+      // Do not accept arbitrary edits, translated text, or different URLs.
+      if(marked&&matchingAuthor){
+        const compact=s=>s.replace(/[\s\uFE0E\uFE0F]/g,'');
+        const long=compact(full),short=compact(prefix);
+        if(Array.from(short).length>=80&&long.startsWith(short))return true;
+      }
     }
     return false;
   }
@@ -572,6 +623,16 @@
           :post.hasCapturedQuote?null
           :candidates.length===1&&!normalized(text)&&!statusId?null
           :false;
+      const compactEvidence=post.detailPreviewSource&&!modernContext&&primary?.article?{
+        expansion:expandControls(primary.article).length===1,
+        expansionIdPresent:Boolean(detailExpansionId(primary.article,initialUrl)),
+        authorMatches:detailAuthor(primary.article,initialUrl)===post.detailPreviewSource.owner,
+        timestampPresent:detailTimestamp(primary.article)!==null,
+        conflict:compactDetailConflict,
+        matched:compactDetailMatch,
+        sourceTextVariants:Math.min(5,post.detailPreviewSource.texts.length),
+        modalTextVariants:Math.min(5,detailBodies(primary.article,post.hasCapturedMedia).texts.length)
+      }:null;
       const contextDetail=routeConflict?"route_preview_conflict":
         linkless&&contextMatches===true?"verified_route_preview":
         modernContext&&post.replyRouteVerified&&contextMatches===null?"awaiting_route_preview":
@@ -587,7 +648,7 @@
         quarantinedContextMatch,
         contextArticleCount:articles.length,contextTextPresent:Boolean(normalized(text)||routeQuoteText),
         contextTextMatches:Boolean(primary&&sameContext(post,text)||quoteRoutePreview),
-        contextMatches,contextDetail};
+        contextMatches,contextDetail,compactEvidence};
     });
     return {now,editors,visibleDialogCount,routeAllowed:routeAllowed(initialUrl,currentUrl,post.statusId,post.modernLayout===true||post.legacyDetailIdentity===true),
       sourceUnchanged};

@@ -158,6 +158,36 @@ test('legacy detail identity fallback requires owned native evidence and an inde
       checks.initialBind=session.evaluate(a.snapshot(document,noTimes,url,compose,20)).editor===e;
       inner.querySelector('[data-testid="User-Name"] a').href='https://x.com/other';
       checks.changedTargetAfterBind=session.evaluate(a.snapshot(document,noTimes,url,compose,21)).state==='rejected';
+      // Long preview with identical native redirect target but different
+      // displayed link labels, and nested/native Show more markup.
+      const longLead='A long synthetic original post with enough leading text to check the native hyperlink projection ';
+      const tail=' and a substantial caption following the link before the remaining content';
+      const longSource=make('longSource',header()+'<div data-testid="tweetText">'+longLead+'<a href="https://t.co/AbCd123">example.test/path</a>'+tail+' plus final detail</div>'+photo('101')+actions('101'));
+      const longPost=a.capturePost(p.extractPost(longSource,url),url);
+      const longPreview=longLead+'<a href="https://t.co/AbCd123">example.test/…</a>'+tail+' pic.x.com/ABC123';
+      e=preview(longPreview,true);inner.querySelector('time').remove();
+      checks.linkPresentation=state(longPost).editor===e;
+      inner.querySelector('[data-testid="tweetText"] a').href='https://t.co/Different';
+      checks.differentLinkTarget=state(longPost).state!=='bound';
+      e=preview(longPreview,false);inner.querySelector('time').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend','<div data-testid="tweet-text-show-more-link"><button>Show more</button></div>');
+      checks.nestedExpand=state(longPost).editor===e;
+      e=preview('Different display due to native translation',false);inner.querySelector('time').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend','<a data-testid="tweet-text-show-more-link" href="'+url+'">Show more</a>');
+      checks.nativeExpandId=state(longPost).editor===e;
+      inner.querySelector('[data-testid="tweet-text-show-more-link"]').href='https://x.com/example/status/202';
+      checks.nativeExpandWrongId=state(longPost).state!=='bound';
+      e=preview('Different display due to native translation',false);inner.querySelector('time').remove();
+      inner.querySelector('article').insertAdjacentHTML('beforeend','<a href="'+url+'">Show more</a>');
+      checks.unmarkedExpandNotIdentity=state(longPost).state!=='bound';
+      const chinese='这是一段用于测试长文展示差异的合成文字，其中包含足够多的字符来验证原生预览与详情页的正文对应关系。'+
+        '这里还有另一段文字，模拟链接及图片之前的完整内容，确保只是排版空格不一致而不是替换原文。';
+      const chineseSource=make('chineseSource',header()+'<div data-testid="tweetText">'+chinese+'还有剩余全文。</div>'+photo('101')+actions('101'));
+      const chinesePost=a.capturePost(p.extractPost(chineseSource,url),url);
+      e=preview(Array.from(chinese).join(' '),true);inner.querySelector('time').remove();
+      checks.cjkSpacing=state(chinesePost).editor===e;
+      inner.querySelector('[data-testid="User-Name"] a').href='https://x.com/other';
+      checks.cjkWrongAuthor=state(chinesePost).state!=='bound';
       $('result').textContent=JSON.stringify(checks);
     };
     const file=path.join(dir,'fixture.html');writeFileSync(file,'<!doctype html><html><body><main></main><output id="result"></output><script>'+code+'</script><script>('+run.toString()+')()</script></body></html>');
@@ -167,7 +197,7 @@ test('legacy detail identity fallback requires owned native evidence and an inde
     const match=result.stdout.match(/<output id="result">(\{[^<]+\})<\/output>/);
     assert.ok(match,result.stdout.slice(-1000));
     const checks=JSON.parse(match[1]);
-    assert.equal(Object.keys(checks).length,64);
+    assert.equal(Object.keys(checks).length,72);
     assert.deepEqual(Object.entries(checks).filter(([,value])=>!value),[]);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
