@@ -69,7 +69,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const press=async t=>{await until(button(t));await evaluate('('+button(t)+').click()');};
  const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
  const disabled=t=>'Boolean(('+button(t)+')?.disabled)';
- await until(has('推广伙伴'));await evaluate('showDashboard("guest")');await until(has('登录后申请'));assert.deepEqual(await evaluate('fixture.reads'),['/v1/me']);assert.equal(await evaluate('document.querySelector("a[href*=next=partners]")?.getAttribute("href")'),'/login?mode=login&next=partners');
+ await until(has('推广伙伴'));await evaluate('showDashboard("guest")');await until(has('登录后申请'));assert.deepEqual(await evaluate('fixture.reads'),['/v1/me']);assert.equal(await evaluate('document.querySelector("a[href*=partners]")?.getAttribute("href")'),'/login?mode=login&next=partners');
  await evaluate('showDashboard("error")');await until(has('暂时无法确认账户状态'));assert.deepEqual(await evaluate('fixture.reads'),['/v1/me']);
  await evaluate('showDashboard("partner")');await until(has('推广伙伴'));assert.equal(await evaluate('document.querySelectorAll("[data-testid=account-referral-rewards]").length'),1);
  await evaluate('showMember()');await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('订单本金')),true);assert.equal(await evaluate(has('佣金比例')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate('Boolean(document.querySelector("[data-testid=partner-purchase-list]"))'),true);assert.equal(await evaluate(disabled('申请结算')),true);
