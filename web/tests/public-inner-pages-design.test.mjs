@@ -42,10 +42,18 @@ test("guide keeps CMS-controlled links and FAQ keeps CMS fallback", () => {
   assert.match(guide, /id="guide-steps-heading"/);
   assert.match(faq, /data-site-text="faq"/);
   assert.match(faq, /data-site-faq-default/);
-  assert.equal((faq.match(/<details class="faq-item/g) || []).length, 6);
-  assert.equal((faq.match(/<\/details>/g) || []).length, 6);
+  assert.equal((faq.match(/<details class="faq-item/g) || []).length, 4);
+  assert.equal((faq.match(/<\/details>/g) || []).length, 4);
   assert.match(faq, /href="\/feedback"/);
   assert.match(faq, /data-zh="免费额度何时领取？"/);
+  assert.match(faq, /data-zh="一次生成三种风格扣几次？"/);
+  assert.match(faq, /data-zh="会自动发送 X 回复吗？"/);
+  assert.match(faq, /data-zh="没有出现悬浮窗？"/);
+  assert.match(faq, /刷新 X 官网（x\.com）页面/);
+  assert.match(faq, /不要使用 Google 网页翻译/);
+  assert.match(faq, /restore the original page, and refresh/);
+  assert.doesNotMatch(faq, /需要自己的 AI API Key 吗|如何充值？|在哪里反馈问题？/);
+  assert.deepEqual([...faq.matchAll(/class="faq-number">(\d+)<\/span>/g)].map(m=>m[1]),["01","02","03","04"]);
 });
 
 test("auth and account pages go straight to functional panels without duplicate marketing heroes", () => {

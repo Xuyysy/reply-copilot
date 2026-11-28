@@ -44,7 +44,7 @@ test("real built user pages fit phone, tablet and desktop viewports", { timeout:
         assert.match(await evaluate('document.querySelector(".momentum-signature").dataset.zh'), /互动是蓄势/);
       }
       if (route === "faq") {
-        assert.equal(await evaluate("document.querySelectorAll('.public-faq-item').length"), 6);
+        assert.equal(await evaluate("document.querySelectorAll('.public-faq-item').length"), 4);
         assert.equal(await evaluate("document.querySelector('.public-faq-item').open"), true);
       }
     });
