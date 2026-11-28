@@ -12,8 +12,12 @@ type ReferralMine={
  invitedBy?:{status:string;registeredAt:number;rewardedAt:number|null}|null;
  invites?:{registeredAt:number;status:string;label:string}[];
 };
-export default function ReferralInviteCard({language,showRecruitment,applicationsEnabled=false,renderPartner}:{language:Language;showRecruitment:boolean;applicationsEnabled?:boolean;renderPartner?:(invites:ReactNode)=>ReactNode}){
+export default function ReferralInviteCard({language,showRecruitment,applicationsEnabled=false,renderPartner,showPartnerAdvice=false}:{language:Language;showRecruitment:boolean;applicationsEnabled?:boolean;renderPartner?:(invites:ReactNode)=>ReactNode;showPartnerAdvice?:boolean}){
  const t=(zh:string,en:string)=>phrase(language,zh,en);
+ const promotionAdvice=<>
+  <p className="text-sm font-semibold">{t("边冲 X 原创者收益，边实现流量变现。粉丝更划算，你也有额外收益机会。","Keep working toward X creator monetization while earning affiliate commissions on qualifying referrals. A better deal for your audience, another way to earn.")}</p>
+  <p className="text-sm font-semibold">{t("无需把账号变成广告号！保持你原有的内容和更新节奏，通过分享实用工具、使用心得或原创文章，自然地融入你的专属邀请链接。","No need to turn your account into an ad feed. Keep creating as usual and naturally include your referral link when sharing useful tools, personal insights, or original articles.")}</p>
+ </>;
  const [data,setData]=useState<ReferralMine|null>(null);
  const [loading,setLoading]=useState(true);
  const [busy,setBusy]=useState(false);
@@ -57,6 +61,10 @@ export default function ReferralInviteCard({language,showRecruitment,application
       <input aria-label={t("我的邀请链接","My invite link")} readOnly value={data.link} onFocus={e=>e.target.select()} className="min-w-0 flex-1 rounded-md border bg-muted/30 p-2 text-xs"/>
       <Button type="button" size="sm" variant="outline" onClick={()=>void copy()}><Copy size={15}/>{t("复制链接","Copy link")}</Button>
      </div>:<Button type="button" disabled={busy} onClick={()=>void create()}><Gift size={16}/>{t("生成我的邀请链接","Create my invite link")}</Button>}
+    {showPartnerAdvice&&!showRecruitment&&<div className="space-y-2 rounded-lg bg-muted/40 p-3" data-testid="partner-promotion-advice">
+     <h3 className="text-sm font-semibold">{t("推广建议","Promotion tips")}</h3>
+     {promotionAdvice}
+    </div>}
     {showRecruitment&&<div className="space-y-3 rounded-lg bg-muted/40 p-3" data-testid="partner-recruitment">
        <h3 className="font-semibold">{t("想让流量变现？成为推广合伙人","Turn your audience into income. Become a partner.")}</h3>
        <div className="grid grid-cols-2 gap-2">
@@ -65,8 +73,7 @@ export default function ReferralInviteCard({language,showRecruitment,application
        </div>
        <p className="text-sm">{t("通过你的专属邀请链接注册，粉丝完成激活条件后可获得共计 250 次免费回复额度，你也可获得额外 50 次邀请奖励。","Fans who sign up through your invite link can earn 250 free replies in total after meeting the reward requirements. You can earn 50 bonus replies too.")}</p>
        <p className="text-sm">{t("成为合伙人后，粉丝产生的符合条件的充值及订阅订单，还能为你带来最低 15% 的约定佣金收入。","Approved partners also earn an agreed commission of at least 15% on qualifying credit and subscription purchases made by their referrals.")}</p>
-       <p className="text-sm font-semibold">{t("边冲 X 原创者收益，边实现流量变现。粉丝更划算，你也有额外收益机会。","Keep working toward X creator monetization while earning affiliate commissions on qualifying referrals. A better deal for your audience, another way to earn.")}</p>
-       <p className="text-sm font-semibold">{t("无需把账号变成广告号！保持你原有的内容和更新节奏，通过分享实用工具、使用心得或原创文章，自然地融入你的专属邀请链接。","No need to turn your account into an ad feed. Keep creating as usual and naturally include your referral link when sharing useful tools, personal insights, or original articles.")}</p>
+       {promotionAdvice}
        {applicationsEnabled?<PartnerApplication language={language}/>:<p className="text-sm text-muted-foreground">{t("合伙人申请暂未开放，请稍后查看。","Partner applications are temporarily unavailable. Check back later.")}</p>}
        <p className="text-xs text-muted-foreground">{data.link?t("审核开通后，继续使用已有邀请链接，无需重新生成。","After approval, keep using your existing invite link; no new link is needed."):t("普通邀请奖励无需申请合作，生成链接不代表开通现金返佣。","Standard referral rewards do not require approval. Creating a link does not activate cash commissions.")}</p>
       </div>}

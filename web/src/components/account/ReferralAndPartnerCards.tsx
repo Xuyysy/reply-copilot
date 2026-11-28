@@ -8,5 +8,5 @@ export default function ReferralAndPartnerCards({language,owner}:{language:Langu
  const result=usePartnerMembership(owner);
  const showRecruitment=result?.enabled===true&&result.recruitmentEligible===true&&result.policy===null;
  const hasPartner=result?.enabled===true&&!!result.policy;
- return <ReferralInviteCard language={language} showRecruitment={showRecruitment} applicationsEnabled={result?.applicationsEnabled===true} renderPartner={hasPartner?(invites)=><PartnerMembershipContent owner={owner} language={language} result={result} inviteRecords={invites}/>:undefined}/>;
+ return <ReferralInviteCard language={language} showRecruitment={showRecruitment} applicationsEnabled={result?.applicationsEnabled===true} renderPartner={hasPartner?(invites)=><PartnerMembershipContent owner={owner} language={language} result={result} inviteRecords={invites}/>:undefined} showPartnerAdvice={hasPartner&&result.policy?.status==="active"}/>;
 }
