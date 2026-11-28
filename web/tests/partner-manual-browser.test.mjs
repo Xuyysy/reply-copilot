@@ -10,6 +10,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await build({stdin:{contents:`import React from 'react';import{createRoot}from'react-dom/client';
  import Membership from './src/components/account/PartnerMembershipCard';
  import ReferralAndPartner from './src/components/account/ReferralAndPartnerCards';
+ import PartnerDashboard from './src/components/account/PartnerDashboard';
  import Admin from './src/components/admin/PartnerAdminPanel';
  import {api} from './src/lib/api';
  import {adminOperationPayload} from './src/lib/admin-operation-payload';
@@ -20,6 +21,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
   const u=new URL(url);if(u.origin!=='https://account.fixture.invalid')throw Error('External forbidden');if(!init.method||init.method==='GET')f.reads.push(u.pathname);
+  if(u.pathname==='/v1/me')return f.owner==='guest'?Response.json({code:'UNAUTHORIZED'},{status:401}):f.owner==='error'?Response.json({code:'SERVER_UNAVAILABLE'},{status:503}):Response.json({user:{userId:f.owner}});
   if(u.pathname==='/v1/auth/csrf')return Response.json({csrfToken:'fixture-csrf'});
   if(u.pathname==='/v1/partners/me')return Response.json({enabled:f.enabled,policy:f.owner==='partner'?policy:null,payoutProfileEnabled:f.payout,applicationsEnabled:f.appEnabled});
   if(u.pathname==='/v1/partners/payout')return Response.json({enabled:true,version:0,locked:false,profile:null});
@@ -56,6 +58,7 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  };
  window.showMember=(owner='partner',language='zh')=>{f.owner=owner;root.render(<Membership key={owner} owner={owner} language={language}/>);};
  window.showReferral=(owner,link,enabled=true)=>{f.owner=owner;f.link=link;f.enabled=enabled;root.render(<ReferralAndPartner key={owner+':'+link+':'+enabled} owner={owner} language="zh"/>);};
+ window.showDashboard=(owner)=>{f.owner=owner;f.reads=[];root.render(<PartnerDashboard key={owner}/>);};
  window.showAdmin=()=>root.render(<Admin language="zh" write={(p,b)=>{const {payload,valid}=adminOperationPayload(p,b,'');if(!valid)throw Error('Reason required');return api(p,{method:'POST',body:JSON.stringify({...payload,operationId:'fixture-operation'})});}}/>);
  window.showMember();`,resolveDir:web,loader:'tsx'},bundle:true,platform:'browser',format:'iife',define:{'import.meta.env.PUBLIC_API_BASE_URL':'"https://account.fixture.invalid"','import.meta.env.DEV':'false'},outfile:path.join(dir,'app.js')});
  const {readdirSync}=await import('node:fs');const css=readdirSync(path.join(web,'dist/_astro')).find(x=>x.endsWith('.css'));
@@ -66,7 +69,10 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  const press=async t=>{await until(button(t));await evaluate('('+button(t)+').click()');};
  const has=t=>'document.body.textContent.includes('+JSON.stringify(t)+')';
  const disabled=t=>'Boolean(('+button(t)+')?.disabled)';
- await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('订单本金')),true);assert.equal(await evaluate(has('佣金比例')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate('Boolean(document.querySelector("[data-testid=partner-purchase-list]"))'),true);assert.equal(await evaluate(disabled('申请结算')),true);
+ await until(has('推广伙伴'));await evaluate('showDashboard("guest")');await until(has('登录后申请'));assert.deepEqual(await evaluate('fixture.reads'),['/v1/me']);assert.equal(await evaluate('document.querySelector("a[href*=next=partners]")?.getAttribute("href")'),'/login?mode=login&next=partners');
+ await evaluate('showDashboard("error")');await until(has('暂时无法确认账户状态'));assert.deepEqual(await evaluate('fixture.reads'),['/v1/me']);
+ await evaluate('showDashboard("partner")');await until(has('推广伙伴'));assert.equal(await evaluate('document.querySelectorAll("[data-testid=account-referral-rewards]").length'),1);
+ await evaluate('showMember()');await until(has('推广伙伴'));await press('查看分成');await until(has('累计核实分成'));assert.equal(await evaluate(has('受邀用户 y***')),true);assert.equal(await evaluate(has('订单本金')),true);assert.equal(await evaluate(has('佣金比例')),true);assert.equal(await evaluate(has('已计入累计佣金')),true);assert.equal(await evaluate('Boolean(document.querySelector("[data-testid=partner-purchase-list]"))'),true);assert.equal(await evaluate(disabled('申请结算')),true);
  assert.deepEqual(await evaluate('fixture.posts'),[]);
  await evaluate('fixture.earned=1000');await press('刷新');await until('!'+disabled('申请结算'));await evaluate('fixture.hold=true');
  await evaluate('('+button('申请结算')+').click();('+button('申请结算')+').click()');

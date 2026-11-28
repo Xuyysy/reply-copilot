@@ -101,7 +101,10 @@ test('partner candidate excludes automated transfers and schedulers, gates manua
  assert.match(card,/if\(!result\?\.enabled\|\|!result\.policy\)return null/);
  assert.match(card,/api<Result>\("\/v1\/partners\/me"\)/);
  const wrapper=readFileSync(new URL('../../web/src/components/account/ReferralAndPartnerCards.tsx',import.meta.url),'utf8');
- assert.match(account,/<ReferralAndPartnerCards key=\{data\.account\.user\.userId\} owner=\{data\.account\.user\.userId\} language=\{language\}\/>/);
+ const dashboard=readFileSync(new URL('../../web/src/components/account/PartnerDashboard.tsx',import.meta.url),'utf8');
+ assert.doesNotMatch(account,/<ReferralAndPartnerCards/);
+ assert.match(account,/href="\/partners"/);
+ assert.match(dashboard,/<ReferralAndPartnerCards key=\{state\.owner\} owner=\{state\.owner\} language=\{language\}\/>/);
  assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} applicationsEnabled=\{result\?\.applicationsEnabled===true\} renderPartner=/);
  assert.match(wrapper,/<PartnerMembershipContent owner=\{owner\} language=\{language\} result=\{result\} inviteRecords=\{invites\}/);
  assert.match(wrapper,/result\?\.enabled===true&&result\.policy===null/);

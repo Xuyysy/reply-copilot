@@ -55,7 +55,7 @@ export default function AuthPanel({ localVerification, sitekey }: { localVerific
   function switchView(next: View) { setView(next); setNotice(null); setCode(""); }
   function redirect() {
     const deviceCode = new URL(location.href).searchParams.get("device_code");
-    location.href = deviceCode && /^[A-F0-9]{8}$/.test(deviceCode) ? `/account?device_code=${deviceCode}` : "/account";
+    location.href = deviceCode && /^[A-F0-9]{8}$/.test(deviceCode) ? `/account?device_code=${deviceCode}` : new URL(location.href).searchParams.get("next")==="partners" ? "/partners" : "/account";
   }
   async function request<T>(event: FormEvent, path: string, body: object, success: (result: T) => void) {
     event.preventDefault();

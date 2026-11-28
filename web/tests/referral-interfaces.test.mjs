@@ -10,8 +10,11 @@ const login=read("../src/components/auth/AuthPanel.tsx");
 const admin=read("../src/components/admin/AdminDashboard.tsx");
 const adminPanel=read("../src/components/admin/ReferralAdminPanel.tsx");
 
-test("My Account includes V1 referrals beside existing free and paid credit balances",()=>{
- assert.match(account,/import ReferralAndPartnerCards from "\.\/ReferralAndPartnerCards"/);
+test("Partners owns V1 referrals and My Account retains only a navigation link",()=>{
+ const dashboard=read("../src/components/account/PartnerDashboard.tsx");
+ assert.doesNotMatch(account,/<ReferralAndPartnerCards|import ReferralAndPartnerCards/);
+ assert.match(account,/href="\/partners"/);
+ assert.match(dashboard,/<ReferralAndPartnerCards key=\{state\.owner\} owner=\{state\.owner\} language=\{language\}/);
  assert.match(wrapper,/<ReferralInviteCard language=\{language\} showRecruitment=\{showRecruitment\} applicationsEnabled=\{result\?\.applicationsEnabled===true\} renderPartner=/);
  assert.match(card,/我的推广中心/);
  assert.match(card,/account-referral-rewards/);

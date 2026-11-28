@@ -42,6 +42,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
           <a data-nav-id="faq" href="/faq" data-astro-prefetch="hover">FAQ</a>
         </nav>
         <div class="header-actions">
+          {!isAdminPage && <a data-nav-id="partners" class="partner-nav-entry" href="/partners" aria-current={/^\/partners\/?$/.test(Astro.url.pathname)?"page":undefined}><span data-zh="推广合伙人">Partners</span></a>}
           {!isAdminPage && <a data-nav-id="momentum-terminal" class="momentum-terminal-entry" href="/momentum-terminal" aria-label="势能分析 / Momentum Analytics"><span data-zh="势能分析">Momentum Analytics</span><span aria-hidden="true">⚡</span></a>}
           <button class="language-button" id="language-toggle" type="button" aria-label="Switch language">中文</button>
           <span id="account-loading" class="account-status-loading" role="status" aria-live="polite"><span class="account-loading-dot" aria-hidden="true"></span><span data-zh="正在确认账户">Checking account</span></span>
@@ -55,6 +56,7 @@ const isGuidePage = /^\/guide\/?$/.test(Astro.url.pathname);
             </summary>
             <nav class="mobile-nav-list" aria-label="Mobile navigation">
               <a href="/" data-zh="首页">Home</a>
+              <a href="/partners" data-zh="推广合伙人" aria-current={/^\/partners\/?$/.test(Astro.url.pathname)?"page":undefined}>Partners</a>
               <a href="/momentum-terminal" data-zh="势能分析">Momentum Analytics</a>
               <a data-site-link="chromeStoreUrl" aria-disabled="true"><span data-zh="安装插件">Install extension</span></a>
               <a href="/guide" data-astro-prefetch="hover" data-zh="使用指南">Guide</a>
