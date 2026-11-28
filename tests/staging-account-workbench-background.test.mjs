@@ -49,3 +49,14 @@ test('schedule interval is owner-scoped preference only; never enables live work
  assert.equal((await f.dispatch('interaction','schedule-preferences',f.page('interaction',12))).intervalMinutes,60);
  assert.ok(f.sent.every(t=>t==='XRH_STAGING_WORKBENCH_IDENTITY'));
 });
+
+test('a view requested for the old binding cannot proceed after same-owner rebinding while reading task state',async()=>{
+ const f=fixture();await f.dispatch('interaction','open',f.side);
+ const original=f.c.storage.session.get;let reached,release;
+ const ready=new Promise(r=>reached=r);
+ f.c.storage.session.get=async key=>{if(key==='xrh-interaction-task-111'){reached();await new Promise(r=>release=r);}return original(key);};
+ const view=f.dispatch('interaction','view',f.page('interaction',11));const rejected=assert.rejects(view,/identity_changed/);
+ await ready;
+ const b=f.data['xrh-workbench-interaction'];f.data['xrh-workbench-interaction']={...b,bindingId:'new-binding'};
+ release();await rejected;
+});

@@ -26,3 +26,11 @@ test('denied and navigated samples stop without reading or committing bodies',()
  const f=fixture();f.start();f.network.onNavigated.emit('https://x.com/home');f.network.onRequestFinished.emit(f.entry());assert.equal(f.reads,0);assert.equal(f.reports.at(-1).reason,'navigation');
  assert.equal(responseKind('https://x.com/i/api/graphql/abcdefgh/SearchTimeline','post'),'search');assert.equal(responseKind('https://x.com/i/api/graphql/abcdefgh/SearchTimeline','notification'),null);
 });
+
+test('a background cancellation is reported without replacing it with a generic source error',async()=>{
+ const network={onRequestFinished:channel(),onNavigated:channel()},reports=[];
+ const probe=createInteractionResponseProbe({network,project,commit:async()=>{throw Error('cancelled')},notify:e=>reports.push(e),schedule:()=>1,unschedule:()=>{}});
+ probe.start({source:'notification',ownerUserId:'111',authorized:true});
+ network.onRequestFinished.emit({request:{url:'https://x.com/i/api/2/notifications/all.json',method:'GET'},response:{status:200},getContent:f=>f(JSON.stringify(body),'')});
+ await Promise.resolve();await Promise.resolve();assert.equal(reports.at(-1).reason,'cancelled');assert.equal(probe.active,false);
+});

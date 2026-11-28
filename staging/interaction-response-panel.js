@@ -6,6 +6,7 @@ const send=async(action,extra={})=>{const r=await chrome.runtime.sendMessage({ty
 function cancelTicket(){const t=ticket;ticket=null;if(t)void send('sample-cancel',{ticket:t}).catch(()=>{});}
 function render(e){
  $('status').textContent=({waiting:'等待网页自身产生响应…',saved:'已写入本机互动数据库',rejected:'本次未通过',stopped:'已停止'})[e.phase]??'未启动';
+ if(e.phase==='stopped'&&e.saveMayHaveCompleted)$('status').textContent='已停止；若写入已经完成，记录仍保留。请读取本地记录确认。';
  $('report').textContent=JSON.stringify(e,null,2);
  const active=probe?.active===true;$('start').disabled=active||busy;$('stop').disabled=!active&&!busy;$('source').disabled=$('authorized').disabled=active||busy;
  if(e.phase!=='waiting')cancelTicket();
@@ -20,7 +21,7 @@ $('start').onclick=async()=>{
   const r=await send('sample-start',{source,authorized:true});
   if(g!==generation){void send('sample-cancel',{ticket:r.ticket}).catch(()=>{});return;}
   ticket=r.ticket;busy=false;probe.start({source,ownerUserId:r.ownerUserId,authorized:true});
- }catch{if(g===generation){busy=false;cancelTicket();render({phase:'rejected',reason:'请先从当前 X 标签页打开互动助手并确认账号，或等待其他任务完成'});}}
+ }catch(e){if(g===generation){busy=false;cancelTicket();render({phase:'rejected',reason:e?.message==='busy'?'其他同步或采集正在进行，请先停止或完成该任务':'请先从当前 X 标签页打开互动助手并确认账号'});}}
 };
 $('stop').onclick=stop;
 window.stopInteractionSample=stop;

@@ -12,7 +12,7 @@ export function responseKind(url,source){
   return source==='notification'&&op==='NotificationsTimeline'?'graphql':source==='post'&&op==='SearchTimeline'?'search':null;
  }catch{return null;}
 }
-const codes=new Set(['schema_changed','owner_mismatch','page_limit','invalid_pagination','ambiguous_cursor','terminal_unverified','unauthenticated','forbidden','rate_limited']);
+const codes=new Set(['schema_changed','owner_mismatch','page_limit','invalid_pagination','ambiguous_cursor','terminal_unverified','unauthenticated','forbidden','rate_limited','cancelled','identity_changed','owner_unverified','busy','invalid_context','workspace_limit']);
 export function createInteractionResponseProbe({network,project,commit,notify,clock=()=>Date.now(),schedule=setTimeout,unschedule=clearTimeout}){
  let active=null;
  function finish(s,report){

@@ -34,3 +34,14 @@ test('independent interaction page automatically loads real-format cache and hid
   assert.equal(await evaluate("document.getElementById('ranking').children.length"),0);
  });
 });
+
+test('ranking count bars stay bounded under weighted sorting',{timeout:30000},async()=>{
+ const scenario=setup.replace("const users=rows.map","for(let q=0;q<3;q++)rows.push({...rows[0],type:'quote',eventPostId:String(800+q),eventId:'111:quote:1000:111:'+String(800+q)});for(let n=0;n<5;n++)rows.push({...rows[1],eventId:'111:like:1001:111:'+String(700+n),targetPostId:String(700+n)});const users=rows.map").replace("handle:'user'+i","handle:'user'+(Number(r.actorUserId)-1000)");
+ await withMomentumBrowser(scenario,async({evaluate})=>{
+  await wait(evaluate,"document.getElementById('ranking').children.length===50");
+  await evaluate("document.getElementById('sort').value='weighted';document.getElementById('sort').dispatchEvent(new Event('change'))");
+  await wait(evaluate,"document.querySelector('#ranking button').textContent==='@user0'");
+  assert.equal(await evaluate("Array.from(document.querySelectorAll('#ranking .bar span')).every(e=>parseFloat(e.style.width)<=100)"),true);
+  assert.ok(Math.abs(await evaluate("parseFloat(document.querySelector('#ranking li .bar span').style.width)")-100*4/6)<0.001);
+ });
+});
