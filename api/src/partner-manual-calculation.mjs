@@ -53,13 +53,14 @@ export function summarizeManualOrders(orders,recordedFen,complete){
  const reviewed=orders.filter(o=>o.state==='verified');
  const total=reviewed.reduce((s,o)=>s+o.commissionFen,0);
  if(!int(total,0))throw new TypeError('PARTNER_REPORT_INVALID');
- // No actionable outstanding balance when the report is incomplete or any
- // order requires human reconciliation. A negative difference is shown as such.
+ // Only verified orders contribute to the balance. Deduct ALL completed
+ // settlements even when a previously counted order now requires review;
+ // this conservatively absorbs possible debt. Incomplete reports still block.
  const reviewCount=orders.length-reviewed.length;
- return {verifiedOrders:reviewed.length,reviewCount,estimatedFen:complete?total:null,recordedFen,differenceFen:complete&&reviewCount===0?total-recordedFen:null,complete};
+ return {verifiedOrders:reviewed.length,reviewCount,estimatedFen:complete?total:null,recordedFen,differenceFen:complete?total-recordedFen:null,complete};
 }
 export const MIN_REQUEST_FEN=1000;
 export function requestableFen(summary,pending){
- if(pending||!summary?.complete||summary.reviewCount!==0||!int(summary.differenceFen,MIN_REQUEST_FEN,1000000000000))return null;
+ if(pending||!summary?.complete||!int(summary.differenceFen,MIN_REQUEST_FEN,1000000000000))return null;
  return summary.differenceFen;
 }

@@ -62,12 +62,20 @@ test('manual applications: owner isolation, minimum, admin handling and terminal
   db.exec("UPDATE credit_accounts SET paid_balance=paid_balance+500 WHERE user_id='ordinary'");
  }
  paidOrder('under',4995);
+ // Reproduce actual RSA2 recharge persistence: merchant outTradeNo and
+ // verified payment event exist, separate provider payment ID is NULL.
+ db.exec("UPDATE payment_transactions SET merchant_provider='xiaodou',provider_payment_id=NULL,payment_protocol='rsa2' WHERE order_id='under'");
+ db.exec("UPDATE provider_payment_events SET merchant_provider='xiaodou' WHERE transaction_id='tx-under'");
+ paidOrder('unverified',5000);
+ db.exec("UPDATE payment_transactions SET risk_state='manual_review' WHERE order_id='unverified'");
  const below=await ok('partner',me);
- assert.equal(below.summary.estimatedFen,999);assert.equal(below.requestableFen,null);
+ assert.equal(below.summary.estimatedFen,999);assert.equal(below.summary.reviewCount,1);assert.equal(below.summary.differenceFen,999);assert.equal(below.requestableFen,null);
  assert.equal((await call('partner',me,{expectedAmountFen:999})).status,409);
  paidOrder('boundary',5);
+ db.exec("UPDATE payment_transactions SET merchant_provider='xiaodou',provider_payment_id=NULL,payment_protocol='epay',epay_trade_no='epay-boundary' WHERE order_id='boundary'");
+ db.exec("UPDATE provider_payment_events SET merchant_provider='xiaodou' WHERE transaction_id='tx-boundary'");
  const exact=await ok('partner',me);
- assert.equal(exact.summary.estimatedFen,1000);assert.equal(exact.requestableFen,1000);
+ assert.equal(exact.summary.estimatedFen,1000);assert.equal(exact.summary.reviewCount,1);assert.equal(exact.orders.find(o=>o.orderId==='boundary').state,'verified');assert.equal(exact.requestableFen,1000);
  assert.equal((await call('partner',me,{expectedAmountFen:1001})).status,409);
  await ok('partner',me,{expectedAmountFen:1000});
  const requestId=(await ok('partner',me)).pendingId,second=randomUUID();

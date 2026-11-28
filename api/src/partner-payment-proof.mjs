@@ -17,7 +17,7 @@ function identityColumns(domain){
 export function paymentEvidencePlan(domain,orderId){
  if(!validId(orderId)||!['recharge','subscription'].includes(domain))throw new TypeError('PARTNER_ORDER_INVALID');
  if(domain==='recharge')return {sql:`SELECT o.id order_id,o.user_id buyer_id,'recharge' order_kind,o.status order_status,
- o.paid_at,o.credited_at applied_at,t.id transaction_id,t.merchant_provider,t.status payment_status,t.risk_state,t.currency,
+ o.paid_at,o.credited_at applied_at,t.id transaction_id,t.merchant_provider,t.payment_protocol,t.epay_trade_no,t.status payment_status,t.risk_state,t.currency,
  ${identityColumns(domain)},
  t.amount_fen buyer_fen,t.base_amount_fen principal_fen,t.service_fee_fen,t.principal_refunded_fen,
  (SELECT COUNT(*) FROM payment_transactions x WHERE x.order_id=o.id) transaction_count,
@@ -59,7 +59,16 @@ export function classifyPaymentEvidence(domain,rows,{allowFullyReversed=false}={
  if(!paid&&!refunded)return blocked('not_paid');
  if(r.payment_proof!==1||r.applied_proof!==1||!Number.isSafeInteger(r.paid_at)||r.paid_at<=0||
  !Number.isSafeInteger(r.applied_at)||r.applied_at<r.paid_at)return blocked('missing_settlement_proof');
- if(typeof r.provider_trade_id!=='string'||!r.provider_trade_id.trim()||r.provider_trade_id.length>200||typeof r.provider_payment_id!=='string'||!r.provider_payment_id.trim()||r.provider_payment_id.length>200||r.identity_count!==1||r.transaction_paid_at!==r.paid_at)return blocked('payment_identity_review');
+ // Xiaodou RSA2 recharge settles via a verified webhook or authenticated
+ // query of the merchant outTradeNo. The existing payment writer intentionally
+ // leaves provider_payment_id NULL. Epay writes its unique epay_trade_no.
+ // MK99 and subscriptions still require their provider payment ID.
+ const validTrade=x=>typeof x==='string'&&!!x.trim()&&x.length<=200;
+ const rsa2Recharge=domain==='recharge'&&r.merchant_provider==='xiaodou'&&r.payment_protocol==='rsa2';
+ const epayRecharge=domain==='recharge'&&r.merchant_provider==='xiaodou'&&r.payment_protocol==='epay';
+ const providerIdentity=epayRecharge?validTrade(r.epay_trade_no)&&(r.provider_payment_id===null||validTrade(r.provider_payment_id)&&r.provider_payment_id===r.epay_trade_no):
+   validTrade(r.provider_payment_id)||(rsa2Recharge&&r.provider_payment_id===null);
+ if(!validTrade(r.provider_trade_id)||!providerIdentity||r.identity_count!==1||r.transaction_paid_at!==r.paid_at)return blocked('payment_identity_review');
  if(!integer(r.principal_fen)||!integer(r.buyer_fen)||r.principal_fen>r.buyer_fen)return blocked('invalid_amount_snapshot');
  if(domain==='subscription'&&(!['purchase','renewal','upgrade'].includes(r.order_kind)||r.principal_fen!==r.buyer_fen))return blocked('invalid_subscription_amount');
  if(domain==='recharge'&&(!integer(r.principal_refunded_fen,0)||r.refund_proof_fen!==r.principal_refunded_fen||
