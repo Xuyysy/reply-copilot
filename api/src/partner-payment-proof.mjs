@@ -8,7 +8,20 @@ const integer=(x,min=1)=>Number.isSafeInteger(x)&&x>=min&&x<=1000000000000;
 function identityColumns(domain){
  const own=domain==='recharge'?'payment_transactions':'subscription_payment_transactions';
  const other=domain==='recharge'?'subscription_payment_transactions':'payment_transactions';
- return `t.provider_trade_id,t.provider_payment_id,t.paid_at transaction_paid_at,
+ // Extra indexed collision checks are short-circuited for the common RSA2
+ // recharge path (no provider payment ID), and for MK99. Epay uses a separate
+ // unique column, but must not collide with Xiaodou's other payment IDs.
+ const epayCollision=domain==='recharge'?
+  `CASE WHEN t.merchant_provider='xiaodou' AND t.payment_protocol='epay' AND t.epay_trade_no IS NOT NULL THEN
+    EXISTS(SELECT 1 FROM payment_transactions x WHERE x.merchant_provider='xiaodou' AND x.provider_payment_id=t.epay_trade_no AND x.id<>t.id)
+    OR EXISTS(SELECT 1 FROM subscription_payment_transactions x WHERE x.merchant_provider='xiaodou' AND x.provider_payment_id=t.epay_trade_no)
+   WHEN t.merchant_provider='xiaodou' AND t.provider_payment_id IS NOT NULL THEN
+    EXISTS(SELECT 1 FROM payment_transactions x WHERE x.merchant_provider='xiaodou' AND x.epay_trade_no=t.provider_payment_id AND x.id<>t.id)
+   ELSE 0 END`:
+  `CASE WHEN t.merchant_provider='xiaodou' AND t.provider_payment_id IS NOT NULL THEN
+    EXISTS(SELECT 1 FROM payment_transactions x WHERE x.merchant_provider='xiaodou' AND x.epay_trade_no=t.provider_payment_id)
+   ELSE 0 END`;
+ return `t.provider_trade_id,t.provider_payment_id,t.paid_at transaction_paid_at,(${epayCollision}) epay_identity_collision,
  (SELECT COUNT(*) FROM ${own} x WHERE x.merchant_provider=t.merchant_provider AND
  (x.provider_trade_id=t.provider_trade_id OR x.provider_payment_id=t.provider_payment_id))+
  (SELECT COUNT(*) FROM ${other} x WHERE x.merchant_provider=t.merchant_provider AND
@@ -68,7 +81,7 @@ export function classifyPaymentEvidence(domain,rows,{allowFullyReversed=false}={
  const epayRecharge=domain==='recharge'&&r.merchant_provider==='xiaodou'&&r.payment_protocol==='epay';
  const providerIdentity=epayRecharge?validTrade(r.epay_trade_no)&&(r.provider_payment_id===null||validTrade(r.provider_payment_id)&&r.provider_payment_id===r.epay_trade_no):
    validTrade(r.provider_payment_id)||(rsa2Recharge&&r.provider_payment_id===null);
- if(!validTrade(r.provider_trade_id)||!providerIdentity||r.identity_count!==1||r.transaction_paid_at!==r.paid_at)return blocked('payment_identity_review');
+ if(!validTrade(r.provider_trade_id)||!providerIdentity||r.identity_count!==1||r.epay_identity_collision!==0||r.transaction_paid_at!==r.paid_at)return blocked('payment_identity_review');
  if(!integer(r.principal_fen)||!integer(r.buyer_fen)||r.principal_fen>r.buyer_fen)return blocked('invalid_amount_snapshot');
  if(domain==='subscription'&&(!['purchase','renewal','upgrade'].includes(r.order_kind)||r.principal_fen!==r.buyer_fen))return blocked('invalid_subscription_amount');
  if(domain==='recharge'&&(!integer(r.principal_refunded_fen,0)||r.refund_proof_fen!==r.principal_refunded_fen||

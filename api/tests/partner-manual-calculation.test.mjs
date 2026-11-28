@@ -41,12 +41,12 @@ test('application minimum is exactly 1000 fen and one outstanding request',()=>{
 });
 
 test('automatic Xiaodou RSA2 and Epay recharge use their actual trusted payment contracts',()=>{
- const row={transaction_count:1,merchant_provider:'xiaodou',payment_protocol:'rsa2',currency:'CNY',risk_state:'clear',refund_pending:0,order_status:'paid',payment_status:'paid',payment_proof:1,applied_proof:1,paid_at:100,applied_at:100,transaction_paid_at:100,provider_trade_id:'merchant-out',provider_payment_id:null,epay_trade_no:null,identity_count:1,principal_fen:1990,buyer_fen:1990,principal_refunded_fen:0,refund_proof_fen:0};
+ const row={transaction_count:1,merchant_provider:'xiaodou',payment_protocol:'rsa2',currency:'CNY',risk_state:'clear',refund_pending:0,order_status:'paid',payment_status:'paid',payment_proof:1,applied_proof:1,paid_at:100,applied_at:100,transaction_paid_at:100,provider_trade_id:'merchant-out',provider_payment_id:null,epay_trade_no:null,identity_count:1,epay_identity_collision:0,principal_fen:1990,buyer_fen:1990,principal_refunded_fen:0,refund_proof_fen:0};
  assert.equal(classifyPaymentEvidence('recharge',[row]).eligible,true);
  const c={order_id:'order',buyer_id:'buyer',paid_at:100,registered_at:1,first_authorized_at:1,term_months:null,rate_bps:1500,buyer_eligible:1};
  assert.equal(manualOrderEstimate('recharge',c,[{...row,order_id:'order',buyer_id:'buyer'}]).commissionFen,298);
  assert.equal(classifyPaymentEvidence('recharge',[{...row,payment_protocol:'epay',epay_trade_no:'unique-epay'}]).eligible,true);
- for(const patch of [{merchant_provider:'mk99'},{payment_protocol:'epay'},{payment_protocol:'unknown'},{provider_trade_id:null},{provider_payment_id:''},{identity_count:2},{transaction_count:2},{transaction_paid_at:99},{risk_state:'manual_review'},{payment_proof:0},{applied_proof:0},{refund_pending:1}]){
+ for(const patch of [{merchant_provider:'mk99'},{payment_protocol:'epay'},{payment_protocol:'unknown'},{provider_trade_id:null},{provider_payment_id:''},{identity_count:2},{epay_identity_collision:1},{transaction_count:2},{transaction_paid_at:99},{risk_state:'manual_review'},{payment_proof:0},{applied_proof:0},{refund_pending:1}]){
   assert.equal(classifyPaymentEvidence('recharge',[{...row,...patch}]).eligible,false,JSON.stringify(patch));
  }
  assert.equal(classifyPaymentEvidence('subscription',[{...row,order_kind:'purchase'}]).eligible,false);
