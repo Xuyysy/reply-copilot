@@ -12,9 +12,10 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  import ReferralAndPartner from './src/components/account/ReferralAndPartnerCards';
  import Admin from './src/components/admin/PartnerAdminPanel';
  import {api} from './src/lib/api';
+ import {adminOperationPayload} from './src/lib/admin-operation-payload';
  const root=createRoot(document.getElementById('root'));
  const policy={version:1,status:'active',level:'standard',rate_bps:2000,term_months:null,effective_at:1700000000000,reason:'synthetic policy'};
- window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false};
+ window.fixture={owner:'partner',enabled:true,earned:999,settled:0,pending:null,records:[],posts:[],hold:false,reads:[],payout:false,dirty:false};
  const f=window.fixture,member='/v1/partners/manual-report',admin='/v1/admin/partners/manual-report',policyPath='/v1/admin/partners/policy';
  const report=()=>({enabled:true,summary:{verifiedOrders:1,reviewCount:0,estimatedFen:f.earned,recordedFen:f.settled,differenceFen:f.earned-f.settled,complete:true},minRequestFen:1000,requestableFen:!f.pending&&f.earned-f.settled>=1000?f.earned-f.settled:null,pendingId:f.pending?.id??null,orders:[{domain:'recharge',orderId:'fixture-purchase',paidAt:1700000000001,registeredAt:1700000000000,buyerLabel:'y***',rateBps:1500,state:'verified',principalFen:1990,commissionFen:298}],records:f.records});
  window.fetch=async(url,init={})=>{
@@ -32,19 +33,25 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
     f.pending={id:'request-'+f.posts.length,partner_user_id:'partner',email:'partner@example.test',amount_fen:b.expectedAmountFen,created_at:1700000000000,status:'pending',resolved_at:null};
     f.records.unshift(f.pending);return Response.json({ok:true});
    }
+   if(u.pathname==='/v1/admin/partners/payout'){
+    if(!f.pending||b.requestId!==f.pending.id||b.forSettlement!==true||b.reason.length<8)throw Error('Invalid reveal');
+    if(f.dirty)return Response.json({code:'PARTNER_SETTLEMENT_CHANGED',message:'needs sync'},{status:409});
+    return Response.json({profile:{name:'Synthetic Recipient',account:'synthetic@example.test'}});
+   }
    if(u.pathname===admin){
+    if(b.sync===true){if(Object.keys(b).sort().join(',')!=='operationId,sync,userId')throw Error('Invalid sync payload');f.dirty=false;return Response.json(report());}
     if(!f.pending||b.requestId!==f.pending.id||!b.operationId||b.reason.length<8)throw Error('Invalid admin request');
     f.pending.status=b.action;if(b.action==='completed')f.settled+=f.pending.amount_fen;f.pending=null;return Response.json({ok:true});
    }
   }
   if(u.pathname===member)return Response.json(f.enabled?report():{enabled:false});
-  if(u.pathname===admin)return Response.json(u.searchParams.has('userId')?report():{enabled:true,queue:f.pending?[f.pending]:[]});
+  if(u.pathname===admin)return Response.json(u.searchParams.has('requestId')?{ledgerEnabled:true,settlementReady:!f.dirty}:u.searchParams.has('userId')?report():{enabled:true,queue:f.pending?[{...f.pending,recipient_available:1}]:[],ledgerEnabled:f.payout,payoutProfileEnabled:f.payout});
   if(u.pathname===policyPath)return Response.json({enabled:true,user:{id:'partner',email:'partner@example.test',eligible:true},history:[policy]});
   throw Error('Unexpected API '+u.pathname);
  };
  window.showMember=(owner='partner',language='zh')=>{f.owner=owner;root.render(<Membership key={owner} owner={owner} language={language}/>);};
  window.showReferral=(owner,link,enabled=true)=>{f.owner=owner;f.link=link;f.enabled=enabled;root.render(<ReferralAndPartner key={owner+':'+link+':'+enabled} owner={owner} language="zh"/>);};
- window.showAdmin=()=>root.render(<Admin language="zh" write={(p,b)=>api(p,{method:'POST',body:JSON.stringify({...b,operationId:'fixture-operation'})})}/>);
+ window.showAdmin=()=>root.render(<Admin language="zh" write={(p,b)=>{const {payload,valid}=adminOperationPayload(p,b,'');if(!valid)throw Error('Reason required');return api(p,{method:'POST',body:JSON.stringify({...payload,operationId:'fixture-operation'})});}}/>);
  window.showMember();`,resolveDir:web,loader:'tsx'},bundle:true,platform:'browser',format:'iife',define:{'import.meta.env.PUBLIC_API_BASE_URL':'"https://account.fixture.invalid"','import.meta.env.DEV':'false'},outfile:path.join(dir,'app.js')});
  const {readdirSync}=await import('node:fs');const css=readdirSync(path.join(web,'dist/_astro')).find(x=>x.endsWith('.css'));
  writeFileSync(path.join(dir,'index.html'),`<html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="${pathToFileURL(path.join(web,'dist/_astro',css)).href}"><div id="root"></div><script src="app.js"></script></html>`);
@@ -81,5 +88,12 @@ test('partner UI: eligibility, settlement request and administrator queue',{time
  await press('结算记录');await until(has('支付宝收款资料'));await until(has('申请记录'));assert.equal(await evaluate(has('受邀用户 y***')),false);assert.equal(await evaluate('fixture.reads.filter(x=>x==="/v1/partners/payout").length'),1);assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true);
  await evaluate('fixture.payout=false');
  await evaluate('showReferral("ordinary","https://account.fixture.invalid/login/?mode=register&ref=0123456789abcdef",false)');await until('Boolean(document.querySelector("[aria-label=我的邀请链接]"))');assert.equal(await evaluate(has('想让流量变现')),false);assert.equal(await evaluate('fixture.posts.length'),4);
+ // Reproduce the actual generic administrator payload path: a clean request
+ // reveals immediately; a dirty request performs one exact sync and retries.
+ await evaluate('fixture.payout=true;fixture.dirty=true;fixture.pending={id:"fixture-dirty",partner_user_id:"partner",email:"partner@example.test",amount_fen:1000,created_at:1700000000000,status:"pending"};showAdmin()');
+ await press('查看申请');await press('处理');assert.equal(await evaluate('Boolean('+button('重新核实佣金')+')'),false);
+ await press('验证身份并查看本次收款资料');await until(has('synthetic@example.test'));
+ assert.deepEqual(await evaluate('fixture.posts.slice(-3).map(x=>[x.path,Object.keys(x.body).sort().join(",")])'),[['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId'],['/v1/admin/partners/manual-report','operationId,sync,userId'],['/v1/admin/partners/payout','forSettlement,operationId,reason,requestId,userId']]);
+ assert.equal(await evaluate(disabled('标记已结算')),true);
  }finally{if(chrome&&chrome.exitCode===null){const closed=new Promise(r=>chrome.once('exit',r));void call('Browser.close',{},null).catch(()=>{});const killer=setTimeout(()=>chrome.kill(),1500);await closed;clearTimeout(killer);}for(const p of pending.values())clearTimeout(p.timer);rmSync(dir,{recursive:true,force:true,maxRetries:20,retryDelay:100});}
 });

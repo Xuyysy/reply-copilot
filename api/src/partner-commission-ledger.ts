@@ -1,7 +1,7 @@
 import type {Env} from "./types";
 import {ApiFailure} from "./types";
 import {boltReadSchemaReady} from "./boltutil/environment";
-import {manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,requestableFen} from "./partner-manual-calculation.mjs";
+import {manualCandidatePlan,manualEvidenceBatchPlan,manualOrderEstimate,requestableFen,MIN_REQUEST_FEN} from "./partner-manual-calculation.mjs";
 type Domain="recharge"|"subscription";
 type Dirty={domain:Domain;order_id:string;token:string;buyer_id:string};
 type Candidate={order_id:string;buyer_id:string;paid_at:number;registered_at:number;version:number;status:string;rate_bps:number;term_months:number|null;first_authorized_at:number;buyer_eligible:number;payment_source:'fiat'|'boltutil'};
@@ -68,13 +68,12 @@ export async function syncCommissionLedger(env:Env,userId:string){
 export async function ledgerBalance(env:Env,userId:string){
  const totals=await env.DB.prepare(`SELECT COALESCE(t.earned_fen,0) earned,COALESCE(t.settled_fen,0) settled,COALESCE(t.verified_count,0) verified,COALESCE(t.review_count,0) review,
  EXISTS(SELECT 1 FROM partner_commission_dirty q WHERE q.partner_user_id=u.id) dirty,
- (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId,
- CASE WHEN ?='staging' AND EXISTS(SELECT 1 FROM system_settings s WHERE s.key='partner_staging_min_request_user' AND s.value=u.id AND s.updated_at>CAST(unixepoch('now') AS INTEGER)*1000) THEN 200 ELSE 1000 END minRequestFen
- FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(env.ENVIRONMENT,userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null;minRequestFen:number}>();
+ (SELECT id FROM partner_manual_requests r WHERE r.partner_user_id=u.id AND r.status='pending') pendingId
+ FROM users u LEFT JOIN partner_commission_totals t ON t.partner_user_id=u.id WHERE u.id=?`).bind(userId).first<{earned:number;settled:number;verified:number;review:number;dirty:number;pendingId:string|null}>();
  if(!totals)throw new ApiFailure(404,"USER_NOT_FOUND","账户不存在。");
  const complete=totals.dirty===0;
  const summary={verifiedOrders:totals.verified,reviewCount:totals.review,estimatedFen:complete?totals.earned:null,recordedFen:totals.settled,differenceFen:complete?totals.earned-totals.settled:null,complete};
- return {summary,requestableFen:requestableFen(summary,!!totals.pendingId,totals.minRequestFen),minRequestFen:totals.minRequestFen,pendingId:totals.pendingId,syncPending:!complete};
+ return {summary,requestableFen:requestableFen(summary,!!totals.pendingId),minRequestFen:MIN_REQUEST_FEN,pendingId:totals.pendingId,syncPending:!complete};
 }
 export async function ledgerReport(env:Env,userId:string,admin:boolean,cursor:string|null){
  const before=parseCommissionCursor(cursor);

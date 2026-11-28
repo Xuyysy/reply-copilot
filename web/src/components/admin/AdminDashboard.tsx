@@ -1,3 +1,4 @@
+import {adminOperationPayload} from "../../lib/admin-operation-payload";
 import SupportDiagnosticsPanel from "./SupportDiagnosticsPanel";
 import CreatorFeaturesPanel from './CreatorFeaturesPanel';
 import SubscriptionAdminPanel from './SubscriptionAdminPanel';
@@ -115,8 +116,8 @@ export default function AdminDashboard() {
   const say = (text: string, failed = false) => { setNotice(text); setError(failed); };
   const read = <T,>(path: string) => api<T>(path);
   const write = async <T,>(path: string, body: object): Promise<T> => {
-    const payload = { ...body, reason: (body as { reason?: string }).reason || reasonRef.current };
-    if (payload.reason.trim().length < 8) throw new Error(t("操作原因至少 8 字", "Reason must contain at least 8 characters"));
+    const {payload,valid} = adminOperationPayload(path,body,reasonRef.current);
+    if (!valid) throw new Error(t("操作原因至少 8 字", "Reason must contain at least 8 characters"));
     const passwordChange = path === "/v1/admin/security/password";
     // Never retain password fields in retry-map keys. The old password is rechecked server-side.
     const retryPayload = path.startsWith("/v1/admin/ai-models") ? { ...payload, apiKey: undefined, apiKeyUpdated: Boolean((payload as Record<string, unknown>).apiKey) } : payload;
