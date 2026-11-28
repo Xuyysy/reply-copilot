@@ -407,7 +407,7 @@
       }catch{return {conflict:true};}
     }
     if(ids.size>1||ids.has(outerId))return {conflict:true};
-    const body=bodies[0],id=ids.values().next().value||null;
+    const body=bodies[0];
     const text=normalized(globalThis.ZaneReplyCopilotContent.postExtractor.readOriginalText(body));
     // Only media within this one captured quote card, not outer media.
     const media=Boolean(card.querySelector('[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"],video'));
@@ -435,6 +435,25 @@
       }
       if(handles.size>1)return {conflict:true};
       owner=handles.values().next().value||null;
+      // A legacy clickable quote card may have an unlinked timestamp,
+      // while its owned photo/video still carries a canonical status ID.
+      // Only native media inside this card can supply that identity.
+      // Do not use the outer body or the card's ordinary text links.
+      const marker='[data-testid="tweetPhoto"],[data-testid="videoPlayer"],[data-testid="videoComponent"],video';
+      for(const link of card.querySelectorAll('a[href*="/status/"]')){
+        if(body.contains(link)||link.closest('article')!==article)continue;
+        const mediaNode=link.closest(marker);
+        if(!(mediaNode&&card.contains(mediaNode))&&!link.querySelector(marker))continue;
+        try{
+          const u=new URL(link.getAttribute('href'),initialUrl),base=new URL(initialUrl);
+          const m=u.pathname.match(/^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/(?:photo|video)\/\d+\/?$/);
+          if(!m||u.origin!==base.origin||u.username||u.password||u.hash)continue;
+          if(!owner)continue;
+          if(m[1].toLowerCase()!==owner)return {conflict:true};
+          ids.add(m[2]);
+        }catch{}
+      }
+      if(ids.size>1||ids.has(outerId))return {conflict:true};
       const timestamps=[...card.querySelectorAll('time[datetime]')].filter(n=>!body.contains(n));
       if(timestamps.length>1)return {conflict:true};
       const raw=timestamps[0]?.getAttribute('datetime');
@@ -442,7 +461,7 @@
         const parsed=Date.parse(raw);if(Number.isFinite(parsed))time=parsed;
       }
     }
-    return text?Object.freeze({id,text,media,links:Object.freeze(links),presentations:Object.freeze(presentations),owner,time}):{conflict:true};
+    return text?Object.freeze({id:ids.values().next().value||null,text,media,links:Object.freeze(links),presentations:Object.freeze(presentations),owner,time}):{conflict:true};
   }
   function sameCapturedQuote(source,modal){
     if(!source||!modal||source.conflict||modal.conflict||
@@ -675,7 +694,26 @@
     const expandedId=modal.expansionId();
     if(expandedId&&expandedId!==post.statusId)return false;
     const sourceQuote=captureDetailQuote(post.article,initialUrl,post.statusId,true);
-    const modalQuote=captureDetailQuote(article,initialUrl,post.statusId,true);
+    let modalQuote=captureDetailQuote(article,initialUrl,post.statusId,true);
+    const outerCorroborated=sourceAuthor===owner&&modalAuthor===owner&&
+      sourceEvidence.eligible&&modalEvidence.eligible&&
+      (routeId===post.statusId||(sourceTime!==null&&sourceTime===modalTime));
+    // A compact modal can omit the inner permalink and replace the
+    // source's native media with a pic link. Recover the INNER identity
+    // only from an exact attached quote destination plus the same author
+    // and exact quote content, after independently confirming the outer.
+    // This is never a way to infer the parent from a quote URL.
+    if(outerCorroborated&&post.hasCapturedQuote&&sourceQuote?.id&&sourceQuote.owner&&
+       modalQuote&&!modalQuote.conflict&&!modalQuote.id&&modalQuote.owner===sourceQuote.owner&&
+       (sourceQuote.time===null||modalQuote.time===null||sourceQuote.time===modalQuote.time)&&
+       quoteProjection(article,sourceQuote.id,initialUrl,sourceQuote.owner)){
+      const candidate={...modalQuote,id:sourceQuote.id};
+      if(sameTimelineQuote(sourceQuote,candidate))modalQuote=candidate;
+    }
+    if(report)Object.assign(report,{sourceQuoteId:Boolean(sourceQuote?.id),modalQuoteId:Boolean(modalQuote?.id),
+      quoteOwnerMatch:Boolean(sourceQuote?.owner&&sourceQuote.owner===modalQuote?.owner),
+      quoteTimeMatch:Boolean(sourceQuote?.time!=null&&sourceQuote.time===modalQuote?.time),
+      outerTimeMatch:Boolean(sourceTime!==null&&sourceTime===modalTime)});
     if(post.hasCapturedQuote){
       if(sourceQuote?.conflict||modalQuote?.conflict||
          (sourceQuote&&modalQuote&&!sameTimelineQuote(sourceQuote,modalQuote))||
@@ -691,10 +729,6 @@
       return Boolean(sourceQuote?.id&&sourceQuote.id===modalQuote?.id&&sourceQuote.text===normalized(post.quotedText)&&
         !quarantinedPosts.some(old=>old?.statusId!==post.statusId&&sameContext(old,post.sourceText)));
     }
-    if(report)Object.assign(report,{sourceQuoteId:Boolean(sourceQuote?.id),modalQuoteId:Boolean(modalQuote?.id),
-      quoteOwnerMatch:Boolean(sourceQuote?.owner&&sourceQuote.owner===modalQuote?.owner),
-      quoteTimeMatch:Boolean(sourceQuote?.time!=null&&sourceQuote.time===modalQuote?.time),
-      outerTimeMatch:Boolean(sourceTime!==null&&sourceTime===modalTime)});
     const full=source.bodies(),short=modal.bodies();
     if(!full.texts.length||!short.texts.length)return null;
     // Rendered labels can be truncated or identical for different links.

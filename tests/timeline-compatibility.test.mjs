@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,mkdtempSync,writeFileSync,rmSync} from 'node:fs';
-import {spawnSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -42,6 +42,12 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       const timedMediaQuote=mediaQuote.replace('<time>Nov 25</time>','<time datetime="2026-11-25T01:51:00.000Z">Nov 25</time>');
       const linklessProjectedQuote=projectedQuote.replace('<a href="https://x.com/quoted/status/202"><time>Nov 25</time></a>','<time datetime="2026-11-25T01:51:00.000Z">Nov 25</time>');
       const expandedQuoteLink='<a href="https://t.co/QuoteToken" title="https://x.com/quoted/status/202">x.com/quoted/status/20…</a>';
+      const zhCaption='又叒叒叒一位同学通过了！！！<br><br>让我们恭喜他！！！<br><br>希望各位也能早日上岸！！！';
+      const zhQuote='不懂就问<br><br>多久能审核通过呀？';
+      const mediaOnlyQuote='<div role="link"><div data-testid="User-Name"><a href="https://x.com/quoted">@quoted</a></div><time>4h</time>'+text(zhQuote)+'<a href="'+quoteUrl+'/photo/1"><div data-testid="tweetPhoto"><img alt="Image"></div></a></div>';
+      const compactZhQuote='<div role="link"><div data-testid="User-Name"><span>@quoted</span></div><time>4h</time>'+text(zhQuote+' <a href="https://t.co/PicToken">pic.x.com/Quote123</a>')+'</div>';
+      const zhSource=header+permalink+text(zhCaption)+mediaOnlyQuote;
+      const zhModal=header+exactTime+text(zhCaption+' '+expandedQuoteLink)+compactZhQuote;
       const specs=[
         {name:'plain',source:header+permalink+text(caption),modal:header+permalink+text(caption)},
         {name:'long_verified_modal_id',source:header+permalink+text(full)+photo,modal:header+permalink+text(caption)+more},
@@ -96,7 +102,17 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
         {name:'tco_missing_expanded_metadata',source:header+permalink+text(caption)+mediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink.replace(' title="https://x.com/quoted/status/202"',''))+projectedQuote},
         {name:'tco_wrong_inner_time',source:header+permalink+text(caption)+timedMediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote.replace('01:51:00','01:51:01')},
         {name:'tco_wrong_inner_author',source:header+permalink+text(caption)+timedMediaQuote,modal:header+exactTime+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote.replace('https://x.com/quoted','https://x.com/other')},
-        {name:'tco_no_outer_time',source:header+permalink+text(caption)+timedMediaQuote,modal:header+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote}
+        {name:'tco_no_outer_time',source:header+permalink+text(caption)+timedMediaQuote,modal:header+text(caption+' '+expandedQuoteLink)+linklessProjectedQuote},
+        {name:'zh_owned_quote_media_id',source:zhSource,modal:zhModal},
+        {name:'zh_owned_quote_media_id_wrong_owner',source:zhSource.replace('/quoted/status/202/photo','/other/status/202/photo'),modal:zhModal},
+        {name:'zh_owned_quote_media_id_wrong_link',source:zhSource,modal:zhModal.replace('title="https://x.com/quoted/status/202"','title="https://x.com/quoted/status/203"')},
+        {name:'zh_owned_quote_media_id_no_outer_proof',source:zhSource,modal:zhModal.replace(exactTime,'<time>1h</time>')},
+        {name:'zh_owned_quote_media_id_wrong_inner_text',source:zhSource,modal:zhModal.replace('多久能审核通过呀？','完全不同的正文')},
+        {name:'zh_owned_quote_media_id_wrong_inner_author',source:zhSource,modal:zhModal.replace('@quoted','@other')},
+        {name:'zh_owned_quote_media_id_wrong_outer_time',source:zhSource,modal:zhModal.replace(exactTime,wrongTime)},
+        {name:'zh_owned_quote_media_id_wrong_outer_route',source:zhSource,modal:zhModal,route:compose+'?in_reply_to=999'},
+        {name:'zh_owned_quote_media_id_quarantined',source:zhSource,modal:zhModal,quarantine:[{statusId:'999',sourceText:'又叒叒叒一位同学通过了！！！ 让我们恭喜他！！！ 希望各位也能早日上岸！！！'}]},
+        {name:'zh_body_link_not_quote_media_evidence',source:zhSource.replace('<a href="'+quoteUrl+'/photo/1"><div data-testid="tweetPhoto"><img alt="Image"></div></a>','<div data-testid="tweetPhoto"><img alt="Image"></div>'),modal:zhModal}
       ];
       const results=[];
       for(const item of specs){
@@ -118,14 +134,22 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       document.body.innerHTML='<output id="result"></output>';
       document.getElementById('result').textContent=JSON.stringify(results);
     };
-    const file=path.join(dir,'fixture.html');
-    writeFileSync(file,'<!doctype html><html><body><script>'+source+'</script><script>try{('+run.toString()+')()}catch(e){document.body.innerHTML="<output id=result></output>";document.getElementById("result").textContent=JSON.stringify({error:String(e)});}</script></body></html>');
     const browser=process.env.CHROME_BINARY||'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    const result=spawnSync(browser,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+path.join(dir,'profile'),'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:35000,maxBuffer:2*1024*1024});
-    assert.equal(result.status,0,result.stderr);
-    const match=result.stdout.match(/<output id="result">([^<]+)<\/output>/);
-    assert.ok(match,result.stdout.slice(-1200));
-    const rows=JSON.parse(match[1]);
+    function execute(code,name){
+      const file=path.join(dir,name+'.html');
+      writeFileSync(file,'<!doctype html><html><body><script>'+code+'</script><script>try{('+run.toString()+')()}catch(e){document.body.innerHTML="<output id=result></output>";document.getElementById("result").textContent=JSON.stringify({error:String(e)});}</script></body></html>');
+      const result=spawnSync(browser,['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-gpu','--no-first-run','--user-data-dir='+path.join(dir,'profile-'+name),'--dump-dom',pathToFileURL(file).href],{encoding:'utf8',timeout:25000,maxBuffer:2*1024*1024});
+      assert.equal(result.status,0,result.stderr);
+      const match=result.stdout.match(/<output id="result">([^<]+)<\/output>/);
+      assert.ok(match,result.stdout.slice(-1200));
+      const rows=JSON.parse(match[1]);assert.ok(Array.isArray(rows),JSON.stringify(rows));return rows;
+    }
+    const previous=['post-extractor','reply-detector','composer-adapter','composer-association'].map(n=>
+      execFileSync('git',['show','f06075212b78bda12454bf487ec343116b122554:content/'+n+'.js'],{encoding:'utf8'})).join('\n');
+    const before=execute(previous,'before');
+    const old=before.find(r=>r.name==='zh_owned_quote_media_id');
+    assert.equal(old?.state,'rejected',JSON.stringify(old));
+    const rows=execute(source,'after');
     console.log('Timeline compatibility '+JSON.stringify(rows));
     assert.ok(Array.isArray(rows),JSON.stringify(rows));
     const actual=Object.fromEntries(rows.map(r=>[r.name,r.state]));
@@ -150,7 +174,12 @@ test('timeline compatibility: verified legacy media, history and strictly corrob
       quote_only_media_verified_outer:'bound',quote_only_media_linkless_outer:'bound',quote_projection_unverified_time:'waiting',
       quote_projection_wrong_body_destination:'rejected',quote_projection_second_card:'rejected',
       tco_expanded_quote:'bound',tco_unlinked_inner_timestamp:'bound',tco_wrong_expanded_id:'rejected',
-      tco_missing_expanded_metadata:'rejected',tco_wrong_inner_time:'rejected',tco_wrong_inner_author:'rejected',tco_no_outer_time:'waiting'
+      tco_missing_expanded_metadata:'rejected',tco_wrong_inner_time:'rejected',tco_wrong_inner_author:'rejected',tco_no_outer_time:'waiting',
+      zh_owned_quote_media_id:'bound',zh_owned_quote_media_id_wrong_owner:'rejected',
+      zh_owned_quote_media_id_wrong_link:'rejected',zh_owned_quote_media_id_no_outer_proof:'rejected',
+      zh_owned_quote_media_id_wrong_inner_text:'rejected',zh_owned_quote_media_id_wrong_inner_author:'rejected',
+      zh_owned_quote_media_id_wrong_outer_time:'rejected',zh_owned_quote_media_id_wrong_outer_route:'rejected',
+      zh_owned_quote_media_id_quarantined:'rejected',zh_body_link_not_quote_media_evidence:'rejected'
     });
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
